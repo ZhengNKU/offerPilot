@@ -1,0 +1,276 @@
+@import "tailwindcss";
+
+@theme {
+  --color-surface-container-low: #131b2e;
+  --color-primary-container: #8083ff;
+  --color-surface-container-highest: #2d3449;
+  --color-on-secondary: #67001b;
+  --color-secondary: #ffb2b7;
+  --color-surface-variant: #2d3449;
+  --color-secondary-container: #b50036;
+  --color-primary: #c0c1ff;
+  --color-on-secondary-fixed-variant: #92002a;
+  --color-on-secondary-fixed: #40000d;
+  --color-on-surface-variant: #c7c4d7;
+  --color-secondary-fixed: #ffdadb;
+  --color-on-error-container: #ffdad6;
+  --color-on-primary: #1000a9;
+  --color-on-primary-fixed-variant: #2f2ebe;
+  --color-tertiary: #4edea3;
+  --color-error-container: #93000a;
+  --color-surface-container: #171f33;
+  --color-inverse-on-surface: #283044;
+  --color-on-surface: #dae2fd;
+  --color-inverse-primary: #494bd6;
+  --color-on-tertiary-fixed: #002113;
+  --color-outline-variant: #464554;
+  --color-on-secondary-container: #ffc2c4;
+  --color-on-background: #dae2fd;
+  --color-surface-tint: #c0c1ff;
+  --color-surface: #0b1326;
+  --color-surface-container-high: #222a3d;
+  --color-surface-dim: #0b1326;
+  --color-on-tertiary: #003824;
+  --color-tertiary-fixed-dim: #4edea3;
+  --color-secondary-fixed-dim: #ffb2b7;
+  --color-on-primary-container: #0d0096;
+  --color-tertiary-container: #00885d;
+  --color-on-tertiary-container: #000703;
+  --color-background: #0b1326;
+  --color-on-error: #690005;
+  --color-tertiary-fixed: #6ffbbe;
+  --color-on-tertiary-fixed-variant: #005236;
+  --color-surface-container-lowest: #060e20;
+  --color-inverse-surface: #dae2fd;
+  --color-surface-bright: #31394d;
+  --color-on-primary-fixed: #07006c;
+  --color-error: #ffb4ab;
+  --color-primary-fixed: #e1e0ff;
+  --color-outline: #908fa0;
+  --color-primary-fixed-dim: #c0c1ff;
+
+  --spacing-gutter: 24px;
+  --spacing-section-padding: 120px;
+  --spacing-stack-gap: 16px;
+  --spacing-container-max: 1720px;
+  
+  --font-body-md: "Inter", sans-serif;
+  --font-headline-lg: "Hanken Grotesk", sans-serif;
+  --font-display-xl: "Hanken Grotesk", sans-serif;
+  --font-headline-lg-mobile: "Hanken Grotesk", sans-serif;
+  --font-label-mono: "Geist", monospace;
+}
+
+body {
+  background-color: #0b1326;
+  color: #dae2fd;
+  font-family: "Inter", sans-serif;
+  overflow-x: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+/* Fallback utilities to resolve container-max and custom spacing compiler bugs */
+.max-w-container-max {
+  max-width: 95% !important;
+  width: 95% !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+@media (min-width: 2560px) {
+  .max-w-container-max {
+    max-width: 2400px !important;
+  }
+}
+.px-gutter {
+  padding-left: 24px !important;
+  padding-right: 24px !important;
+}
+.py-section-padding {
+  padding-top: 120px !important;
+  padding-bottom: 120px !important;
+}
+.gap-stack-gap {
+  gap: 16px !important;
+}
+
+/* Core font sizes and typography overrides matching the Design 1 specifications */
+.text-display-xl {
+  font-size: 72px !important;
+  line-height: 1.1 !important;
+  letter-spacing: -0.04em !important;
+  font-weight: 800 !important;
+  font-family: "Hanken Grotesk", sans-serif !important;
+}
+
+.text-headline-lg {
+  font-size: 48px !important;
+  line-height: 1.2 !important;
+  letter-spacing: -0.02em !important;
+  font-weight: 700 !important;
+  font-family: "Hanken Grotesk", sans-serif !important;
+}
+
+.text-headline-lg-mobile {
+  font-size: 36px !important;
+  line-height: 1.2 !important;
+  font-weight: 700 !important;
+  font-family: "Hanken Grotesk", sans-serif !important;
+}
+
+.text-body-md {
+  font-size: 16px !important;
+  line-height: 1.6 !important;
+  font-weight: 400 !important;
+  font-family: "Inter", sans-serif !important;
+}
+
+.text-label-mono {
+  font-size: 12px !important;
+  line-height: 1 !important;
+  letter-spacing: 0.1em !important;
+  font-weight: 500 !important;
+  font-family: "Geist", monospace !important;
+}
+
+/* Glass panel background */
+.glass-panel {
+  background: rgba(19, 27, 46, 0.4);
+  backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.1);
+}
+
+.glow-border {
+  position: relative;
+}
+
+.glow-border::after {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(45deg, transparent, rgba(192, 193, 255, 0.3), transparent);
+  border-radius: inherit;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.glow-border:hover::after {
+  opacity: 1;
+}
+
+.ai-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: .5; transform: scale(1.1); }
+}
+
+.data-trail {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  animation: draw 3s forwards;
+}
+
+@keyframes draw {
+  to { stroke-dashoffset: 0; }
+}
+
+/* 3D Tilt Effect Styles */
+.tilt-container {
+  perspective: 1000px;
+}
+
+.tilt-card {
+  transition: transform 0.2s cubic-bezier(0.03, 0.98, 0.52, 0.99), box-shadow 0.2s ease;
+  transform: rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg));
+  transform-style: preserve-3d;
+  position: relative;
+}
+
+/* Premium Glare Effect */
+.glare {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(
+      circle at var(--mx, 50%) var(--my, 50%),
+      rgba(255, 255, 255, 0.12) 0%,
+      rgba(255, 255, 255, 0.05) 20%,
+      transparent 60%
+  );
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  mix-blend-mode: overlay;
+  border-radius: inherit;
+}
+.tilt-card:hover .glare {
+  opacity: 1;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-float {
+  animation: float 4s ease-in-out infinite;
+}
+
+@keyframes scan {
+  0% { transform: translateY(-100%); opacity: 0; }
+  50% { opacity: 0.5; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+
+.scan-line {
+  position: absolute;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #c0c1ff, transparent);
+  animation: scan 4s linear infinite;
+  z-index: 0;
+  pointer-events: none;
+}
+
+@keyframes wave {
+  0%, 100% { height: 4px; }
+  50% { height: 16px; }
+}
+
+.audio-bar {
+  animation: wave 1s ease-in-out infinite;
+}
+.audio-bar:nth-child(2) { animation-delay: 0.1s; }
+.audio-bar:nth-child(3) { animation-delay: 0.2s; }
+.audio-bar:nth-child(4) { animation-delay: 0.3s; }
+.audio-bar:nth-child(5) { animation-delay: 0.4s; }
+
+.hover-card-glow:hover {
+  box-shadow: 0 0 30px rgba(192, 193, 255, 0.15);
+  transform: scale(1.02);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.engine-card {
+  transition: opacity 0.8s ease-out, transform 0.8s ease-out;
+}
+.stagger-1 { transition-delay: 0.1s; }
+.stagger-2 { transition-delay: 0.2s; }
+.stagger-3 { transition-delay: 0.3s; }
+.stagger-4 { transition-delay: 0.4s; }
+.stagger-5 { transition-delay: 0.5s; }
+.stagger-6 { transition-delay: 0.6s; }
+
+.text-gradient {
+  background: linear-gradient(135deg, #c0c1ff 0%, #ffb2b7 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
