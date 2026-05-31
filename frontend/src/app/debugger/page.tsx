@@ -79,6 +79,8 @@ export default function NewAnalysisDebugger() {
       localStorage.setItem("offerPilot_session_salary", audioForm.salary || "25K * 16薪");
     }
 
+    localStorage.setItem("offerPilot_viewing_session", "true");
+
     setTimeout(() => {
       setIsAnalyzing(false);
       router.push("/debugger/report");
@@ -114,13 +116,13 @@ export default function NewAnalysisDebugger() {
             <a onClick={() => router.push("/debugger")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
               面试调试器
             </a>
-            <a onClick={() => router.push("/debugger/records")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业记忆看板
             </a>
-            <a onClick={() => router.push("/debugger/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               面试训练场
             </a>
-            <a onClick={() => router.push("/debugger/report")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
             </a>
             <a onClick={() => router.push("/")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
@@ -130,7 +132,7 @@ export default function NewAnalysisDebugger() {
 
           <div className="flex items-center gap-4">
             <button
-              onClick={() => router.push("/debugger/records?tab=timeline")}
+              onClick={() => router.push("/memory?tab=timeline")}
               className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <span className="material-symbols-outlined text-base">history</span>历史记录

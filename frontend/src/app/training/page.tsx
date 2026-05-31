@@ -128,6 +128,14 @@ export default function InterviewTrainingPage() {
     if (activeQuestionIndex >= 5) {
       alert("模拟面试已完成所有环节！正在生成AI面试报告...");
       setIsTrainingStarted(false);
+      localStorage.setItem("offerPilot_viewing_session", "true");
+      localStorage.setItem("offerPilot_report_mode", "audio");
+      localStorage.setItem("offerPilot_session_company", companyStyle);
+      localStorage.setItem("offerPilot_session_role", targetRole);
+      localStorage.setItem("offerPilot_session_round", interviewType);
+      localStorage.setItem("offerPilot_session_grade", "P6 / L5");
+      localStorage.setItem("offerPilot_session_salary", "25K * 16薪");
+      localStorage.setItem("offerPilot_session_date", "2026-05-31");
       router.push("/debugger/report");
       return;
     }
@@ -184,7 +192,7 @@ export default function InterviewTrainingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col font-sans text-on-surface antialiased overflow-x-hidden relative selection:bg-primary/30 selection:text-white pb-0">
+    <div className="min-h-screen bg-background flex flex-col font-body-md text-on-surface antialiased overflow-x-hidden relative selection:bg-primary/30 selection:text-white pb-0 pt-20">
       
       {/* Background Gradients & Matrix Scifi Grid */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px),linear-gradient(to_bottom,#ffffff03_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0" />
@@ -194,49 +202,52 @@ export default function InterviewTrainingPage() {
       {/* ========================================================
           TOP NAVIGATION BAR (Pixel Perfect Alignment)
          ======================================================== */}
-      <nav className="bg-surface-container-lowest/80 backdrop-blur-md border-b border-white/5 w-full sticky top-0 z-40 shrink-0">
-        <div className="px-gutter h-16 max-w-container-max mx-auto flex justify-between items-center relative">
+      <nav className="fixed top-0 w-full z-40 bg-surface/80 backdrop-blur-xl border-b border-white/10">
+        <div className="px-gutter h-20 max-w-container-max mx-auto flex justify-between items-center relative">
           
-          <div onClick={() => router.push("/")} className="flex items-center gap-3 text-lg font-black text-white tracking-widest cursor-pointer select-none">
+          <div
+            onClick={() => router.push("/")}
+            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2 cursor-pointer"
+          >
             <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo-training)" />
+              <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo)" />
               <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#0b1326" />
               <defs>
-                <linearGradient id="nav-brand-logo-training" x1="0" y1="0" x2="1" y2="1">
+                <linearGradient id="nav-brand-logo" x1="0" y1="0" x2="1" y2="1">
                   <stop offset="0%" stopColor="#c0c1ff" />
                   <stop offset="100%" stopColor="#ffb2b7" />
                 </linearGradient>
               </defs>
             </svg>
             OfferPilot
-            <span className="text-[9px] font-label-mono text-on-surface-variant/40 px-1.5 py-0.5 rounded border border-white/5 bg-white/[0.02] tracking-normal font-semibold">
-              工作台 v2.4
-            </span>
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
             <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               面试调试器
             </a>
-            <a onClick={() => router.push("/debugger/training")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
-              面试训练场
-            </a>
-            <a onClick={() => router.push("/debugger/records")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业记忆看板
             </a>
-            <a onClick={() => router.push("/debugger/report")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/training")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
+              面试训练场
+            </a>
+            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
+            </a>
+            <a onClick={() => router.push("/")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              案例
             </a>
           </div>
 
           <div className="flex items-center gap-4">
             <button
-              onClick={() => router.push("/debugger/records?tab=timeline")}
+              onClick={() => router.push("/memory?tab=timeline")}
               className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <span className="material-symbols-outlined text-base">history</span>历史面试
             </button>
-            <button onClick={() => router.push("/debugger/report")} className="px-3.5 py-2 hover:bg-white/5 text-on-surface-variant hover:text-white rounded-full transition-colors flex items-center gap-1 cursor-pointer">
+            <button onClick={() => router.push("/home")} className="px-3.5 py-2 hover:bg-white/5 text-on-surface-variant hover:text-white rounded-full transition-colors flex items-center gap-1 cursor-pointer">
               <span className="material-symbols-outlined text-lg">settings</span>设置
             </button>
             <div className="flex items-center gap-2 border-l border-white/10 pl-4">
@@ -272,96 +283,88 @@ export default function InterviewTrainingPage() {
                 
                 {/* Field 1: Target Role */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标岗位</label>
+                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">目标岗位</label>
                   <div className="relative">
-                    <select 
+                    <input 
+                      type="text"
                       disabled={isTrainingStarted}
                       value={targetRole}
                       onChange={(e) => setTargetRole(e.target.value)}
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-xs font-black appearance-none cursor-pointer focus:outline-none transition-all"
-                    >
-                      <option value="后端开发工程师" className="bg-[#0b1326] text-white">后端开发工程师</option>
-                      <option value="前端开发工程师" className="bg-[#0b1326] text-white">前端开发工程师</option>
-                      <option value="算法工程师" className="bg-[#0b1326] text-white">算法工程师</option>
-                      <option value="产品经理" className="bg-[#0b1326] text-white">产品经理</option>
-                    </select>
-                    <span className="material-symbols-outlined absolute right-3.5 top-3 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
+                      placeholder="请输入目标岗位"
+                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black focus:outline-none transition-all placeholder:text-white/20"
+                    />
                   </div>
                 </div>
 
                 {/* Field 2: Job Level */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">职位级别</label>
+                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">职位级别</label>
                   <div className="relative">
-                    <select 
+                    <input 
+                      type="text"
                       disabled={isTrainingStarted}
                       value={jobLevel}
                       onChange={(e) => setJobLevel(e.target.value)}
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-xs font-black appearance-none cursor-pointer focus:outline-none transition-all"
-                    >
-                      <option value="高级 (P6-P7)" className="bg-[#0b1326] text-white">高级 (P6-P7)</option>
-                      <option value="资深 (P7-P8)" className="bg-[#0b1326] text-white">资深 (P7-P8)</option>
-                      <option value="中级 (P4-P5)" className="bg-[#0b1326] text-white">中级 (P4-P5)</option>
-                      <option value="架构师 (P8+)" className="bg-[#0b1326] text-white">架构师 (P8+)</option>
-                    </select>
-                    <span className="material-symbols-outlined absolute right-3.5 top-3 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
+                      placeholder="请输入职位级别"
+                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black focus:outline-none transition-all placeholder:text-white/20"
+                    />
                   </div>
                 </div>
 
                 {/* Field 3: Interview Type */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">面试类型</label>
+                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">面试类型</label>
                   <div className="relative">
                     <select 
                       disabled={isTrainingStarted}
                       value={interviewType}
                       onChange={(e) => setInterviewType(e.target.value)}
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-xs font-black appearance-none cursor-pointer focus:outline-none transition-all"
+                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black appearance-none cursor-pointer focus:outline-none transition-all"
                     >
                       <option value="技术面试 - 系统设计" className="bg-[#0b1326] text-white">技术面试 - 系统设计</option>
                       <option value="技术面试 - 算法架构" className="bg-[#0b1326] text-white">技术面试 - 算法架构</option>
                       <option value="行为面试 - 综合能力" className="bg-[#0b1326] text-white">行为面试 - 综合能力</option>
                       <option value="项目深挖面试" className="bg-[#0b1326] text-white">项目深挖面试</option>
                     </select>
-                    <span className="material-symbols-outlined absolute right-3.5 top-3 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
+                    <span className="material-symbols-outlined absolute right-3.5 top-3.5 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
                   </div>
                 </div>
 
                 {/* Field 4: Company Style */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">公司风格</label>
+                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">公司风格</label>
                   <div className="relative">
                     <select 
                       disabled={isTrainingStarted}
                       value={companyStyle}
                       onChange={(e) => setCompanyStyle(e.target.value)}
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-xs font-black appearance-none cursor-pointer focus:outline-none transition-all"
+                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black appearance-none cursor-pointer focus:outline-none transition-all"
                     >
                       <option value="字节跳动" className="bg-[#0b1326] text-white">字节跳动</option>
                       <option value="腾讯" className="bg-[#0b1326] text-white">腾讯</option>
                       <option value="阿里巴巴" className="bg-[#0b1326] text-white">阿里巴巴</option>
                       <option value="美团" className="bg-[#0b1326] text-white">美团</option>
                     </select>
-                    <span className="material-symbols-outlined absolute right-3.5 top-3 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
+                    <span className="material-symbols-outlined absolute right-3.5 top-3.5 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
                   </div>
                 </div>
 
                 {/* Field 5: Difficulty Level */}
                 <div className="space-y-1.5">
-                  <label className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">难度等级</label>
+                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">难度等级</label>
                   <div className="relative">
                     <select 
                       disabled={isTrainingStarted}
                       value={difficulty}
                       onChange={(e) => setDifficulty(e.target.value)}
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-xs font-black appearance-none cursor-pointer focus:outline-none transition-all"
+                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black appearance-none cursor-pointer focus:outline-none transition-all"
                     >
                       <option value="Lv3 困难" className="bg-[#0b1326] text-white">Lv3 困难</option>
                       <option value="Lv1 简单" className="bg-[#0b1326] text-white">Lv1 简单</option>
                       <option value="Lv2 一般" className="bg-[#0b1326] text-white">Lv2 一般</option>
                       <option value="Lv4 地狱" className="bg-[#0b1326] text-white">Lv4 地狱</option>
                     </select>
-                    <span className="material-symbols-outlined absolute right-3.5 top-3 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
+                    <span className="material-symbols-outlined absolute right-3.5 top-3.5 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
                   </div>
                 </div>
 
@@ -439,9 +442,9 @@ export default function InterviewTrainingPage() {
               {/* OFFLINE ONBOARDING PREVIEW (When Simulator has NOT started) */}
               {!isTrainingStarted && !isCountingDown && (
                 <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-6 z-10 select-none">
-                  <div className="w-20 h-20 rounded-3xl bg-white/[0.01] border border-white/5 flex items-center justify-center shadow-inner relative group overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-tr from-primary/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-                    <span className="material-symbols-outlined text-4xl text-primary animate-pulse relative z-10">support_agent</span>
+                  <div className="w-24 h-24 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center shadow-lg relative group overflow-hidden transition-transform duration-300">
+                    <div className="absolute inset-0 bg-gradient-to-tr from-primary/15 to-transparent" />
+                    <span className="material-symbols-outlined text-primary animate-pulse relative z-10" style={{ fontSize: "56px" }}>support_agent</span>
                   </div>
                   
                   <div className="space-y-2 max-w-md">
@@ -449,7 +452,7 @@ export default function InterviewTrainingPage() {
                       配置完成，准备就绪
                     </h3>
                     <p className="text-xs text-on-surface-variant/50 leading-relaxed font-semibold">
-                      点击左下角 **“开始模拟面试”** 按钮即可唤醒您的 AI 资深面试官。系统将模拟 3D 真人面试情境，支持全真音画调试、实时答题逻辑剖析与分段评分。
+                      点击左下角 <span className="font-black text-white">“开始模拟面试”</span> 按钮即可唤醒您的 AI 资深面试官。系统将模拟 3D 真人面试情境，支持全真音画调试、实时答题逻辑剖析与分段评分。
                     </p>
                   </div>
                   
@@ -469,9 +472,9 @@ export default function InterviewTrainingPage() {
                   <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
                     <div className="flex items-center gap-3">
                       <span className="w-2.5 h-2.5 rounded-full bg-tertiary animate-ping" />
-                      <span className="text-xs font-black text-white flex items-center gap-2">
+                      <span className="text-sm font-black text-white flex items-center gap-2.5">
                         面试进行中
-                        <span className="px-2 py-0.5 bg-white/5 rounded border border-white/5 text-[10px] text-on-surface-variant/60 font-bold font-label-mono">
+                        <span className="px-2.5 py-0.5 bg-white/5 rounded border border-white/5 text-xs text-on-surface-variant/60 font-bold font-label-mono">
                           {formatTime(currentTime)}
                         </span>
                       </span>
@@ -501,6 +504,14 @@ export default function InterviewTrainingPage() {
                         onClick={() => {
                           if(confirm("确定要提前结束本次模拟面试并导出分析报告吗？")) {
                             setIsTrainingStarted(false);
+                            localStorage.setItem("offerPilot_viewing_session", "true");
+                            localStorage.setItem("offerPilot_report_mode", "audio");
+                            localStorage.setItem("offerPilot_session_company", companyStyle);
+                            localStorage.setItem("offerPilot_session_role", targetRole);
+                            localStorage.setItem("offerPilot_session_round", interviewType);
+                            localStorage.setItem("offerPilot_session_grade", "P6 / L5");
+                            localStorage.setItem("offerPilot_session_salary", "25K * 16薪");
+                            localStorage.setItem("offerPilot_session_date", "2026-05-31");
                             router.push("/debugger/report");
                           }
                         }}
@@ -602,11 +613,11 @@ export default function InterviewTrainingPage() {
                   <div className="space-y-2.5 shrink-0 text-left">
                     
                     <div className="flex justify-between items-center">
-                      <span className="text-xs text-white font-black flex items-center gap-1.5 select-none">
-                        <span className="material-symbols-outlined text-sm text-secondary animate-pulse" style={{ fontVariationSettings: "'wght' 700" }}>insights</span>
+                      <span className="text-sm text-white font-black flex items-center gap-1.5 select-none">
+                        <span className="material-symbols-outlined text-base text-secondary animate-pulse" style={{ fontVariationSettings: "'wght' 700" }}>insights</span>
                         实时表现反馈
                       </span>
-                      <span className="text-[10px] font-label-mono font-bold text-on-surface-variant/40 select-none">
+                      <span className="text-xs font-label-mono font-bold text-on-surface-variant/40 select-none">
                         AI ENGINE VERSION 4.2
                       </span>
                     </div>
@@ -626,14 +637,14 @@ export default function InterviewTrainingPage() {
                           {/* Inner glowing hover effect */}
                           <div className="absolute inset-0 bg-white/[0.01] opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
 
-                          <div className="flex justify-between items-center text-[10px] text-on-surface-variant/40 font-bold select-none">
+                          <div className="flex justify-between items-center text-xs text-on-surface-variant/40 font-bold select-none">
                             <span>{cell.label}</span>
-                            <span className="material-symbols-outlined text-[10px] scale-90">zoom_out_map</span>
+                            <span className="material-symbols-outlined text-xs scale-90">zoom_out_map</span>
                           </div>
 
                           <div className="flex items-baseline gap-2 shrink-0">
-                            <span className="text-lg font-black font-label-mono text-white">{cell.score}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${cell.color}`}>
+                            <span className="text-xl font-black font-label-mono text-white">{cell.score}</span>
+                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase ${cell.color}`}>
                               {cell.tag}
                             </span>
                           </div>
@@ -643,11 +654,11 @@ export default function InterviewTrainingPage() {
 
                     {/* Alerts / Tips footer block */}
                     <div className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center justify-between gap-4 text-xs font-semibold text-on-surface-variant/60 relative overflow-hidden select-none">
-                      <span className="flex items-center gap-1.5 text-[11px]">
-                        <span className="material-symbols-outlined text-sm text-[#c0c1ff]">lightbulb</span>
+                      <span className="flex items-center gap-1.5 text-xs">
+                        <span className="material-symbols-outlined text-base text-[#c0c1ff]">lightbulb</span>
                         小贴士: 尝试使用 PREP 框架 (Point-Reason-Example-Point) 来组织回答，会让你的表达更有条理。
                       </span>
-                      <span className="text-[10px] text-[#ffb2b7] font-bold font-label-mono shrink-0 flex items-center gap-1">
+                      <span className="text-xs text-[#ffb2b7] font-bold font-label-mono shrink-0 flex items-center gap-1">
                         AI 实时分析中...
                         <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping" />
                       </span>
@@ -743,56 +754,51 @@ export default function InterviewTrainingPage() {
                   { id: 4, label: "系统设计", duration: "等候中", status: "pending", color: "bg-white/5" },
                   { id: 5, label: "追问环节", duration: "等候中", status: "pending", color: "bg-white/5" },
                   { id: 6, label: "总结评价", duration: "等候中", status: "pending", color: "bg-white/5" }
-                ].map((step, idx) => (
-                  <div key={idx} className="relative flex justify-between items-center text-xs font-semibold">
-                    <div className={`absolute -left-5 top-1 w-2.5 h-2.5 rounded-full ring-4 ring-background z-10 flex items-center justify-center ${
-                      step.status === 'completed' ? 'bg-tertiary' : 
-                      step.status === 'active' ? 'bg-primary' : 'bg-white/5 border border-white/10'
-                    }`} />
-                    
-                    <span className={`text-[13px] font-black ${
-                      step.status === 'completed' ? 'text-on-surface-variant/40 line-through' :
-                      step.status === 'active' ? 'text-white' : 'text-on-surface-variant/40'
-                    }`}>
-                      {step.label}
-                    </span>
-
-                    <span className={`text-[10px] font-label-mono font-black rounded px-1.5 py-0.5 border ${
-                      step.status === 'completed' ? 'bg-tertiary/10 text-tertiary border-tertiary/20' :
-                      step.status === 'active' ? 'bg-primary/15 text-primary border-primary/20 animate-pulse' : 
-                      'bg-white/5 text-on-surface-variant/30 border-white/5'
-                    }`}>
-                      {step.duration}
-                    </span>
-                  </div>
-                ))}
+                ].map((stepItem) => {
+                  const isCompleted = stepItem.id < activeQuestionIndex;
+                  const isActive = stepItem.id === activeQuestionIndex;
+                  return (
+                    <div key={stepItem.id} className="relative flex justify-between items-center text-sm font-black">
+                      <div className={`absolute -left-5.5 top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-background z-10 ${
+                        isCompleted ? "bg-[#4edea3]" : isActive ? "bg-[#c0c1ff] animate-pulse" : "bg-white/5"
+                      }`} />
+                      <span className={isCompleted ? "text-on-surface-variant/40 font-bold" : isActive ? "text-white" : "text-on-surface-variant/30"}>
+                        {stepItem.label}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded font-label-mono text-[11px] font-bold ${
+                        isCompleted ? "bg-tertiary/10 text-tertiary border border-tertiary/15" : isActive ? "bg-primary/25 text-primary border border-primary/30" : "bg-white/5 text-on-surface-variant/30"
+                      }`}>
+                        {stepItem.duration}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
-            {/* WIDGET 2: CURRENT TOPIC & WAVEFORM */}
-            <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-start gap-4">
-              <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
+            {/* WIDGET 2: CURRENT ROUND QUESTION METRIC */}
+            <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-start gap-4 shrink-0">
+              <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0 select-none">
                 <h4 className="text-base font-black text-white flex items-center gap-2">
-                  <span className="material-symbols-outlined text-lg text-secondary">record_voice_over</span>
+                  <span className="material-symbols-outlined text-lg text-secondary">question_answer</span>
                   本轮问题
                 </h4>
-                <span className="text-xs text-secondary font-black font-label-mono">
-                  2 / 3
-                </span>
+                <span className="text-[13px] md:text-[14px] font-label-mono font-bold text-on-surface-variant/50">{activeQuestionIndex} / 3</span>
               </div>
 
-              {/* Dynamic waveform simulation */}
-              <div className="flex items-center justify-center gap-1 py-1 mt-[-2px] h-12 select-none">
-                {[...Array(28)].map((_, i) => {
-                  const h = Math.abs(Math.sin(i * 0.25)) * 32 + 6;
-                  return (
+              {/* Speech pulsing waveform indicator in right panel */}
+              <div className="py-2.5 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center justify-center relative overflow-hidden min-h-[50px]">
+                <div className="flex items-center gap-1.5 h-6">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((waveBar) => (
                     <div 
-                      key={i} 
-                      style={{ height: `${h}px`, animationDelay: `${i * 0.05}s` }}
-                      className="w-0.5 bg-gradient-to-t from-primary to-secondary rounded-full animate-[pulse_0.75s_infinite_alternate]" 
+                      key={waveBar}
+                      style={{ animationDelay: `${waveBar * 0.05}s` }}
+                      className={`w-0.5 bg-gradient-to-t from-primary to-secondary rounded-full animate-[pulse_0.6s_infinite_alternate] ${
+                        isTrainingStarted ? 'h-6' : 'h-1.5'
+                      }`} 
                     />
-                  );
-                })}
+                  ))}
+                </div>
               </div>
 
               {/* Text description of current problem */}
@@ -800,7 +806,7 @@ export default function InterviewTrainingPage() {
                 能详细说说你是如何设计系统架构来应对高并发的吗？
               </div>
 
-              <div className="flex justify-between items-center text-[10px] text-on-surface-variant/40 font-bold select-none">
+              <div className="flex justify-between items-center text-[13px] md:text-[14px] text-on-surface-variant/50 font-bold select-none">
                 <span>追问次数: 1 / 2</span>
                 <span className="text-secondary font-black cursor-pointer hover:text-white transition-colors" onClick={() => alert("追问环节将由 AI 根据您前面的回答深度逻辑深挖！")}>关于追问机制 →</span>
               </div>
@@ -824,7 +830,7 @@ export default function InterviewTrainingPage() {
                 <div className="space-y-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-black text-white">技术专家</span>
-                    <span className="px-1.5 py-0.5 rounded bg-tertiary/10 text-tertiary border border-tertiary/20 text-[9px] font-black uppercase">
+                    <span className="px-2.5 py-1 rounded bg-tertiary/10 text-tertiary border border-tertiary/20 text-[11px] md:text-[12px] font-black uppercase">
                       系统设计专家
                     </span>
                   </div>
@@ -840,7 +846,7 @@ export default function InterviewTrainingPage() {
 
               <span 
                 onClick={() => alert("本位面试官偏好：结构清晰，逻辑紧密，重视容灾防御设计。")}
-                className="text-[10px] text-tertiary font-bold hover:text-white transition-colors cursor-pointer"
+                className="text-[13px] md:text-[14px] text-tertiary font-bold hover:text-white transition-colors cursor-pointer"
               >
                 查看面试官性格偏好 →
               </span>

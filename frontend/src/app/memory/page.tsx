@@ -113,6 +113,7 @@ export default function CareerMemoryDashboard() {
     localStorage.setItem("offerPilot_session_date", item.date.includes("202") ? item.date.split(" ")[0] : "2026-06-01");
     localStorage.setItem("offerPilot_session_grade", item.type === "resume" ? "L8 / P7" : "P6");
     localStorage.setItem("offerPilot_session_salary", item.type === "resume" ? "35K-45K" : "35-40K");
+    localStorage.setItem("offerPilot_viewing_session", "true");
     
     router.push("/debugger/report");
   };
@@ -157,10 +158,10 @@ export default function CareerMemoryDashboard() {
             <a onClick={() => handleTabChange("overview")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
               职业记忆看板
             </a>
-            <a onClick={() => router.push("/debugger/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               面试训练场
             </a>
-            <a onClick={() => router.push("/debugger/report")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
             </a>
             <a onClick={() => router.push("/")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
@@ -1314,10 +1315,10 @@ export default function CareerMemoryDashboard() {
                       { label: "弱点覆盖突破", value: "65%", diff: "+18%", isUp: true }
                     ].map((card, i) => (
                       <div key={i} className="p-4.5 rounded-2xl bg-white/[0.01] border border-white/5 space-y-2">
-                        <span className="text-[10px] text-on-surface-variant/40 font-extrabold uppercase">{card.label}</span>
+                        <span className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-extrabold uppercase">{card.label}</span>
                         <div className="flex justify-between items-baseline">
                           <h4 className="text-2xl font-black text-white font-label-mono">{card.value}</h4>
-                          <span className={`text-[10px] font-black font-label-mono ${card.isUp ? "text-tertiary" : "text-primary"}`}>
+                          <span className={`text-[13px] md:text-[14px] font-black font-label-mono ${card.isUp ? "text-tertiary" : "text-primary"}`}>
                             {card.diff}
                           </span>
                         </div>
