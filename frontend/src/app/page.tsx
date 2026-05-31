@@ -3,6 +3,7 @@
 import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
+import { useRouter } from "next/navigation";
 
 // Elegant Count-Up Component - Animate every time it appears in the viewport
 function StatCounter({ target, suffix = "" }: { target: number | string; suffix?: string }) {
@@ -147,6 +148,7 @@ function WaveformBar({ isPlaying, index }: { isPlaying: boolean; index: number }
 }
 
 export default function Home() {
+  const router = useRouter();
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(18); // Start at 00:18 (crash point)
 
@@ -188,16 +190,26 @@ export default function Home() {
             </svg>
             OfferPilot
           </div>
-          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-10">
-            <a className="text-on-surface-variant hover:text-on-surface transition-colors text-[17px] font-extrabold" href="#">产品功能</a>
-            <a className="text-on-surface-variant hover:text-on-surface transition-colors text-[17px] font-extrabold" href="#">解决方案</a>
-            <a className="text-on-surface-variant hover:text-on-surface transition-colors text-[17px] font-extrabold" href="#">案例</a>
-            <a className="text-on-surface-variant hover:text-on-surface transition-colors text-[17px] font-extrabold" href="#pricing">价格</a>
-            <a className="text-on-surface-variant hover:text-on-surface transition-colors text-[17px] font-extrabold" href="#">资源中心</a>
+          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
+            <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试调试器
+            </a>
+            <a onClick={() => router.push("/debugger/records")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              职业记忆看板
+            </a>
+            <a onClick={() => router.push("/debugger/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试训练场
+            </a>
+            <a onClick={() => router.push("/debugger/report")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              职业驾驶舱
+            </a>
+            <a onClick={() => router.push("/")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
+              案例
+            </a>
           </div>
           <div className="flex items-center gap-4">
             <button className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium">登录</button>
-            <button className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-90 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] hover:shadow-[0_0_30px_rgba(192,193,255,0.5)]">免费开始</button>
+            <button onClick={() => router.push("/debugger")} className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-90 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] hover:shadow-[0_0_30px_rgba(192,193,255,0.5)]">免费开始</button>
           </div>
         </div>
       </nav>
@@ -229,7 +241,7 @@ export default function Home() {
           </div>
           
           <div className="flex flex-wrap justify-center gap-6 pt-4 w-full">
-            <button className="px-10 py-4 bg-primary text-on-primary text-lg font-extrabold rounded-xl shadow-xl hover:translate-y-[-2px] active:scale-95 transition-all flex items-center gap-2 cursor-pointer">
+            <button onClick={() => router.push("/debugger")} className="px-10 py-4 bg-primary text-on-primary text-lg font-extrabold rounded-xl shadow-xl hover:translate-y-[-2px] active:scale-95 transition-all flex items-center gap-2 cursor-pointer">
               开始免费分析
               <span className="material-symbols-outlined">arrow_forward</span>
             </button>
@@ -772,7 +784,7 @@ export default function Home() {
           </div>
           
           <div className="flex flex-wrap justify-center gap-4 relative z-10 w-full">
-            <button className="px-12 py-4 bg-primary text-on-primary font-black rounded-xl shadow-2xl hover:scale-105 active:scale-95 transition-all cursor-pointer">
+            <button onClick={() => router.push("/debugger")} className="px-12 py-4 bg-primary text-on-primary font-black rounded-xl shadow-2xl hover:scale-105 active:scale-95 transition-all cursor-pointer">
               立即免费分析
             </button>
             <button className="px-12 py-4 border border-white/10 hover:bg-white/5 active:scale-95 text-on-surface font-bold rounded-xl transition-all cursor-pointer">
