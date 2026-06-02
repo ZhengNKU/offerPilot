@@ -115,7 +115,11 @@ export default function CareerMemoryDashboard() {
     localStorage.setItem("offerPilot_session_salary", item.type === "resume" ? "35K-45K" : "35-40K");
     localStorage.setItem("offerPilot_viewing_session", "true");
     
-    router.push("/debugger/report");
+    if (item.type === "audio") {
+      router.push("/debugger/voice");
+    } else {
+      router.push("/debugger/report");
+    }
   };
 
   // Main list filters
@@ -220,7 +224,7 @@ export default function CareerMemoryDashboard() {
                   <button
                     key={tab.id}
                     onClick={() => handleTabChange(tab.id)}
-                    className={`flex items-center gap-3.5 px-4.5 py-4 rounded-2xl text-sm font-black transition-all w-full text-left cursor-pointer group ${
+                    className={`flex items-center gap-3.5 px-4.5 py-4 rounded-2xl text-base font-black transition-all w-full text-left cursor-pointer group ${
                       isActive
                         ? "bg-primary text-on-primary shadow-lg shadow-primary/20 scale-[1.02]"
                         : "text-on-surface-variant/70 hover:text-white hover:bg-white/5 active:scale-98"
@@ -293,7 +297,7 @@ export default function CareerMemoryDashboard() {
                     memory
                   </span>
                 </div>
-                <span className="text-xs md:text-[13px] font-black text-white">AI 长期记忆已开启</span>
+                <span className="text-xs md:text-base font-black text-white">AI 长期记忆已开启</span>
               </div>
               <p className="text-[11px] md:text-xs text-on-surface-variant/70 leading-relaxed font-semibold">
                 Agent 持续学习你的面试表现，提炼项目亮点并追踪长周期技能波动，提供定制化晋升路线。
@@ -682,9 +686,9 @@ export default function CareerMemoryDashboard() {
                           </p>
                           <a
                             onClick={() => handleTabChange("weaknesses")}
-                            className="text-[13.5px] font-black text-primary flex items-center gap-0.5 cursor-pointer pt-0.5"
+                            className="text-sm font-black text-primary hover:text-white transition-colors flex items-center gap-1 cursor-pointer pt-0.5"
                           >
-                            查看优化建议 <span className="material-symbols-outlined text-xs">arrow_forward</span>
+                            查看优化建议 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                           </a>
                         </div>
                       </div>
@@ -760,7 +764,7 @@ export default function CareerMemoryDashboard() {
                         onClick={() => handleTabChange("projects")}
                         className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
                       >
-                        查看全部项目 (12) <span className="material-symbols-outlined text-xs">arrow_forward</span>
+                        查看全部项目 (12) <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                       </button>
                     </div>
                   </div>
@@ -811,7 +815,7 @@ export default function CareerMemoryDashboard() {
                         onClick={() => handleTabChange("knowledge")}
                         className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
                       >
-                        查看全部知识点 (36) <span className="material-symbols-outlined text-xs">arrow_forward</span>
+                        查看全部知识点 (36) <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                       </button>
                     </div>
                   </div>

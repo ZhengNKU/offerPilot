@@ -418,9 +418,9 @@ export default function CareerDashboard() {
                   </button>
                   <span 
                     onClick={() => setShowUpgradeModal(true)}
-                    className="text-xs font-bold text-on-surface-variant/40 hover:text-white transition-colors cursor-pointer text-center block"
+                    className="text-sm font-black text-primary hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1 mt-2.5"
                   >
-                    查看所有会员权益 →
+                    查看所有会员权益 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                   </span>
                 </div>
               </div>
@@ -514,9 +514,9 @@ export default function CareerDashboard() {
                   </h4>
                   <span 
                     onClick={handleHistoryRedirect}
-                    className="text-sm text-primary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
+                    className="text-sm text-primary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-1"
                   >
-                    查看全部 →
+                    查看全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                   </span>
                 </div>
 
@@ -613,9 +613,9 @@ export default function CareerDashboard() {
                   </h4>
                   <span 
                     onClick={() => setShowUpgradeModal(true)}
-                    className="text-sm text-tertiary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
+                    className="text-sm text-tertiary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-1"
                   >
-                    查看全部 →
+                    查看全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                   </span>
                 </div>
 

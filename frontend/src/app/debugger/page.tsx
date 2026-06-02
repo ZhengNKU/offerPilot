@@ -77,13 +77,22 @@ export default function NewAnalysisDebugger() {
       localStorage.setItem("offerPilot_session_date", audioForm.date || "2026-05-31");
       localStorage.setItem("offerPilot_session_grade", audioForm.grade || "P6 / L5");
       localStorage.setItem("offerPilot_session_salary", audioForm.salary || "25K * 16薪");
+      if (activeMode === "text") {
+        localStorage.setItem("offerPilot_session_pasteText", pasteText);
+      }
     }
 
     localStorage.setItem("offerPilot_viewing_session", "true");
 
     setTimeout(() => {
       setIsAnalyzing(false);
-      router.push("/debugger/report");
+      if (activeMode === "audio") {
+        router.push("/debugger/voice");
+      } else if (activeMode === "text") {
+        router.push("/debugger/record");
+      } else {
+        router.push("/debugger/report");
+      }
     }, 1500);
   };
 

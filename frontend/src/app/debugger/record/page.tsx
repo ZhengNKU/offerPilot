@@ -1,0 +1,1218 @@
+"use client";
+
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+
+interface DialogueItem {
+  sender: "interviewer" | "user";
+  name: string;
+  time: string;
+  text: string;
+  badgeText?: string;
+  badgeClass?: string;
+  hasWarning?: boolean;
+}
+
+interface QuestionItem {
+  id: string;
+  label: string;
+  time: string;
+  isActive?: boolean;
+}
+
+export default function InterviewRecordAnalysisPage() {
+  const router = useRouter();
+
+  // Mode: Input Form OR Analysis Dashboard
+  const [showInputForm, setShowInputForm] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isTemplateLoading, setIsTemplateLoading] = useState(false);
+
+  // Tabs: "对话分析" | "问题拆解" | "追问路径" | "能力评估"
+  const [activeTab, setActiveTab] = useState<"dialogue" | "deconstruct" | "followup" | "assessment">("dialogue");
+
+  // Popover State
+  const [activePopoverIdx, setActivePopoverIdx] = useState<number | null>(null);
+
+  // Search filter query
+  const [searchQuery, setSearchQuery] = useState("");
+
+  // Form State
+  const [pasteText, setPasteText] = useState("");
+  const [metadataForm, setMetadataForm] = useState({
+    company: "字节跳动",
+    role: "后端开发工程师",
+    round: "二面",
+    date: "2025-06-01",
+    grade: "P6",
+    salary: "35-40K",
+    years: "3-5年",
+    isOnJob: "在职"
+  });
+
+  // Parsed dialogues list
+  const [dialogues, setDialogues] = useState<DialogueItem[]>([]);
+
+  // Default transcript matching preview image
+  const DEFAULT_TRANSCRIPT = 
+    `面试官 (00:00)：请先做个自我介绍吧。\n` +
+    `我 (00:02)：好的，我叫张三，3年后端开发经验，主要做分布式系统 and 中间件相关的开发...\n` +
+    `面试官 (02:16)：介绍一下你负责的项目吧，重点讲讲你的角色和技术难点。\n` +
+    `我 (02:32)：我主要负责推荐系统的后端开发，使用了 Redis、MySQL、Kafka 等技术栈...\n` +
+    `面试官 (06:42)：为什么使用 Redis ？\n` +
+    `我 (06:45)：因为 Redis 性能高，可以做缓存，提升接口响应速度。\n` +
+    `面试官 (06:50)：那为什么不用本地缓存呢？\n` +
+    `我 (06:53)：本地缓存会有数据不一致的问题，而且不好维护...\n` +
+    `面试官 (06:58)：那如果缓存和数据库的数据不一致怎么办？\n` +
+    `我 (07:02)：我们用的是定时双删策略，保证最终一致性。`;
+
+  // Pre-load default or local storage text
+  useEffect(() => {
+    const savedText = localStorage.getItem("offerPilot_session_pasteText");
+    const savedCompany = localStorage.getItem("offerPilot_session_company");
+    const savedRole = localStorage.getItem("offerPilot_session_role");
+    const savedRound = localStorage.getItem("offerPilot_session_round");
+    const savedDate = localStorage.getItem("offerPilot_session_date");
+    const savedGrade = localStorage.getItem("offerPilot_session_grade");
+    const savedSalary = localStorage.getItem("offerPilot_session_salary");
+
+    if (savedCompany || savedRole || savedRound) {
+      setMetadataForm(prev => ({
+        ...prev,
+        company: savedCompany || prev.company,
+        role: savedRole || prev.role,
+        round: savedRound || prev.round,
+        date: savedDate || prev.date,
+        grade: savedGrade || prev.grade,
+        salary: savedSalary || prev.salary
+      }));
+    }
+
+    if (savedText && savedText.trim().length > 0) {
+      setPasteText(savedText);
+      parseDialogueText(savedText);
+    } else {
+      setPasteText(DEFAULT_TRANSCRIPT);
+      parseDialogueText(DEFAULT_TRANSCRIPT);
+    }
+  }, []);
+
+  // Tech term highlighter for beautiful styling matching mockups
+  const renderHighlightedText = (text: string) => {
+    if (!text) return null;
+    const regex = /(Redis|MySQL|Kafka|Guava|Ehcache)/gi;
+    const parts = text.split(regex);
+    return parts.map((part, index) => {
+      const lower = part.toLowerCase();
+      if (lower === "redis") {
+        return (
+          <span key={index} className="px-1.5 py-0.5 mx-0.5 rounded bg-amber-400/20 text-amber-300 font-mono text-[11px] border border-amber-400/20 font-bold select-all">
+            Redis
+          </span>
+        );
+      } else if (lower === "mysql") {
+        return (
+          <span key={index} className="px-1.5 py-0.5 mx-0.5 rounded bg-blue-400/20 text-blue-300 font-mono text-[11px] border border-blue-400/20 font-bold select-all">
+            MySQL
+          </span>
+        );
+      } else if (lower === "kafka") {
+        return (
+          <span key={index} className="px-1.5 py-0.5 mx-0.5 rounded bg-purple-400/20 text-purple-300 font-mono text-[11px] border border-purple-400/20 font-bold select-all">
+            Kafka
+          </span>
+        );
+      } else if (lower === "guava") {
+        return (
+          <span key={index} className="px-1.5 py-0.5 mx-0.5 rounded bg-teal-400/20 text-teal-300 font-mono text-[11px] border border-teal-400/20 font-bold select-all">
+            Guava
+          </span>
+        );
+      } else if (lower === "ehcache") {
+        return (
+          <span key={index} className="px-1.5 py-0.5 mx-0.5 rounded bg-emerald-400/20 text-emerald-300 font-mono text-[11px] border border-emerald-400/20 font-bold select-all">
+            Ehcache
+          </span>
+        );
+      }
+      return part;
+    });
+  };
+
+  // Safe inline markdown renderer for formatting tags
+  const formatMarkdownInline = (text: string) => {
+    if (!text) return "";
+    const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+    return parts.map((part, idx) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return (
+          <strong key={idx} className="font-extrabold text-[#5DECCB]">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      if (part.startsWith("`") && part.endsWith("`")) {
+        return (
+          <code key={idx} className="px-1.5 py-0.2 mx-0.5 rounded bg-white/10 text-white font-mono text-[11px] border border-white/5 select-all">
+            {part.slice(1, -1)}
+          </code>
+        );
+      }
+      return part;
+    });
+  };
+
+  // Parse custom lines to bubbles helper
+  const parseDialogueText = (rawText: string) => {
+    const lines = rawText.split("\n");
+    const parsedList: DialogueItem[] = [];
+    let count = 0;
+
+    lines.forEach((line) => {
+      const cleanLine = line.trim();
+      if (!cleanLine) return;
+
+      // Extract timestamp in brackets/parentheses like (00:00) or [00:00]
+      let timeStr = "";
+      let remainingText = cleanLine;
+
+      const timeMatch = cleanLine.match(/[\(\[\uff08\uff3b]([0-9]{2}:[0-9]{2})[\)\]\uff09\uff3d]/);
+      if (timeMatch) {
+        timeStr = timeMatch[1];
+        remainingText = cleanLine.replace(timeMatch[0], "").replace(/\s+/g, " ");
+      } else {
+        const totalSecs = count * 95; // auto-generated timestamp
+        const mins = Math.floor(totalSecs / 60);
+        const secs = totalSecs % 60;
+        timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      }
+      count++;
+
+      let sender: "interviewer" | "user" = "user";
+      let name = "您";
+      let textVal = remainingText;
+
+      const isInterviewer = /^(面试官|Q|q)\s*[：:]/.test(remainingText);
+      const isUser = /^(我|您|A|a)\s*[：:]/.test(remainingText);
+
+      if (isInterviewer) {
+        sender = "interviewer";
+        name = "面试官";
+        textVal = remainingText.replace(/^(面试官|Q|q)\s*[：:]/, "").trim();
+      } else if (isUser) {
+        sender = "user";
+        name = "您";
+        textVal = remainingText.replace(/^(我|您|A|a)\s*[：:]/, "").trim();
+      }
+
+      const hasWarn = sender === "user" && textVal.includes("因为 Redis 性能高");
+      parsedList.push({
+        sender,
+        name,
+        time: timeStr,
+        text: textVal,
+        hasWarning: hasWarn,
+        badgeText: hasWarn ? "回答较简" : undefined,
+        badgeClass: hasWarn ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[10px]" : undefined
+      });
+    });
+
+    setDialogues(parsedList);
+  };
+
+  // Handle Manual Form Submission
+  const handleAnalyzeSubmit = () => {
+    setIsAnalyzing(true);
+    localStorage.setItem("offerPilot_session_pasteText", pasteText);
+    localStorage.setItem("offerPilot_session_company", metadataForm.company);
+    localStorage.setItem("offerPilot_session_role", metadataForm.role);
+    localStorage.setItem("offerPilot_session_round", metadataForm.round);
+    localStorage.setItem("offerPilot_session_date", metadataForm.date);
+    localStorage.setItem("offerPilot_session_grade", metadataForm.grade);
+    localStorage.setItem("offerPilot_session_salary", metadataForm.salary);
+
+    setTimeout(() => {
+      setIsAnalyzing(false);
+      setShowInputForm(false);
+      parseDialogueText(pasteText);
+    }, 1200);
+  };
+
+  // Helper to load standard preview demo template
+  const loadDemoTemplate = () => {
+    setIsTemplateLoading(true);
+    setTimeout(() => {
+      setPasteText(DEFAULT_TRANSCRIPT);
+      setMetadataForm({
+        company: "字节跳动",
+        role: "后端开发工程师",
+        round: "二面 - 技术面",
+        date: "2026-05-31",
+        grade: "P6 / L5",
+        salary: "25K * 16薪",
+        years: "3-5年",
+        isOnJob: "在职"
+      });
+      setIsTemplateLoading(false);
+    }, 1200);
+  };
+
+  // Helper to copy text to clipboard
+  const handleCopyToClipboard = (text: string, msg: string) => {
+    navigator.clipboard.writeText(text);
+    alert(msg);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden select-none pt-20">
+      
+      {/* Sci-Fi Background Grids and Halos */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-[#AFA7FF]/5 rounded-full blur-[160px] pointer-events-none z-0" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-[#5DECCB]/3 rounded-full blur-[160px] pointer-events-none z-0" />
+
+      {/* ========================================================
+          GLOBAL WORKBENCH NAVBAR (Fixed top-0)
+         ======================================================== */}
+      <nav className="fixed top-0 w-full z-40 bg-surface/80 backdrop-blur-xl border-b border-white/10">
+        <div className="flex justify-between items-center h-20 px-gutter max-w-container-max mx-auto w-full relative">
+          
+          <div
+            onClick={() => router.push("/")}
+            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2 cursor-pointer"
+          >
+            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo)" />
+              <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#0b1326" />
+              <defs>
+                <linearGradient id="nav-brand-logo" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="#c0c1ff" />
+                  <stop offset="100%" stopColor="#ffb2b7" />
+                </linearGradient>
+              </defs>
+            </svg>
+              <span className="flex items-baseline">OfferPilot</span>
+          </div>
+
+          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
+            <a onClick={() => router.push("/debugger")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
+              面试调试器
+            </a>
+            <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              职业记忆看板
+            </a>
+            <a onClick={() => router.push("/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试训练场
+            </a>
+            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              职业驾驶舱
+            </a>
+            <a onClick={() => router.push("/")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              案例
+            </a>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => router.push("/memory?tab=timeline")}
+              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-base">history</span>历史记录
+            </button>
+            <div className="flex items-center gap-1.5 border-l border-white/10 pl-3.5">
+              <div className="w-8 h-8 rounded-full bg-slate-900 border border-white/10 overflow-hidden shrink-0">
+                <img src="/debugger-2.jpg" alt="Dame Zheng" className="w-full h-full object-cover" />
+              </div>
+              <span className="text-on-surface font-extrabold text-sm whitespace-nowrap hidden sm:block">Dame Zheng</span>
+            </div>
+          </div>
+
+        </div>
+      </nav>
+
+      {/* Simulated Glow Loading Screen */}
+      <AnimatePresence>
+        {isAnalyzing && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-[#050B1A]/90 backdrop-blur-xl flex flex-col justify-center items-center"
+          >
+            <div className="w-16 h-16 rounded-full border-4 border-[#00D4FF]/20 border-t-[#00D4FF] animate-spin mb-4" />
+            <h3 className="font-extrabold text-white text-lg animate-pulse">OfferPilot 正在分析面试记录...</h3>
+            <p className="text-xs text-white/50 mt-1">剖析答题逻辑、计算风险漏点、输出表达升级策略</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className="flex-1 flex flex-col px-gutter max-w-container-max mx-auto w-full py-6 gap-5.5 text-left relative z-10">
+
+        {showInputForm ? (
+          /* ========================================================
+              MANUAL DIALOGUE ENTRY & CONFIG FORM
+             ======================================================== */
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="max-w-3xl w-full mx-auto glass-panel p-8 rounded-3xl border-white/10 space-y-6 text-left"
+          >
+            <div className="pb-4 border-b border-white/5 flex justify-between items-center">
+              <div>
+                <span className="text-[10px] font-label-mono tracking-widest text-[#AFA7FF] font-bold uppercase">Manual Transcript Analysis</span>
+                <h2 className="text-xl font-black text-white mt-0.5">输入面试记录分析</h2>
+              </div>
+              <button 
+                onClick={loadDemoTemplate}
+                className="text-xs md:text-sm font-black text-[#AFA7FF] hover:text-white transition-colors cursor-pointer flex items-center gap-1"
+              >
+                <span className="material-symbols-outlined text-xs">bolt</span>载入字节跳动真实面试模板
+              </button>
+            </div>
+
+            {isTemplateLoading ? (
+              <div className="py-24 flex flex-col items-center justify-center gap-4 text-center select-none w-full">
+                <div className="w-16 h-16 rounded-full border-4 border-dashed border-[#00D4FF] flex items-center justify-center relative animate-[spin:6s_linear_infinite]" style={{ animation: "spin 6s linear infinite" }} />
+                <div className="space-y-1 mt-2">
+                  <p className="text-sm font-black text-white animate-pulse">正在载入字节跳动真实面试模板数据...</p>
+                  <p className="text-xs text-white/40 font-bold font-mono">LOADING_REAL_BYTEDANCE_INTERVIEW_TEMPLATE</p>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-4">
+                  <div className="space-y-1.5">
+                    <label className="text-xs text-white/60 font-bold">请粘贴或填写您的面试对话片段：</label>
+                    <textarea
+                      value={pasteText}
+                      onChange={(e) => setPasteText(e.target.value)}
+                      placeholder={`格式如：\n面试官：请先做个自我介绍。\n我：好的，我叫...`}
+                      className="w-full h-64 bg-[#050B1A]/80 border border-white/5 rounded-2xl p-4 font-mono text-xs md:text-sm text-white focus:outline-none focus:border-[#AFA7FF]/40 transition-all leading-relaxed"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-white/60">
+                    <div>
+                      <label className="block mb-1.5">面试公司 *</label>
+                      <input
+                        type="text"
+                        value={metadataForm.company}
+                        onChange={(e) => setMetadataForm({ ...metadataForm, company: e.target.value })}
+                        className="w-full py-2.5 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1.5">面试岗位 *</label>
+                      <input
+                        type="text"
+                        value={metadataForm.role}
+                        onChange={(e) => setMetadataForm({ ...metadataForm, role: e.target.value })}
+                        className="w-full py-2.5 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1.5">面试轮次 *</label>
+                      <input
+                        type="text"
+                        value={metadataForm.round}
+                        onChange={(e) => setMetadataForm({ ...metadataForm, round: e.target.value })}
+                        className="w-full py-2.5 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-white/60">
+                    <div>
+                      <label className="block mb-1.5">面试时间</label>
+                      <input
+                        type="date"
+                        value={metadataForm.date}
+                        onChange={(e) => setMetadataForm({ ...metadataForm, date: e.target.value })}
+                        className="w-full py-2.5 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1.5">职级级别</label>
+                      <input
+                        type="text"
+                        value={metadataForm.grade}
+                        onChange={(e) => setMetadataForm({ ...metadataForm, grade: e.target.value })}
+                        className="w-full py-2.5 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block mb-1.5">期望薪资</label>
+                      <input
+                        type="text"
+                        value={metadataForm.salary}
+                        onChange={(e) => setMetadataForm({ ...metadataForm, salary: e.target.value })}
+                        className="w-full py-2.5 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4">
+                  <button
+                    onClick={() => setShowInputForm(false)}
+                    className="px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-black cursor-pointer text-white"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={handleAnalyzeSubmit}
+                    className="px-6 py-2.5 bg-[#AFA7FF] text-[#050B1A] rounded-xl text-xs font-black cursor-pointer transition-all shadow-lg shadow-purple-500/10"
+                  >
+                    开始 AI 智能分析
+                  </button>
+                </div>
+              </>
+            )}
+          </motion.div>
+        ) : (
+          <>
+            {/* ========================================================
+               WORKSPACE MAIN CONTAINER (3 COLUMNS DASHBOARD)
+               ======================================================== */}
+            <div className="grid grid-cols-12 gap-5.5 items-stretch w-full">
+
+            {/* ----------------------------------------------------
+                COLUMN 1: Left Sidebar switcher (3 cols)
+               ---------------------------------------------------- */}
+            <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5">
+              
+              {/* Sidebar Header */}
+              <div className="pb-1 select-none text-left">
+                <h3 className="font-black text-white text-base">面试调试器</h3>
+                <p className="text-[10px] text-white/30 font-mono font-bold mt-0.5">Session #8824</p>
+              </div>
+
+              {/* 1.2 Interview Info card */}
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5">
+                <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-base text-[#00D4FF]">assignment_ind</span>
+                    面试信息
+                  </h4>
+                  <span 
+                    onClick={() => setShowInputForm(true)}
+                    className="text-base font-black text-[#AFA7FF] hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
+                  >
+                    编辑
+                  </span>
+                </div>
+
+                <div className="space-y-2.5 text-xs font-bold text-white/60">
+                  <div className="flex justify-between items-center">
+                    <span>是否在职</span>
+                    <span className="px-2 py-0.5 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/20 text-xs font-extrabold">
+                      {metadataForm.isOnJob}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>工作年限</span>
+                    <span className="text-white font-extrabold">{metadataForm.years}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>面试公司</span>
+                    <span className="text-white font-extrabold">{metadataForm.company}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>面试岗位</span>
+                    <span className="text-white font-extrabold">{metadataForm.role}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>面试轮次</span>
+                    <span className="text-white font-extrabold">{metadataForm.round}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>面试时间</span>
+                    <span className="text-white font-extrabold">{metadataForm.date}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>岗位职级</span>
+                    <span className="text-white font-extrabold">{metadataForm.grade}</span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span>期望薪资</span>
+                    <span className="text-white font-extrabold">{metadataForm.salary}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 1.3 Question Catalog */}
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 flex-1">
+                <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-base text-[#00D4FF]">list_alt</span>
+                    问题目录
+                  </h4>
+                  <span className="text-sm text-white/30 font-mono">共 18 个问题</span>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-3 pr-1 select-none">
+                  {[
+                    { id: "Q1", label: "自我介绍", tag: "良好", time: "00:00 - 02:15" },
+                    { id: "Q2", label: "项目介绍", tag: "一般", time: "02:16 - 05:40" },
+                    { id: "Q3", label: "Redis 追问", tag: "风险", time: "05:41 - 09:18", isActive: true },
+                    { id: "Q4", label: "系统一致性", tag: "一般", time: "09:19 - 14:35" },
+                    { id: "Q5", label: "TCC 与 Saga", tag: "风险", time: "14:36 - 20:02" },
+                    { id: "Q6", label: "行为面试", tag: "良好", time: "20:03 - 32:18" }
+                  ].map((q) => {
+                    const isSelected = q.isActive;
+                    const isRisk = q.tag === "风险";
+                    const isGood = q.tag === "良好";
+
+                    // Circle dot color
+                    const dotColor = isRisk ? "bg-[#FF7A95] shadow-[0_0_8px_rgba(255,122,149,0.4)]" : isGood ? "bg-[#5DECCB]" : "bg-[#AFA7FF]";
+                    
+                    // Right tag color
+                    const badgeClass = isRisk 
+                      ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" 
+                      : isGood 
+                        ? "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20" 
+                        : "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20";
+
+                    return (
+                      <div 
+                        key={q.id}
+                        onClick={() => alert(`切换到 ${q.id} 详细分析`)}
+                        className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all duration-300 relative flex items-center justify-between gap-3 ${
+                          isSelected
+                            ? "bg-[#AFA7FF]/5 border-[#AFA7FF]/20 shadow-lg shadow-[#AFA7FF]/5"
+                            : "bg-[#050B1A]/40 border-white/5 hover:border-white/10 hover:bg-[#050B1A]/80"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          {/* Connector line dot */}
+                          <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
+                          <h5 className={`text-sm font-black truncate leading-tight ${isSelected ? "text-[#AFA7FF]" : "text-white"}`}>
+                            {q.id} {q.label}
+                          </h5>
+                        </div>
+
+                        <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase border shrink-0 ${badgeClass}`}>
+                          {q.tag}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="text-center pt-2 border-t border-white/5">
+                  <span 
+                    onClick={() => alert("问题目录开发中...")}
+                    className="text-sm font-black text-[#AFA7FF] hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
+                  >
+                    查看全部问题 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
+                  </span>
+                </div>
+              </div>
+
+            </div>
+
+            {/* ----------------------------------------------------
+                COLUMN 2: Center workspace Dialogue Analysis (6 cols)
+               ---------------------------------------------------- */}
+            <div className="col-span-12 lg:col-span-6 flex flex-col gap-4.5 min-w-0">
+              
+              {/* Main Content Board */}
+              <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4 flex-1 h-[890px]">
+                
+                {/* Board Header details */}
+                <div className="flex justify-between items-start select-none shrink-0 border-b border-white/5 pb-3">
+                  <div className="text-left space-y-1 pr-3">
+                    <h2 className="text-lg font-black text-white">面试记录分析</h2>
+                    <p className="text-[11px] text-white/30 font-bold">
+                      共识别：18 个问题 | 7 次追问 | 4 个高风险问题 | 2 个严重失分点
+                    </p>
+                  </div>
+                  
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => handleCopyToClipboard(pasteText, "面试日志原文已复制！")}
+                      className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-sm">content_copy</span>复制原文
+                    </button>
+                    <button 
+                      onClick={() => handleCopyToClipboard("面试诊断分析报告-字节跳动-后端工程师", "分析数据导出中...")}
+                      className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                    >
+                      <span className="material-symbols-outlined text-sm">download</span>导出分析
+                    </button>
+                  </div>
+                </div>
+
+                {/* Main tabs bar with search */}
+                <div className="flex justify-between items-center border-b border-white/5 select-none shrink-0">
+                  <div className="flex items-center gap-6 font-black text-base">
+                    {[
+                      { id: "dialogue", label: "对话分析" },
+                      { id: "deconstruct", label: "问题拆解" },
+                      { id: "followup", label: "追问路径" },
+                      { id: "assessment", label: "能力评估" }
+                    ].map((tab) => (
+                      <span 
+                        key={tab.id}
+                        onClick={() => setActiveTab(tab.id as any)}
+                        className={`pb-2.5 cursor-pointer transition-colors relative ${
+                          activeTab === tab.id 
+                            ? "text-[#AFA7FF] border-b-2 border-[#AFA7FF] -bottom-[1px]" 
+                            : "text-white/40 hover:text-white"
+                        }`}
+                      >
+                        {tab.label}
+                      </span>
+                    ))}
+                  </div>
+
+                  {activeTab === "dialogue" && (
+                    <div className="flex items-center bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 w-36 md:w-44 mb-2.5">
+                      <input
+                        type="text"
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="搜索对话..."
+                        className="bg-transparent text-[11px] text-white placeholder-white/30 focus:outline-none w-full"
+                      />
+                      {searchQuery && (
+                        <span
+                           onClick={() => setSearchQuery("")}
+                           className="material-symbols-outlined text-[11px] text-white/40 hover:text-white cursor-pointer ml-1 select-none"
+                        >
+                          close
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Scrollable analysis area */}
+                <div className="flex-1 overflow-y-auto pr-1">
+                  {activeTab === "dialogue" ? (
+                    /* Tab 1: 对话分析 Bubble list */
+                    <div className="space-y-5 pt-2 relative">
+                      {dialogues
+                        .filter(bubble => bubble.text.toLowerCase().includes(searchQuery.toLowerCase()))
+                        .map((bubble, idx) => {
+                          const isInterviewer = bubble.sender === "interviewer";
+                          return (
+                            <div 
+                              key={idx}
+                              className={`p-3.5 rounded-xl border transition-all duration-300 text-left flex flex-col gap-1.5 relative ${
+                                isInterviewer 
+                                  ? "bg-[#050B1A]/40 border-white/5 hover:border-white/10" 
+                                  : `bg-gradient-to-r from-[#050B1A]/80 to-[#AFA7FF]/3 border-[#AFA7FF]/10 hover:border-[#AFA7FF]/20 ${
+                                      bubble.hasWarning ? "border-[#FF7A95]/30 bg-[#1e132e]/30 shadow-[0_0_12px_rgba(255,122,149,0.04)]" : ""
+                                    }`
+                              }`}
+                            >
+                              <div className="flex justify-between items-center text-xs font-bold select-none">
+                                <span className="text-white/60 flex items-center gap-1.5 text-xs">
+                                  <span className={`w-2.5 h-2.5 rounded-full ${isInterviewer ? "bg-[#FF7A95]" : "bg-[#00D4FF]"}`} />
+                                  {bubble.name}
+                                </span>
+                                
+                                <div className="flex items-center gap-2">
+                                  {bubble.hasWarning && (
+                                    <span className="relative inline-block">
+                                      <span 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setActivePopoverIdx(activePopoverIdx === idx ? null : idx);
+                                        }}
+                                        className="inline-flex items-center align-middle material-symbols-outlined text-[#FF7A95] text-base cursor-pointer select-none"
+                                        style={{ fontVariationSettings: "'FILL' 1" }}
+                                      >
+                                        warning
+                                      </span>
+                                      
+                                      {/* Warning Alert Popover aligned near warning element */}
+                                      {activePopoverIdx === idx && (
+                                        <div className="absolute right-0 bottom-full mb-3 w-64 p-4 rounded-xl bg-slate-950 border border-white/10 shadow-2xl z-50 space-y-2 text-left select-none animate-[slideIn_0.2s_ease-out]">
+                                          <div className="flex justify-between items-center pb-1.5 border-b border-white/5">
+                                            <span className="text-xs font-black text-[#FF7A95] flex items-center gap-1">
+                                              <span className="material-symbols-outlined text-xs">warning</span>
+                                              表达风险
+                                            </span>
+                                            <button 
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setActivePopoverIdx(null);
+                                              }}
+                                              className="text-white/30 hover:text-white text-xs font-bold leading-none cursor-pointer"
+                                            >
+                                              ✕
+                                            </button>
+                                          </div>
+                                          <div className="space-y-1.5 text-xs text-white/70 font-semibold leading-relaxed">
+                                            <p>• 缺少选型依据，未说明问题背景</p>
+                                            <p>• 没有量化指标，缺乏说服力</p>
+                                          </div>
+                                          <div className="pt-2 border-t border-white/5">
+                                            <a 
+                                              href="#upgrade-expression" 
+                                              onClick={() => {
+                                                setActivePopoverIdx(null);
+                                                const el = document.getElementById("upgrade-expression");
+                                                if(el) el.scrollIntoView({ behavior: 'smooth' });
+                                              }}
+                                              className="text-xs text-[#AFA7FF] font-black hover:text-white transition-colors cursor-pointer block text-right"
+                                            >
+                                              如何优化表达 &gt;
+                                            </a>
+                                          </div>
+                                          {/* Arrow pointing down */}
+                                          <div className="absolute top-full right-2 border-solid border-t-slate-950 border-t-8 border-x-transparent border-x-8 border-b-0 drop-shadow-md"></div>
+                                        </div>
+                                      )}
+                                    </span>
+                                  )}
+                                  
+                                  {bubble.badgeText && (
+                                    <span className={`px-2 py-0.5 rounded border shrink-0 font-black text-[10px] uppercase ${bubble.badgeClass}`}>
+                                      {bubble.badgeText}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              <p className="text-[13px] md:text-sm leading-relaxed text-white font-semibold">
+                                {renderHighlightedText(bubble.text)}
+                              </p>
+                            </div>
+                          );
+                        })}
+
+                      {/* Bottom action panel */}
+                      <div className="flex justify-end items-center pt-3 select-none shrink-0 font-black text-base text-white/40">
+                        <span className="px-3 py-1 bg-white/5 border border-white/10 hover:bg-white/10 hover:text-white rounded-lg cursor-pointer flex items-center gap-1 transition-all text-xs" onClick={() => {
+                          const warningIdx = dialogues.findIndex(d => d.hasWarning);
+                          if(warningIdx !== -1) {
+                            alert("已定位到当前存在表达风险的问答段落！");
+                            setActivePopoverIdx(warningIdx);
+                          }
+                        }}>
+                          <span className="material-symbols-outlined text-xs">arrow_upward</span>定位到当前问题
+                        </span>
+                      </div>
+                    </div>
+                  ) : activeTab === "deconstruct" ? (
+                    /* Tab 2: 问题拆解 */
+                    <div className="space-y-3.5 py-2">
+                      <div className="p-3.5 rounded-xl bg-white/[0.01] border border-white/5 space-y-2.5 text-left text-base font-semibold leading-relaxed">
+                        <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-sm text-[#00D4FF]">account_tree</span>
+                          大厂考察要点对齐
+                        </h4>
+                        <p className="text-white/60">通过对日志的拆解，面试官在 Redis 环节共设计了 3 步渐进式提问：考察缓存作用 ➔ 考察缓存与本地内存的区别 ➔ 考察主从双写一致性一致性重试机制。</p>
+                      </div>
+                      <div className="flex flex-col gap-4">
+                        <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl text-sm flex flex-col gap-2 text-left">
+                          <div>
+                            <span className="inline-block px-2 py-0.5 rounded bg-white/5 text-white/70 font-mono text-xs font-black">
+                              第 1 关 · 基础引入
+                            </span>
+                          </div>
+                          <p className="text-white font-extrabold text-sm md:text-base">为什么使用 Redis？</p>
+                          <p className="text-xs md:text-sm text-white/40 leading-relaxed">
+                            考查求职者是否知道 Redis 在项目中的具体角色，是否有明确的技术背景支持还是仅仅套用热门词汇。
+                          </p>
+                        </div>
+                        <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl text-sm flex flex-col gap-2 text-left">
+                          <div>
+                            <span className="inline-block px-2 py-0.5 rounded bg-[#AFA7FF]/10 text-[#AFA7FF] border border-[#AFA7FF]/20 font-mono text-xs font-black">
+                              第 2 关 · 方案对比
+                            </span>
+                          </div>
+                          <p className="text-white font-extrabold text-sm md:text-base">为什么不用本地缓存？</p>
+                          <p className="text-xs md:text-sm text-white/40 leading-relaxed">
+                            深度考查对进程内缓存 (Guava/Ehcache) 与分布式缓存 (Redis) 的 Trade-off 架构对比和边界思考。
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  ) : activeTab === "followup" ? (
+                    /* Tab 3: 追问路径 */
+                    <div className="space-y-4 py-2">
+                      <div className="relative pl-6 space-y-4">
+                        <div className="absolute left-2 top-2.5 bottom-2.5 w-0.5 bg-[#AFA7FF]/20" />
+                        
+                        <div className="relative">
+                          <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-[#5DECCB] z-10" />
+                          <div className="text-left text-base space-y-1 font-semibold">
+                            <p className="text-base text-white/40">Q1 自我介绍 · 引导切入</p>
+                            <p className="text-base text-white">抛出“做过分布式系统与中间件开发”，成功引导面试官进入中间件板块。</p>
+                          </div>
+                        </div>
+
+                        <div className="relative">
+                          <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-[#AFA7FF] z-10 animate-pulse" />
+                          <div className="text-left text-base space-y-1 font-semibold">
+                            <p className="text-base text-[#AFA7FF]">Q3 Redis 选型 · 主动深挖</p>
+                            <p className="text-base text-white/80">核心漏洞点：“因为 Redis 性能高，可以做缓存” ➔ 引出高负载高并发背景的细节追问。</p>
+                          </div>
+                        </div>
+
+                        <div className="relative">
+                          <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-white/5 z-10" />
+                          <div className="text-left text-base space-y-1 font-semibold">
+                            <p className="text-base text-white/30">Q5 双写一致性 · 重试质感</p>
+                            <p className="text-base text-white/40">最终瓶颈：“定时双删”的答法暴露了高并发和真实复杂场景落地架构经验欠缺的破绽。</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Tab 4: 能力评估 */
+                    <div className="space-y-4 py-2">
+                      <div className="grid grid-cols-2 gap-3.5 text-base text-left">
+                        <div className="p-3.5 rounded-xl bg-white/[0.01] border border-white/5 space-y-1">
+                          <span className="text-white/40">逻辑自洽度</span>
+                          <p className="text-lg font-black text-white">85%</p>
+                          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-1">
+                            <div className="h-full bg-[#5DECCB]" style={{ width: "85%" }} />
+                          </div>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-white/[0.01] border border-white/5 space-y-1">
+                          <span className="text-white/40">技术细节深度</span>
+                          <p className="text-lg font-black text-[#FF7A95]">60%</p>
+                          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-1">
+                            <div className="h-full bg-[#FF7A95]" style={{ width: "60%" }} />
+                          </div>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-white/[0.01] border border-white/5 space-y-1">
+                          <span className="text-white/40">选型对比宽度</span>
+                          <p className="text-lg font-black text-[#AFA7FF]">70%</p>
+                          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-1">
+                            <div className="h-full bg-[#AFA7FF]" style={{ width: "70%" }} />
+                          </div>
+                        </div>
+                        <div className="p-3.5 rounded-xl bg-white/[0.01] border border-white/5 space-y-1">
+                          <span className="text-white/40">业务与数据指标</span>
+                          <p className="text-lg font-black text-[#FF7A95]">55%</p>
+                          <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-1">
+                            <div className="h-full bg-[#FF7A95]" style={{ width: "55%" }} />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="p-3.5 rounded-xl bg-[#0b1326] border border-white/5 font-semibold text-base leading-relaxed text-left space-y-1">
+                        <span className="text-base font-black text-[#AFA7FF] uppercase tracking-wider block mb-1">AI 提分战略建议</span>
+                        求职者表达有一定条理（逻辑自洽），但缺乏架构师常用的“多方案 Trade-off 选型比对”和“核心量化吞吐指标描述”。建议把 “因为性能高所以用 Redis” 升级为 “解决热点行高并发打挂数据库的架构痛点”。
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+              </div>
+
+            </div>
+
+            {/* ----------------------------------------------------
+                COLUMN 3: Right Sidebar (3 cols)
+               ---------------------------------------------------- */}
+            <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5 text-left">
+              
+              {/* 3.1 Scores widgets */}
+              <div className="grid grid-cols-2 gap-4 select-none">
+                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-1.5">
+                  <span className="text-base font-bold text-white/40">综合评分</span>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-3xl font-black font-label-mono text-[#5DECCB]">78</span>
+                    <span className="text-[10px] text-white/30">/100</span>
+                  </div>
+                  <span className="px-1.5 py-0.2 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/20 text-[9px] font-black uppercase text-center block w-fit">
+                    中级候选人
+                  </span>
+                </div>
+
+                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-1.5">
+                  <span className="text-base font-bold text-white/40">Offer 风险</span>
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-3xl font-black font-label-mono text-[#FFB2B7]">42%</span>
+                  </div>
+                  <span className="px-1.5 py-0.2 rounded bg-amber-400/10 text-amber-400 border border-amber-400/20 text-[9px] font-black uppercase text-center block w-fit">
+                    中等风险
+                  </span>
+                </div>
+              </div>
+
+              {/* 3.2 Largest Lose Point TOP 3 */}
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 select-none">
+                <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-sm text-[#FF7A95]">report</span>
+                    最大失分点 TOP 3
+                  </h4>
+                  <span 
+                    onClick={() => alert("更多失分点分析开发中...")}
+                    className="text-xs font-black text-[#FF7A95] hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
+                  >
+                    查看全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {[
+                    { rank: 1, label: "Redis 选型依据不足", tag: "高风险", tagClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black", desc: "缺少问题背景和选型对比，无法体现技术决策能力" },
+                    { rank: 2, label: "没有 Trade-off 分析", tag: "中风险", tagClass: "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black", desc: "回答较表面，缺乏权衡思考和方案对比" },
+                    { rank: 3, label: "项目贡献模糊", tag: "中风险", tagClass: "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black", desc: "未突出个人贡献和负责的核心模块" }
+                  ].map((lose) => (
+                    <div key={lose.rank} className="p-2.5 rounded-xl bg-[#050B1A]/80 border border-white/5 space-y-1.5 text-left text-xs md:text-sm">
+                      <div className="flex justify-between items-center">
+                        <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm">
+                          <span className="w-4 h-4 rounded-full bg-white/5 flex items-center justify-center font-mono text-xs font-black text-white/55">{lose.rank}</span>
+                          {lose.label}
+                        </span>
+                        <span className={`px-1.5 py-0.2 rounded border shrink-0 ${lose.tagClass}`}>
+                          {lose.tag}
+                        </span>
+                      </div>
+                      <p className="text-xs text-white/45 leading-snug font-bold">
+                        {lose.desc}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3.3 Interviewer Perspective */}
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 select-none">
+                <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-sm text-[#00D4FF]">psychology</span>
+                    面试官视角：真正验证什么
+                  </h4>
+                  <span 
+                    onClick={() => alert("深度追问解析开发中...")}
+                    className="text-xs font-black text-[#00D4FF] hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
+                  >
+                    展开全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
+                  </span>
+                </div>
+
+                <div className="space-y-2 font-bold text-xs md:text-sm text-white/60">
+                  {[
+                    { label: "Redis 相关问题", val: "验证缓存设计能力" },
+                    { label: "一致性问题", val: "验证分布式系统架构能力" },
+                    { label: "TCC 与 Saga", val: "验证分布式事务经验" },
+                    { label: "项目深度挖", val: "验证真实项目经验" }
+                  ].map((p, i) => (
+                    <div key={i} className="flex justify-between items-center py-2 px-2.5 rounded bg-white/[0.01] border border-white/5 hover:border-white/10 hover:text-white cursor-pointer transition-all">
+                      <span className="flex items-center gap-1 text-xs md:text-sm">
+                        <span className="material-symbols-outlined text-xs text-white/30">folder_open</span>
+                        {p.label}
+                      </span>
+                      <span className="text-white/40 font-semibold flex items-center gap-0.5 text-xs md:text-sm">
+                        {p.val} <span className="material-symbols-outlined text-xs">chevron_right</span>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* 3.4 Project Authenticity Risk Radar */}
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3">
+                <div className="flex justify-between items-center pb-2 border-b border-white/5 select-none">
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-sm text-[#FFB2B7]">radar</span>
+                    项目真实性风险 ❓
+                  </h4>
+                </div>
+
+                <div className="flex flex-col gap-3">
+                  <div className="flex justify-between items-center select-none">
+                    <div className="flex items-baseline gap-1.5">
+                      <span className="text-3xl font-black font-label-mono text-[#5DECCB]">72%</span>
+                      <span className="px-1.5 py-0.2 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/20 text-[9px] font-black uppercase">
+                        真实度中等
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Pentagon Radar Chart Resized to 220x220 centered */}
+                  <div className="flex justify-center items-center py-1 select-none">
+                    <svg className="w-[220px] h-[220px] overflow-visible" viewBox="0 0 220 220">
+                      <defs>
+                        <filter id="mesh-glow-record" x="-20%" y="-20%" width="140%" height="140%">
+                          <feGaussianBlur stdDeviation="3" result="blur" />
+                          <feMerge>
+                            <feMergeNode in="blur" />
+                            <feMergeNode in="SourceGraphic" />
+                          </feMerge>
+                        </filter>
+                      </defs>
+
+                      {/* Inner grid lines & Concentric pentagons */}
+                      {[18, 36, 54, 72].map((radius, rIdx) => {
+                        const pts = [
+                          { x: 110, y: 110 - radius }, // Top
+                          { x: 110 + radius * Math.cos((-18 * Math.PI) / 180), y: 110 + radius * Math.sin((-18 * Math.PI) / 180) }, // Right Top
+                          { x: 110 + radius * Math.cos((54 * Math.PI) / 180), y: 110 + radius * Math.sin((54 * Math.PI) / 180) }, // Right Bottom
+                          { x: 110 + radius * Math.cos((126 * Math.PI) / 180), y: 110 + radius * Math.sin((126 * Math.PI) / 180) }, // Left Bottom
+                          { x: 110 + radius * Math.cos((198 * Math.PI) / 180), y: 110 + radius * Math.sin((198 * Math.PI) / 180) }  // Left Top
+                        ];
+                        const pathD = `M ${pts[0].x} ${pts[0].y} L ${pts[1].x} ${pts[1].y} L ${pts[2].x} ${pts[2].y} L ${pts[3].x} ${pts[3].y} L ${pts[4].x} ${pts[4].y} Z`;
+
+                        return (
+                          <path 
+                            key={rIdx} 
+                            d={pathD} 
+                            fill="none" 
+                            stroke="white" 
+                            strokeWidth="0.5" 
+                            strokeOpacity={rIdx === 3 ? "0.08" : "0.03"} 
+                          />
+                        );
+                      })}
+
+                      {/* Connecting vertical Axes */}
+                      {[0, 72, 144, 216, 288].map((angle, aIdx) => {
+                        const targetX = 110 + 72 * Math.cos(((angle - 90) * Math.PI) / 180);
+                        const targetY = 110 + 72 * Math.sin(((angle - 90) * Math.PI) / 180);
+                        return (
+                          <line 
+                            key={aIdx} 
+                            x1="110" y1="110" x2={targetX} y2={targetY} 
+                            stroke="white" strokeWidth="0.5" strokeOpacity="0.04" 
+                          />
+                        );
+                      })}
+
+                      {/* Shaded neon data polygon */}
+                      {(() => {
+                        const rDepth = (85 / 100) * 72;
+                        const rSystem = (60 / 100) * 72;
+                        const rExpression = (70 / 100) * 72;
+                        const rSolving = (55 / 100) * 72;
+                        const rImplementation = (80 / 100) * 72;
+
+                        const pt0 = { x: 110, y: 110 - rDepth };
+                        const pt1 = { x: 110 + rSystem * Math.cos((-18 * Math.PI) / 180), y: 110 + rSystem * Math.sin((-18 * Math.PI) / 180) };
+                        const pt2 = { x: 110 + rExpression * Math.cos((54 * Math.PI) / 180), y: 110 + rExpression * Math.sin((54 * Math.PI) / 180) };
+                        const pt3 = { x: 110 + rSolving * Math.cos((126 * Math.PI) / 180), y: 110 + rSolving * Math.sin((126 * Math.PI) / 180) };
+                        const pt4 = { x: 110 + rImplementation * Math.cos((198 * Math.PI) / 180), y: 110 + rImplementation * Math.sin((198 * Math.PI) / 180) };
+
+                        const dString = `M ${pt0.x} ${pt0.y} L ${pt1.x} ${pt1.y} L ${pt2.x} ${pt2.y} L ${pt3.x} ${pt3.y} L ${pt4.x} ${pt4.y} Z`;
+
+                        return (
+                          <g>
+                            <path 
+                              d={dString} 
+                              fill="#8B5CF6" fillOpacity="0.12" 
+                              stroke="#AFA7FF" strokeWidth="1.75" 
+                              filter="url(#mesh-glow-record)" 
+                            />
+                            {/* Vertices dot hooks */}
+                            {[pt0, pt1, pt2, pt3, pt4].map((pt, pIdx) => (
+                              <g key={pIdx}>
+                                <circle cx={pt.x} cy={pt.y} r="2.5" fill="white" />
+                                <circle cx={pt.x} cy={pt.y} r="5.5" fill="none" stroke="#AFA7FF" strokeWidth="0.5" strokeOpacity="0.5" />
+                              </g>
+                            ))}
+                          </g>
+                        );
+                      })()}
+
+                      {/* Dimension Labels */}
+                      <text x="110" y="20" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="middle">
+                        逻辑自洽 <tspan fill="#AFA7FF">85</tspan>
+                      </text>
+                      <text x="195" y="92" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="start">
+                        技术广度 <tspan fill="#AFA7FF">60</tspan>
+                      </text>
+                      <text x="172" y="185" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="start">
+                        数据指标 <tspan fill="#AFA7FF">70</tspan>
+                      </text>
+                      <text x="48" y="185" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="end">
+                        业务理解 <tspan fill="#AFA7FF">55</tspan>
+                      </text>
+                      <text x="25" y="92" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="end">
+                        细节深度 <tspan fill="#AFA7FF">80</tspan>
+                      </text>
+                    </svg>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5 text-xs text-white/50 font-semibold leading-relaxed border-t border-white/5 pt-2">
+                  <p className="flex items-start gap-1">
+                    <span className="text-[#FF7A95] font-black">•</span>
+                    <span>问答偏概念，缺少具体实践细节</span>
+                  </p>
+                  <p className="flex items-start gap-1">
+                    <span className="text-[#FF7A95] font-black">•</span>
+                    <span>缺少关键数据指标 and 业务影响</span>
+                  </p>
+                  <p className="flex items-start gap-1">
+                    <span className="text-[#FF7A95] font-black">•</span>
+                    <span>部分回答与经验不符的风险</span>
+                  </p>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* ========================================================
+              BOTTOM ROW: Expression Upgrade & Diagnostic (Full Width)
+             ======================================================== */}
+          <div id="upgrade-expression" className="glass-panel p-5.5 rounded-2xl border-white/5 grid grid-cols-12 gap-5.5 w-full select-none mt-4.5 scroll-mt-24">
+            
+            {/* Section 1: 表达升级 title & your answer (4 cols) */}
+            <div className="col-span-12 lg:col-span-4 flex gap-3.5 border-r border-white/5 pr-4">
+              <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0 text-[#AFA7FF] mt-0.5">
+                <span className="material-symbols-outlined text-lg">auto_awesome</span>
+              </div>
+              <div className="space-y-2 flex-1 text-left">
+                <h4 className="text-sm font-black text-white uppercase tracking-wider">表达升级 · 你的回答</h4>
+                <p className="text-xs text-white/40 leading-normal block">示例：为什么使用 Redis</p>
+                <p className="bg-white/[0.01] border border-white/5 p-3 rounded-xl text-white/50 font-mono text-xs md:text-sm leading-relaxed">
+                  “因为 Redis 性能高，可以做缓存，提升接口响应速度。”
+                </p>
+              </div>
+            </div>
+
+            {/* Section 2: 优化后话术 (5 cols) */}
+            <div className="col-span-12 lg:col-span-5 flex gap-3.5 border-r border-white/5 px-2">
+              <div className="w-9 h-9 rounded-xl bg-[#5DECCB]/10 border border-[#5DECCB]/20 flex items-center justify-center shrink-0 text-[#5DECCB] mt-0.5">
+                <span className="material-symbols-outlined text-lg">verified</span>
+              </div>
+              <div className="space-y-2 flex-1 text-left">
+                <h4 className="text-sm font-black text-[#5DECCB] uppercase tracking-wider flex items-center gap-1">
+                  优化后话术
+                </h4>
+                <p className="bg-slate-950/60 border border-[#5DECCB]/25 p-3.5 rounded-xl text-white font-mono leading-relaxed text-xs md:text-sm">
+                  “我们的业务存在大量热点数据，直接查数据库 QPS 接近上限。引入 <strong className="text-[#5DECCB] font-bold">Redis 作为缓存层</strong> 后，接口响应时间从 <strong className="text-[#5DECCB] font-bold">120ms 降低到 35ms</strong>，峰值 QPS 提升了 <strong className="text-[#5DECCB] font-bold">3 倍</strong>。”
+                </p>
+              </div>
+            </div>
+
+            {/* Section 3: Action Buttons (3 cols) */}
+            <div className="col-span-12 lg:col-span-3 pl-2 flex flex-col justify-center gap-3">
+              <h4 className="text-sm font-black text-white uppercase tracking-wider text-left">下一步操作</h4>
+              <button 
+                onClick={() => handleCopyToClipboard("我们的业务存在大量热点数据，直接查数据库 QPS 接近上限。引入 Redis 作为缓存层后，接口响应时间从 120ms 降低到 35ms，峰值 QPS 提升了 3 倍。", "优化后话术已复制！")}
+                className="w-full py-2 bg-gradient-to-r from-secondary to-primary text-on-primary rounded-lg font-black text-xs md:text-sm cursor-pointer flex items-center justify-center gap-1 shadow-md shadow-secondary/15"
+              >
+                <span className="material-symbols-outlined text-xs">content_copy</span>复制优化版本
+              </button>
+              <button 
+                onClick={() => alert("已成功加入您的个人精选表达库！")}
+                className="w-full py-2 border border-[#AFA7FF]/35 hover:border-white/40 text-[#AFA7FF] hover:text-white rounded-lg font-black text-xs md:text-sm cursor-pointer transition-all flex items-center justify-center gap-1"
+              >
+                <span className="material-symbols-outlined text-xs">add_box</span>加入我的表达库
+              </button>
+            </div>
+
+          </div>
+          </>
+        )}
+
+      </div>
+
+    </div>
+  );
+}
