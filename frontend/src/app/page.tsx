@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useRouter } from "next/navigation";
+import { useAuth, UserMenu } from "@/components/AuthProvider";
 
 // Elegant Count-Up Component - Animate every time it appears in the viewport
 function StatCounter({ target, suffix = "" }: { target: number | string; suffix?: string }) {
@@ -149,6 +150,7 @@ function WaveformBar({ isPlaying, index }: { isPlaying: boolean; index: number }
 
 export default function Home() {
   const router = useRouter();
+  const auth = useAuth();
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(18); // Start at 00:18 (crash point)
 
@@ -207,9 +209,25 @@ export default function Home() {
               案例
             </a>
           </div>
-          <div className="flex items-center gap-4">
-            <button className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium">登录</button>
-            <button onClick={() => router.push("/debugger")} className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-90 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] hover:shadow-[0_0_30px_rgba(192,193,255,0.5)]">免费开始</button>
+           <div className="flex items-center gap-4">
+            {auth.isLoggedIn ? (
+              <UserMenu />
+            ) : (
+              <>
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer"
+                >
+                  登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-90 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] hover:shadow-[0_0_30px_rgba(192,193,255,0.5)] cursor-pointer"
+                >
+                  免费开始
+                </button>
+              </>
+            )}
           </div>
         </div>
       </nav>

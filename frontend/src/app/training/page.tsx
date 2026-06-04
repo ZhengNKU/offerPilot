@@ -3,9 +3,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useAuth, UserMenu } from "@/components/AuthProvider";
 
 export default function InterviewTrainingPage() {
   const router = useRouter();
+  const auth = useAuth();
 
   // --- INTERACTIVE SYSTEM STATES ---
   const [targetRole, setTargetRole] = useState('后端开发工程师');
@@ -250,12 +252,24 @@ export default function InterviewTrainingPage() {
             <button onClick={() => router.push("/home")} className="px-3.5 py-2 hover:bg-white/5 text-on-surface-variant hover:text-white rounded-full transition-colors flex items-center gap-1 cursor-pointer">
               <span className="material-symbols-outlined text-lg">settings</span>设置
             </button>
-            <div className="flex items-center gap-2 border-l border-white/10 pl-4">
-              <div className="w-7 h-7 rounded-full bg-slate-900 border border-white/10 overflow-hidden shrink-0">
-                <img src="/debugger-2.jpg" alt="Dame Zheng" className="w-full h-full object-cover" />
-              </div>
-              <span className="text-white font-black text-xs md:text-sm whitespace-nowrap">Dame Zheng</span>
-            </div>
+            {auth.isLoggedIn ? (
+              <UserMenu />
+            ) : (
+              <>
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer"
+                >
+                  登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] cursor-pointer"
+                >
+                  免费开始
+                </button>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -835,7 +849,7 @@ export default function InterviewTrainingPage() {
                     </span>
                   </div>
                   <p className="text-[10px] text-on-surface-variant/40 font-bold truncate">
-                    Dame Zheng 的专属定制 AI
+                    {auth.user.name} 的专属定制 AI
                   </p>
                 </div>
               </div>

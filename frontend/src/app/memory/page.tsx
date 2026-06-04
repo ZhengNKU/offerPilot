@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth, UserMenu } from "@/components/AuthProvider";
 
 interface SessionHistoryItem {
   id: string;
@@ -70,6 +71,7 @@ const INITIAL_HISTORY: SessionHistoryItem[] = [
 
 export default function CareerMemoryDashboard() {
   const router = useRouter();
+  const auth = useAuth();
 
   // Active tab management: overview, timeline, projects, knowledge, weaknesses, growth, advisor
   const [activeTab, setActiveTab] = useState("overview");
@@ -117,6 +119,10 @@ export default function CareerMemoryDashboard() {
     
     if (item.type === "audio") {
       router.push("/debugger/voice");
+    } else if (item.type === "text") {
+      router.push("/debugger/record");
+    } else if (item.type === "resume") {
+      router.push("/debugger/resume");
     } else {
       router.push("/debugger/report");
     }
@@ -180,15 +186,24 @@ export default function CareerMemoryDashboard() {
             >
               <span className="material-symbols-outlined text-base">add</span>新建分析
             </button>
-            <button onClick={handleInterceptAction} className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium">
-              登录
-            </button>
-            <button
-              onClick={handleInterceptAction}
-              className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.35)]"
-            >
-              免费开始
-            </button>
+            {auth.isLoggedIn ? (
+              <UserMenu />
+            ) : (
+              <>
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer"
+                >
+                  登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] cursor-pointer"
+                >
+                  免费开始
+                </button>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -329,8 +344,8 @@ export default function CareerMemoryDashboard() {
               <div className="relative shrink-0">
                 <div className="w-16 h-16 rounded-full border-2 border-primary/40 overflow-hidden bg-slate-900 flex items-center justify-center shadow-lg">
                   <img
-                    src="/debugger-2.jpg"
-                    alt="Dame Zheng"
+                    src={auth.user.avatar}
+                    alt={auth.user.name}
                     className="w-full h-full object-cover opacity-80"
                     onError={(e) => {
                       (e.target as HTMLElement).style.display = "none";
@@ -347,9 +362,11 @@ export default function CareerMemoryDashboard() {
               <div className="space-y-2 min-w-0 flex-1 sm:flex-initial">
                 <div className="flex items-center gap-3 flex-wrap">
                   <div className="flex items-center gap-2 whitespace-nowrap shrink-0">
-                    <h2 className="text-xl font-black text-white whitespace-nowrap">Dame Zheng</h2>
-                    <span className="px-2 py-0.5 rounded-full bg-tertiary/10 text-tertiary text-[11px] font-black border border-tertiary/20 whitespace-nowrap">在职</span>
+                    <h2 className="text-xl font-black text-white whitespace-nowrap">{auth.user.name}</h2>
                   </div>
+                  <span className="px-3.5 py-1 rounded-full bg-tertiary/10 text-tertiary text-xs md:text-sm font-black border border-tertiary/20 whitespace-nowrap">
+                    {auth.user.status || "在职"}
+                  </span>
                   <div className="flex flex-wrap gap-1.5">
                     {["Backend Engineer", "AI Engineer", "System Design"].map((tag, i) => (
                       <span key={i} className="px-2.5 py-0.5 rounded bg-white/5 text-on-surface-variant/75 text-[11px] font-bold border border-white/5 whitespace-nowrap">{tag}</span>
@@ -358,11 +375,11 @@ export default function CareerMemoryDashboard() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-on-surface-variant/60 font-semibold font-label-mono">
-                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">apartment</span>腾讯科技</span>
-                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">work</span>后端开发工程师</span>
-                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">military_tech</span>P6 (2-2)</span>
+                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">apartment</span>{auth.user.company || "腾讯科技"}</span>
+                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">work</span>{auth.user.role ? auth.user.role.split(" · ")[0] : "后端开发工程师"}</span>
+                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">military_tech</span>{auth.user.role ? auth.user.role.split(" · ")[1] || "P6" : "P6"}</span>
                   <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">pin_drop</span>上海</span>
-                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">schedule</span>6年经验</span>
+                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">schedule</span>{auth.user.years || "6年经验"}</span>
                 </div>
               </div>
             </div>

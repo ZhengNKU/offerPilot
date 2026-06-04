@@ -1,0 +1,1200 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { useAuth, UserMenu } from "@/components/AuthProvider";
+
+export default function ResumeAnalysisPage() {
+  const router = useRouter();
+  const auth = useAuth();
+
+  // =========================================================================
+  // STATE MANAGEMENT
+  // =========================================================================
+  const [profile, setProfile] = useState({
+    name: "张三",
+    status: "在职",
+    title: "后端开发工程师 · P6",
+    years: "5 年",
+    company: "字节跳动",
+    role: "后端开发工程师",
+    salary: "35K * 16",
+    targetCompany: "阿里巴巴",
+    targetRole: "高级后端开发工程师",
+    targetGrade: "P7",
+    targetSalary: "45K * 16",
+    version: "v3",
+    uploadTime: "2026-06-01 14:30"
+  });
+
+  const [activeTab, setActiveTab] = useState<
+    "preview" | "risk" | "match" | "optimization" | "keywords" | "ats"
+  >("preview");
+
+  const [viewMode, setViewMode] = useState<"original" | "optimized">("original");
+
+  // Modals Visibility
+  const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+  const [showNotification, setShowNotification] = useState<string | null>(null);
+
+  // Prefill metadata from localStorage if available
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const storedCompany = localStorage.getItem("offerPilot_session_company");
+      const storedRole = localStorage.getItem("offerPilot_session_role");
+      const storedGrade = localStorage.getItem("offerPilot_session_grade");
+      const storedSalary = localStorage.getItem("offerPilot_session_salary");
+      const storedYears = localStorage.getItem("offerPilot_session_years");
+      const storedDate = localStorage.getItem("offerPilot_session_date");
+
+      if (storedCompany || storedRole || storedGrade || storedSalary) {
+        setProfile((prev) => ({
+          ...prev,
+          targetCompany: storedCompany || prev.targetCompany,
+          targetRole: storedRole || prev.targetRole,
+          targetGrade: storedGrade || prev.targetGrade,
+          targetSalary: storedSalary || prev.targetSalary,
+          years: storedYears ? `${storedYears}` : prev.years,
+          uploadTime: storedDate ? `${storedDate} 14:30` : prev.uploadTime
+        }));
+      }
+    }
+  }, []);
+
+  const triggerToast = (msg: string) => {
+    setShowNotification(msg);
+    setTimeout(() => {
+      setShowNotification(null);
+    }, 2500);
+  };
+
+  const handleEditProfile = (e: React.FormEvent) => {
+    e.preventDefault();
+    triggerToast("简历基本信息修改已保存！");
+    setShowEditProfileModal(false);
+  };
+
+  // Mock Work Experience list with original vs optimized data
+  const workExperiences = [
+    {
+      company: "字节跳动",
+      role: "后端开发工程师",
+      period: "2022.07 - 至今",
+      bullets: [
+        {
+          originalText: "负责推荐系统服务开发",
+          optimizedText: "主导推荐系统高并发架构重塑，重构模型召回链路，支撑核心吞吐率提升 25%",
+          originalTag: "风险",
+          originalTagClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
+          originalDesc: "职责描述，缺少量化成果和业务影响",
+          optimizedTag: "已优化",
+          optimizedTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
+        },
+        {
+          originalText: "负责 Redis 缓存架构设计",
+          optimizedText: "重构分布式多级缓存方案，引入热点探测与本地缓存双锁机制，抗住大促期间 10W+ QPS 峰值流量",
+          originalTag: "风险",
+          originalTagClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
+          originalDesc: "缺少数据规模，技术深度不足",
+          optimizedTag: "已优化",
+          optimizedTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
+        },
+        {
+          originalText: "支撑日活 3000 万用户的高并发访问",
+          optimizedText: "主导设计弹性扩缩容和多集群流控方案，应对 3000 万日活高并发波动，服务可用性达 99.99%",
+          originalTag: "亮点",
+          originalTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+          originalDesc: "量化成果，体现业务影响",
+          optimizedTag: "已优化",
+          optimizedTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
+        },
+        {
+          originalText: "负责 Kafka 消息链路建设",
+          optimizedText: "搭建高可靠异步消息总线，处理每日十亿级日志，解决瞬间流量洪峰积压与吞吐瓶颈",
+          originalTag: "风险",
+          originalTagClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
+          originalDesc: "缺少具体优化点和效果",
+          optimizedTag: "已优化",
+          optimizedTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
+        },
+        {
+          originalText: "优化接口性能，整体延迟降低 40%",
+          optimizedText: "优化全链路核心 API 耗时，通过异步编排与多段并发预取，接口延迟平均从 120ms 降至 35ms",
+          originalTag: "亮点",
+          originalTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+          originalDesc: "量化成果，体现技术价值",
+          optimizedTag: "已优化",
+          optimizedTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
+        }
+      ]
+    },
+    {
+      company: "美团",
+      role: "后端开发工程师",
+      period: "2020.03 - 2022.06",
+      bullets: [
+        {
+          originalText: "参与外卖订单系统的开发与维护",
+          optimizedText: "核心参与美团外卖订单核心交易模块建设，参与重写分布式状态机，保证订单处理一致性",
+          originalTag: "风险",
+          originalTagClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
+          originalDesc: "职责描述过于宽泛",
+          optimizedTag: "已优化",
+          optimizedTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
+        },
+        {
+          originalText: "设计并实现分布式事务方案",
+          optimizedText: "基于 Seata TCC 模式与 Saga 事务补偿机制重构复杂嵌套支付链路，规避分布式环境账实不符风险",
+          originalTag: "亮点",
+          originalTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+          originalDesc: "体现技术能力",
+          optimizedTag: "已优化",
+          optimizedTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
+        },
+        {
+          originalText: "提升系统稳定性，故障率降低 60%",
+          optimizedText: "主导线上链路监控与全链路压测，提前拦截服务隐患 15 起，系统可用性抖动率整体降低 60%",
+          originalTag: "亮点",
+          originalTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+          originalDesc: "量化成果，价值突出",
+          optimizedTag: "已优化",
+          optimizedTagClass: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
+        }
+      ]
+    }
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden select-none pt-20">
+      {/* Background visual grid elements */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-[#AFA7FF]/5 rounded-full blur-[160px] pointer-events-none z-0" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-[#5DECCB]/3 rounded-full blur-[160px] pointer-events-none z-0" />
+
+      {/* ========================================================
+          GLOBAL NAVBAR
+         ======================================================== */}
+      <nav className="fixed top-0 w-full z-40 bg-surface/80 backdrop-blur-xl border-b border-white/10">
+        <div className="flex justify-between items-center h-20 px-gutter max-w-container-max mx-auto w-full relative">
+          <div
+            onClick={() => router.push("/")}
+            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2 cursor-pointer"
+          >
+            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
+              <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo)" />
+              <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#050B1A" />
+              <defs>
+                <linearGradient id="nav-brand-logo" x1="0" y1="0" x2="1" y2="1">
+                  <stop offset="0%" stopColor="#c0c1ff" />
+                  <stop offset="100%" stopColor="#ffb2b7" />
+                </linearGradient>
+              </defs>
+            </svg>
+            OfferPilot
+          </div>
+
+          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
+            <a onClick={() => router.push("/debugger")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
+              面试调试器
+            </a>
+            <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              职业记忆看板
+            </a>
+            <a onClick={() => router.push("/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试训练场
+            </a>
+            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              职业驾驶舱
+            </a>
+            <a onClick={() => router.push("/")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              案例
+            </a>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => router.push("/debugger")}
+              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-base">add</span>新建分析
+            </button>
+            <button
+              onClick={() => router.push("/memory?tab=timeline")}
+              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+            >
+              <span className="material-symbols-outlined text-base">history</span>历史记录
+            </button>
+            {auth.isLoggedIn ? (
+              <UserMenu />
+            ) : (
+              <>
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer"
+                >
+                  登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] cursor-pointer"
+                >
+                  免费开始
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </nav>
+
+      {/* ========================================================
+          GLOBAL WORKSPACE LAYOUT (Icon Rail + 3 Sidebars Dashboard)
+         ======================================================== */}
+      <div className="flex-1 flex max-w-container-max mx-auto w-full px-gutter py-6 gap-6 relative z-10 items-stretch">
+        
+
+
+        {/* ========================================================
+            2. MAIN DASHBOARD CONTENT AREA (Left Sidebar, Center content, Right Stats)
+           ======================================================== */}
+        <div className="flex-1 grid grid-cols-12 gap-5.5 items-stretch min-w-0">
+          
+          {/* ----------------------------------------------------
+              COLUMN 1: Left Sidebar (3 cols)
+             ---------------------------------------------------- */}
+          <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5">
+            
+            {/* Sidebar Profile Card */}
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 text-left">
+              <div className="flex justify-between items-center pb-2.5 border-b border-white/5">
+                <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-base text-[#00D4FF]">assignment_ind</span>
+                  简历信息
+                </h4>
+                <span
+                  onClick={() => setShowEditProfileModal(true)}
+                  className="text-base font-black text-[#AFA7FF] hover:text-white transition-colors cursor-pointer"
+                >
+                  编辑
+                </span>
+              </div>
+
+              {/* Avatar and basic info */}
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-[#AFA7FF] text-[#050B1A] flex items-center justify-center font-black text-lg select-none">
+                  {profile.name.substring(0, 1)}
+                </div>
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-base font-black text-white">{profile.name}</span>
+                    <span className="px-1.5 py-0.2 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/25 text-[9px] font-black uppercase">
+                      {profile.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-white/50 font-bold">{profile.title}</p>
+                </div>
+              </div>
+
+              {/* Attributes list */}
+              <div className="space-y-2.5 text-xs font-bold text-white/60">
+                <div className="flex justify-between items-center">
+                  <span>工作年限</span>
+                  <span className="text-white font-extrabold">{profile.years}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>当前公司</span>
+                  <span className="text-white font-extrabold">{profile.company}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>当前岗位</span>
+                  <span className="text-white font-extrabold">{profile.role}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>当前薪资</span>
+                  <span className="text-white font-extrabold">{profile.salary}</span>
+                </div>
+                <div className="h-px bg-white/5 my-1" />
+                <div className="flex justify-between items-center">
+                  <span>目标公司</span>
+                  <span className="text-white font-extrabold">{profile.targetCompany}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>目标岗位</span>
+                  <span className="text-white font-extrabold">{profile.targetRole}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>目标职级</span>
+                  <span className="text-white font-extrabold">{profile.targetGrade}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span>目标薪资</span>
+                  <span className="text-white font-extrabold">{profile.targetSalary}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Sidebar Structure Status Card */}
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 text-left flex-1 min-h-[300px]">
+              <div className="flex justify-between items-center pb-2.5 border-b border-white/5">
+                <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-base text-[#00D4FF]">map</span>
+                  简历结构地图
+                </h4>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 select-none">
+                {[
+                  { name: "个人信息", status: "优秀", color: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25" },
+                  { name: "工作经历", status: "优秀", color: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25" },
+                  { name: "项目经历", status: "风险", color: "text-amber-400 bg-amber-400/10 border-amber-400/25" },
+                  { name: "技术栈", status: "风险", color: "text-amber-400 bg-amber-400/10 border-amber-400/25" },
+                  { name: "教育背景", status: "优秀", color: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25" },
+                  { name: "开源经历", status: "亮点", color: "text-[#00D4FF] bg-[#00D4FF]/10 border-[#00D4FF]/25" },
+                  { name: "业务成果", status: "缺失", color: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25" },
+                  { name: "管理经验", status: "缺失", color: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25" }
+                ].map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="p-3 rounded-xl border border-white/5 bg-[#050B1A]/40 flex justify-between items-center text-xs font-bold"
+                  >
+                    <span className="text-[13px] text-white/90">{item.name}</span>
+                    <span className={`px-2 py-0.2 rounded text-sm font-black uppercase border shrink-0 ${item.color}`}>
+                      {item.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <button
+                onClick={() => triggerToast("简历完整结构图正在渲染中...")}
+                className="w-full pt-3.5 border-t border-white/5 text-sm text-[#AFA7FF] font-black hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
+              >
+                查看完整结构分析 <span className="material-symbols-outlined text-xs">arrow_forward</span>
+              </button>
+            </div>
+
+          </div>
+
+          {/* ----------------------------------------------------
+              COLUMN 2: Center Workspace (6 cols)
+             ---------------------------------------------------- */}
+          <div className="col-span-12 lg:col-span-6 flex flex-col gap-4.5 min-w-0">
+            
+            {/* Center Header Details */}
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 select-none text-left">
+              <div>
+                <h2 className="text-lg font-black text-white flex items-center gap-2">
+                  简历深度分析
+                </h2>
+                <p className="text-[11px] text-white/30 font-bold mt-1">
+                  根据目标求职画像精确定位简历漏洞与风险点，输出AI专家建议
+                </p>
+              </div>
+            </div>
+
+            {/* Quick Metrics Row */}
+            <div className="grid grid-cols-4 gap-3.5 select-none shrink-0">
+              {[
+                { title: "总字数", val: "3,821", icon: "article", color: "text-[#00D4FF]" },
+                { title: "风险点", val: "7 个", icon: "warning", color: "text-[#FF7A95]" },
+                { title: "优化建议", val: "21 条", icon: "lightbulb", color: "text-[#AFA7FF]" },
+                { title: "岗位匹配度", val: "83%", icon: "donut_large", color: "text-[#5DECCB]" }
+              ].map((m, i) => (
+                <div key={i} className="glass-panel p-4 rounded-xl border-white/5 flex items-center gap-3 w-full">
+                  <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                    <span className={`material-symbols-outlined text-base ${m.color}`}>
+                      {m.icon}
+                    </span>
+                  </div>
+                  <div className="text-left min-w-0 flex-1">
+                    <span className="text-xs text-white/40 font-bold block">{m.title}</span>
+                    <span className="text-sm md:text-base font-black text-white block mt-0.5 leading-none font-mono">
+                      {m.val}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Interactive Tab Switcher Panel */}
+            <div className="glass-panel rounded-2xl border-white/5 p-4 flex flex-col gap-4 flex-1 h-[610px]">
+              
+              {/* Tab Header Row */}
+              <div className="flex border-b border-white/5 pb-2.5 overflow-x-auto gap-2 shrink-0 select-none no-scrollbar">
+                {[
+                  { id: "preview", label: "简历预览" },
+                  { id: "risk", label: "风险分析" },
+                  { id: "match", label: "岗位匹配分析" },
+                  { id: "optimization", label: "AI 优化建议" },
+                  { id: "keywords", label: "关键词分析" },
+                  { id: "ats", label: "ATS 检测" }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`px-3 py-1.5 rounded-lg text-[13px] md:text-sm font-black whitespace-nowrap cursor-pointer transition-all ${
+                      activeTab === tab.id
+                        ? "bg-[#AFA7FF]/15 text-[#AFA7FF] border border-[#AFA7FF]/20"
+                        : "text-white/40 hover:text-white/70 hover:bg-white/5 border border-transparent"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab Workspace Scroll Window */}
+              <div className="flex-1 overflow-y-auto pr-1">
+                {activeTab === "preview" && (
+                  /* ========================================================
+                      TAB 1: RESUME PREVIEW (HIGH-FIDELITY EXPERIENCE BLOCKS)
+                     ======================================================== */
+                  <div className="space-y-6 pt-1">
+                    <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                      <h4 className="text-sm font-black text-white flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-base text-[#00D4FF]">business_center</span>
+                        工作经历
+                      </h4>
+
+                      {/* Original vs Optimized Switcher */}
+                      <div className="flex rounded-lg bg-slate-950 p-1 border border-white/5 select-none font-bold text-[10px] md:text-xs">
+                        <button
+                          onClick={() => setViewMode("original")}
+                          className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
+                            viewMode === "original"
+                              ? "bg-[#AFA7FF]/15 text-[#AFA7FF] border border-[#AFA7FF]/15"
+                              : "text-white/40 hover:text-white/70"
+                          }`}
+                        >
+                          原始简历
+                        </button>
+                        <button
+                          onClick={() => setViewMode("optimized")}
+                          className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
+                            viewMode === "optimized"
+                              ? "bg-[#5DECCB]/15 text-[#5DECCB] border border-[#5DECCB]/15"
+                              : "text-white/40 hover:text-white/70"
+                          }`}
+                        >
+                          AI 优化预览
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-6">
+                      {workExperiences.map((exp, expIdx) => (
+                        <div key={expIdx} className="space-y-3.5 text-left">
+                          <div className="flex justify-between items-center text-xs font-bold font-mono">
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm font-black text-white">{exp.company}</span>
+                              <span className="text-white/45">{exp.role}</span>
+                            </div>
+                            <span className="text-white/30">{exp.period}</span>
+                          </div>
+
+                          <div className="space-y-2.5">
+                            {exp.bullets.map((bullet, bullIdx) => {
+                              const isOriginal = viewMode === "original";
+                              const textContent = isOriginal ? bullet.originalText : bullet.optimizedText;
+                              const badgeLabel = isOriginal ? bullet.originalTag : bullet.optimizedTag;
+                              const badgeStyle = isOriginal ? bullet.originalTagClass : bullet.optimizedTagClass;
+                              const isRisk = isOriginal && bullet.originalTag === "风险";
+
+                              return (
+                                <div
+                                  key={bullIdx}
+                                  className={`p-3.5 rounded-xl border text-xs md:text-sm flex flex-col gap-2 relative transition-all duration-300 ${
+                                    isOriginal
+                                      ? isRisk
+                                        ? "bg-red-950/[0.04] border-red-500/10 hover:border-red-500/20"
+                                        : "bg-emerald-950/[0.04] border-emerald-500/10 hover:border-emerald-500/20"
+                                      : "bg-emerald-950/[0.08] border-emerald-500/15 hover:border-emerald-500/30"
+                                  }`}
+                                >
+                                  <div className="flex justify-between items-start gap-4">
+                                    <p className="text-[13px] md:text-sm leading-relaxed text-white font-semibold flex-1">
+                                      {textContent}
+                                    </p>
+                                    <span className={`px-2 py-0.2 rounded text-[10px] font-black uppercase border shrink-0 ${badgeStyle}`}>
+                                      {badgeLabel}
+                                    </span>
+                                  </div>
+
+                                  {/* Explanation notes (only in original mode) */}
+                                  {isOriginal && (
+                                    <div className="flex items-center gap-1.5 text-[11px] text-white/40 font-bold border-t border-white/5 pt-2 mt-1">
+                                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRisk ? "bg-amber-400" : "bg-[#5DECCB]"}`} />
+                                      <span>{bullet.originalDesc}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === "risk" && (
+                  /* ========================================================
+                      TAB 2: RISK ANALYSIS
+                     ======================================================== */
+                  <div className="space-y-4 pt-1 text-left">
+                    <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
+                      <span className="material-symbols-outlined text-base text-[#FF7A95]">warning</span>
+                      简历风险漏洞诊断报告
+                    </h4>
+                    <div className="space-y-3">
+                      {[
+                        { title: "核心业绩缺少量化指标", desc: "在字节跳动开发推荐服务时，未明确写出提升了多少吞吐量或降低了多少毫秒耗时。高水平架构师极度看重数据支撑。", priority: "高风险", color: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" },
+                        { title: "技术名词拼写混乱", desc: "把 Redis 写为 redis，或者 Kafka 拼写为 kafka，甚至拼写不一致。暴露了文档编写不够严谨与规范。", priority: "中风险", color: "text-amber-400 bg-amber-400/10 border-amber-400/20" },
+                        { title: "职责描述流于日常化", desc: "使用过多“负责...”、“参与...”等日常事务词汇，缺少能够凸显个人独立设计决策力、技术攻关突破点的措辞（如：主导、设计、重塑）。", priority: "高风险", color: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" },
+                        { title: "架构Trade-off思考为零", desc: "介绍消息总线或缓存链路时，未能对为什么使用此项技术，以及其背后的架构边界、容灾方案进行深层次的技术解剖。", priority: "中风险", color: "text-amber-400 bg-amber-400/10 border-amber-400/20" }
+                      ].map((item, idx) => (
+                        <div key={idx} className="p-3.5 rounded-xl border border-white/5 bg-[#050B1A]/80 space-y-1.5 text-sm md:text-sm">
+                          <div className="flex justify-between items-center">
+                            <span className="font-extrabold text-white flex items-center gap-2">
+                              <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center font-mono text-[10px] font-black text-white/55">{idx + 1}</span>
+                              {item.title}
+                            </span>
+                            <span className={`px-2 py-0.2 rounded border text-[10px] font-black shrink-0 ${item.color}`}>
+                              {item.priority}
+                            </span>
+                          </div>
+                          <p className="text-xs text-white/45 leading-relaxed font-bold pl-7">
+                            {item.desc}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === "match" && (
+                  /* ========================================================
+                      TAB 3: JOB MATCH ANALYSIS
+                     ======================================================== */
+                  <div className="space-y-4 pt-1 text-left">
+                    <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
+                      <span className="material-symbols-outlined text-base text-[#5DECCB]">donut_large</span>
+                      岗位画像深度匹配分析 (Target: {profile.targetCompany} {profile.targetRole})
+                    </h4>
+                    <div className="space-y-4">
+                      <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 flex items-center gap-5 justify-between">
+                        <div className="space-y-1">
+                          <span className="text-xs text-white/45 font-bold">画像符合度估值</span>
+                          <h3 className="text-2xl font-black text-[#5DECCB] font-mono">83% Match</h3>
+                        </div>
+                        <p className="text-xs text-white/60 leading-relaxed font-bold flex-1 max-w-sm">
+                          您的技术背景与阿里/腾讯等主流大厂的【高并发微服务后端专家】JD极其吻合。重点缺失项主要集中在“业务闭环指标”和“管理/带人经验”描述。
+                        </p>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {[
+                          { item: "分布式多级缓存 (Redis/Guava)", status: "完美覆盖", percent: "95%", tagStyle: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20" },
+                          { item: "高吞吐消息中间件 (Kafka/RocketMQ)", status: "完美覆盖", percent: "90%", tagStyle: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20" },
+                          { item: "分布式一致性方案 (TCC/Saga/2PC)", status: "基础具备", percent: "75%", tagStyle: "text-amber-400 bg-amber-400/10 border-amber-400/20" },
+                          { item: "全链路线上大促压测与高可用设计", status: "描述较弱", percent: "45%", tagStyle: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" }
+                        ].map((m, idx) => (
+                          <div key={idx} className="p-3 rounded-xl border border-white/5 bg-[#050B1A]/40 flex justify-between items-center text-xs md:text-sm font-bold">
+                            <span className="text-white/80">{m.item}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono text-white/50">{m.percent}</span>
+                              <span className={`px-2 py-0.2 rounded border text-[10px] font-black uppercase ${m.tagStyle}`}>
+                                {m.status}
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === "optimization" && (
+                  /* ========================================================
+                      TAB 4: AI SUGGESTIONS
+                     ======================================================== */
+                  <div className="space-y-4 pt-1 text-left">
+                    <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
+                      <span className="material-symbols-outlined text-base text-[#AFA7FF]">lightbulb</span>
+                      AI 简历深度优化建议书
+                    </h4>
+                    <div className="space-y-3.5 text-xs md:text-sm text-white/70 font-semibold leading-relaxed">
+                      <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 space-y-2">
+                        <h5 className="font-black text-[#AFA7FF] text-sm">建议 1：重塑“动作词”，剔除事务型字眼</h5>
+                        <p className="text-white/50 font-bold leading-normal">
+                          在简历中，避免将自己的工作描绘为“被动执行”。将所有的“负责开发”、“配合维护”替换为“主导设计”、“构建”、“重塑”、“突破”等主动掌控性动词。
+                        </p>
+                      </div>
+
+                      <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 space-y-2">
+                        <h5 className="font-black text-[#AFA7FF] text-sm">建议 2：STAR 法则全盘套用，补齐 Result (成果)</h5>
+                        <p className="text-white/50 font-bold leading-normal">
+                          每一个项目经历必须遵循：背景与挑战(Situation) &rarr; 目标(Task) &rarr; 采取的架构行动(Action) &rarr; 业务/技术产出成果(Result)。特别是必须把性能提高比例、节省机器成本、解决事故次数等量化。
+                        </p>
+                      </div>
+
+                      <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 space-y-2">
+                        <h5 className="font-black text-[#AFA7FF] text-sm">建议 3：精修技术栈，提升高级段位感</h5>
+                        <p className="text-white/50 font-bold leading-normal">
+                          不要笼统写“精通 Java/Go”，应当写“深入研究 Spring/JVM 垃圾回收调优逻辑，阅读 Kafka 源码；掌握 Redis 缓存穿透与大 Key 多级缓冲治理架构”。
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === "keywords" && (
+                  /* ========================================================
+                      TAB 5: KEYWORDS ANALYSIS
+                     ======================================================== */
+                  <div className="space-y-4 pt-1 text-left">
+                    <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
+                      <span className="material-symbols-outlined text-base text-[#00D4FF]">tag</span>
+                      简历关键词覆盖率分析
+                    </h4>
+                    <div className="space-y-3.5">
+                      <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 text-xs text-white/50 font-bold leading-relaxed space-y-2">
+                        <p>大厂AI筛简历系统（ATS）会根据JD权重匹配核心词频。当前简历关键词权重最高的为：</p>
+                        <div className="flex flex-wrap gap-2 pt-1.5">
+                          {["Redis", "Kafka", "分布式系统", "高并发", "后端开发", "架构设计", "接口优化"].map((word, idx) => (
+                            <span key={idx} className="px-2.5 py-1 rounded-md bg-[#AFA7FF]/10 text-[#AFA7FF] border border-[#AFA7FF]/20 text-xs font-black">
+                              {word} (高频)
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        <h5 className="text-xs font-black text-white">推荐补齐的行业热点词：</h5>
+                        <div className="flex flex-wrap gap-2">
+                          {["Service Mesh", "高可用容灾", "限流熔断", "多机房多活", "性能调优", "微服务编排"].map((word, idx) => (
+                            <span key={idx} className="px-2.5 py-1 rounded-md bg-white/5 text-white/50 border border-white/10 text-xs font-bold">
+                              {word}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === "ats" && (
+                  /* ========================================================
+                      TAB 6: ATS COMPATIBILITY
+                     ======================================================== */
+                  <div className="space-y-4 pt-1 text-left">
+                    <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
+                      <span className="material-symbols-outlined text-base text-[#00D4FF]">checklist</span>
+                      大厂 ATS 机器人可读性诊断
+                    </h4>
+                    <div className="space-y-3">
+                      {[
+                        { name: "双栏/复杂排版可读性", status: "通过", score: "结构规范", color: "text-[#5DECCB] border-[#5DECCB]/20 bg-[#5DECCB]/10" },
+                        { name: "PDF 字体及文本提取无乱码", status: "通过", score: "高保真", color: "text-[#5DECCB] border-[#5DECCB]/20 bg-[#5DECCB]/10" },
+                        { name: "简历总字数阈值控制", status: "通过", score: "适中 (3.8k字)", color: "text-[#5DECCB] border-[#5DECCB]/20 bg-[#5DECCB]/10" },
+                        { name: "非标准分隔符识别", status: "警告", score: "图表/虚线可能截断", color: "text-amber-400 border-amber-400/20 bg-amber-400/10" }
+                      ].map((item, idx) => (
+                        <div key={idx} className="p-3 rounded-xl border border-white/5 bg-[#050B1A]/40 flex justify-between items-center text-xs md:text-sm font-bold">
+                          <span className="text-white/80">{item.name}</span>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono text-white/45">{item.score}</span>
+                            <span className={`px-2 py-0.2 rounded border text-[10px] font-black uppercase ${item.color}`}>
+                              {item.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+            </div>
+
+          </div>
+
+          {/* ----------------------------------------------------
+              COLUMN 3: Right Panel Stats Grid (3 cols)
+             ---------------------------------------------------- */}
+          <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5">
+            
+            {/* 3.1 Resume Hiring Score */}
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 select-none">
+              <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-[#00D4FF]">verified</span>
+                  简历综合评分
+                </h4>
+                <span className="material-symbols-outlined text-sm text-white/30 cursor-pointer" title="点击查看计算指标">info</span>
+              </div>
+
+              <div className="flex flex-col items-center justify-center py-2.5 relative">
+                <div className="relative w-36 h-36 flex items-center justify-center">
+                  <svg className="w-full h-full -rotate-90">
+                    <circle cx="72" cy="72" r="56" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="8" />
+                    <circle
+                      cx="72"
+                      cy="72"
+                      r="56"
+                      fill="transparent"
+                      stroke="url(#resume-ring-grad)"
+                      strokeWidth="8"
+                      strokeDasharray={2 * Math.PI * 56}
+                      strokeDashoffset={2 * Math.PI * 56 * (1 - 84 / 100)}
+                      strokeLinecap="round"
+                    />
+                    <defs>
+                      <linearGradient id="resume-ring-grad" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stopColor="#c0c1ff" />
+                        <stop offset="100%" stopColor="#00D4FF" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-3xl font-black text-white font-mono">84</span>
+                    <span className="text-[10px] text-white/30 font-bold block scale-90 -mt-0.5">/100 优秀</span>
+                  </div>
+                </div>
+                <div className="space-y-1 mt-4 text-center">
+                  <p className="text-xs text-white/40 font-bold">超过 <span className="text-[#00D4FF] font-black">76%</span> 同岗位候选人</p>
+                </div>
+              </div>
+            </div>
+
+            {/* 3.2 Offer Probability */}
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 select-none">
+              <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-[#AFA7FF]">trending_up</span>
+                  Offer 概率预测
+                </h4>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 py-2 px-1">
+                {/* Current */}
+                <div className="flex flex-col items-center justify-center flex-1 py-2.5 rounded-xl bg-white/[0.01] border border-white/5 relative">
+                  {/* Small progress circle */}
+                  <svg className="w-20 h-20 -rotate-90">
+                    <circle cx="40" cy="40" r="32" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="4" />
+                    <circle cx="40" cy="40" r="32" fill="transparent" stroke="#AFA7FF" strokeWidth="4" strokeDasharray={2 * Math.PI * 32} strokeDashoffset={2 * Math.PI * 32 * (1 - 72 / 100)} strokeLinecap="round" />
+                  </svg>
+                  <div className="absolute top-[21px] text-center w-full">
+                    <span className="text-base font-black text-white font-mono block">72%</span>
+                    <span className="text-[11px] text-white/30 font-bold block -mt-0.5">当前简历</span>
+                  </div>
+                  <span className="text-xs text-white/50 font-bold mt-3">获得面试概率</span>
+                </div>
+
+                {/* Arrow */}
+                <span className="material-symbols-outlined text-white/20 select-none">arrow_forward</span>
+
+                {/* Optimized */}
+                <div className="flex flex-col items-center justify-center flex-1 py-2.5 rounded-xl bg-white/[0.01] border border-white/5 relative">
+                  {/* Small progress circle */}
+                  <svg className="w-20 h-20 -rotate-90">
+                    <circle cx="40" cy="40" r="32" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="4" />
+                    <circle cx="40" cy="40" r="32" fill="transparent" stroke="#5DECCB" strokeWidth="4" strokeDasharray={2 * Math.PI * 32} strokeDashoffset={2 * Math.PI * 32 * (1 - 89 / 100)} strokeLinecap="round" />
+                  </svg>
+                  <div className="absolute top-[21px] text-center w-full">
+                    <span className="text-base font-black text-[#5DECCB] font-mono block">89%</span>
+                    <span className="text-[11px] text-[#5DECCB]/50 font-bold block -mt-0.5">优化后</span>
+                  </div>
+                  <span className="text-xs text-[#5DECCB]/85 font-bold mt-3">预计提升概率</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3.3 ATS Checks checklist */}
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 select-none">
+              <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-[#00D4FF]">analytics</span>
+                  ATS 兼容性检测
+                </h4>
+                <div className="relative group/tooltip flex items-center">
+                  <span className="material-symbols-outlined text-sm text-white/30 cursor-pointer hover:text-white/60 transition-colors">info</span>
+                  <div className="absolute right-0 bottom-full mb-2 w-52 hidden group-hover/tooltip:block bg-[#0e1626] border border-white/10 p-3 rounded-xl text-sm leading-relaxed text-white/70 shadow-2xl z-50 pointer-events-none">
+                    <span className="font-extrabold text-[#00D4FF] block mb-1">ATS（申请人追踪系统）</span>
+                    大厂用于自动筛选简历的系统。检测您的简历关键词覆盖率、排版规范度以及是否易被机器解析。
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-6 py-2.5 px-1">
+                {/* ATS Circle Gauge */}
+                <div className="relative w-22 h-22 flex items-center justify-center shrink-0">
+                  <svg className="w-full h-full -rotate-90">
+                    <circle cx="44" cy="44" r="36" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="4.5" />
+                    <circle
+                      cx="44"
+                      cy="44"
+                      r="36"
+                      fill="transparent"
+                      stroke="#00D4FF"
+                      strokeWidth="4.5"
+                      strokeDasharray={2 * Math.PI * 36}
+                      strokeDashoffset={2 * Math.PI * 36 * (1 - 92 / 100)}
+                      strokeLinecap="round"
+                    />
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-lg font-black text-white font-mono">92%</span>
+                    <span className="text-[10px] text-white/40 font-bold block -mt-0.5">通过率</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2 text-left text-[13px] font-bold text-white/70 flex-1 pl-2">
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-sm text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span>关键词覆盖</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-sm text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span>结构规范</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-sm text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span>PDF 兼容</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="material-symbols-outlined text-sm text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span>机器可读</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 3.4 Risk Distribution donut */}
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 select-none flex-1 min-h-[180px]">
+              <div className="flex justify-between items-center pb-2 border-b border-white/5">
+                <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-[#FF7A95]">pie_chart</span>
+                  风险分布
+                </h4>
+              </div>
+
+              <div className="flex items-center gap-6 justify-center flex-1 py-2 px-1">
+                {/* SVG Ring Donut */}
+                <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
+                  <svg className="w-full h-full -rotate-90" viewBox="0 0 44 44">
+                    {/* Ring for Low Risk: 8 points */}
+                    <circle cx="22" cy="22" r="16" fill="transparent" stroke="#5DECCB" strokeWidth="3.5" strokeDasharray="100.5" strokeDashoffset="0" />
+                    {/* Ring for Medium Risk: 4 points */}
+                    <circle cx="22" cy="22" r="16" fill="transparent" stroke="url(#medium-grad)" strokeWidth="3.5" strokeDasharray="100.5" strokeDashoffset="54" />
+                    {/* Ring for High Risk: 3 points */}
+                    <circle cx="22" cy="22" r="16" fill="transparent" stroke="#FF7A95" strokeWidth="3.5" strokeDasharray="100.5" strokeDashoffset="81" />
+                    <defs>
+                      <linearGradient id="medium-grad" x1="0" y1="0" x2="1" y2="1">
+                        <stop offset="0%" stopColor="#fbbf24" />
+                        <stop offset="100%" stopColor="#f59e0b" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-lg font-black text-white font-mono">15</span>
+                    <span className="text-[10px] text-white/40 font-bold block -mt-0.5">总项数</span>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 text-left text-[13px] font-bold text-white/70 flex-1 pl-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#FF7A95] shrink-0" />
+                      <span>高风险</span>
+                    </div>
+                    <span className="font-mono text-white/55 font-black">{3}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
+                      <span>中风险</span>
+                    </div>
+                    <span className="font-mono text-white/55 font-black">{4}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#5DECCB] shrink-0" />
+                      <span>低风险</span>
+                    </div>
+                    <span className="font-mono text-white/55 font-black">{8}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          {/* ========================================================
+              3. BOTTOM ROW: AI RESUME REBUILD ENGINE (Full-width 12 cols)
+             ======================================================== */}
+          <div className="col-span-12 relative overflow-hidden rounded-3xl border border-white/10 bg-[#060e20]/60 backdrop-blur-xl p-6 md:py-8 md:px-10 flex flex-col md:flex-row justify-between items-center gap-6 shadow-2xl group min-h-[120px] select-none mt-1">
+            
+            {/* Background Glow Layer */}
+            <div className="absolute inset-0 bg-gradient-to-r from-[#AFA7FF]/5 via-[#5DECCB]/3 to-transparent pointer-events-none" />
+
+            <div className="relative z-10 text-left flex items-center gap-6">
+              {/* Spinning Logo Graphic */}
+              <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center relative shrink-0">
+                <span className="material-symbols-outlined text-3xl text-[#AFA7FF] animate-pulse">settings_suggest</span>
+              </div>
+
+              <div className="space-y-1.5 max-w-xl text-left">
+                <h4 className="text-base font-black text-white flex items-center gap-2">
+                  AI 简历重构引擎
+                </h4>
+                <p className="text-sm text-white/50 leading-relaxed font-bold">
+                  AI 已完成简历重构，全面优化表达与结构，提升面试与 ATS 通过率。
+                </p>
+
+                {/* Enhancement statistics tags */}
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] md:text-sm font-black font-mono text-[#5DECCB] pt-1">
+                  <span className="flex items-center gap-1.5">
+                    面试通过率 <span className="bg-[#5DECCB]/15 border border-[#5DECCB]/25 px-1 rounded">+17%</span> 预计提升
+                  </span>
+                  <span className="text-white/10 font-normal">|</span>
+                  <span className="flex items-center gap-1.5">
+                    ATS 通过率 <span className="bg-[#5DECCB]/15 border border-[#5DECCB]/25 px-1 rounded">+12%</span> 预计提升
+                  </span>
+                  <span className="text-white/10 font-normal">|</span>
+                  <span className="flex items-center gap-1.5">
+                    关键词覆盖 <span className="bg-[#5DECCB]/15 border border-[#5DECCB]/25 px-1 rounded">+34%</span> 预计提升
+                  </span>
+                  <span className="text-white/10 font-normal">|</span>
+                  <span className="flex items-center gap-1.5">
+                    表达专业度 <span className="bg-[#5DECCB]/15 border border-[#5DECCB]/25 px-1 rounded">+28%</span> 预计提升
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions panel */}
+            <div className="relative z-10 flex gap-4.5 w-full md:w-auto text-sm font-black">
+              <button
+                onClick={() => setViewMode(viewMode === "original" ? "optimized" : "original")}
+                className="flex-1 md:flex-none px-4.5 py-3 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer whitespace-nowrap"
+              >
+                {viewMode === "original" ? "预览优化版" : "预览原始版"}
+              </button>
+              
+              <button
+                onClick={() => triggerToast("已为您载入简历对比视图...")}
+                className="flex-1 md:flex-none px-4.5 py-3 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer whitespace-nowrap"
+              >
+                对比修改内容
+              </button>
+
+              <button
+                onClick={() => triggerToast("Word 简历导出正在生成...")}
+                className="flex-1 md:flex-none px-4.5 py-3 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer whitespace-nowrap"
+              >
+                导出 Word
+              </button>
+
+              <button
+                onClick={() => triggerToast("正在为您导出 AI 优化版 PDF...")}
+                className="flex-1 md:flex-none px-6 py-3 bg-gradient-to-r from-[#AFA7FF] to-[#00D4FF] text-[#050B1A] rounded-xl hover:scale-[1.01] active:scale-98 transition-all shadow-md shadow-[#AFA7FF]/25 cursor-pointer whitespace-nowrap flex items-center justify-center gap-1"
+              >
+                下载 AI 优化版 PDF <span className="material-symbols-outlined text-sm">download</span>
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+
+      {/* ========================================================
+          GLOBAL FOOTER
+         ======================================================== */}
+      <footer className="bg-[#060e20] border-t border-white/5 w-full block mt-8">
+        <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left select-none">
+          <div className="flex items-center gap-4">
+            <span className="text-xs text-white/30 font-label-mono font-bold tracking-widest">
+              © 2024 OfferPilot AI. All rights reserved.
+            </span>
+          </div>
+          <div className="flex gap-8 text-xs text-white/30 font-label-mono font-bold tracking-widest animate-pulse">
+            <a onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer">
+              返回主页
+            </a>
+            <a className="hover:text-primary transition-colors cursor-default" href="#">
+              隐私政策
+            </a>
+            <a className="hover:text-primary transition-colors cursor-default" href="#">
+              服务条款
+            </a>
+          </div>
+        </div>
+      </footer>
+
+      {/* ========================================================
+          MODAL: EDIT PROFILE FORM
+         ======================================================== */}
+      {showEditProfileModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          {/* Overlay blur shadow */}
+          <div
+            onClick={() => setShowEditProfileModal(false)}
+            className="absolute inset-0 bg-[#050B1A]/80 backdrop-blur-md transition-opacity duration-300"
+          />
+
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-[#171f33] border border-white/10 rounded-3xl p-8 max-w-lg w-full text-left relative z-10 space-y-6 shadow-2xl"
+          >
+            <div className="flex justify-between items-center pb-3 border-b border-white/5">
+              <h3 className="font-extrabold text-white text-lg">编辑简历分析信息</h3>
+              <button
+                onClick={() => setShowEditProfileModal(false)}
+                className="text-white/30 hover:text-white transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            <form onSubmit={handleEditProfile} className="space-y-4 text-xs font-semibold text-white/60">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1.5">姓名 *</label>
+                  <input
+                    type="text"
+                    required
+                    value={profile.name}
+                    onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1.5">求职状态 *</label>
+                  <input
+                    type="text"
+                    required
+                    value={profile.status}
+                    onChange={(e) => setProfile({ ...profile, status: e.target.value })}
+                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block mb-1.5">当前公司</label>
+                <input
+                  type="text"
+                  value={profile.company}
+                  onChange={(e) => setProfile({ ...profile, company: e.target.value })}
+                  className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1.5">当前岗位</label>
+                  <input
+                    type="text"
+                    value={profile.role}
+                    onChange={(e) => setProfile({ ...profile, role: e.target.value })}
+                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1.5">当前薪资</label>
+                  <input
+                    type="text"
+                    value={profile.salary}
+                    onChange={(e) => setProfile({ ...profile, salary: e.target.value })}
+                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                  />
+                </div>
+              </div>
+
+              <div className="h-px bg-white/5 my-1" />
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1.5">目标公司 *</label>
+                  <input
+                    type="text"
+                    required
+                    value={profile.targetCompany}
+                    onChange={(e) => setProfile({ ...profile, targetCompany: e.target.value })}
+                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1.5">目标岗位 *</label>
+                  <input
+                    type="text"
+                    required
+                    value={profile.targetRole}
+                    onChange={(e) => setProfile({ ...profile, targetRole: e.target.value })}
+                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block mb-1.5">目标职级</label>
+                  <input
+                    type="text"
+                    value={profile.targetGrade}
+                    onChange={(e) => setProfile({ ...profile, targetGrade: e.target.value })}
+                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                  />
+                </div>
+                <div>
+                  <label className="block mb-1.5">目标薪资</label>
+                  <input
+                    type="text"
+                    value={profile.targetSalary}
+                    onChange={(e) => setProfile({ ...profile, targetSalary: e.target.value })}
+                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowEditProfileModal(false)}
+                  className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold cursor-pointer text-center"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-[#AFA7FF] text-[#050B1A] rounded-xl font-black cursor-pointer text-center"
+                >
+                  保存修改
+                </button>
+              </div>
+            </form>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ========================================================
+          FLOATING GLOBAL TOAST NOTIFICATION
+         ======================================================== */}
+      <AnimatePresence>
+        {showNotification && (
+          <motion.div
+            initial={{ opacity: 0, y: -30, x: "-50%" }}
+            animate={{ opacity: 1, y: 0, x: "-50%" }}
+            exit={{ opacity: 0, y: -20, x: "-50%" }}
+            className="fixed top-10 left-1/2 z-[9999] px-6 py-3.5 bg-[#131b2e]/95 backdrop-blur-md border border-[#AFA7FF]/20 shadow-2xl rounded-2xl flex items-center gap-2.5 select-none"
+          >
+            <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg">check_circle</span>
+            <span className="text-sm md:text-base font-extrabold text-white">{showNotification}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}

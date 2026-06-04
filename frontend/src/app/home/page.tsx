@@ -3,9 +3,11 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth, UserMenu } from "@/components/AuthProvider";
 
 export default function CareerDashboard() {
   const router = useRouter();
+  const auth = useAuth();
 
   // =========================================================================
   // STATE MANAGEMENT
@@ -14,13 +16,19 @@ export default function CareerDashboard() {
     name: "张三",
     status: "在职",
     title: "高级后端工程师",
-    experience: "6 年经验",
+    experience: "6年经验",
     city: "深圳",
     joinDays: 128,
     tags: ["后端开发", "分布式系统", "系统设计", "性能优化"],
     company: "腾讯科技",
     role: "高级后端工程师",
-    level: "T10-2"
+    level: "高级",
+    salary: "25K - 35K",
+    gender: "male",
+    age: "26",
+    school: "清华大学",
+    degree: "本科",
+    gradYear: "2018"
   });
 
   const [careerGoal, setCareerGoal] = useState({
@@ -28,21 +36,23 @@ export default function CareerDashboard() {
     level: "P7",
     salary: "50K - 70K",
     city: "深圳",
+    company: "腾讯/美团等 (目标)",
     matchRate: 72
   });
 
   const [accountSecurity, setAccountSecurity] = useState({
     email: "zhangsan@email.com",
     phone: "138****8888",
-    loginMethod: "微信登录"
+    loginMethod: "微信登录",
+    password: ""
   });
 
   // Modals visibility
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showEditGoalModal, setShowEditGoalModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showEditSecurityModal, setShowEditSecurityModal] = useState(false);
+  const [avatarError, setAvatarError] = useState(false);
 
   // Form states for modals
   const [profileForm, setProfileForm] = useState({ ...profile, tagsString: profile.tags.join(", ") });
@@ -67,23 +77,75 @@ export default function CareerDashboard() {
     setSecurityForm({ ...accountSecurity });
   }, [accountSecurity]);
 
+  useEffect(() => {
+    if (auth.isLoggedIn && auth.user) {
+      setProfile(prev => ({
+        ...prev,
+        name: auth.user.name,
+        status: auth.user.status || prev.status,
+        title: auth.user.role || prev.title,
+        experience: auth.user.years || prev.experience,
+        company: auth.user.company || prev.company,
+        role: auth.user.role ? auth.user.role.split(" · ")[0] : prev.role,
+        level: auth.user.role ? auth.user.role.split(" · ")[1] || prev.level : prev.level,
+        salary: auth.user.salary || prev.salary,
+        gender: auth.user.gender || prev.gender,
+        age: auth.user.age || prev.age,
+        school: auth.user.school || prev.school,
+        degree: auth.user.degree || prev.degree,
+        gradYear: auth.user.gradYear || prev.gradYear
+      }));
+      setCareerGoal(prev => ({
+        ...prev,
+        role: auth.user.targetRole || prev.role,
+        level: auth.user.targetGrade || prev.level,
+        salary: auth.user.targetSalary || prev.salary,
+        company: auth.user.targetCompany || prev.company
+      }));
+    }
+  }, [auth.isLoggedIn, auth.user]);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [auth.user.avatar]);
+
   // Handlers for Save actions
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
-    setProfile({
+    const updatedProfile = {
       ...profileForm,
       tags: profileForm.tagsString.split(",").map(t => t.trim()).filter(Boolean)
+    };
+    setProfile(updatedProfile);
+    
+    auth.updateUser({
+      name: profileForm.name,
+      status: profileForm.status,
+      years: profileForm.experience,
+      company: profileForm.company,
+      role: `${profileForm.role} · ${profileForm.level || "高级"}`,
+      salary: profileForm.salary,
+      gender: profileForm.gender,
+      age: profileForm.age,
+      school: profileForm.school,
+      degree: profileForm.degree,
+      gradYear: profileForm.gradYear
     });
     setShowEditProfileModal(false);
   };
 
   const handleSaveGoal = (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate dynamic match rate recalculation based on salary/level input
     const randomMatch = Math.floor(Math.random() * 20) + 65; // 65 - 85
     setCareerGoal({
       ...goalForm,
       matchRate: randomMatch
+    });
+    auth.updateUser({
+      targetRole: goalForm.role,
+      targetGrade: goalForm.level,
+      targetSalary: goalForm.salary,
+      targetCompany: goalForm.company
     });
     setShowEditGoalModal(false);
   };
@@ -150,15 +212,24 @@ export default function CareerDashboard() {
             >
               <span className="material-symbols-outlined text-base">history</span>历史记录
             </button>
-            <button onClick={() => setShowUpgradeModal(true)} className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium">
-              登录
-            </button>
-            <button
-              onClick={() => setShowUpgradeModal(true)}
-              className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)]"
-            >
-              免费开始
-            </button>
+            {auth.isLoggedIn ? (
+              <UserMenu />
+) : (
+              <>
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer"
+                >
+                  登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] cursor-pointer"
+                >
+                  免费开始
+                </button>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -189,13 +260,6 @@ export default function CareerDashboard() {
               <span className="text-on-surface-variant/55 hover:text-white transition-colors cursor-pointer flex items-center gap-1">
                 <span className="material-symbols-outlined text-sm">help</span>帮助中心
               </span>
-              <div className="flex items-center gap-2 border-l border-white/10 pl-4">
-                <div className="w-7 h-7 rounded-full bg-slate-900 border border-white/10 overflow-hidden shrink-0">
-                  <img src="/debugger-2.jpg" alt="Dame Zheng" className="w-full h-full object-cover" />
-                </div>
-                <span className="text-white font-black whitespace-nowrap">Dame Zheng</span>
-                <span className="material-symbols-outlined text-sm text-on-surface-variant/40 select-none">expand_more</span>
-              </div>
             </div>
           </div>
 
@@ -206,15 +270,16 @@ export default function CareerDashboard() {
               {/* User Avatar image */}
               <div className="relative shrink-0 select-none">
                 <div className="w-20 h-20 rounded-full border border-primary/30 overflow-hidden bg-slate-900 flex items-center justify-center shadow-2xl relative z-10">
-                  <img
-                    src="/debugger-2.jpg"
-                    alt={profile.name}
-                    className="w-full h-full object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = "none";
-                    }}
-                  />
-                  <span className="material-symbols-outlined text-4xl text-primary opacity-60">person</span>
+                  {!avatarError ? (
+                    <img
+                      src={auth.user.avatar}
+                      alt={profile.name}
+                      className="w-full h-full object-cover"
+                      onError={() => setAvatarError(true)}
+                    />
+                  ) : (
+                    <span className="material-symbols-outlined text-4xl text-primary opacity-60">person</span>
+                  )}
                 </div>
                 <div className="absolute -bottom-1 -right-1 bg-tertiary w-4.5 h-4.5 rounded-full border-2 border-background flex items-center justify-center z-20">
                   <span className="w-1.5 h-1.5 bg-white rounded-full" />
@@ -232,7 +297,7 @@ export default function CareerDashboard() {
                   >
                     edit
                   </span>
-                  <span className="px-2.5 py-0.5 rounded-full bg-tertiary/10 text-tertiary text-[11px] font-black border border-tertiary/20 whitespace-nowrap">
+                  <span className="px-3.5 py-1 rounded-full bg-tertiary/10 text-tertiary text-xs md:text-sm font-black border border-tertiary/20 whitespace-nowrap">
                     {profile.status}
                   </span>
                 </div>
@@ -659,62 +724,39 @@ export default function CareerDashboard() {
               {/* Security info items block */}
               <div className="flex flex-wrap items-center gap-x-6 gap-y-4 flex-1">
                 
-                <div className="flex items-center gap-3 px-4.5 py-3 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-[200px]">
-                  <div className="text-left min-w-0 flex-1 pr-2">
-                    <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">邮箱</span>
+                <div className="flex items-center gap-3.5 px-4.5 py-3.5 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-[200px]">
+                  <span className="material-symbols-outlined text-primary text-xl opacity-60 shrink-0">mail</span>
+                  <div className="text-left min-w-0 flex-1">
+                    <span className="text-xs md:text-sm text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">邮箱</span>
                     <span className="text-sm font-black text-white block mt-0.5 truncate">{accountSecurity.email}</span>
                   </div>
-                  <button 
-                    onClick={() => setShowEditSecurityModal(true)}
-                    className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-white text-[10px] font-black rounded-lg border border-white/10 transition-all shrink-0 cursor-pointer"
-                  >
-                    修改
-                  </button>
                 </div>
 
-                <div className="flex items-center gap-3 px-4.5 py-3 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-[200px]">
-                  <div className="text-left min-w-0 flex-1 pr-2">
-                    <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">手机号</span>
+                <div className="flex items-center gap-3.5 px-4.5 py-3.5 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-[200px]">
+                  <span className="material-symbols-outlined text-primary text-xl opacity-60 shrink-0">phone_iphone</span>
+                  <div className="text-left min-w-0 flex-1">
+                    <span className="text-xs md:text-sm text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">手机号</span>
                     <span className="text-sm font-black text-white block mt-0.5 truncate">{accountSecurity.phone}</span>
                   </div>
-                  <button 
-                    onClick={() => setShowEditSecurityModal(true)}
-                    className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-white text-[10px] font-black rounded-lg border border-white/10 transition-all shrink-0 cursor-pointer"
-                  >
-                    修改
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-3 px-4.5 py-3 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-[200px]">
-                  <div className="text-left min-w-0 flex-1 pr-2">
-                    <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">登录方式</span>
-                    <span className="text-sm font-black text-white block mt-0.5 truncate">{accountSecurity.loginMethod}</span>
-                  </div>
-                  <button 
-                    onClick={() => setShowEditSecurityModal(true)}
-                    className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-white text-[10px] font-black rounded-lg border border-white/10 transition-all shrink-0 cursor-pointer"
-                  >
-                    管理
-                  </button>
                 </div>
 
               </div>
 
               {/* Core Actions buttons */}
-              <div className="flex flex-wrap items-center gap-3.5 shrink-0 justify-between lg:justify-end">
+              <div className="flex flex-wrap items-center gap-3.5 shrink-0 justify-between lg:justify-end text-sm font-black">
                 <button
                   onClick={() => setShowEditSecurityModal(true)}
-                  className="px-4.5 py-2.5 bg-white/5 hover:bg-white/10 text-white text-xs font-black rounded-xl border border-white/10 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
+                  className="px-5 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl border border-white/10 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
                 >
-                  <span className="material-symbols-outlined text-sm">lock</span>
-                  修改密码
+                  <span className="material-symbols-outlined text-base">edit</span>
+                  修改
                 </button>
                 
                 <button
-                  onClick={() => setShowLogoutModal(true)}
-                  className="px-4.5 py-2.5 bg-secondary/10 hover:bg-secondary/20 text-secondary text-xs font-black rounded-xl border border-secondary/25 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
+                  onClick={() => auth.setShowLogout(true)}
+                  className="px-5 py-3 bg-secondary/10 hover:bg-secondary/20 text-secondary rounded-xl border border-secondary/25 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
                 >
-                  <span className="material-symbols-outlined text-sm">logout</span>
+                  <span className="material-symbols-outlined text-base">logout</span>
                   退出登录
                 </button>
               </div>
@@ -766,7 +808,7 @@ export default function CareerDashboard() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface-container-high border border-white/10 rounded-3xl p-6.5 max-w-lg w-full text-left relative z-10 space-y-5 shadow-2xl overflow-y-auto max-h-[90vh]"
+              className="bg-surface-container-high border border-white/10 rounded-3xl p-8 max-w-xl w-full text-left relative z-10 space-y-6 shadow-2xl overflow-y-auto max-h-[90vh]"
             >
               <div className="flex justify-between items-center pb-3.5 border-b border-white/5">
                 <h3 className="font-extrabold text-white text-base flex items-center gap-2">
@@ -781,7 +823,7 @@ export default function CareerDashboard() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveProfile} className="space-y-4 text-xs font-semibold text-white">
+              <form onSubmit={handleSaveProfile} className="space-y-4 text-sm font-semibold text-white">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-on-surface-variant/60 font-bold block">姓名</label>
@@ -790,69 +832,52 @@ export default function CareerDashboard() {
                       required
                       value={profileForm.name}
                       onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">状态</label>
+                    <label className="text-on-surface-variant/60 font-bold block">求职状态</label>
                     <select
                       value={profileForm.status}
                       onChange={(e) => setProfileForm({ ...profileForm, status: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-on-surface-variant"
+                      className="w-full px-4 py-3 bg-[#060e20] border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
                     >
-                      <option className="bg-surface-container-high" value="在职">在职</option>
-                      <option className="bg-surface-container-high" value="离职">离职</option>
-                      <option className="bg-surface-container-high" value="找工作中">找工作中</option>
+                      <option className="bg-[#0e1626]" value="在职">在职</option>
+                      <option className="bg-[#0e1626]" value="离职">离职</option>
+                      <option className="bg-[#0e1626]" value="在校生">在校生</option>
                     </select>
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">职业头衔</label>
-                  <input
-                    type="text"
-                    required
-                    value={profileForm.title}
-                    onChange={(e) => setProfileForm({ ...profileForm, title: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">专业技术标签 (用英文逗号隔开)</label>
-                  <input
-                    type="text"
-                    required
-                    value={profileForm.tagsString}
-                    onChange={(e) => setProfileForm({ ...profileForm, tagsString: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
-                  />
-                </div>
-
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">工作经验</label>
-                    <input
-                      type="text"
-                      required
-                      value={profileForm.experience}
-                      onChange={(e) => setProfileForm({ ...profileForm, experience: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
-                    />
+                    <label className="text-on-surface-variant/60 font-bold block">性别</label>
+                    <select
+                      value={profileForm.gender || "male"}
+                      onChange={(e) => setProfileForm({ ...profileForm, gender: e.target.value })}
+                      className="w-full px-4 py-3 bg-[#060e20] border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                    >
+                      <option className="bg-[#0e1626]" value="male">男</option>
+                      <option className="bg-[#0e1626]" value="female">女</option>
+                      <option className="bg-[#0e1626]" value="other">不方便透露</option>
+                    </select>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">城市</label>
+                    <label className="text-on-surface-variant/60 font-bold block">年龄</label>
                     <input
-                      type="text"
+                      type="number"
                       required
-                      value={profileForm.city}
-                      onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                      min="1"
+                      max="120"
+                      placeholder="26"
+                      value={profileForm.age || ""}
+                      onChange={(e) => setProfileForm({ ...profileForm, age: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white placeholder-white/20"
                     />
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3 pt-2">
+                <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1.5">
                     <label className="text-on-surface-variant/60 font-bold block">当前公司</label>
                     <input
@@ -860,7 +885,7 @@ export default function CareerDashboard() {
                       required
                       value={profileForm.company}
                       onChange={(e) => setProfileForm({ ...profileForm, company: e.target.value })}
-                      className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -870,7 +895,7 @@ export default function CareerDashboard() {
                       required
                       value={profileForm.role}
                       onChange={(e) => setProfileForm({ ...profileForm, role: e.target.value })}
-                      className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -880,22 +905,105 @@ export default function CareerDashboard() {
                       required
                       value={profileForm.level}
                       onChange={(e) => setProfileForm({ ...profileForm, level: e.target.value })}
-                      className="w-full px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
                 </div>
 
-                <div className="pt-4 border-t border-white/5 flex gap-3 justify-end">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-on-surface-variant/60 font-bold block">当前月薪范围</label>
+                    <input
+                      type="text"
+                      placeholder="例如：25K - 35K"
+                      value={profileForm.salary || ""}
+                      onChange={(e) => setProfileForm({ ...profileForm, salary: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-on-surface-variant/60 font-bold block">城市</label>
+                    <input
+                      type="text"
+                      required
+                      value={profileForm.city}
+                      onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-on-surface-variant/60 font-bold block">工作年限</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="例如：2年6个月"
+                      value={profileForm.experience}
+                      onChange={(e) => setProfileForm({ ...profileForm, experience: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-on-surface-variant/60 font-bold block">职业头衔</label>
+                    <input
+                      type="text"
+                      required
+                      value={profileForm.title}
+                      onChange={(e) => setProfileForm({ ...profileForm, title: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-on-surface-variant/60 font-bold block">专业技术标签 (用英文逗号隔开)</label>
+                  <input
+                    type="text"
+                    required
+                    value={profileForm.tagsString}
+                    onChange={(e) => setProfileForm({ ...profileForm, tagsString: e.target.value })}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-on-surface-variant/60 font-bold block">学校名称</label>
+                    <input
+                      type="text"
+                      placeholder="例如：清华大学"
+                      value={profileForm.school || ""}
+                      onChange={(e) => setProfileForm({ ...profileForm, school: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-on-surface-variant/60 font-bold block">学历</label>
+                    <select
+                      value={profileForm.degree || "本科"}
+                      onChange={(e) => setProfileForm({ ...profileForm, degree: e.target.value })}
+                      className="w-full px-4 py-3 bg-[#060e20] border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                    >
+                      {["大专", "本科", "硕士", "博士", "其他"].map((d) => (
+                        <option key={d} className="bg-[#0e1626]" value={d}>{d}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="pt-6 border-t border-white/5 flex gap-4 justify-end text-sm font-black">
                   <button
                     type="button"
                     onClick={() => setShowEditProfileModal(false)}
-                    className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all text-white cursor-pointer"
                   >
                     取消
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
                   >
                     保存资料
                   </button>
@@ -920,7 +1028,7 @@ export default function CareerDashboard() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface-container-high border border-white/10 rounded-3xl p-6.5 max-w-md w-full text-left relative z-10 space-y-5 shadow-2xl"
+              className="bg-surface-container-high border border-white/10 rounded-3xl p-8 max-w-md w-full text-left relative z-10 space-y-6 shadow-2xl"
             >
               <div className="flex justify-between items-center pb-3.5 border-b border-white/5">
                 <h3 className="font-extrabold text-white text-base flex items-center gap-2">
@@ -935,19 +1043,18 @@ export default function CareerDashboard() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveGoal} className="space-y-4 text-xs font-semibold text-white">
-                <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">目标岗位</label>
-                  <input
-                    type="text"
-                    required
-                    value={goalForm.role}
-                    onChange={(e) => setGoalForm({ ...goalForm, role: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
-                  />
-                </div>
-
+              <form onSubmit={handleSaveGoal} className="space-y-4 text-sm font-semibold text-white">
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-on-surface-variant/60 font-bold block">目标岗位</label>
+                    <input
+                      type="text"
+                      required
+                      value={goalForm.role}
+                      onChange={(e) => setGoalForm({ ...goalForm, role: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                    />
+                  </div>
                   <div className="space-y-1.5">
                     <label className="text-on-surface-variant/60 font-bold block">目标职级</label>
                     <input
@@ -955,9 +1062,12 @@ export default function CareerDashboard() {
                       required
                       value={goalForm.level}
                       onChange={(e) => setGoalForm({ ...goalForm, level: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-on-surface-variant/60 font-bold block">目标城市</label>
                     <input
@@ -965,7 +1075,17 @@ export default function CareerDashboard() {
                       required
                       value={goalForm.city}
                       onChange={(e) => setGoalForm({ ...goalForm, city: e.target.value })}
-                      className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-on-surface-variant/60 font-bold block">目标公司 (选填)</label>
+                    <input
+                      type="text"
+                      placeholder="例如：腾讯科技"
+                      value={goalForm.company || ""}
+                      onChange={(e) => setGoalForm({ ...goalForm, company: e.target.value })}
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
                 </div>
@@ -977,21 +1097,21 @@ export default function CareerDashboard() {
                     required
                     value={goalForm.salary}
                     onChange={(e) => setGoalForm({ ...goalForm, salary: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                   />
                 </div>
 
-                <div className="pt-4 border-t border-white/5 flex gap-3 justify-end">
+                <div className="pt-6 border-t border-white/5 flex gap-4 justify-end text-sm font-black">
                   <button
                     type="button"
                     onClick={() => setShowEditGoalModal(false)}
-                    className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all text-white cursor-pointer"
                   >
                     取消
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
                   >
                     保存更新
                   </button>
@@ -1016,12 +1136,12 @@ export default function CareerDashboard() {
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface-container-high border border-white/10 rounded-3xl p-6.5 max-w-md w-full text-left relative z-10 space-y-5 shadow-2xl"
+              className="bg-surface-container-high border border-white/10 rounded-3xl p-8 max-w-md w-full text-left relative z-10 space-y-6 shadow-2xl"
             >
               <div className="flex justify-between items-center pb-3.5 border-b border-white/5">
                 <h3 className="font-extrabold text-white text-base flex items-center gap-2">
                   <span className="material-symbols-outlined text-primary">security</span>
-                  修改密码与安全设置
+                  修改账号与安全设置
                 </h3>
                 <button
                   onClick={() => setShowEditSecurityModal(false)}
@@ -1031,7 +1151,7 @@ export default function CareerDashboard() {
                 </button>
               </div>
 
-              <form onSubmit={handleSaveSecurity} className="space-y-4 text-xs font-semibold text-white">
+              <form onSubmit={handleSaveSecurity} className="space-y-4 text-sm font-semibold text-white">
                 <div className="space-y-1.5">
                   <label className="text-on-surface-variant/60 font-bold block">邮箱绑定</label>
                   <input
@@ -1039,7 +1159,7 @@ export default function CareerDashboard() {
                     required
                     value={securityForm.email}
                     onChange={(e) => setSecurityForm({ ...securityForm, email: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                   />
                 </div>
 
@@ -1050,32 +1170,32 @@ export default function CareerDashboard() {
                     required
                     value={securityForm.phone}
                     onChange={(e) => setSecurityForm({ ...securityForm, phone: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                   />
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">第三方关联登录</label>
+                  <label className="text-on-surface-variant/60 font-bold block">修改密码 (选填)</label>
                   <input
-                    type="text"
-                    required
-                    value={securityForm.loginMethod}
-                    onChange={(e) => setSecurityForm({ ...securityForm, loginMethod: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
+                    type="password"
+                    placeholder="请输入新密码，不修改请留空"
+                    value={securityForm.password || ""}
+                    onChange={(e) => setSecurityForm({ ...securityForm, password: e.target.value })}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white placeholder-white/20"
                   />
                 </div>
 
-                <div className="pt-4 border-t border-white/5 flex gap-3 justify-end">
+                <div className="pt-6 border-t border-white/5 flex gap-4 justify-end text-sm font-black">
                   <button
                     type="button"
                     onClick={() => setShowEditSecurityModal(false)}
-                    className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all text-white cursor-pointer"
                   >
                     取消
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
                   >
                     确认修改
                   </button>
@@ -1085,55 +1205,7 @@ export default function CareerDashboard() {
           </div>
         )}
 
-        {/* LOGOUT PROMPT MODAL */}
-        {showLogoutModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowLogoutModal(false)}
-              className="absolute inset-0 bg-surface/60 backdrop-blur-md"
-            />
 
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface-container-high border border-white/10 rounded-3xl p-6.5 max-w-sm w-full text-center relative z-10 space-y-5 shadow-2xl"
-            >
-              <div className="w-12 h-12 rounded-full bg-secondary/15 border border-secondary/20 flex items-center justify-center text-secondary mx-auto">
-                <span className="material-symbols-outlined text-xl">logout</span>
-              </div>
-
-              <div className="space-y-1.5">
-                <h3 className="font-extrabold text-white text-base">确认要退出登录吗？</h3>
-                <p className="text-xs text-on-surface-variant/50 leading-relaxed font-semibold">
-                  退出后，你下次需要重新登录以访问所有的 AI 面试调试器历史、简历诊断结论与职业记忆数据。
-                </p>
-              </div>
-
-              <div className="flex gap-3 justify-center pt-2">
-                <button
-                  onClick={() => setShowLogoutModal(false)}
-                  className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all text-xs font-bold cursor-pointer"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={() => {
-                    setShowLogoutModal(false);
-                    // Navigate back to case dashboard home
-                    router.push("/");
-                  }}
-                  className="px-5 py-2.5 rounded-xl bg-secondary text-on-secondary font-black shadow-lg shadow-secondary/20 hover:scale-[1.01] active:scale-98 transition-all text-xs cursor-pointer"
-                >
-                  退出登录
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
 
         {/* UPGRADE AND MEMBERSHIP DETAILS MODAL */}
         {showUpgradeModal && (

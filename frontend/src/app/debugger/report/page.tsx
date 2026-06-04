@@ -3,9 +3,11 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth, UserMenu } from "@/components/AuthProvider";
 
 export default function CareerDashboard() {
   const router = useRouter();
+  const auth = useAuth();
 
   // =========================================================================
   // STATE MANAGEMENT
@@ -41,7 +43,6 @@ export default function CareerDashboard() {
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showEditGoalModal, setShowEditGoalModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [showEditSecurityModal, setShowEditSecurityModal] = useState(false);
 
   // Form states for modals
@@ -66,6 +67,27 @@ export default function CareerDashboard() {
   useEffect(() => {
     setSecurityForm({ ...accountSecurity });
   }, [accountSecurity]);
+
+  useEffect(() => {
+    if (auth.isLoggedIn && auth.user) {
+      setProfile(prev => ({
+        ...prev,
+        name: auth.user.name,
+        status: auth.user.status || prev.status,
+        title: auth.user.role || prev.title,
+        experience: auth.user.years ? `${auth.user.years}经验` : prev.experience,
+        company: auth.user.company || prev.company,
+        role: auth.user.role ? auth.user.role.split(" · ")[0] : prev.role,
+        level: auth.user.role ? auth.user.role.split(" · ")[1] || prev.level : prev.level
+      }));
+      setCareerGoal(prev => ({
+        ...prev,
+        role: auth.user.targetRole || prev.role,
+        level: auth.user.targetGrade || prev.level,
+        salary: auth.user.targetSalary || prev.salary
+      }));
+    }
+  }, [auth.isLoggedIn, auth.user]);
 
   // Handlers for Save actions
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -147,15 +169,24 @@ export default function CareerDashboard() {
             >
               <span className="material-symbols-outlined text-base">history</span>历史记录
             </button>
-            <button onClick={() => setShowUpgradeModal(true)} className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium">
-              登录
-            </button>
-            <button
-              onClick={() => setShowUpgradeModal(true)}
-              className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)]"
-            >
-              免费开始
-            </button>
+            {auth.isLoggedIn ? (
+              <UserMenu />
+            ) : (
+              <>
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer"
+                >
+                  登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] cursor-pointer"
+                >
+                  免费开始
+                </button>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -188,9 +219,9 @@ export default function CareerDashboard() {
               </span>
               <div className="flex items-center gap-2 border-l border-white/10 pl-4">
                 <div className="w-7 h-7 rounded-full bg-slate-900 border border-white/10 overflow-hidden shrink-0">
-                  <img src="/debugger-2.jpg" alt="Dame Zheng" className="w-full h-full object-cover" />
+                  <img src={auth.user.avatar} alt={auth.user.name} className="w-full h-full object-cover" />
                 </div>
-                <span className="text-white font-black whitespace-nowrap">Dame Zheng</span>
+                <span className="text-white font-black whitespace-nowrap">{auth.user.name}</span>
                 <span className="material-symbols-outlined text-sm text-on-surface-variant/40 select-none">expand_more</span>
               </div>
             </div>
@@ -204,7 +235,7 @@ export default function CareerDashboard() {
               <div className="relative shrink-0 select-none">
                 <div className="w-20 h-20 rounded-full border border-primary/30 overflow-hidden bg-slate-900 flex items-center justify-center shadow-2xl relative z-10">
                   <img
-                    src="/debugger-2.jpg"
+                    src={auth.user.avatar}
                     alt={profile.name}
                     className="w-full h-full object-cover"
                     onError={(e) => {
@@ -682,18 +713,7 @@ export default function CareerDashboard() {
                   </button>
                 </div>
 
-                <div className="flex items-center gap-3 px-4.5 py-3 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-[200px]">
-                  <div className="text-left min-w-0 flex-1 pr-2">
-                    <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">登录方式</span>
-                    <span className="text-sm font-black text-white block mt-0.5 truncate">{accountSecurity.loginMethod}</span>
-                  </div>
-                  <button 
-                    onClick={() => setShowEditSecurityModal(true)}
-                    className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-white text-[10px] font-black rounded-lg border border-white/10 transition-all shrink-0 cursor-pointer"
-                  >
-                    管理
-                  </button>
-                </div>
+
 
               </div>
 
@@ -701,17 +721,17 @@ export default function CareerDashboard() {
               <div className="flex flex-wrap items-center gap-3.5 shrink-0 justify-between lg:justify-end">
                 <button
                   onClick={() => setShowEditSecurityModal(true)}
-                  className="px-4.5 py-2.5 bg-white/5 hover:bg-white/10 text-white text-xs font-black rounded-xl border border-white/10 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
+                  className="px-4.5 py-2.5 bg-white/5 hover:bg-white/10 text-white text-sm font-black rounded-xl border border-white/10 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
                 >
-                  <span className="material-symbols-outlined text-sm">lock</span>
+                  <span className="material-symbols-outlined text-base">lock</span>
                   修改密码
                 </button>
                 
                 <button
-                  onClick={() => setShowLogoutModal(true)}
-                  className="px-4.5 py-2.5 bg-secondary/10 hover:bg-secondary/20 text-secondary text-xs font-black rounded-xl border border-secondary/25 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
+                  onClick={() => auth.setShowLogout(true)}
+                  className="px-4.5 py-2.5 bg-secondary/10 hover:bg-secondary/20 text-secondary text-sm font-black rounded-xl border border-secondary/25 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
                 >
-                  <span className="material-symbols-outlined text-sm">logout</span>
+                  <span className="material-symbols-outlined text-base">logout</span>
                   退出登录
                 </button>
               </div>
@@ -1051,28 +1071,19 @@ export default function CareerDashboard() {
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">第三方关联登录</label>
-                  <input
-                    type="text"
-                    required
-                    value={securityForm.loginMethod}
-                    onChange={(e) => setSecurityForm({ ...securityForm, loginMethod: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
-                  />
-                </div>
+
 
                 <div className="pt-4 border-t border-white/5 flex gap-3 justify-end">
                   <button
                     type="button"
                     onClick={() => setShowEditSecurityModal(false)}
-                    className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
                   >
                     取消
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
                   >
                     确认修改
                   </button>
@@ -1082,55 +1093,6 @@ export default function CareerDashboard() {
           </div>
         )}
 
-        {/* LOGOUT PROMPT MODAL */}
-        {showLogoutModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowLogoutModal(false)}
-              className="absolute inset-0 bg-surface/60 backdrop-blur-md"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface-container-high border border-white/10 rounded-3xl p-6.5 max-w-sm w-full text-center relative z-10 space-y-5 shadow-2xl"
-            >
-              <div className="w-12 h-12 rounded-full bg-secondary/15 border border-secondary/20 flex items-center justify-center text-secondary mx-auto">
-                <span className="material-symbols-outlined text-xl">logout</span>
-              </div>
-
-              <div className="space-y-1.5">
-                <h3 className="font-extrabold text-white text-base">确认要退出登录吗？</h3>
-                <p className="text-xs text-on-surface-variant/50 leading-relaxed font-semibold">
-                  退出后，你下次需要重新登录以访问所有的 AI 面试调试器历史、简历诊断结论与职业记忆数据。
-                </p>
-              </div>
-
-              <div className="flex gap-3 justify-center pt-2">
-                <button
-                  onClick={() => setShowLogoutModal(false)}
-                  className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all text-xs font-bold cursor-pointer"
-                >
-                  取消
-                </button>
-                <button
-                  onClick={() => {
-                    setShowLogoutModal(false);
-                    // Navigate back to case dashboard home
-                    router.push("/");
-                  }}
-                  className="px-5 py-2.5 rounded-xl bg-secondary text-on-secondary font-black shadow-lg shadow-secondary/20 hover:scale-[1.01] active:scale-98 transition-all text-xs cursor-pointer"
-                >
-                  退出登录
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
 
         {/* UPGRADE AND MEMBERSHIP DETAILS MODAL */}
         {showUpgradeModal && (

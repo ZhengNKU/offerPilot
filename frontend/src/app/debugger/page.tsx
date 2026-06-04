@@ -3,14 +3,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
+import { useAuth, UserMenu } from "@/components/AuthProvider";
 
 export default function NewAnalysisDebugger() {
   const router = useRouter();
+  const auth = useAuth();
 
   // Active input mode
   const [activeMode, setActiveMode] = useState<"audio" | "text" | "resume">("audio");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [showLoginModal, setShowLoginModal] = useState(false);
 
   // Audio/Dialogue context fields - ALL TEXT INPUTS except onJob and date (Defaulted to empty)
   const [audioForm, setAudioForm] = useState({
@@ -42,7 +43,7 @@ export default function NewAnalysisDebugger() {
   const [pasteText, setPasteText] = useState("");
 
   const handleInterceptAction = () => {
-    setShowLoginModal(true);
+    auth.setShowLogin(true);
   };
 
   // Pre-load templates
@@ -91,7 +92,7 @@ export default function NewAnalysisDebugger() {
       } else if (activeMode === "text") {
         router.push("/debugger/record");
       } else {
-        router.push("/debugger/report");
+        router.push("/debugger/resume");
       }
     }, 1500);
   };
@@ -146,15 +147,24 @@ export default function NewAnalysisDebugger() {
             >
               <span className="material-symbols-outlined text-base">history</span>历史记录
             </button>
-            <button onClick={handleInterceptAction} className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium">
-              登录
-            </button>
-            <button
-              onClick={handleInterceptAction}
-              className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)]"
-            >
-              免费开始
-            </button>
+            {auth.isLoggedIn ? (
+              <UserMenu />
+            ) : (
+              <>
+                <button
+                  onClick={handleInterceptAction}
+                  className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer"
+                >
+                  登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] cursor-pointer"
+                >
+                  免费开始
+                </button>
+              </>
+            )}
           </div>
         </div>
       </nav>
@@ -453,60 +463,6 @@ export default function NewAnalysisDebugger() {
         </div>
       </footer>
 
-      {/* WECHAT MODAL */}
-      {showLoginModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div
-            onClick={() => setShowLoginModal(false)}
-            className="absolute inset-0 bg-surface/60 backdrop-blur-md transition-opacity duration-300"
-          />
-
-          <div className="bg-surface-container-high border border-white/10 rounded-3xl p-8 max-w-sm w-full text-center relative z-10 space-y-6 shadow-2xl transition-all scale-100 animate-fade-in">
-            <div className="flex justify-between items-center">
-              <span className="font-label-mono text-[10px] text-primary tracking-widest uppercase font-bold">
-                OfferPilot Intelligence
-              </span>
-              <button
-                onClick={() => setShowLoginModal(false)}
-                className="text-on-surface-variant hover:text-white transition-colors"
-              >
-                <span className="material-symbols-outlined text-lg">close</span>
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto mb-2 animate-bounce">
-                <span className="material-symbols-outlined text-2.5xl">lock</span>
-              </div>
-              <h3 className="font-extrabold text-white text-lg">保存分析结果与成长轨迹</h3>
-              <p className="text-on-surface-variant text-xs leading-relaxed max-w-xs mx-auto font-semibold">
-                注册并登录账号，即可保存本次分析历史、下载修改好的简历并追踪您的面试成长路径。
-              </p>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <button
-                onClick={() => setShowLoginModal(false)}
-                className="w-full py-3.5 rounded-xl bg-tertiary text-on-tertiary font-bold text-xs hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-tertiary/15"
-              >
-                <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  chat
-                </span>
-                使用微信一键登录
-              </button>
-              <button
-                onClick={() => setShowLoginModal(false)}
-                className="w-full py-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold text-xs hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-sm">phone_iphone</span>
-                手机号验证码登录
-              </button>
-            </div>
-
-            <p className="text-[10px] text-on-surface-variant/40">登录即代表您已阅读并同意《服务条款》和《隐私政策》</p>
-          </div>
-        </div>
-      )}
     </main>
   );
 }
