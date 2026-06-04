@@ -58,6 +58,52 @@ export default function CareerDashboard() {
   const [profileForm, setProfileForm] = useState({ ...profile, tagsString: profile.tags.join(", ") });
   const [goalForm, setGoalForm] = useState({ ...careerGoal });
   const [securityForm, setSecurityForm] = useState({ ...accountSecurity });
+  const [securityTab, setSecurityTab] = useState<"email" | "phone">("phone");
+
+  // Verification states for security edits
+  const [emailCountdown, setEmailCountdown] = useState(0);
+  const [phoneCountdown, setPhoneCountdown] = useState(0);
+  const [emailCode, setEmailCode] = useState("");
+  const [phoneCode, setPhoneCode] = useState("");
+
+  // Clear code details on tab change
+  useEffect(() => {
+    setEmailCode("");
+    setPhoneCode("");
+    setEmailCountdown(0);
+    setPhoneCountdown(0);
+  }, [securityTab]);
+
+  useEffect(() => {
+    let interval: any;
+    if (emailCountdown > 0) {
+      interval = setInterval(() => {
+        setEmailCountdown(prev => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [emailCountdown]);
+
+  useEffect(() => {
+    let interval: any;
+    if (phoneCountdown > 0) {
+      interval = setInterval(() => {
+        setPhoneCountdown(prev => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [phoneCountdown]);
+
+  useEffect(() => {
+    if (!showEditSecurityModal) {
+      setEmailCode("");
+      setPhoneCode("");
+      setEmailCountdown(0);
+      setPhoneCountdown(0);
+      setSecurityForm({ ...accountSecurity });
+      setSecurityTab("phone");
+    }
+  }, [showEditSecurityModal, accountSecurity]);
 
   // Synchronize search params and highlights (History navbar action)
   const handleHistoryRedirect = () => {
@@ -152,7 +198,28 @@ export default function CareerDashboard() {
 
   const handleSaveSecurity = (e: React.FormEvent) => {
     e.preventDefault();
-    setAccountSecurity({ ...securityForm });
+    if (securityTab === "email") {
+      if (!emailCode) {
+        auth.triggerToast("请输入邮箱验证码！");
+        return;
+      }
+      setAccountSecurity(prev => ({
+        ...prev,
+        email: securityForm.email,
+        password: securityForm.password
+      }));
+    } else {
+      if (!phoneCode) {
+        auth.triggerToast("请输入短信验证码！");
+        return;
+      }
+      setAccountSecurity(prev => ({
+        ...prev,
+        phone: securityForm.phone,
+        password: securityForm.password
+      }));
+    }
+    auth.triggerToast("修改成功！");
     setShowEditSecurityModal(false);
   };
 
@@ -722,9 +789,9 @@ export default function CareerDashboard() {
 
             <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-6">
               {/* Security info items block */}
-              <div className="flex flex-wrap items-center gap-x-6 gap-y-4 flex-1">
+              <div className="flex flex-col sm:flex-row gap-3.5 flex-1 w-full max-w-2xl">
                 
-                <div className="flex items-center gap-3.5 px-4.5 py-3.5 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-[200px]">
+                <div className="flex items-center gap-3.5 px-4.5 py-3.5 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-0">
                   <span className="material-symbols-outlined text-primary text-xl opacity-60 shrink-0">mail</span>
                   <div className="text-left min-w-0 flex-1">
                     <span className="text-xs md:text-sm text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">邮箱</span>
@@ -732,7 +799,7 @@ export default function CareerDashboard() {
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3.5 px-4.5 py-3.5 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-[200px]">
+                <div className="flex items-center gap-3.5 px-4.5 py-3.5 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-0">
                   <span className="material-symbols-outlined text-primary text-xl opacity-60 shrink-0">phone_iphone</span>
                   <div className="text-left min-w-0 flex-1">
                     <span className="text-xs md:text-sm text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">手机号</span>
@@ -1152,27 +1219,110 @@ export default function CareerDashboard() {
               </div>
 
               <form onSubmit={handleSaveSecurity} className="space-y-4 text-sm font-semibold text-white">
-                <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">邮箱绑定</label>
-                  <input
-                    type="email"
-                    required
-                    value={securityForm.email}
-                    onChange={(e) => setSecurityForm({ ...securityForm, email: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
-                  />
+                
+                {/* Tab switchers matching Forgot Password style (Phone first, Email second) */}
+                <div className="flex bg-[#050B1A] p-1.5 rounded-xl border border-white/5 font-bold text-sm select-none">
+                  <button
+                    type="button"
+                    onClick={() => setSecurityTab("phone")}
+                    className={`flex-1 py-2.5 rounded-lg text-center transition-all cursor-pointer ${
+                      securityTab === "phone" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
+                    }`}
+                  >
+                    手机修改
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSecurityTab("email")}
+                    className={`flex-1 py-2.5 rounded-lg text-center transition-all cursor-pointer ${
+                      securityTab === "email" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
+                    }`}
+                  >
+                    邮箱修改
+                  </button>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">绑定手机号</label>
-                  <input
-                    type="text"
-                    required
-                    value={securityForm.phone}
-                    onChange={(e) => setSecurityForm({ ...securityForm, phone: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
-                  />
-                </div>
+                {securityTab === "email" ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <label className="text-on-surface-variant/60 font-bold block">邮箱地址 <span className="text-[#FF7A95]">*</span></label>
+                      <input
+                        type="email"
+                        required
+                        value={securityForm.email}
+                        onChange={(e) => setSecurityForm({ ...securityForm, email: e.target.value })}
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-[#AFA7FF]/40 text-sm text-white placeholder-white/20"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5 animate-fade-in">
+                      <label className="text-on-surface-variant/60 font-bold block">验证码 <span className="text-[#FF7A95]">*</span></label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          required
+                          maxLength={6}
+                          placeholder="输入 6 位验证码"
+                          value={emailCode}
+                          onChange={(e) => setEmailCode(e.target.value)}
+                          className="flex-1 py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold"
+                        />
+                        <button
+                          type="button"
+                          disabled={emailCountdown > 0}
+                          onClick={() => {
+                            if (!securityForm.email) return;
+                            setEmailCountdown(60);
+                            auth.triggerToast("验证码已发送，请查收！");
+                          }}
+                          className="px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer"
+                        >
+                          {emailCountdown > 0 ? `${emailCountdown}s` : "获取验证码"}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-1.5">
+                      <label className="text-on-surface-variant/60 font-bold block">手机号码 <span className="text-[#FF7A95]">*</span></label>
+                      <input
+                        type="text"
+                        required
+                        value={securityForm.phone}
+                        onChange={(e) => setSecurityForm({ ...securityForm, phone: e.target.value })}
+                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-[#AFA7FF]/40 text-sm text-white placeholder-white/20"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5 animate-fade-in">
+                      <label className="text-on-surface-variant/60 font-bold block">验证码 <span className="text-[#FF7A95]">*</span></label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          required
+                          maxLength={6}
+                          placeholder="输入 6 位验证码"
+                          value={phoneCode}
+                          onChange={(e) => setPhoneCode(e.target.value)}
+                          className="flex-1 py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold"
+                        />
+                        <button
+                          type="button"
+                          disabled={phoneCountdown > 0}
+                          onClick={() => {
+                            if (!securityForm.phone) return;
+                            setPhoneCountdown(60);
+                            auth.triggerToast("验证码已发送，请查收！");
+                          }}
+                          className="px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer"
+                        >
+                          {phoneCountdown > 0 ? `${phoneCountdown}s` : "获取验证码"}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
 
                 <div className="space-y-1.5">
                   <label className="text-on-surface-variant/60 font-bold block">修改密码 (选填)</label>
@@ -1181,7 +1331,7 @@ export default function CareerDashboard() {
                     placeholder="请输入新密码，不修改请留空"
                     value={securityForm.password || ""}
                     onChange={(e) => setSecurityForm({ ...securityForm, password: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white placeholder-white/20"
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-[#AFA7FF]/40 text-sm text-white placeholder-white/20"
                   />
                 </div>
 
