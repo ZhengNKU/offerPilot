@@ -1,0 +1,27 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+class Settings(BaseSettings):
+    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/offerpilot"
+    REDIS_URL: str = "redis://localhost:6379/0"
+    
+    JWT_SECRET: str = "super-secret-key-change-me"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    
+    TENCENT_SECRET_ID: str = ""
+    TENCENT_SECRET_KEY: str = ""
+    TENCENT_SMS_APP_ID: str = ""
+    TENCENT_SMS_SIGN_NAME: str = ""
+    TENCENT_SMS_TEMPLATE_ID: str = ""
+    
+    # SMTP Email configuration
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 465
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_SENDER: str = ""
+    SMTP_USE_SSL: bool = True
+    
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+settings = Settings()

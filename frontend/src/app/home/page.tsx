@@ -196,31 +196,116 @@ export default function CareerDashboard() {
     setShowEditGoalModal(false);
   };
 
-  const handleSaveSecurity = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (securityTab === "email") {
-      if (!emailCode) {
-        auth.triggerToast("请输入邮箱验证码！");
+  const handleGetSecurityEmailCode = async () => {
+    if (!securityForm.email) {
+      auth.triggerToast("请输入邮箱地址！");
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(securityForm.email)) {
+      auth.triggerToast("请输入正确的邮箱地址格式！");
+      return;
+    }
+    try {
+      const res = await fetch("http://localhost:8000/api/auth/send-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "email", target: securityForm.email })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        auth.triggerToast(errData.detail || "发送验证码失败！");
         return;
       }
+      setEmailCountdown(60);
+      auth.triggerToast("验证码已发送，请查收！");
+    } catch (e) {
+      auth.triggerToast("无法连接到后端服务！");
+    }
+  };
+
+  const handleGetSecurityPhoneCode = async () => {
+    if (!securityForm.phone) {
+      auth.triggerToast("请输入手机号码！");
+      return;
+    }
+    const phoneRegex = /^1[3-9]\d{9}$/;
+    if (!phoneRegex.test(securityForm.phone)) {
+      auth.triggerToast("请输入正确的手机号格式！");
+      return;
+    }
+    try {
+      const res = await fetch("http://localhost:8000/api/auth/send-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "phone", target: securityForm.phone })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        auth.triggerToast(errData.detail || "发送验证码失败！");
+        return;
+      }
+      setPhoneCountdown(60);
+      auth.triggerToast("验证码已发送，请查收！");
+    } catch (e) {
+      auth.triggerToast("无法连接到后端服务！");
+    }
+  };
+
+  const handleSaveSecurity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = localStorage.getItem("offerPilot_token");
+    if (!token) {
+      auth.triggerToast("未登录或会话已过期，请重新登录！");
+      return;
+    }
+
+    const isEmail = securityTab === "email";
+    const value = isEmail ? securityForm.email : securityForm.phone;
+    const verify_code = isEmail ? emailCode : phoneCode;
+
+    if (!value) {
+      auth.triggerToast(isEmail ? "请输入邮箱地址！" : "请输入手机号码！");
+      return;
+    }
+    if (!verify_code) {
+      auth.triggerToast("请输入验证码！");
+      return;
+    }
+
+    try {
+      const res = await fetch("http://localhost:8000/api/auth/security/update", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          update_type: securityTab,
+          value: value,
+          verify_code: verify_code,
+          new_password: securityForm.password || null
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        auth.triggerToast(errData.detail || "安全信息修改失败，请核对输入！");
+        return;
+      }
+
       setAccountSecurity(prev => ({
         ...prev,
         email: securityForm.email,
-        password: securityForm.password
-      }));
-    } else {
-      if (!phoneCode) {
-        auth.triggerToast("请输入短信验证码！");
-        return;
-      }
-      setAccountSecurity(prev => ({
-        ...prev,
         phone: securityForm.phone,
-        password: securityForm.password
+        password: ""
       }));
+
+      auth.triggerToast("修改成功！");
+      setShowEditSecurityModal(false);
+    } catch (err) {
+      auth.triggerToast("无法连接到后端服务！");
     }
-    auth.triggerToast("修改成功！");
-    setShowEditSecurityModal(false);
   };
 
   return (
@@ -839,7 +924,7 @@ export default function CareerDashboard() {
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2024 OfferPilot AI. All rights reserved.
+            © 2026 OfferPilot AI. All rights reserved.
           </span>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
             <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">
@@ -1270,11 +1355,7 @@ export default function CareerDashboard() {
                         <button
                           type="button"
                           disabled={emailCountdown > 0}
-                          onClick={() => {
-                            if (!securityForm.email) return;
-                            setEmailCountdown(60);
-                            auth.triggerToast("验证码已发送，请查收！");
-                          }}
+                          onClick={handleGetSecurityEmailCode}
                           className="px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer"
                         >
                           {emailCountdown > 0 ? `${emailCountdown}s` : "获取验证码"}
@@ -1310,11 +1391,7 @@ export default function CareerDashboard() {
                         <button
                           type="button"
                           disabled={phoneCountdown > 0}
-                          onClick={() => {
-                            if (!securityForm.phone) return;
-                            setPhoneCountdown(60);
-                            auth.triggerToast("验证码已发送，请查收！");
-                          }}
+                          onClick={handleGetSecurityPhoneCode}
                           className="px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer"
                         >
                           {phoneCountdown > 0 ? `${phoneCountdown}s` : "获取验证码"}

@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0.0
+asyncpg
+redis
+pyjwt
+bcrypt
+tencentcloud-sdk-python
+pydantic>=2.0.0
+pydantic-settings
+python-dotenv
+python-multipart

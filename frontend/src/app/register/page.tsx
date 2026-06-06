@@ -90,7 +90,9 @@ export default function RegisterPage() {
   const [regMethod, setRegMethod] = useState<"phone" | "email">("phone");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
-  const [verifyCode, setVerifyCode] = useState("");
+  const [phoneVerifyCode, setPhoneVerifyCode] = useState("");
+  const [emailVerifyCode, setEmailVerifyCode] = useState("");
+  const [isSendingCode, setIsSendingCode] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -119,38 +121,55 @@ export default function RegisterPage() {
     return () => clearTimeout(t);
   }, [emailTimer]);
 
-  const handleSendCode = () => {
-    if (regMethod === "phone") {
-      if (!phone) {
-        setErrors(prev => ({ ...prev, phone: true }));
-        auth.triggerToast("请输入手机号！");
-        return;
-      }
+  const handleSendCode = async () => {
+    const isPhone = regMethod === "phone";
+    const target = isPhone ? phone : email;
+    if (!target) {
+      if (isPhone) setErrors(prev => ({ ...prev, phone: true }));
+      else setErrors(prev => ({ ...prev, email: true }));
+      auth.triggerToast(isPhone ? "请输入手机号！" : "请输入邮箱地址！");
+      return;
+    }
+
+    if (isPhone) {
       const phoneRegex = /^1[3-9]\d{9}$/;
-      if (!phoneRegex.test(phone)) {
+      if (!phoneRegex.test(target)) {
         setErrors(prev => ({ ...prev, phone: true }));
         auth.triggerToast("请输入正确的手机号格式！");
         return;
       }
-      setPhoneTimer(60);
     } else {
-      if (!email) {
-        setErrors(prev => ({ ...prev, email: true }));
-        auth.triggerToast("请输入邮箱地址！");
-        return;
-      }
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
+      if (!emailRegex.test(target)) {
         setErrors(prev => ({ ...prev, email: true }));
         auth.triggerToast("请输入正确的邮箱地址格式！");
         return;
       }
-      setEmailTimer(60);
     }
-    auth.triggerToast("验证码已发送，请查收！");
+
+    setIsSendingCode(true);
+    try {
+      const res = await fetch("http://localhost:8000/api/auth/send-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        auth.triggerToast(errData.detail || "发送验证码失败！");
+        return;
+      }
+      if (isPhone) setPhoneTimer(60);
+      else setEmailTimer(60);
+      auth.triggerToast("验证码已发送，请查收！");
+    } catch (err) {
+      auth.triggerToast("无法连接到后端服务！");
+    } finally {
+      setIsSendingCode(false);
+    }
   };
 
-  const handleNextToStep2 = () => {
+  const handleNextToStep2 = async () => {
     const newErrors: Record<string, boolean> = {};
     if (regMethod === "phone") {
       if (!phone) {
@@ -178,8 +197,14 @@ export default function RegisterPage() {
         }
       }
     }
-    if (!verifyCode) {
-      newErrors.verifyCode = true;
+    if (regMethod === "phone") {
+      if (!phoneVerifyCode) {
+        newErrors.phoneVerifyCode = true;
+      }
+    } else {
+      if (!emailVerifyCode) {
+        newErrors.emailVerifyCode = true;
+      }
     }
     if (!username) {
       newErrors.username = true;
@@ -219,7 +244,31 @@ export default function RegisterPage() {
       }
       return;
     }
-    setStep(2);
+
+    try {
+      const res = await fetch("http://localhost:8000/api/auth/register/step1", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reg_method: regMethod,
+          phone: regMethod === "phone" ? phone : null,
+          email: regMethod === "email" ? email : null,
+          verify_code: regMethod === "phone" ? phoneVerifyCode : emailVerifyCode,
+          username,
+          password
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        auth.triggerToast(errData.detail || "注册信息验证失败！");
+        return;
+      }
+
+      setStep(2);
+    } catch (err) {
+      auth.triggerToast("无法连接到后端服务！");
+    }
   };
 
   // -------------------------------------------------------------
@@ -361,8 +410,20 @@ export default function RegisterPage() {
     if (canvas) {
       const ctx = canvas.getContext("2d");
       const img = new Image();
-      img.src = avatarSrc;
       
+      let didSubmit = false;
+      let timeoutId: NodeJS.Timeout | null = null;
+      
+      const doSubmit = (avatar: string) => {
+        if (didSubmit) return;
+        didSubmit = true;
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+          timeoutId = null;
+        }
+        saveUserData(avatar);
+      };
+
       img.onload = () => {
         if (ctx) {
           ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -373,13 +434,10 @@ export default function RegisterPage() {
           ctx.clip();
 
           // Calculate drawing dimensions based on scale & translation offsets
-          // Circle display box in Step 2 is 128px (w-32 h-32).
-          // Scale factor applies on top of this.
           const size = 400;
           const drawWidth = size * scale;
           const drawHeight = size * scale;
           
-          // Translation offsets are from w-32 display. Canvas scale ratio is 400 / 128 = 3.125
           const ratio = 3.125;
           const drawX = (200 - drawWidth / 2) + offsetX * ratio;
           const drawY = (200 - drawHeight / 2) + offsetY * ratio;
@@ -388,45 +446,81 @@ export default function RegisterPage() {
           
           try {
             finalAvatar = canvas.toDataURL("image/jpeg", 0.9);
-            saveUserData(finalAvatar);
+            doSubmit(finalAvatar);
           } catch (e) {
-            saveUserData(avatarSrc);
+            doSubmit(avatarSrc);
           }
+        } else {
+          doSubmit(finalAvatar);
         }
       };
       
       // Fallback in case onload is blocked / doesn't trigger
-      setTimeout(() => {
-        saveUserData(finalAvatar);
-      }, 100);
+      timeoutId = setTimeout(() => {
+        doSubmit(finalAvatar);
+      }, 200);
+
+      img.src = avatarSrc;
     } else {
       saveUserData(finalAvatar);
     }
   };
 
-  const saveUserData = (avatarDataUrl: string) => {
-    const formattedProfile = {
-      name: username || "求职者",
-      avatar: avatarDataUrl,
-      role: `${roleName || "后端工程师"} · ${targetGrade || "高级"}`,
-      company: companyName || "暂无公司",
-      years: `${expYears}${expMonths}`,
-      status: jobStatus === "active" ? "在职" : jobStatus === "resigned" ? "离职" : "在校生",
-      salary: `${salaryMin}K - ${salaryMax}K`,
-      targetCompany: targetCompany || "大厂公司 (目标)",
-      targetRole: targetRole || "高级工程师",
-      targetGrade: targetGrade || "P7 / L7",
-      targetSalary: `${targetSalaryMin}K - ${targetSalaryMax}K`,
-      gender: gender,
-      age: age,
-      school: school,
-      degree: degree,
-      gradYear: gradYear,
-      hasExp: hasExp
+  const saveUserData = async (avatarDataUrl: string) => {
+    const payload = {
+      account: {
+        reg_method: regMethod,
+        phone: regMethod === "phone" ? phone : null,
+        email: regMethod === "email" ? email : null,
+        verify_code: regMethod === "phone" ? phoneVerifyCode : emailVerifyCode,
+        username,
+        password
+      },
+      profile: {
+        gender,
+        age: parseInt(age) || 0,
+        job_status: jobStatus,
+        avatar_url: avatarDataUrl,
+        experience_years: expYears,
+        experience_months: expMonths,
+        company_name: companyName,
+        role_name: roleName,
+        salary_min: salaryMin,
+        salary_max: salaryMax,
+        school,
+        degree,
+        has_experience: hasExp
+      },
+      expectations: {
+        target_cities: targetCities,
+        target_company: targetCompany,
+        target_role: targetRole,
+        target_grade: targetGrade,
+        target_salary_min: targetSalaryMin,
+        target_salary_max: targetSalaryMax
+      }
     };
 
-    auth.login(formattedProfile);
-    router.push("/debugger");
+    try {
+      const response = await fetch("http://localhost:8000/api/auth/register/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        auth.triggerToast(errData.detail || "注册提交失败，请重试！");
+        return;
+      }
+
+      const data = await response.json();
+      localStorage.setItem("offerPilot_token", data.access_token);
+      auth.login(data.user);
+      router.push("/debugger");
+    } catch (err) {
+      auth.triggerToast("无法连接到后端服务！");
+    }
   };
 
   return (
@@ -606,87 +700,145 @@ export default function RegisterPage() {
 
                           {/* Fields */}
                           {regMethod === "phone" ? (
-                            <div>
-                              <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
-                                手机号 <span className="text-[#FF7A95] ml-0.5">*</span>
-                              </label>
-                              <div className="flex gap-2">
-                                <select className="py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm font-semibold shrink-0">
-                                  <option>+86</option>
-                                  <option>+852</option>
-                                  <option>+1</option>
-                                </select>
+                            <div className="space-y-4">
+                              <div>
+                                <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
+                                  手机号 <span className="text-[#FF7A95] ml-0.5">*</span>
+                                </label>
+                                <div className="flex gap-2">
+                                  <select className="py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm font-semibold shrink-0">
+                                    <option>+86</option>
+                                    <option>+852</option>
+                                    <option>+1</option>
+                                  </select>
+                                  <input
+                                    type="tel"
+                                    placeholder="请输入手机号"
+                                    value={phone}
+                                    onChange={(e) => {
+                                      setPhone(e.target.value);
+                                      if (errors.phone) setErrors(prev => ({ ...prev, phone: false }));
+                                    }}
+                                    className={`flex-1 py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
+                                      errors.phone 
+                                        ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
+                                        : "border-white/10 focus:border-[#AFA7FF]/40"
+                                    }`}
+                                  />
+                                </div>
+                              </div>
+
+                              {/* Verification Code for Phone */}
+                              <div>
+                                <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
+                                  验证码 <span className="text-[#FF7A95] ml-0.5">*</span>
+                                </label>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    placeholder="请输入验证码"
+                                    value={phoneVerifyCode}
+                                    onChange={(e) => {
+                                      setPhoneVerifyCode(e.target.value);
+                                      if (errors.phoneVerifyCode) setErrors(prev => ({ ...prev, phoneVerifyCode: false }));
+                                    }}
+                                    className={`flex-1 py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
+                                      errors.phoneVerifyCode 
+                                        ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
+                                        : "border-white/10 focus:border-[#AFA7FF]/40"
+                                    }`}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={handleSendCode}
+                                    disabled={isSendingCode || phoneTimer > 0}
+                                    className={`px-5 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-xs md:text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer flex items-center justify-center gap-1.5 ${
+                                      (isSendingCode || phoneTimer > 0) ? "opacity-50 cursor-not-allowed" : ""
+                                    }`}
+                                  >
+                                    {isSendingCode ? (
+                                      <>
+                                        <svg className="animate-spin h-4 w-4 text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
+                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                        </svg>
+                                        发送中
+                                      </>
+                                    ) : (
+                                      phoneTimer > 0 ? `${phoneTimer}s 后重发` : "获取验证码"
+                                    )}
+                                  </button>
+                                </div>
+                                <span className="text-[10px] md:text-xs text-white/30 font-bold block mt-1">验证码将发送至您的手机</span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="space-y-4">
+                              <div>
+                                <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
+                                  邮箱地址 <span className="text-[#FF7A95] ml-0.5">*</span>
+                                </label>
                                 <input
-                                  type="tel"
-                                  placeholder="请输入手机号"
-                                  value={phone}
+                                  type="email"
+                                  placeholder="请输入邮箱地址"
+                                  value={email}
                                   onChange={(e) => {
-                                    setPhone(e.target.value);
-                                    if (errors.phone) setErrors(prev => ({ ...prev, phone: false }));
+                                    setEmail(e.target.value);
+                                    if (errors.email) setErrors(prev => ({ ...prev, email: false }));
                                   }}
-                                  className={`flex-1 py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
-                                    errors.phone 
+                                  className={`w-full py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
+                                    errors.email 
                                       ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
                                       : "border-white/10 focus:border-[#AFA7FF]/40"
                                   }`}
                                 />
                               </div>
-                            </div>
-                          ) : (
-                            <div>
-                              <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
-                                邮箱地址 <span className="text-[#FF7A95] ml-0.5">*</span>
-                              </label>
-                              <input
-                                type="email"
-                                placeholder="请输入邮箱地址"
-                                value={email}
-                                onChange={(e) => {
-                                  setEmail(e.target.value);
-                                  if (errors.email) setErrors(prev => ({ ...prev, email: false }));
-                                }}
-                                className={`w-full py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
-                                  errors.email 
-                                    ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
-                                    : "border-white/10 focus:border-[#AFA7FF]/40"
-                                }`}
-                              />
+
+                              {/* Verification Code for Email */}
+                              <div>
+                                <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
+                                  验证码 <span className="text-[#FF7A95] ml-0.5">*</span>
+                                </label>
+                                <div className="flex gap-2">
+                                  <input
+                                    type="text"
+                                    placeholder="请输入验证码"
+                                    value={emailVerifyCode}
+                                    onChange={(e) => {
+                                      setEmailVerifyCode(e.target.value);
+                                      if (errors.emailVerifyCode) setErrors(prev => ({ ...prev, emailVerifyCode: false }));
+                                    }}
+                                    className={`flex-1 py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
+                                      errors.emailVerifyCode 
+                                        ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
+                                        : "border-white/10 focus:border-[#AFA7FF]/40"
+                                    }`}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={handleSendCode}
+                                    disabled={isSendingCode || emailTimer > 0}
+                                    className={`px-5 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-xs md:text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer flex items-center justify-center gap-1.5 ${
+                                      (isSendingCode || emailTimer > 0) ? "opacity-50 cursor-not-allowed" : ""
+                                    }`}
+                                  >
+                                    {isSendingCode ? (
+                                      <>
+                                        <svg className="animate-spin h-4 w-4 text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
+                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                        </svg>
+                                        发送中
+                                      </>
+                                    ) : (
+                                      emailTimer > 0 ? `${emailTimer}s 后重发` : "获取验证码"
+                                    )}
+                                  </button>
+                                </div>
+                                <span className="text-[10px] md:text-xs text-white/30 font-bold block mt-1">验证码将发送至您的邮箱</span>
+                              </div>
                             </div>
                           )}
-
-                          {/* Verification Code */}
-                          <div>
-                            <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
-                              验证码 <span className="text-[#FF7A95] ml-0.5">*</span>
-                            </label>
-                            <div className="flex gap-2">
-                              <input
-                                type="text"
-                                placeholder="请输入验证码"
-                                value={verifyCode}
-                                onChange={(e) => {
-                                  setVerifyCode(e.target.value);
-                                  if (errors.verifyCode) setErrors(prev => ({ ...prev, verifyCode: false }));
-                                }}
-                                className={`flex-1 py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
-                                  errors.verifyCode 
-                                    ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
-                                    : "border-white/10 focus:border-[#AFA7FF]/40"
-                                }`}
-                              />
-                              <button
-                                type="button"
-                                onClick={handleSendCode}
-                                disabled={(regMethod === "phone" ? phoneTimer : emailTimer) > 0}
-                                className={`px-5 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-xs md:text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer ${
-                                  (regMethod === "phone" ? phoneTimer : emailTimer) > 0 ? "opacity-50 cursor-not-allowed" : ""
-                                }`}
-                              >
-                                {(regMethod === "phone" ? phoneTimer : emailTimer) > 0 ? `${regMethod === "phone" ? phoneTimer : emailTimer}s 后重发` : "获取验证码"}
-                              </button>
-                            </div>
-                            <span className="text-[10px] md:text-xs text-white/30 font-bold block mt-1">验证码将发送至您的手机/邮箱</span>
-                          </div>
 
                           {/* Account username & password */}
                           <div className="grid grid-cols-2 gap-4">
@@ -1572,7 +1724,7 @@ export default function RegisterPage() {
 
           <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-left">
             <span className="text-xs md:text-sm text-white/30 font-label-mono font-bold tracking-widest">
-              © 2024 OfferPilot AI. All rights reserved.
+              © 2026 OfferPilot AI. All rights reserved.
             </span>
             <div className="flex gap-8 text-xs md:text-sm text-white/30 font-label-mono font-bold tracking-widest">
               <a onClick={() => router.push("/")} className="hover:text-[#AFA7FF] transition-colors cursor-pointer">

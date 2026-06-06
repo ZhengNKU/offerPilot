@@ -116,7 +116,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new Event("storage"));
   };
 
-  const logout = () => {
+  const logout = async () => {
+    const token = localStorage.getItem("offerPilot_token");
+    if (token) {
+      try {
+        await fetch("http://localhost:8000/api/auth/logout", {
+          method: "POST",
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+      } catch (e) {}
+    }
+    localStorage.removeItem("offerPilot_token");
     setIsLoggedIn(false);
     localStorage.setItem("offerPilot_isLoggedIn", "false");
     setShowLogout(false);
@@ -125,7 +135,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new Event("storage"));
   };
 
-  const deleteAccount = () => {
+  const deleteAccount = async () => {
+    const token = localStorage.getItem("offerPilot_token");
+    if (token) {
+      try {
+        const res = await fetch("http://localhost:8000/api/auth/delete-account", {
+          method: "DELETE",
+          headers: { "Authorization": `Bearer ${token}` }
+        });
+        if (!res.ok) {
+          const errData = await res.json();
+          triggerToast(errData.detail || "注销账号失败！");
+          return;
+        }
+      } catch (e) {
+        triggerToast("无法连接到后端服务！");
+        return;
+      }
+    }
+    localStorage.removeItem("offerPilot_token");
     setIsLoggedIn(false);
     localStorage.setItem("offerPilot_isLoggedIn", "false");
     localStorage.removeItem("offerPilot_user");
@@ -136,11 +164,66 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new Event("storage"));
   };
 
-  const updateUser = (data: Partial<UserProfile>) => {
+  const updateUser = async (data: Partial<UserProfile>) => {
     const newUser = { ...user, ...data };
     setUser(newUser);
     localStorage.setItem("offerPilot_user", JSON.stringify(newUser));
     window.dispatchEvent(new Event("storage"));
+
+    const token = localStorage.getItem("offerPilot_token");
+    if (token) {
+      try {
+        const body: any = {};
+        if (data.name !== undefined) body.username = data.name;
+        if (data.gender !== undefined) body.gender = data.gender;
+        if (data.age !== undefined) body.age = parseInt(data.age) || 0;
+        if (data.status !== undefined) {
+          body.job_status = data.status === "在职" ? "active" : data.status === "离职" ? "resigned" : "student";
+        }
+        if (data.avatar !== undefined) body.avatar_url = data.avatar;
+        
+        if (data.years !== undefined) {
+          const matched = data.years.match(/^(\d+年)?(\d+个月)?/);
+          body.experience_years = matched?.[1] || "在校/应届";
+          body.experience_months = matched?.[2] || "0个月";
+        }
+        if (data.company !== undefined) body.company_name = data.company;
+        if (data.role !== undefined) body.role_name = data.role.split(" · ")[0];
+        
+        if (data.salary !== undefined) {
+          const salMatch = data.salary.match(/(\d+)K\s*-\s*(\d+)K/i);
+          if (salMatch) {
+            body.salary_min = parseInt(salMatch[1]);
+            body.salary_max = parseInt(salMatch[2]);
+          }
+        }
+        if (data.school !== undefined) body.school = data.school;
+        if (data.degree !== undefined) body.degree = data.degree;
+        if (data.hasExp !== undefined) body.has_experience = data.hasExp;
+        
+        if (data.targetCompany !== undefined) body.target_company = data.targetCompany;
+        if (data.targetRole !== undefined) body.target_role = data.targetRole;
+        if (data.targetGrade !== undefined) body.target_grade = data.targetGrade;
+        if (data.targetSalary !== undefined) {
+          const salMatch = data.targetSalary.match(/(\d+)K\s*-\s*(\d+)K/i);
+          if (salMatch) {
+            body.target_salary_min = parseInt(salMatch[1]);
+            body.target_salary_max = parseInt(salMatch[2]);
+          }
+        }
+
+        await fetch("http://localhost:8000/api/auth/profile/update", {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${token}`
+          },
+          body: JSON.stringify(body)
+        });
+      } catch (e) {
+        console.error("Failed to sync profile to backend", e);
+      }
+    }
   };
 
   // Sync state between tabs/windows
@@ -259,7 +342,7 @@ function AuthModals() {
     }
   }, [auth.showLogin, showForgot]);
 
-  const handleGetCode = () => {
+  const handleGetCode = async () => {
     if (!phone) {
       auth.triggerToast("请输入手机号！");
       return;
@@ -269,69 +352,129 @@ function AuthModals() {
       auth.triggerToast("请输入正确的手机号格式！");
       return;
     }
-    setCountdown(60);
-    auth.triggerToast("验证码已发送，请查收！");
-  };
 
-  const handleLoginSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (loginTab === "password") {
-      if (!username || !password) {
-        auth.triggerToast("请输入用户名和密码！");
+    try {
+      const res = await fetch("http://localhost:8000/api/auth/send-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "phone", target: phone })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        auth.triggerToast(errData.detail || "发送验证码失败！");
         return;
       }
-      auth.login({ name: username });
-    } else {
-      if (!phone || !code) {
-        auth.triggerToast("请输入手机号和验证码！");
-        return;
-      }
-      const phoneRegex = /^1[3-9]\d{9}$/;
-      if (!phoneRegex.test(phone)) {
-        auth.triggerToast("请输入正确的手机号格式！");
-        return;
-      }
-      auth.login({ name: phone.replace(/(\d{3})\d{4}(\d{4})/, "$1****$2") });
+      setCountdown(60);
+      auth.triggerToast("验证码已发送，请查收！");
+    } catch (err) {
+      auth.triggerToast("无法连接到后端服务！");
     }
   };
 
-  const handleForgotGetCode = () => {
-    if (forgotTab === "phone") {
-      if (!forgotPhone) {
-        auth.triggerToast("请输入手机号！");
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      let body: any = {};
+      if (loginTab === "password") {
+        if (!username || !password) {
+          auth.triggerToast("请输入用户名和密码！");
+          return;
+        }
+        body = {
+          login_type: "password",
+          account: username,
+          password: password
+        };
+      } else {
+        if (!phone || !code) {
+          auth.triggerToast("请输入手机号和验证码！");
+          return;
+        }
+        const phoneRegex = /^1[3-9]\d{9}$/;
+        if (!phoneRegex.test(phone)) {
+          auth.triggerToast("请输入正确的手机号格式！");
+          return;
+        }
+        body = {
+          login_type: "code",
+          account: phone,
+          verify_code: code
+        };
+      }
+
+      const res = await fetch("http://localhost:8000/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        auth.triggerToast(errData.detail || "登录失败，请检查账号密码/验证码！");
         return;
       }
+
+      const data = await res.json();
+      localStorage.setItem("offerPilot_token", data.access_token);
+      auth.login(data.user);
+    } catch (err) {
+      auth.triggerToast("无法连接到后端服务！");
+    }
+  };
+
+  const handleForgotGetCode = async () => {
+    const isPhone = forgotTab === "phone";
+    const target = isPhone ? forgotPhone : forgotEmail;
+    if (!target) {
+      auth.triggerToast(isPhone ? "请输入手机号！" : "请输入邮箱地址！");
+      return;
+    }
+    if (isPhone) {
       const phoneRegex = /^1[3-9]\d{9}$/;
-      if (!phoneRegex.test(forgotPhone)) {
+      if (!phoneRegex.test(target)) {
         auth.triggerToast("请输入正确的手机号格式！");
         return;
       }
     } else {
-      if (!forgotEmail) {
-        auth.triggerToast("请输入邮箱地址！");
-        return;
-      }
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(forgotEmail)) {
+      if (!emailRegex.test(target)) {
         auth.triggerToast("请输入正确的邮箱地址格式！");
         return;
       }
     }
-    setForgotCountdown(60);
-    auth.triggerToast("验证码已发送，请查收！");
+
+    try {
+      const res = await fetch("http://localhost:8000/api/auth/send-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        auth.triggerToast(errData.detail || "发送验证码失败！");
+        return;
+      }
+      setForgotCountdown(60);
+      auth.triggerToast("验证码已发送，请查收！");
+    } catch (err) {
+      auth.triggerToast("无法连接到后端服务！");
+    }
   };
 
-  const handleForgotSubmit = (e: React.FormEvent) => {
+  const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (forgotTab === "phone") {
+    const isPhone = forgotTab === "phone";
+    const target = isPhone ? forgotPhone : forgotEmail;
+
+    if (isPhone) {
       const phoneRegex = /^1[3-9]\d{9}$/;
-      if (!phoneRegex.test(forgotPhone)) {
+      if (!phoneRegex.test(target)) {
         auth.triggerToast("请输入正确的手机号格式！");
         return;
       }
     } else {
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(forgotEmail)) {
+      if (!emailRegex.test(target)) {
         auth.triggerToast("请输入正确的邮箱地址格式！");
         return;
       }
@@ -355,14 +498,35 @@ function AuthModals() {
       return;
     }
 
-    auth.triggerToast("密码重置成功，请使用新密码登录！");
-    setShowForgot(false);
-    setForgotPhone("");
-    setForgotEmail("");
-    setForgotCode("");
-    setForgotPassword("");
-    setForgotConfirmPassword("");
-    setForgotCountdown(0);
+    try {
+      const res = await fetch("http://localhost:8000/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: forgotTab,
+          target,
+          verify_code: forgotCode,
+          new_password: forgotPassword
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        auth.triggerToast(errData.detail || "密码重置失败，请检查验证码！");
+        return;
+      }
+
+      auth.triggerToast("密码重置成功，请使用新密码登录！");
+      setShowForgot(false);
+      setForgotPhone("");
+      setForgotEmail("");
+      setForgotCode("");
+      setForgotPassword("");
+      setForgotConfirmPassword("");
+      setForgotCountdown(0);
+    } catch (err) {
+      auth.triggerToast("无法连接到后端服务！");
+    }
   };
 
   return (

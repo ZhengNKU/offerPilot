@@ -221,7 +221,7 @@ export default function Home() {
                   登录
                 </button>
                 <button
-                  onClick={() => router.push("/register")}
+                  onClick={() => router.push("/debugger")}
                   className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-90 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] hover:shadow-[0_0_30px_rgba(192,193,255,0.5)] cursor-pointer"
                 >
                   免费开始
@@ -690,7 +690,10 @@ export default function Home() {
                   标准转写服务
                 </li>
               </ul>
-              <button className="w-full py-4 rounded-xl border border-white/10 text-on-surface font-bold hover:bg-white/5 active:scale-95 transition-all cursor-pointer">
+              <button
+                onClick={() => router.push("/debugger")}
+                className="w-full py-4 rounded-xl border border-white/10 text-on-surface font-bold hover:bg-white/5 active:scale-95 transition-all cursor-pointer"
+              >
                 免费开始
               </button>
             </div>
@@ -864,7 +867,7 @@ export default function Home() {
         </div>
         
         <div className="px-gutter py-8 border-t border-white/5 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">© 2024 OfferPilot AI. All rights reserved.</p>
+          <p className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">© 2026 OfferPilot AI. All rights reserved.</p>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
             <a className="hover:text-primary transition-colors" href="#">隐私政策</a>
             <a className="hover:text-primary transition-colors" href="#">服务条款</a>
