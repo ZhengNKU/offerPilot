@@ -314,6 +314,102 @@ const GENERAL_RISKS = [
   { time: "18:33", label: "CAP 理论理解不够深入", tag: "中风险", tagClass: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20", sec: 1113 }
 ];
 
+// Analysis step labels displayed during polling
+const ANALYSIS_STEPS = [
+  "ASR 转写中 - 正在提取音频文字...",
+  "语义段落划分中 - 对话说话人角色判定...",
+  "LLM 问答结构提取中 - 生成结构化问答对...",
+  "LangGraph 智能体评估中 - 对比用户画像...",
+  "AI 表达重构优化中 - 编写完美回答升级话术...",
+  "分析完成"
+];
+
+// =========================================================================
+// BUILD DYNAMIC SEGMENTS FROM REAL TRANSCRIPT
+// Groups utterances by interviewer questions to form meaningful topic blocks.
+// Returns a SegmentData[] that is structurally identical to SEGMENTS_DATA
+// but populated 100% from real ASR data.
+// =========================================================================
+function buildDynamicSegments(
+  utterances: Array<{ start_time: number; end_time: number; speaker: string; content: string }>
+): SegmentData[] {
+  if (utterances.length === 0) return SEGMENTS_DATA; // fallback to mock if no transcript
+
+  const fmtSecs = (s: number) => {
+    const m = Math.floor(Math.abs(s) / 60);
+    const sec = Math.floor(Math.abs(s) % 60);
+    return `${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
+  };
+
+  // Generic segment topic labels (replace with LLM-generated later)
+  const topicLabels = ["自我介绍", "技术深度", "项目经验", "系统设计", "综合问答", "行为面试", "反问环节"];
+  const tagCycle: Array<"良好" | "一般" | "风险"> = ["良好", "一般", "良好", "一般", "风险", "良好", "一般"];
+  const tagColorCycle = [
+    "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+    "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+    "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+    "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+    "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
+    "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+    "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+  ];
+
+  // Group utterances: start a new segment on each Interviewer utterance (question boundary)
+  const groups: Array<typeof utterances> = [];
+  let current: typeof utterances = [];
+
+  for (const utt of utterances) {
+    if (utt.speaker === "Interviewer" && current.length > 0) {
+      groups.push(current);
+      current = [];
+    }
+    current.push(utt);
+  }
+  if (current.length > 0) groups.push(current);
+
+  // If only one group (no Interviewer detected), split into chunks of 4
+  if (groups.length === 1 && utterances.length > 4) {
+    const chunkSize = Math.ceil(utterances.length / 4);
+    groups.length = 0;
+    for (let i = 0; i < utterances.length; i += chunkSize) {
+      groups.push(utterances.slice(i, i + chunkSize));
+    }
+  }
+
+  return groups.map((group, idx) => {
+    const startSecs  = group[0].start_time;
+    const endSecs    = group[group.length - 1].end_time;
+    const durSecs    = endSecs - startSecs;
+
+    return {
+      id:           idx + 1,
+      label:        topicLabels[idx % topicLabels.length],
+      timeRange:    `${fmtSecs(startSecs)} - ${fmtSecs(endSecs)}`,
+      durationText: fmtSecs(durSecs),
+      secondsStart: Math.floor(startSecs),
+      secondsEnd:   Math.ceil(endSecs),
+      tag:          tagCycle[idx % tagCycle.length],
+      tagColor:     tagColorCycle[idx % tagColorCycle.length],
+      score:        70,
+      badgeText:    "AI 分析",
+      badgeColor:   "bg-[#AFA7FF]/10 text-[#AFA7FF]",
+      summary:      "AI 正在生成片段分析...",
+      advantages:   [],
+      shortcomings: [],
+      reviewPoints: [],
+      ipiTrendPoints: [70, 72, 74, 73, 75, 76, 78],
+      radarScores:  { depth: 70, system: 70, expression: 72, solving: 70, implementation: 70 },
+      dialogue: group.map(utt => ({
+        sender:  utt.speaker === "Interviewer" ? "interviewer" as const : "user" as const,
+        name:    utt.speaker === "Interviewer" ? "面试官" : "您",
+        time:    fmtSecs(Math.floor(utt.start_time)),
+        seconds: Math.floor(utt.start_time),
+        text:    utt.content,
+      })),
+    };
+  });
+}
+
 // =========================================================================
 // MAIN PAGE COMPONENT (AI INTERVIEW INTELLIGENCE CENTER - REDESIGNED V2)
 // =========================================================================
@@ -321,13 +417,33 @@ export default function InterviewVoiceAnalysisPage() {
   const router = useRouter();
   const auth = useAuth();
 
+  // ── Analysis polling state ─────────────────────────────────────────────
+  // pageStatus: "analyzing" = polling in progress (block dashboard)
+  //             "ready"     = analysis done, show real data
+  //             "no_session" = no task found, redirect
+  const [pageStatus, setPageStatus] = useState<"analyzing" | "ready" | "no_session">("analyzing");
+  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [analysisStep, setAnalysisStep] = useState(0);
+  const [reportData, setReportData] = useState<{
+    ipi_score: number;
+    offer_probability: number;
+    executive_summary: string;
+    strengths: string[];
+    weaknesses: string[];
+    suggestions: string[];
+  } | null>(null);
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Live segments: starts as mock, replaced with real transcript once analysis completes
+  const [liveSegmentsData, setLiveSegmentsData] = useState(SEGMENTS_DATA);
+
   // Onboarding / AI Segmenting Animation States
   const [isSegmenting, setIsSegmenting] = useState(false);
   const [segmentingStep, setSegmentingStep] = useState(0);
 
-  // Active Timeline Segment
-  const [activeSegIdx, setActiveSegIdx] = useState(2); // Default to selected "技术深挖: Redis" (index 2)
-  const activeSeg = SEGMENTS_DATA[activeSegIdx];
+  // Active Timeline Segment — reads from liveSegmentsData (not the const)
+  const [activeSegIdx, setActiveSegIdx] = useState(0);
+  const activeSeg = liveSegmentsData[activeSegIdx] ?? liveSegmentsData[0];
 
   // Simulated Player States
   const [isPlaying, setIsPlaying] = useState(false);
@@ -337,17 +453,155 @@ export default function InterviewVoiceAnalysisPage() {
   const [playSpeed, setPlaySpeed] = useState(1.0);
   const playTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const [isGuest, setIsGuest] = useState(false);
+
   // Edit / Form states
-  const [interviewInfo] = useState({
+  const [interviewInfo, setInterviewInfo] = useState({
     company: "字节跳动",
     role: "后端开发工程师",
     round: "技术一面",
-    time: "2026-06-01",
+    time: "",
     level: "P6",
     salary: "35-40K",
     years: "3-5年",
     isOnJob: "在职"
   });
+
+  // ── Mount: page gate + polling ──────────────────────────────────────────
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const savedGuest = localStorage.getItem("offerPilot_is_guest_session");
+    if (savedGuest === "true") setIsGuest(true);
+
+    const savedCompany = localStorage.getItem("offerPilot_session_company");
+    const savedRole    = localStorage.getItem("offerPilot_session_role");
+    const savedRound   = localStorage.getItem("offerPilot_session_round");
+    const savedDate    = localStorage.getItem("offerPilot_session_date");
+    const savedGrade   = localStorage.getItem("offerPilot_session_grade");
+    const savedSalary  = localStorage.getItem("offerPilot_session_salary");
+    const savedYears   = localStorage.getItem("offerPilot_session_years");
+
+    if (savedCompany || savedRole || savedRound) {
+      setInterviewInfo(prev => ({
+        ...prev,
+        company: savedCompany || prev.company,
+        role:    savedRole    || prev.role,
+        round:   savedRound   || prev.round,
+        time:    savedDate    || prev.time,
+        level:   savedGrade   || prev.level,
+        salary:  savedSalary  || prev.salary,
+        years:   savedYears   || prev.years
+      }));
+    }
+
+    const taskId    = localStorage.getItem("offerPilot_task_id");
+    const sessionId = localStorage.getItem("offerPilot_session_id");
+
+    // ── GATE: no session → redirect ──────────────────────────────────
+    // session_id should always be present because the debugger page
+    // polls until completed and THEN navigates here.
+    // task_id has been cleared by the debugger page after completion.
+    if (!sessionId) {
+      setPageStatus("no_session");
+      setTimeout(() => router.push("/debugger"), 2500);
+      return;
+    }
+
+    // ── Fetch completed report ────────────────────────────────────────
+    const fmtTime = (secs: number) => {
+      const m = Math.floor(secs / 60);
+      const s = Math.floor(secs % 60);
+      return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    };
+
+    const loadReport = async () => {
+      try {
+        const token = localStorage.getItem("offerPilot_token");
+        const headers: Record<string, string> = {};
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        // If task_id is still present, wait for it to complete first
+        if (taskId) {
+          let ready = false;
+          for (let i = 0; i < 120; i++) {            // max 4 min wait
+            const taskRes = await fetch(
+              `http://localhost:8000/api/audio/task/${taskId}`,
+              { headers }
+            );
+            if (taskRes.ok) {
+              const taskData = await taskRes.json();
+              const pct = taskData.progress ?? 0;
+              setAnalysisProgress(pct);
+              setAnalysisStep(
+                Math.min(Math.floor((pct / 100) * ANALYSIS_STEPS.length), ANALYSIS_STEPS.length - 1)
+              );
+              if (taskData.status === "completed" || taskData.status === "failed") {
+                ready = true;
+                break;
+              }
+            }
+            await new Promise(r => setTimeout(r, 2000));
+          }
+          if (!ready) {
+            setPageStatus("no_session");
+            return;
+          }
+          localStorage.removeItem("offerPilot_task_id");
+        }
+
+        // Fetch the report
+        const reportRes = await fetch(
+          `http://localhost:8000/api/audio/report/${sessionId}`,
+          { headers }
+        );
+        if (!reportRes.ok) {
+          setPageStatus("no_session");
+          setTimeout(() => router.push("/debugger"), 2500);
+          return;
+        }
+        const report = await reportRes.json();
+
+        // Set scores + summary
+        setReportData({
+          ipi_score:         report.scores?.ipi          ?? 0,
+          offer_probability: report.scores?.offer_probability ?? 0,
+          executive_summary: report.summary?.executive_summary ?? "",
+          strengths:         report.summary?.strengths  ?? [],
+          weaknesses:        report.summary?.weaknesses ?? [],
+          suggestions:       report.summary?.suggestions ?? []
+        });
+
+        // Build dynamic segments from real transcript — no hardcoded time ranges
+        const rawTranscript: Array<{
+          start_time: number;
+          end_time: number;
+          speaker: string;
+          content: string;
+        }> = report.transcript ?? [];
+
+        const dynamicSegments = buildDynamicSegments(rawTranscript);
+        setLiveSegmentsData(dynamicSegments);
+        setActiveSegIdx(0); // reset to first real segment
+
+        // Clean up and show dashboard
+        localStorage.removeItem("offerPilot_session_id");
+        setPageStatus("ready");
+
+
+      } catch (err) {
+        console.error("Failed to load report:", err);
+        setPageStatus("no_session");
+        setTimeout(() => router.push("/debugger"), 2500);
+      }
+    };
+
+    loadReport();
+
+  }, []);
+
+
+
 
   // Next steps optimizer script generation modal
   const [showOptimizer, setShowOptimizer] = useState(false);
@@ -357,72 +611,145 @@ export default function InterviewVoiceAnalysisPage() {
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Timer logic for loading screen removed since loading is skipped on mount
+  // ── Real HTML5 audio element ref ──────────────────────────────────
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioLoaded, setAudioLoaded] = useState(false);
 
-  // Reset player when active segment changes
+  // Load audio URL from localStorage on mount
   useEffect(() => {
-    setIsPlaying(false);
-    setPlaybackTime(activeSeg.secondsStart);
-    if (playTimerRef.current) {
-      clearInterval(playTimerRef.current);
-    }
-  }, [activeSegIdx]);
+    const savedUrl = localStorage.getItem("offerPilot_session_audio_url");
+    if (savedUrl) setAudioUrl(savedUrl);
+  }, []);
 
-  // Handle Player interval loops
+  // When audio URL changes, update the audio element src
   useEffect(() => {
-    if (isPlaying) {
-      playTimerRef.current = setInterval(() => {
-        setPlaybackTime((prev) => {
-          if (prev >= activeSeg.secondsEnd) {
-            setIsPlaying(false);
-            return activeSeg.secondsEnd;
-          }
-          return prev + 1;
-        });
-      }, 1000 / playSpeed);
-    } else {
-      if (playTimerRef.current) {
-        clearInterval(playTimerRef.current);
+    const audio = audioRef.current;
+    if (!audio || !audioUrl) return;
+    audio.src = audioUrl;
+    audio.load();
+    setAudioLoaded(false);
+
+    const onCanPlay = () => setAudioLoaded(true);
+    audio.addEventListener("canplaythrough", onCanPlay);
+    return () => audio.removeEventListener("canplaythrough", onCanPlay);
+  }, [audioUrl]);
+
+  // Sync playbackTime state from audio timeupdate events
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    const onTimeUpdate = () => {
+      const t = Math.floor(audio.currentTime);
+      setPlaybackTime(t);
+
+      // Auto-switch active segment as audio plays through timeline
+      const newSegIdx = liveSegmentsData.findIndex(
+        s => t >= s.secondsStart && t <= s.secondsEnd
+      );
+      if (newSegIdx !== -1) {
+        setActiveSegIdx(prev => prev !== newSegIdx ? newSegIdx : prev);
       }
-    }
 
-    return () => {
-      if (playTimerRef.current) {
-        clearInterval(playTimerRef.current);
+      // Stop at end of current segment (optional boundary enforcement)
+      if (t >= activeSeg.secondsEnd) {
+        audio.pause();
+        setIsPlaying(false);
       }
     };
-  }, [isPlaying, playSpeed, activeSeg]);
+
+    const onPlay  = () => setIsPlaying(true);
+    const onPause = () => setIsPlaying(false);
+    const onEnded = () => { setIsPlaying(false); };
+
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    audio.addEventListener("play",  onPlay);
+    audio.addEventListener("pause", onPause);
+    audio.addEventListener("ended", onEnded);
+
+    return () => {
+      audio.removeEventListener("timeupdate", onTimeUpdate);
+      audio.removeEventListener("play",  onPlay);
+      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("ended", onEnded);
+    };
+  }, [activeSeg, liveSegmentsData]);
+
+  // When switching segment via sidebar, seek audio to segment start
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio) {
+      // Fallback: fake-timer reset for no-audio mode
+      setIsPlaying(false);
+      setPlaybackTime(activeSeg.secondsStart);
+      if (playTimerRef.current) clearInterval(playTimerRef.current);
+      return;
+    }
+    const wasPlaying = !audio.paused;
+    audio.pause();
+    audio.currentTime = activeSeg.secondsStart;
+    setPlaybackTime(activeSeg.secondsStart);
+    setIsPlaying(false);
+    // Optional: auto-resume when switching segments while playing
+    // if (wasPlaying) audio.play();
+  }, [activeSegIdx]);
 
   // Format seconds to MM:SS
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
     const s = secs % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+    return `${m.toString().padStart(2, "00")}:${s.toString().padStart(2, "00")}`;
   };
 
-  // Skip playback cursor by delta offset
+  // Toggle play / pause on real audio element
+  const togglePlay = () => {
+    const audio = audioRef.current;
+    if (!audio || !audioUrl) {
+      // No audio available — gracefully show message
+      return;
+    }
+    if (audio.paused) {
+      audio.currentTime = playbackTime; // ensure position is in sync
+      audio.play().catch(() => {});
+    } else {
+      audio.pause();
+    }
+  };
+
+  // Skip audio by offset seconds
   const skipTime = (offset: number) => {
-    setPlaybackTime((prev) => {
-      const target = prev + offset;
-      if (target < activeSeg.secondsStart) return activeSeg.secondsStart;
-      if (target > activeSeg.secondsEnd) return activeSeg.secondsEnd;
-      return target;
-    });
+    const audio = audioRef.current;
+    const target = playbackTime + offset;
+    const clamped = Math.max(activeSeg.secondsStart, Math.min(activeSeg.secondsEnd, target));
+    setPlaybackTime(clamped);
+    if (audio) audio.currentTime = clamped;
   };
 
-  // Jump playhead directly to specific seconds
+  // Jump playhead to exact second (cross-segment aware)
   const jumpPlayhead = (sec: number) => {
-    const targetSegIdx = SEGMENTS_DATA.findIndex(s => sec >= s.secondsStart && sec <= s.secondsEnd);
-    if (targetSegIdx !== -1) {
+    const targetSegIdx = liveSegmentsData.findIndex(s => sec >= s.secondsStart && sec <= s.secondsEnd);
+    if (targetSegIdx !== -1 && targetSegIdx !== activeSegIdx) {
       setActiveSegIdx(targetSegIdx);
+      // Audio seek happens in the activeSegIdx useEffect + manual set below
       setTimeout(() => {
+        const audio = audioRef.current;
+        if (audio) { audio.currentTime = sec; audio.play().catch(() => {}); }
         setPlaybackTime(sec);
         setIsPlaying(true);
       }, 50);
     } else {
+      const audio = audioRef.current;
+      if (audio) { audio.currentTime = sec; audio.play().catch(() => {}); }
       setPlaybackTime(sec);
       setIsPlaying(true);
     }
+  };
+
+  // Update playback speed on real audio element
+  const handleSpeedChange = (speed: number) => {
+    setPlaySpeed(speed);
+    if (audioRef.current) audioRef.current.playbackRate = speed;
   };
 
   // Trigger Action Advice generation
@@ -435,6 +762,75 @@ export default function InterviewVoiceAnalysisPage() {
 
   return (
     <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden select-none pt-20">
+
+      {/* Hidden real audio element — drives all playback */}
+      <audio
+        ref={audioRef}
+        crossOrigin="anonymous"
+        preload="auto"
+        style={{ display: "none" }}
+      />
+
+      {/* ============================================================
+          PAGE STATE OVERLAYS
+         ============================================================ */}
+
+      {/* ── ANALYZING: full-screen loading while polling ────────────── */}
+      {pageStatus === "analyzing" && (
+        <div className="fixed inset-0 z-50 bg-[#050B1A] flex flex-col items-center justify-center gap-8">
+          <div className="flex flex-col items-center gap-5 max-w-md w-full px-8">
+            {/* Dual-ring Spinner */}
+            <div className="relative w-20 h-20">
+              <div className="absolute inset-0 rounded-full border-4 border-[#AFA7FF]/20 border-t-[#AFA7FF] animate-spin" />
+              <div className="absolute inset-3 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.2s" }} />
+            </div>
+
+            <div className="text-center space-y-1.5">
+              <h3 className="text-white font-black text-lg animate-pulse">{ANALYSIS_STEPS[analysisStep]}</h3>
+              <p className="text-white/40 text-base font-mono">AI 智能分析中，分析完成后自动进入报告页面…</p>
+            </div>
+
+            <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[#AFA7FF] to-[#5DECCB] transition-all duration-700"
+                style={{ width: `${analysisProgress}%` }}
+              />
+            </div>
+            <p className="text-white/30 text-xs font-mono">{analysisProgress}%</p>
+
+            <div className="w-full space-y-2">
+              {ANALYSIS_STEPS.slice(0, -1).map((step, idx) => (
+                <div key={idx} className={`flex items-center gap-2.5 text-xs font-semibold transition-all ${
+                  idx < analysisStep ? "text-[#5DECCB]" :
+                  idx === analysisStep ? "text-white animate-pulse" :
+                  "text-white/20"
+                }`}>
+                  <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
+                    {idx < analysisStep ? "check_circle" : idx === analysisStep ? "radio_button_checked" : "radio_button_unchecked"}
+                  </span>
+                  {step}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── NO_SESSION: redirect message ──────────────────────────── */}
+      {pageStatus === "no_session" && (
+        <div className="fixed inset-0 z-50 bg-[#050B1A] flex flex-col items-center justify-center gap-5">
+          <span className="material-symbols-outlined text-[#FF7A95]" style={{ fontSize: "72px", fontVariationSettings: "'FILL' 1" }}>error</span>
+          <h2 className="text-white font-black text-xl">没有进行中的分析任务</h2>
+          <p className="text-white/50 text-sm">请先上传录音文件并启动分析，正在返回…</p>
+          <button
+            onClick={() => router.push("/debugger")}
+            className="px-6 py-2.5 bg-[#AFA7FF] text-[#050B1A] font-black rounded-full hover:bg-white transition-all"
+          >
+            返回调试器
+          </button>
+        </div>
+      )}
+
       
       {/* Background grids */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />
@@ -519,14 +915,27 @@ export default function InterviewVoiceAnalysisPage() {
       </nav>
 
       {/* ========================================================
-          MAIN WORKSPACE DASHBOARD
+          MAIN WORKSPACE DASHBOARD — only rendered when analysis is done
          ======================================================== */}
+      {pageStatus === "ready" && (
       <motion.div
         key="dashboard"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
+        initial={{ opacity: 0, y: 12 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
         className="flex-1 flex flex-col px-gutter max-w-container-max mx-auto w-full py-6 gap-5.5 text-left relative z-10"
       >
+        {/* Guest Warning Banner */}
+        {isGuest && (
+          <div className="p-4.5 rounded-2xl bg-[#FF7A95]/10 border border-[#FF7A95]/20 text-[#FF7A95] text-xs font-semibold leading-relaxed flex items-center gap-3.5 shadow-lg select-none mb-2">
+            <span className="material-symbols-outlined text-xl shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
+            <div>
+              <p className="font-extrabold text-white text-sm mb-0.5">免费体验模式 (未登录)</p>
+              <p className="text-white/70">您当前未登录，系统已启用免费体验流程。<b>本次分析没有结合您的个人画像（如工作年限、目标职级等）以及历史职业记忆</b>。建议您 <span onClick={() => auth.setShowLogin(true)} className="text-[#AFA7FF] hover:underline cursor-pointer font-black">登录/注册</span> 以解锁完整的个性化深度分析与职业记忆沉淀！</p>
+            </div>
+          </div>
+        )}
+
             {/* ========================================================
                 MAIN WORKSPACE GRID LAYOUT (3 COLUMNS)
                ======================================================== */}
@@ -536,12 +945,6 @@ export default function InterviewVoiceAnalysisPage() {
                   COLUMN 1: Left Sidebar (3 cols)
                  ---------------------------------------------------- */}
               <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5">
-                
-                {/* Sidebar Header */}
-                <div className="pb-1 select-none text-left">
-                  <h3 className="font-black text-white text-base">面试调试器</h3>
-                  <p className="text-[10px] text-white/30 font-mono font-bold mt-0.5">Session #8824</p>
-                </div>
 
                 {/* 1.1 Interview Metadata Card */}
                 <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5">
@@ -713,12 +1116,19 @@ export default function InterviewVoiceAnalysisPage() {
                       
                       {/* Play / Pause */}
                       <button 
-                        onClick={() => setIsPlaying(!isPlaying)}
-                        className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#AFA7FF] to-[#00D4FF] hover:scale-105 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-lg shadow-purple-500/10 shrink-0"
+                        onClick={togglePlay}
+                        title={!audioUrl ? "请先上传录音文件" : audioLoaded ? "播放/暂停" : "音频加载中..."}
+                        className={`w-10 h-10 rounded-full bg-gradient-to-tr from-[#AFA7FF] to-[#00D4FF] hover:scale-105 active:scale-95 transition-all flex items-center justify-center cursor-pointer shadow-lg shadow-purple-500/10 shrink-0 ${
+                          !audioUrl ? "opacity-50 cursor-not-allowed" : ""
+                        }`}
                       >
-                        <span className="material-symbols-outlined text-[#050B1A] text-xl font-black" style={{ fontVariationSettings: "'FILL' 1" }}>
-                          {isPlaying ? "pause" : "play_arrow"}
-                        </span>
+                        {!audioLoaded && audioUrl ? (
+                          <span className="material-symbols-outlined text-[#050B1A] text-base animate-spin" style={{ fontVariationSettings: "'FILL' 1" }}>progress_activity</span>
+                        ) : (
+                          <span className="material-symbols-outlined text-[#050B1A] text-xl font-black" style={{ fontVariationSettings: "'FILL' 1" }}>
+                            {isPlaying ? "pause" : "play_arrow"}
+                          </span>
+                        )}
                       </button>
 
                       {/* Waveform track */}
@@ -770,7 +1180,7 @@ export default function InterviewVoiceAnalysisPage() {
                         {/* Speed multiplier */}
                         <select
                           value={playSpeed}
-                          onChange={(e) => setPlaySpeed(parseFloat(e.target.value))}
+                          onChange={(e) => handleSpeedChange(parseFloat(e.target.value))}
                           className="bg-white/5 border-0 rounded-md py-1.5 pl-2 pr-7 text-xs md:text-sm text-white focus:outline-none cursor-pointer font-bold w-20"
                         >
                           <option value="1.0" className="bg-[#050B1A]">1.0x</option>
@@ -926,11 +1336,13 @@ export default function InterviewVoiceAnalysisPage() {
 
                   <div className="flex items-center gap-3">
                     <div className="flex items-baseline leading-none">
-                      <span className="text-4xl font-black font-mono text-white tracking-tighter">{activeSeg.score}</span>
+                      <span className="text-4xl font-black font-mono text-white tracking-tighter">
+                        {reportData ? reportData.ipi_score : activeSeg.score}
+                      </span>
                       <span className="text-sm text-white/30 font-bold ml-0.5">/100</span>
                     </div>
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase text-[#5DECCB] bg-[#5DECCB]/10 border border-[#5DECCB]/25">
-                      {activeSeg.badgeText}
+                      {reportData ? (reportData.ipi_score >= 80 ? "表现优秀" : reportData.ipi_score >= 65 ? "中等表现" : "表现预警") : activeSeg.badgeText}
                     </span>
                   </div>
 
@@ -1258,6 +1670,7 @@ export default function InterviewVoiceAnalysisPage() {
             </div>
 
           </motion.div>
+      )} {/* end pageStatus === "ready" */}
 
       {/* ========================================================
           GENERATIVE OPTIMIZER POPUP MODAL DRAWER

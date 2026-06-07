@@ -30,6 +30,7 @@ export default function InterviewRecordAnalysisPage() {
   const [showInputForm, setShowInputForm] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isTemplateLoading, setIsTemplateLoading] = useState(false);
+  const [isGuest, setIsGuest] = useState(false);
 
   // Tabs: "对话分析" | "问题拆解" | "追问路径" | "能力评估"
   const [activeTab, setActiveTab] = useState<"dialogue" | "deconstruct" | "followup" | "assessment">("dialogue");
@@ -71,6 +72,11 @@ export default function InterviewRecordAnalysisPage() {
 
   // Pre-load default or local storage text
   useEffect(() => {
+    const savedGuest = localStorage.getItem("offerPilot_is_guest_session");
+    if (savedGuest === "true") {
+      setIsGuest(true);
+    }
+
     const savedText = localStorage.getItem("offerPilot_session_pasteText");
     const savedCompany = localStorage.getItem("offerPilot_session_company");
     const savedRole = localStorage.getItem("offerPilot_session_role");
@@ -225,6 +231,23 @@ export default function InterviewRecordAnalysisPage() {
 
   // Handle Manual Form Submission
   const handleAnalyzeSubmit = () => {
+    if (!pasteText.trim()) {
+      auth.triggerToast("请填写或粘贴面试对话内容！");
+      return;
+    }
+    if (!metadataForm.company.trim()) {
+      auth.triggerToast("请填写面试公司名称！");
+      return;
+    }
+    if (!metadataForm.role.trim()) {
+      auth.triggerToast("请填写岗位名称！");
+      return;
+    }
+    if (!metadataForm.round.trim()) {
+      auth.triggerToast("请填写面试轮次！");
+      return;
+    }
+
     setIsAnalyzing(true);
     localStorage.setItem("offerPilot_session_pasteText", pasteText);
     localStorage.setItem("offerPilot_session_company", metadataForm.company);
@@ -492,6 +515,17 @@ export default function InterviewRecordAnalysisPage() {
           </motion.div>
         ) : (
           <>
+            {/* Guest Warning Banner */}
+            {isGuest && (
+              <div className="p-4.5 rounded-2xl bg-[#FF7A95]/10 border border-[#FF7A95]/20 text-[#FF7A95] text-xs font-semibold leading-relaxed flex items-center gap-3.5 shadow-lg select-none mb-4.5 w-full">
+                <span className="material-symbols-outlined text-xl shrink-0" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
+                <div>
+                  <p className="font-extrabold text-white text-sm mb-0.5">免费体验模式 (未登录)</p>
+                  <p className="text-white/70">您当前未登录，系统已启用免费体验流程。<b>本次分析没有结合您的个人画像（如工作年限、目标职级等）以及历史职业记忆</b>。建议您 <span onClick={() => auth.setShowLogin(true)} className="text-[#AFA7FF] hover:underline cursor-pointer font-black">登录/注册</span> 以解锁完整的个性化深度分析与职业记忆沉淀！</p>
+                </div>
+              </div>
+            )}
+
             {/* ========================================================
                WORKSPACE MAIN CONTAINER (3 COLUMNS DASHBOARD)
                ======================================================== */}

@@ -1,17 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+
+const getTodayString = () => {
+  const d = new Date();
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export default function NewAnalysisDebugger() {
   const router = useRouter();
   const auth = useAuth();
 
-  // Active input mode
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [activeMode, setActiveMode] = useState<"audio" | "text" | "resume">("audio");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [taskProgress, setTaskProgress] = useState(0);
+  const [taskStep, setTaskStep] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadedFileId, setUploadedFileId] = useState<number | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Audio/Dialogue context fields - ALL TEXT INPUTS except onJob and date (Defaulted to empty)
   const [audioForm, setAudioForm] = useState({
@@ -20,10 +35,17 @@ export default function NewAnalysisDebugger() {
     company: "",
     role: "",
     round: "",
-    date: "2026-05-31",
+    date: "",
     grade: "",
     salary: ""
   });
+
+  useEffect(() => {
+    setAudioForm(prev => ({
+      ...prev,
+      date: getTodayString()
+    }));
+  }, []);
 
   // Resume context fields - ALL TEXT INPUTS except onJob (Defaulted to empty)
   const [resumeForm, setResumeForm] = useState({
@@ -42,6 +64,154 @@ export default function NewAnalysisDebugger() {
   // Paste Text dialogues
   const [pasteText, setPasteText] = useState("");
 
+  const handleUploadClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const validateAndSetFile = async (file: File) => {
+    // Validate formats
+    if (activeMode === "audio") {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      if (ext !== "wav" && ext !== "mp3") {
+        auth.triggerToast("上传失败：录音仅支持 WAV 或 MP3 格式！");
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+        return false;
+      }
+    } else if (activeMode === "resume") {
+      const ext = file.name.split('.').pop()?.toLowerCase();
+      if (ext !== "pdf" && ext !== "docx") {
+        auth.triggerToast("上传失败：简历仅支持 PDF 或 DOCX 格式！");
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+        return false;
+      }
+    }
+
+    const maxLimit = 20 * 1024 * 1024; // 20MB limit
+    if (file.size > maxLimit) {
+      auth.triggerToast(
+        activeMode === "audio"
+          ? "上传失败：录音文件大小不能超过 20MB！"
+          : "上传失败：简历文档大小不能超过 20MB！"
+      );
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      return false;
+    }
+
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("file_type", activeMode);
+
+    const token = localStorage.getItem("offerPilot_token");
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    try {
+      const res = await fetch("http://localhost:8000/api/file/upload", {
+        method: "POST",
+        headers,
+        body: formData
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.detail || "上传失败");
+      }
+
+      const data = await res.json();
+      setUploadedFileId(data.file_id);
+      setSelectedFile(file);
+      localStorage.setItem("offerPilot_session_audio_url", data.file_url);
+      auth.triggerToast("文件成功上传至 COS 对象存储！");
+    } catch (e: any) {
+      auth.triggerToast(e.message || "文件上传对象存储失败，请重试！");
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+      setSelectedFile(null);
+      setUploadedFileId(null);
+    } finally {
+      setIsUploading(false);
+    }
+    return true;
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      validateAndSetFile(e.target.files[0]);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+    
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      const file = e.dataTransfer.files[0];
+      validateAndSetFile(file);
+    }
+  };
+
+  const handleRemoveFile = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    if (uploadedFileId) {
+      setIsDeleting(true);
+      const token = localStorage.getItem("offerPilot_token");
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+
+      try {
+        const res = await fetch(`http://localhost:8000/api/file/delete?file_id=${uploadedFileId}`, {
+          method: "DELETE",
+          headers
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || "删除失败");
+        }
+        auth.triggerToast("文件已从对象存储中删除！");
+      } catch (e: any) {
+        auth.triggerToast(e.message || "对象存储文件删除失败！");
+      } finally {
+        setIsDeleting(false);
+      }
+    }
+
+    setSelectedFile(null);
+    setUploadedFileId(null);
+    localStorage.removeItem("offerPilot_session_audio_url");
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
   const handleInterceptAction = () => {
     auth.setShowLogin(true);
   };
@@ -57,44 +227,165 @@ export default function NewAnalysisDebugger() {
   };
 
   // Launch analysis and save context to localStorage
-  const triggerAnalysis = () => {
-    setIsAnalyzing(true);
-    
-    // Save to localStorage so report page is synced dynamically
-    localStorage.setItem("offerPilot_report_mode", activeMode);
-    if (activeMode === "resume") {
-      localStorage.setItem("offerPilot_session_company", "腾讯/美团等 (目标)");
-      localStorage.setItem("offerPilot_session_role", "高级后端专家");
-      localStorage.setItem("offerPilot_session_years", "3-5年");
-      localStorage.setItem("offerPilot_session_round", "简历智能筛选");
-      localStorage.setItem("offerPilot_session_date", "2026-06-01");
-      localStorage.setItem("offerPilot_session_grade", "L8 / P7");
-      localStorage.setItem("offerPilot_session_salary", "35K-45K");
+  const triggerAnalysis = async () => {
+    if (activeMode !== "text") {
+      if (isUploading) {
+        auth.triggerToast("文件正在上传中，请稍后...");
+        return;
+      }
+      if (!selectedFile || !uploadedFileId) {
+        auth.triggerToast(
+          activeMode === "audio"
+            ? "请先上传面试录音文件！"
+            : "请先上传个人简历文档！"
+        );
+        return;
+      }
     } else {
-      localStorage.setItem("offerPilot_session_company", audioForm.company || "字节跳动");
-      localStorage.setItem("offerPilot_session_role", audioForm.role || "后端开发工程师");
-      localStorage.setItem("offerPilot_session_years", "3-5年");
-      localStorage.setItem("offerPilot_session_round", audioForm.round || "二面 - 技术面");
-      localStorage.setItem("offerPilot_session_date", audioForm.date || "2026-05-31");
-      localStorage.setItem("offerPilot_session_grade", audioForm.grade || "P6 / L5");
-      localStorage.setItem("offerPilot_session_salary", audioForm.salary || "25K * 16薪");
-      if (activeMode === "text") {
-        localStorage.setItem("offerPilot_session_pasteText", pasteText);
+      if (!pasteText.trim()) {
+        auth.triggerToast("请先输入或粘贴面试对话内容！");
+        return;
       }
     }
 
+    // Form validation checks for required fields when form is shown (activeMode !== "resume")
+    if (activeMode !== "resume") {
+      if (!audioForm.company.trim()) {
+        auth.triggerToast("请填写面试公司名称！");
+        return;
+      }
+      if (!audioForm.role.trim()) {
+        auth.triggerToast("请填写岗位名称！");
+        return;
+      }
+      if (!audioForm.date.trim()) {
+        auth.triggerToast("请选择面试时间！");
+        return;
+      }
+      if (!audioForm.round.trim()) {
+        auth.triggerToast("请填写面试轮次！");
+        return;
+      }
+    }
+
+    setIsAnalyzing(true);
+
+    // Save form meta to localStorage so result pages can read them
+    localStorage.setItem("offerPilot_report_mode", activeMode);
+    localStorage.setItem("offerPilot_session_company", audioForm.company || "字节跳动");
+    localStorage.setItem("offerPilot_session_role", audioForm.role || "后端开发工程师");
+    localStorage.setItem("offerPilot_session_years", "3-5年");
+    localStorage.setItem("offerPilot_session_round", audioForm.round || "二面 - 技术面");
+    localStorage.setItem("offerPilot_session_date", audioForm.date || getTodayString());
+    localStorage.setItem("offerPilot_session_grade", audioForm.grade || "P6 / L5");
+    localStorage.setItem("offerPilot_session_salary", audioForm.salary || "25K * 16薪");
     localStorage.setItem("offerPilot_viewing_session", "true");
 
-    setTimeout(() => {
-      setIsAnalyzing(false);
-      if (activeMode === "audio") {
+    if (activeMode === "audio") {
+      // ── AUDIO MODE: create session → start analysis → poll → navigate ──
+      const token = localStorage.getItem("offerPilot_token");
+      const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+
+      const audioUrl = localStorage.getItem("offerPilot_session_audio_url") || "";
+      const sessionTitle = `${audioForm.company || "面试"} · ${audioForm.role || "岗位"} · ${audioForm.date || getTodayString()}`;
+
+      try {
+        // Step 1: Create InterviewSession from the already-uploaded COS file
+        const sessionRes = await fetch("http://localhost:8000/api/audio/create_session", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            file_url: audioUrl,
+            title: sessionTitle,
+            file_id: uploadedFileId,
+            file_size: selectedFile?.size || 0
+          })
+        });
+        if (!sessionRes.ok) {
+          const err = await sessionRes.json();
+          throw new Error(err.detail || "创建分析会话失败");
+        }
+        const sessionData = await sessionRes.json();
+        const sessionId: number = sessionData.session_id;
+        localStorage.setItem("offerPilot_session_id", String(sessionId));
+
+        // Step 2: Trigger background analysis task
+        const analyzeRes = await fetch("http://localhost:8000/api/audio/analyze", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({ session_id: sessionId })
+        });
+        if (!analyzeRes.ok) {
+          const err = await analyzeRes.json();
+          throw new Error(err.detail || "启动分析任务失败");
+        }
+        const analyzeData = await analyzeRes.json();
+        const taskId: string = analyzeData.task_id;
+        localStorage.setItem("offerPilot_task_id", taskId);
+
+        // Step 3: Poll on THIS page until analysis completes, THEN navigate
+        //         The isAnalyzing=true state shows a blocking overlay in the UI.
+        const STEPS = [
+          "ASR 转写中——提取音频文字...",
+          "语义分段——判定说话人角色...",
+          "LLM 评估——对比用户画像与答题...",
+          "AI 话术重构——生成升级建议...",
+          "分析完成 — 正在生成报告..."
+        ];
+        const pollUntilDone = async (): Promise<void> => {
+          return new Promise((resolve, reject) => {
+            const interval = setInterval(async () => {
+              try {
+                const pollRes = await fetch(
+                  `http://localhost:8000/api/audio/task/${taskId}`,
+                  { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+                );
+                if (!pollRes.ok) return; // keep trying on network hiccup
+                const pollData = await pollRes.json();
+
+                const pct = pollData.progress ?? 0;
+                setTaskProgress(pct);
+                // Map progress % to a step label
+                const si = Math.min(Math.floor((pct / 100) * STEPS.length), STEPS.length - 1);
+                setTaskStep(STEPS[si]);
+
+                if (pollData.status === "completed") {
+                  clearInterval(interval);
+                  resolve();
+                } else if (pollData.status === "failed") {
+                  clearInterval(interval);
+                  reject(new Error("分析任务失败，请重试"));
+                }
+              } catch { /* keep polling */ }
+            }, 2000);
+          });
+        };
+
+        await pollUntilDone();
+
+        // Step 4: Navigate to voice analysis report page (data is ready)
         router.push("/debugger/voice");
-      } else if (activeMode === "text") {
-        router.push("/debugger/record");
-      } else {
-        router.push("/debugger/resume");
+
+      } catch (e: any) {
+        auth.triggerToast(e.message || "启动分析失败，请重试！");
+        setIsAnalyzing(false);
       }
-    }, 1500);
+
+    } else if (activeMode === "text") {
+      // Text mode: store paste text and navigate (future: connect text analysis API)
+      localStorage.setItem("offerPilot_session_pasteText", pasteText);
+      localStorage.removeItem("offerPilot_task_id");
+      localStorage.removeItem("offerPilot_session_id");
+      setIsAnalyzing(false);
+      router.push("/debugger/record");
+    } else {
+      // Resume mode
+      localStorage.removeItem("offerPilot_task_id");
+      localStorage.removeItem("offerPilot_session_id");
+      setIsAnalyzing(false);
+      router.push("/debugger/resume");
+    }
   };
 
   return (
@@ -211,7 +502,25 @@ export default function NewAnalysisDebugger() {
                   return (
                     <div
                       key={idx}
-                      onClick={() => setActiveMode(item.mode as any)}
+                      onClick={async () => {
+                        if (uploadedFileId) {
+                          // Silently delete in background to avoid orphan file
+                          const token = localStorage.getItem("offerPilot_token");
+                          const headers: Record<string, string> = {};
+                          if (token) headers["Authorization"] = `Bearer ${token}`;
+                          fetch(`http://localhost:8000/api/file/delete?file_id=${uploadedFileId}`, {
+                            method: "DELETE",
+                            headers
+                          }).catch(() => {});
+                        }
+                        setActiveMode(item.mode as any);
+                        setSelectedFile(null);
+                        setUploadedFileId(null);
+                        localStorage.removeItem("offerPilot_session_audio_url");
+                        if (fileInputRef.current) {
+                          fileInputRef.current.value = "";
+                        }
+                      }}
                       className={`p-4 rounded-2xl border text-left cursor-pointer transition-all duration-300 flex items-center gap-3.5 relative overflow-hidden group ${
                         isActive ? activeBorderClass : "border-white/5 bg-white/[0.02] hover:bg-white/5"
                       }`}
@@ -241,12 +550,32 @@ export default function NewAnalysisDebugger() {
         {/* COLUMNS 4-12: PRE-ANALYSIS FORMS CANVAS */}
         <div className="md:col-span-9 flex flex-col justify-between">
           <div className="glass-panel p-8 rounded-3xl border-white/10 h-full flex flex-col justify-between text-left relative overflow-hidden">
-            {/* Simulated Glow Loading Layer */}
+            {/* Full-screen analysis overlay — blocks UI while analysis runs */}
             {isAnalyzing && (
-              <div className="absolute inset-0 z-50 bg-background/90 backdrop-blur-xl flex flex-col justify-center items-center">
-                <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin mb-4" />
-                <h3 className="font-extrabold text-white text-lg animate-pulse">OfferPilot 正在进行 AI 深度分析...</h3>
-                <p className="text-xs text-on-surface-variant/60 mt-1">转写音频频带、提取面试逻辑雷区、重塑专业架构语言</p>
+              <div className="absolute inset-0 z-50 bg-background/95 backdrop-blur-xl flex flex-col justify-center items-center gap-6 px-8">
+                {/* Dual-ring spinner */}
+                <div className="relative w-16 h-16">
+                  <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                  <div className="absolute inset-2 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.1s" }} />
+                </div>
+
+                <div className="text-center space-y-1">
+                  <h3 className="font-extrabold text-white text-lg animate-pulse">
+                    {taskStep || "OfferPilot AI 正在分析中..."}
+                  </h3>
+                  <p className="text-xs text-on-surface-variant/60">
+                    ASR 语音识别 + MiniMax-M3 智能评估，分析完成后自动进入报告
+                  </p>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full max-w-sm bg-white/5 rounded-full h-1.5 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-primary to-[#5DECCB] transition-all duration-700"
+                    style={{ width: `${taskProgress}%` }}
+                  />
+                </div>
+                <p className="text-white/30 text-xs font-mono">{taskProgress}%</p>
               </div>
             )}
 
@@ -274,20 +603,86 @@ export default function NewAnalysisDebugger() {
               {/* Upload drag drop areas */}
               {activeMode !== "text" ? (
                 <div
-                  onClick={handleInterceptAction}
-                  className="border-2 border-dashed border-white/10 hover:border-primary/50 hover:bg-white/[0.01] py-20 md:py-28 rounded-2xl flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-300 min-h-[380px] group"
+                  onClick={selectedFile ? undefined : handleUploadClick}
+                  onDragOver={handleDragOver}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop}
+                  className={`border-2 border-dashed py-20 md:py-28 rounded-2xl flex flex-col items-center justify-center text-center transition-all duration-300 min-h-[380px] group relative ${
+                    selectedFile ? "cursor-default" : "cursor-pointer"
+                  } ${
+                    isDragging
+                      ? "border-primary bg-primary/10 scale-[1.01] shadow-[0_0_25px_rgba(192,193,255,0.1)]"
+                      : "border-white/10 hover:border-primary/50 hover:bg-white/[0.01]"
+                  }`}
                 >
-                  <div className="w-24 h-24 rounded-3xl bg-primary/10 group-hover:scale-110 transition-transform text-primary flex items-center justify-center mb-6">
-                    <span className="material-symbols-outlined" style={{ fontSize: "56px" }}>
-                      {activeMode === "audio" ? "cloud_upload" : "folder_zip"}
-                    </span>
-                  </div>
-                  <h4 className="font-extrabold text-white text-base md:text-lg mb-2">
-                    {activeMode === "audio" ? "拖拽录音文件到此处，或点击浏览上传" : "拖拽简历文档到此处，或点击浏览上传"}
-                  </h4>
-                  <p className="text-xs md:text-sm text-on-surface-variant/60">
-                    {activeMode === "audio" ? "支持 mp3, wav, m4a 格式，最大 500MB (时长限10分钟)" : "支持 PDF, DOCX 格式，最大 20MB"}
-                  </p>
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    accept={activeMode === "audio" ? ".wav,.mp3" : ".pdf,.docx"}
+                    className="hidden"
+                  />
+                  {isUploading ? (
+                    <div className="flex flex-col items-center justify-center space-y-4">
+                      <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin mb-4" />
+                      <h4 className="font-extrabold text-white text-base animate-pulse">文件上传中...</h4>
+                    </div>
+                  ) : isDeleting ? (
+                    <div className="flex flex-col items-center justify-center space-y-4">
+                      <div className="w-16 h-16 rounded-full border-4 border-red-500/20 border-t-red-500 animate-spin mb-4" />
+                      <h4 className="font-extrabold text-white text-base animate-pulse">正在从对象存储中删除...</h4>
+                    </div>
+                  ) : selectedFile ? (
+                    <div className="flex flex-col items-center justify-center space-y-4">
+                      <div className="w-24 h-24 rounded-3xl bg-primary/10 text-primary flex items-center justify-center relative group/icon mb-2 transition-all">
+                        <span className="material-symbols-outlined" style={{ fontSize: "56px" }}>
+                          {activeMode === "audio" ? "library_music" : "description"}
+                        </span>
+                        {/* Always visible close button */}
+                        <button
+                          onClick={handleRemoveFile}
+                          className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-all shadow-md cursor-pointer z-10"
+                          title="删除文件"
+                        >
+                          <span className="material-symbols-outlined text-[16px] font-black">close</span>
+                        </button>
+                      </div>
+                      <div>
+                        <h4 className="font-extrabold text-white text-base md:text-lg mb-1 max-w-md truncate">
+                          已选择: {selectedFile.name}
+                        </h4>
+                        <p className="text-xs text-on-surface-variant/60 font-mono font-semibold">
+                          大小: {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 mt-2">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleUploadClick();
+                          }}
+                          className="px-4.5 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-bold text-white transition-all flex items-center gap-1.5 cursor-pointer"
+                        >
+                          <span className="material-symbols-outlined text-sm">cloud_upload</span>
+                          选择其他文件
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="w-24 h-24 rounded-3xl bg-primary/10 group-hover:scale-110 transition-transform text-primary flex items-center justify-center mb-6">
+                        <span className="material-symbols-outlined" style={{ fontSize: "56px" }}>
+                          {activeMode === "audio" ? "cloud_upload" : "folder_zip"}
+                        </span>
+                      </div>
+                      <h4 className="font-extrabold text-white text-base md:text-lg mb-2">
+                        {activeMode === "audio" ? "拖拽录音文件到此处，或点击浏览上传" : "拖拽简历文档到此处，或点击浏览上传"}
+                      </h4>
+                      <p className="text-xs md:text-sm text-on-surface-variant/60">
+                        {activeMode === "audio" ? "支持 wav, mp3 格式，最大 20MB (时长限10分钟)" : "支持 PDF, DOCX 格式，最大 20MB"}
+                      </p>
+                    </>
+                  )}
                 </div>
               ) : (
                 /* paste transcript area */

@@ -10,3 +10,5 @@ pydantic>=2.0.0
 pydantic-settings
 python-dotenv
 python-multipart
+cos-python-sdk-v5
+

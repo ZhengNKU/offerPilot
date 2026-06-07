@@ -21,6 +21,7 @@ from app.utils.email import email_helper
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 security = HTTPBearer()
+security_optional = HTTPBearer(auto_error=False)
 
 # Helper function to format UserProfile to Frontend expected structure
 def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
@@ -41,7 +42,8 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
         age=str(p.age),
         school=p.school or "暂无学校",
         degree=p.degree or "本科",
-        hasExp=p.has_experience
+        hasExp=p.has_experience,
+        is_online=user.is_online
     )
 
 # FastAPI dependency to fetch logged-in user details
@@ -78,6 +80,34 @@ async def get_current_user(
             detail="用户账户不存在"
         )
     return user
+
+
+# FastAPI dependency to fetch logged-in user details optionally (returns None for guests)
+async def get_current_user_optional(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_optional),
+    db: AsyncSession = Depends(get_db),
+    redis_client: aioredis.Redis = Depends(get_redis)
+) -> Optional[models.User]:
+    if not credentials:
+        return None
+    token = credentials.credentials
+    try:
+        is_blacklisted = await redis_client.get(f"auth:blacklist:{token}")
+        if is_blacklisted:
+            return None
+            
+        user_id = verify_access_token(token)
+        if not user_id:
+            return None
+            
+        result = await db.execute(
+            select(models.User)
+            .options(selectinload(models.User.profile))
+            .where(models.User.id == user_id)
+        )
+        return result.scalars().first()
+    except Exception:
+        return None
 
 
 @router.post("/send-code")
@@ -215,7 +245,8 @@ async def register_complete(
         username=acc.username,
         password_hash=hashed_pwd,
         phone=acc.phone,
-        email=str(acc.email) if acc.email else None
+        email=str(acc.email) if acc.email else None,
+        is_online=True
     )
     db.add(new_user)
     await db.flush() # Flush to get new_user.id
@@ -331,6 +362,9 @@ async def login(
             detail="未知的登录方式"
         )
         
+    user.is_online = True
+    await db.commit()
+    
     token = create_access_token(data={"sub": str(user.id)})
     return {
         "access_token": token,
@@ -342,11 +376,18 @@ async def login(
 @router.post("/logout")
 async def logout(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    redis_client: aioredis.Redis = Depends(get_redis)
+    db: AsyncSession = Depends(get_db),
+    redis_client: aioredis.Redis = Depends(get_redis),
+    current_user: models.User = Depends(get_current_user)
 ):
     token = credentials.credentials
     # Put token to blacklist with 24 hours expiry (matches Access Token expiry)
     await redis_client.setex(f"auth:blacklist:{token}", 86400, "revoked")
+    
+    # Set user online status to False
+    current_user.is_online = False
+    await db.commit()
+    
     return {"message": "已成功安全退出登录"}
 
 

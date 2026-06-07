@@ -76,6 +76,7 @@ class UserProfileResponse(BaseModel):
     school: str
     degree: str
     hasExp: bool
+    is_online: bool = False
 
 class TokenResponse(BaseModel):
     access_token: str
