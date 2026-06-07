@@ -149,7 +149,7 @@ export default function RegisterPage() {
 
     setIsSendingCode(true);
     try {
-      const res = await fetch("http://localhost:8000/api/auth/send-code", {
+      const res = await fetch("http://localhost:8001/api/auth/send-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
@@ -246,7 +246,7 @@ export default function RegisterPage() {
     }
 
     try {
-      const res = await fetch("http://localhost:8000/api/auth/register/step1", {
+      const res = await fetch("http://localhost:8001/api/auth/register/step1", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -502,7 +502,7 @@ export default function RegisterPage() {
     };
 
     try {
-      const response = await fetch("http://localhost:8000/api/auth/register/complete", {
+      const response = await fetch("http://localhost:8001/api/auth/register/complete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)

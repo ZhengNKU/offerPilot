@@ -22,6 +22,7 @@ export interface UserProfile {
   degree?: string;
   gradYear?: string;
   hasExp?: boolean;
+  membership?: string;
 }
 
 interface AuthContextType {
@@ -120,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const token = localStorage.getItem("offerPilot_token");
     if (token) {
       try {
-        await fetch("http://localhost:8000/api/auth/logout", {
+        await fetch("http://localhost:8001/api/auth/logout", {
           method: "POST",
           headers: { "Authorization": `Bearer ${token}` }
         });
@@ -139,7 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const token = localStorage.getItem("offerPilot_token");
     if (token) {
       try {
-        const res = await fetch("http://localhost:8000/api/auth/delete-account", {
+        const res = await fetch("http://localhost:8001/api/auth/delete-account", {
           method: "DELETE",
           headers: { "Authorization": `Bearer ${token}` }
         });
@@ -212,7 +213,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        await fetch("http://localhost:8000/api/auth/profile/update", {
+        await fetch("http://localhost:8001/api/auth/profile/update", {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -354,7 +355,7 @@ function AuthModals() {
     }
 
     try {
-      const res = await fetch("http://localhost:8000/api/auth/send-code", {
+      const res = await fetch("http://localhost:8001/api/auth/send-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "phone", target: phone })
@@ -402,7 +403,7 @@ function AuthModals() {
         };
       }
 
-      const res = await fetch("http://localhost:8000/api/auth/login", {
+      const res = await fetch("http://localhost:8001/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -444,7 +445,7 @@ function AuthModals() {
     }
 
     try {
-      const res = await fetch("http://localhost:8000/api/auth/send-code", {
+      const res = await fetch("http://localhost:8001/api/auth/send-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
@@ -499,7 +500,7 @@ function AuthModals() {
     }
 
     try {
-      const res = await fetch("http://localhost:8000/api/auth/reset-password", {
+      const res = await fetch("http://localhost:8001/api/auth/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

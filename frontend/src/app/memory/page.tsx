@@ -102,6 +102,85 @@ export default function CareerMemoryDashboard() {
   const [searchSidebarQuery, setSearchSidebarQuery] = useState("");
   const [activeTimelineFilter, setActiveTimelineFilter] = useState("all");
 
+  const [historyItems, setHistoryItems] = useState<SessionHistoryItem[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // New deletion states
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | "batch" | null>(null);
+
+  const fetchSessions = async () => {
+    if (!auth.isLoggedIn) {
+      setHistoryItems([]);
+      return;
+    }
+    setIsLoadingHistory(true);
+    try {
+      const token = localStorage.getItem("offerPilot_token");
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch("http://localhost:8001/api/audio/sessions", { headers });
+      if (res.ok) {
+        const data = await res.json();
+        const mapped: SessionHistoryItem[] = data.map((session: any) => {
+          // Parse date
+          let dateStr = "06-01 14:32";
+          if (session.created_at) {
+            const d = new Date(session.created_at);
+            const mm = String(d.getMonth() + 1).padStart(2, '0');
+            const dd = String(d.getDate()).padStart(2, '0');
+            const hh = String(d.getHours()).padStart(2, '0');
+            const min = String(d.getMinutes()).padStart(2, '0');
+            dateStr = `${mm}-${dd} ${hh}:${min}`;
+          }
+
+          // Parse company, role, round from title
+          let company = "面试会话";
+          let role = "录音分析";
+          let round = "技术面试";
+          if (session.title && session.title.includes(" · ")) {
+            const parts = session.title.split(" · ");
+            if (parts.length >= 1) company = parts[0];
+            if (parts.length >= 2) role = parts[1];
+            if (parts.length >= 3) round = parts[2];
+          } else {
+            company = session.title || "语音面试";
+          }
+
+          // Determine grade based on score
+          let grade = "待提升候选人";
+          if (session.ipi_score >= 80) grade = "优秀候选人";
+          else if (session.ipi_score >= 70) grade = "中级候选人";
+
+          return {
+            id: String(session.id),
+            date: dateStr,
+            type: "audio", // Database sessions are voice/audio analyses
+            title: session.title || "未命名面试分析",
+            score: session.ipi_score || 0,
+            grade,
+            company,
+            role,
+            round,
+            details: session.executive_summary || "暂无详细摘要信息。"
+          };
+        });
+        setHistoryItems(mapped);
+      }
+    } catch (err) {
+      console.error("Failed to fetch history sessions:", err);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSessions();
+  }, [auth.isLoggedIn]);
+
   const handleInterceptAction = () => {
     setShowLoginModal(true);
   };
@@ -116,6 +195,8 @@ export default function CareerMemoryDashboard() {
     localStorage.setItem("offerPilot_session_grade", item.type === "resume" ? "L8 / P7" : "P6");
     localStorage.setItem("offerPilot_session_salary", item.type === "resume" ? "35K-45K" : "35-40K");
     localStorage.setItem("offerPilot_viewing_session", "true");
+    localStorage.setItem("offerPilot_session_id", item.id);
+    localStorage.removeItem("offerPilot_task_id");
     
     if (item.type === "audio") {
       router.push("/debugger/voice");
@@ -128,13 +209,91 @@ export default function CareerMemoryDashboard() {
     }
   };
 
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  };
+
+  const handleToggleSelectAll = () => {
+    if (allSelected) {
+      setSelectedIds(prev => prev.filter(id => !visibleIds.includes(id)));
+    } else {
+      setSelectedIds(prev => {
+        const unique = new Set([...prev, ...visibleIds]);
+        return Array.from(unique);
+      });
+    }
+  };
+
+  const handleDeleteClick = (target: string | "batch") => {
+    setDeleteTarget(target);
+    setShowConfirmModal(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    setShowConfirmModal(false);
+    setIsDeleting(true);
+    
+    try {
+      const token = localStorage.getItem("offerPilot_token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      if (deleteTarget === "batch") {
+        const session_ids = selectedIds.map(Number).filter(id => !isNaN(id));
+        const res = await fetch("http://localhost:8001/api/audio/sessions/batch-delete", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ session_ids })
+        });
+        
+        if (res.ok) {
+          setSelectedIds([]);
+          await fetchSessions();
+        } else {
+          const errData = await res.json();
+          alert(errData.detail || "批量删除失败");
+        }
+      } else if (deleteTarget) {
+        const res = await fetch(`http://localhost:8001/api/audio/session/${deleteTarget}`, {
+          method: "DELETE",
+          headers
+        });
+        
+        if (res.ok) {
+          setSelectedIds(prev => prev.filter(x => x !== deleteTarget));
+          await fetchSessions();
+        } else {
+          const errData = await res.json();
+          alert(errData.detail || "删除失败");
+        }
+      }
+    } catch (err) {
+      console.error("Deletion failed:", err);
+      alert("删除请求失败，请稍后重试");
+    } finally {
+      setIsDeleting(false);
+      setDeleteTarget(null);
+    }
+  };
+
   // Main list filters
-  const filteredHistory = INITIAL_HISTORY.filter(
+  const filteredHistory = historyItems.filter(
     (item) =>
       item.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.company.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.role.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const visibleItems = filteredHistory.filter(
+    item => activeTimelineFilter === "all" || item.type === activeTimelineFilter
+  );
+  
+  const visibleIds = visibleItems.map(item => item.id);
+  const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
 
   return (
     <main className="pt-20 bg-background text-on-surface select-none min-h-screen flex flex-col justify-between relative overflow-hidden pb-4">
@@ -480,35 +639,34 @@ export default function CareerMemoryDashboard() {
                         <div className="relative pl-5.5 space-y-4.5 py-1">
                           <div className="absolute left-2 top-1.5 bottom-1.5 w-0.5 bg-white/5"></div>
                           
-                          {[
-                            { date: "今日 10:30", company: "腾讯科技", round: "后端开发 · 技术二面", score: 78, level: "良好" },
-                            { date: "2025-05-25", company: "字节跳动", round: "基础架构 · 技术一面", score: 82, level: "优秀" },
-                            { date: "2025-05-18", company: "阿里云", round: "系统设计 · 技术二面", score: 75, level: "良好" },
-                            { date: "2025-05-10", company: "Shopee", round: "架构师 · 技术三面", score: 89, level: "极佳" },
-                            { date: "2025-02-28", company: "美团", round: "后端开发 · 技术一面", score: 72, level: "中等" }
-                          ].map((item, index) => {
-                            const isToday = item.date.includes("今日");
-                            return (
-                              <div key={index} className="relative flex justify-between items-center group">
-                                <div className={`absolute -left-5.5 top-1.5 w-2.5 h-2.5 rounded-full border border-background z-10 ${
-                                  isToday ? "bg-tertiary" : item.score >= 80 ? "bg-primary" : "bg-secondary"
-                                }`} />
-                                
-                                <div className="space-y-0.5">
-                                  <div className="flex items-center gap-2">
-                                    <span className={`text-[11px] font-label-mono ${isToday ? "text-tertiary font-extrabold" : "text-on-surface-variant/40"}`}>{item.date}</span>
-                                    <span className="text-xs md:text-sm font-black text-white">{item.company}</span>
+                          {historyItems.length > 0 ? (
+                            historyItems.slice(0, 5).map((item, index) => {
+                              return (
+                                <div key={index} className="relative flex justify-between items-center group">
+                                  <div className={`absolute -left-5.5 top-1.5 w-2.5 h-2.5 rounded-full border border-background z-10 ${
+                                    item.score >= 80 ? "bg-primary" : "bg-secondary"
+                                  }`} />
+                                  
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[11px] font-label-mono text-on-surface-variant/40">{item.date}</span>
+                                      <span className="text-xs md:text-sm font-black text-white">{item.company}</span>
+                                    </div>
+                                    <p className="text-xs text-on-surface-variant/50 font-semibold">{item.role} · {item.round}</p>
                                   </div>
-                                  <p className="text-xs text-on-surface-variant/50 font-semibold">{item.round}</p>
-                                </div>
 
-                                <div className="text-right">
-                                  <span className={`text-sm font-black font-label-mono ${item.score >= 80 ? "text-tertiary" : "text-primary"}`}>{item.score}</span>
-                                  <span className="text-[11px] text-on-surface-variant/30 font-label-mono">/100</span>
+                                  <div className="text-right">
+                                    <span className={`text-sm font-black font-label-mono ${item.score >= 80 ? "text-tertiary" : "text-primary"}`}>{item.score}</span>
+                                    <span className="text-[11px] text-on-surface-variant/30 font-label-mono">/100</span>
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
+                              );
+                            })
+                          ) : (
+                            <div className="text-xs text-on-surface-variant/50 text-center py-4">
+                              {auth.isLoggedIn ? "暂无历史面试记录" : "请先登录查看历史记录"}
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -516,7 +674,7 @@ export default function CareerMemoryDashboard() {
                         onClick={() => handleTabChange("timeline")}
                         className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer"
                       >
-                        查看全部 28 次面试
+                        查看全部 {historyItems.length} 次面试
                       </button>
                     </div>
                   </div>
@@ -1038,89 +1196,137 @@ export default function CareerMemoryDashboard() {
                         </div>
                       </div>
 
+                      {/* Batch Action Management Bar */}
+                      {visibleItems.length > 0 && (
+                        <div className="flex justify-between items-center bg-white/[0.02] border border-white/5 p-4.5 rounded-2xl w-full">
+                          <div className="flex items-center gap-3">
+                            <label className="flex items-center gap-2.5 cursor-pointer text-xs md:text-sm font-bold text-on-surface-variant/80 hover:text-white transition-all select-none">
+                              <input
+                                type="checkbox"
+                                checked={allSelected}
+                                onChange={handleToggleSelectAll}
+                                className="w-4 h-4 rounded border-white/10 bg-white/5 text-primary focus:ring-primary focus:ring-offset-0 focus:ring-1 cursor-pointer transition-all accent-primary"
+                              />
+                              全选
+                            </label>
+                            {selectedIds.length > 0 && (
+                              <span className="text-xs text-primary font-bold font-label-mono bg-primary/10 border border-primary/20 px-2.5 py-1 rounded-full">
+                                已选择 {selectedIds.length} 项
+                              </span>
+                            )}
+                          </div>
+
+                          {selectedIds.length > 0 && (
+                            <button
+                              onClick={() => handleDeleteClick("batch")}
+                              className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-xs font-black rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-lg shadow-red-500/10"
+                            >
+                              <span className="material-symbols-outlined text-sm">delete_sweep</span>
+                              批量删除
+                            </button>
+                          )}
+                        </div>
+                      )}
+
                       {/* Vertical Timeline Nodes */}
                       <div className="relative pl-6 space-y-8 py-4 w-full">
                         {/* Vertical Connecting Line */}
                         <div className="absolute left-2.5 top-0 bottom-0 w-0.5 bg-white/5"></div>
 
-                        {filteredHistory.filter(item => activeTimelineFilter === "all" || item.type === activeTimelineFilter).length > 0 ? (
-                          filteredHistory
-                            .filter(item => activeTimelineFilter === "all" || item.type === activeTimelineFilter)
-                            .map((item, index) => {
-                              return (
+                        {visibleItems.length > 0 ? (
+                          visibleItems.map((item, index) => {
+                            return (
+                              <div
+                                key={index}
+                                className="relative flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-2xl bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 transition-all group"
+                              >
+                                {/* Left timeline dot */}
                                 <div
-                                  key={index}
-                                  className="relative flex flex-col md:flex-row md:items-center justify-between gap-4 p-5 rounded-2xl bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 transition-all group"
-                                >
-                                  {/* Left timeline dot */}
-                                  <div
-                                    className={`absolute -left-6 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full border-2 border-background z-10 ${
-                                      item.type === "resume"
-                                        ? "bg-tertiary"
-                                        : item.type === "audio"
-                                        ? "bg-primary"
-                                        : "bg-secondary"
-                                    }`}
-                                  />
+                                  className={`absolute -left-6 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full border-2 border-background z-10 ${
+                                    item.type === "resume"
+                                      ? "bg-tertiary"
+                                      : item.type === "audio"
+                                      ? "bg-primary"
+                                      : "bg-secondary"
+                                  }`}
+                                />
 
-                                  <div className="flex items-start gap-4">
-                                    <div
-                                      className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-                                        item.type === "resume"
-                                          ? "bg-tertiary/10 text-tertiary"
-                                          : item.type === "audio"
-                                          ? "bg-primary/10 text-primary"
-                                          : "bg-secondary/10 text-secondary"
-                                      }`}
-                                    >
-                                      <span className="material-symbols-outlined text-lg">
-                                        {item.type === "resume" ? "description" : item.type === "audio" ? "graphic_eq" : "edit_document"}
-                                      </span>
-                                    </div>
-
-                                    <div>
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <h4 className="font-extrabold text-sm text-white">{item.title}</h4>
-                                        <span className="text-[10px] font-label-mono text-on-surface-variant/40">
-                                          {item.date}
-                                        </span>
-                                      </div>
-                                      <p className="text-xs text-on-surface-variant/60 mt-1 leading-relaxed max-w-xl font-medium">
-                                        {item.details}
-                                      </p>
-                                    </div>
+                                <div className="flex items-start gap-4 flex-1">
+                                  {/* Selection Checkbox */}
+                                  <div className="flex items-center justify-center self-center shrink-0">
+                                    <input
+                                      type="checkbox"
+                                      checked={selectedIds.includes(item.id)}
+                                      onChange={() => handleToggleSelect(item.id)}
+                                      className="w-4 h-4 rounded border-white/10 bg-white/5 text-primary focus:ring-primary focus:ring-offset-0 focus:ring-1 cursor-pointer transition-all accent-primary"
+                                    />
                                   </div>
 
-                                  <div className="flex items-center gap-4 self-end md:self-auto">
-                                    <div className="text-right">
-                                      <span className="text-[9px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">
-                                        综合得分
-                                      </span>
-                                      <span
-                                        className={`text-sm font-black font-label-mono ${
-                                          item.score >= 80 ? "text-tertiary" : "text-primary"
-                                        }`}
-                                      >
-                                        {item.score}分 ({item.grade})
+                                  <div
+                                    className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                                      item.type === "resume"
+                                        ? "bg-tertiary/10 text-tertiary"
+                                        : item.type === "audio"
+                                        ? "bg-primary/10 text-primary"
+                                        : "bg-secondary/10 text-secondary"
+                                    }`}
+                                  >
+                                    <span className="material-symbols-outlined text-lg">
+                                      {item.type === "resume" ? "description" : item.type === "audio" ? "graphic_eq" : "edit_document"}
+                                    </span>
+                                  </div>
+
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <h4 className="font-extrabold text-sm text-white truncate max-w-sm">{item.title}</h4>
+                                      <span className="text-[10px] font-label-mono text-on-surface-variant/40 shrink-0">
+                                        {item.date}
                                       </span>
                                     </div>
-
-                                    <button
-                                      onClick={() => handleViewDetails(item)}
-                                      className="px-4 py-2 bg-white/5 border border-white/10 group-hover:bg-primary group-hover:border-primary group-hover:text-on-primary text-white text-xs font-bold rounded-lg transition-all cursor-pointer"
-                                    >
-                                      查看详情
-                                    </button>
+                                    <p className="text-xs text-on-surface-variant/60 mt-1 leading-relaxed max-w-xl font-medium line-clamp-2">
+                                      {item.details}
+                                    </p>
                                   </div>
                                 </div>
-                              );
-                            })
+
+                                <div className="flex items-center gap-3.5 self-end md:self-auto shrink-0">
+                                  <div className="text-right">
+                                    <span className="text-[9px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">
+                                      综合得分
+                                    </span>
+                                    <span
+                                      className={`text-sm font-black font-label-mono ${
+                                        item.score >= 80 ? "text-tertiary" : "text-primary"
+                                      }`}
+                                    >
+                                      {item.score}分 ({item.grade})
+                                    </span>
+                                  </div>
+
+                                  <button
+                                    onClick={() => handleViewDetails(item)}
+                                    className="px-4 py-2 bg-white/5 border border-white/10 group-hover:bg-primary group-hover:border-primary group-hover:text-on-primary text-white text-xs font-bold rounded-lg transition-all cursor-pointer"
+                                  >
+                                    查看详情
+                                  </button>
+
+                                  <button
+                                    onClick={() => handleDeleteClick(item.id)}
+                                    className="p-2 bg-white/5 border border-white/10 hover:bg-red-500/20 hover:border-red-500/30 hover:text-red-400 text-on-surface-variant/60 rounded-lg transition-all cursor-pointer flex items-center justify-center"
+                                    title="删除记录"
+                                  >
+                                    <span className="material-symbols-outlined text-base">delete</span>
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
                         ) : (
                           <div className="py-12 text-center w-full">
                             <span className="material-symbols-outlined text-4xl text-on-surface-variant/35 mb-2 block">
                               folder_open
                             </span>
-                            <p className="text-xs text-on-surface-variant/50">未找到符合搜索条件的面试分析历史记录。</p>
+                            <p className="text-base text-on-surface-variant/50">未找到符合搜索条件的面试分析历史记录。</p>
                           </div>
                         )}
                       </div>
@@ -1686,6 +1892,79 @@ export default function CareerMemoryDashboard() {
 
             <p className="text-[10px] text-on-surface-variant/40">登录即代表您已阅读并同意《服务条款》和《隐私政策》</p>
           </div>
+        </div>
+      )}
+
+      {/* DOUBLE CONFIRMATION MODAL */}
+      {showConfirmModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div
+            onClick={() => {
+              if (!isDeleting) {
+                setShowConfirmModal(false);
+                setDeleteTarget(null);
+              }
+            }}
+            className="absolute inset-0 bg-surface/60 backdrop-blur-md transition-opacity duration-300"
+          />
+
+          <div className="bg-surface-container-high border border-white/10 rounded-3xl p-8 max-w-md w-full text-center relative z-10 space-y-6 shadow-2xl transition-all scale-100 animate-fade-in animate-duration-200">
+            <div className="flex justify-between items-center">
+              <span className="font-label-mono text-[10px] text-red-400 tracking-widest uppercase font-bold">
+                Danger Zone
+              </span>
+              <button
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  setDeleteTarget(null);
+                }}
+                className="text-on-surface-variant hover:text-white transition-colors"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <div className="w-16 h-16 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2">
+                <span className="material-symbols-outlined" style={{ fontSize: "40px" }}>warning</span>
+              </div>
+              <h3 className="font-extrabold text-white text-2xl">确认要删除吗？</h3>
+              <p className="text-on-surface-variant text-sm leading-relaxed max-w-xs mx-auto font-semibold">
+                {deleteTarget === "batch" 
+                  ? `您已选择批量删除 ${selectedIds.length} 条面试分析记录，此操作将永久删除关联的对象存储音频文件和数据库分析报告，且不可撤销。`
+                  : "此操作将永久删除此面试分析记录，以及关联的对象存储音频文件和数据库分析报告，且不可撤销。"}
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setShowConfirmModal(false);
+                  setDeleteTarget(null);
+                }}
+                className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-base font-bold hover:bg-white/10 transition-all cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleDeleteConfirm}
+                className="flex-1 py-3 rounded-xl bg-red-500 text-white text-base font-bold hover:bg-red-600 transition-all cursor-pointer shadow-lg shadow-red-500/15"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LOADING OVERLAY */}
+      {isDeleting && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-surface/80 backdrop-blur-md">
+          <div className="relative w-16 h-16 mb-4">
+            <div className="absolute inset-0 rounded-full border-4 border-primary/20" />
+            <div className="absolute inset-0 rounded-full border-4 border-t-primary animate-spin" />
+          </div>
+          <p className="text-sm font-bold text-white tracking-wider animate-pulse">删除中，请稍候...</p>
         </div>
       )}
     </main>

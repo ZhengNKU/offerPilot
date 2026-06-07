@@ -36,7 +36,7 @@ export default function InterviewRecordAnalysisPage() {
   const [activeTab, setActiveTab] = useState<"dialogue" | "deconstruct" | "followup" | "assessment">("dialogue");
 
   // Popover State
-  const [activePopoverIdx, setActivePopoverIdx] = useState<number | null>(null);
+  const [activePopoverIdx, setActivePopoverIdx] = useState<string | null>(null);
 
   // Search filter query
   const [searchQuery, setSearchQuery] = useState("");
@@ -56,6 +56,129 @@ export default function InterviewRecordAnalysisPage() {
 
   // Parsed dialogues list
   const [dialogues, setDialogues] = useState<DialogueItem[]>([]);
+
+  // Section & Collapsible States
+  const [activeSectionId, setActiveSectionId] = useState<number | null>(null);
+  const [sections, setSections] = useState<any[]>([]);
+  const [collapsedSections, setCollapsedSections] = useState<Record<number, boolean>>({});
+  const [isLoading, setIsLoading] = useState(false);
+
+  const fmtTime = (secs: number) => {
+    const m = Math.floor(Math.abs(secs) / 60);
+    const s = Math.floor(Math.abs(secs) % 60);
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const parseTimeStrToSecs = (timeStr: string): number => {
+    if (!timeStr) return 0;
+    const clean = timeStr.replace(/[()\[\]\uff08\uff3b\uff09\uff3d]/g, "").trim();
+    const parts = clean.split(":");
+    if (parts.length === 2) {
+      return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+    }
+    return 0;
+  };
+
+  const mergeRecordSectionsToMax10 = (secList: any[]): any[] => {
+    if (secList.length <= 10) return secList;
+
+    const N = secList.length;
+    const M = 10;
+    const merged: any[] = [];
+
+    const tagColorMap: Record<string, string> = {
+      "良好": "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+      "一般": "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+      "风险": "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+    };
+
+    for (let j = 0; j < M; j++) {
+      const startIdx = Math.floor((j * N) / M);
+      const endIdx = Math.floor(((j + 1) * N) / M);
+      const group = secList.slice(startIdx, endIdx);
+
+      if (group.length === 0) continue;
+
+      const first = group[0];
+      const last = group[group.length - 1];
+
+      const start_time = first.start_time ?? 0;
+      const end_time = last.end_time ?? 0;
+
+      const uniqueTitles = Array.from(new Set(group.map(g => g.title)));
+      let title = uniqueTitles.join(" & ");
+      if (title.length > 28) {
+        title = title.slice(0, 25) + "...";
+      }
+
+      const dialogue: any[] = [];
+      group.forEach(g => {
+        dialogue.push(...g.dialogue);
+      });
+
+      let tag = "一般";
+      if (group.some(g => g.tag === "风险")) {
+        tag = "风险";
+      } else if (group.every(g => g.tag === "良好")) {
+        tag = "良好";
+      }
+
+      merged.push({
+        id: j + 1,
+        title,
+        start_time,
+        end_time,
+        timeRange: `${fmtTime(start_time)} - ${fmtTime(end_time)}`,
+        tag,
+        tagColor: tagColorMap[tag] || first.tagColor,
+        dialogue
+      });
+    }
+
+    return merged;
+  };
+
+  const scrollToSection = (secId: number) => {
+    setActiveSectionId(secId);
+    setCollapsedSections(prev => ({ ...prev, [secId]: false })); // Ensure it is expanded
+    setTimeout(() => {
+      const el = document.getElementById(`section-block-${secId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
+  };
+
+  // Group local dialogues by interviewer question for fallback mock mode
+  const groupLocalDialoguesIntoSections = (dialogueItems: DialogueItem[]) => {
+    const grouped: any[] = [];
+    let currentSection: any = null;
+    let secIndex = 1;
+
+    dialogueItems.forEach((bubble) => {
+      const isInterviewer = bubble.sender === "interviewer";
+      const bubbleSecs = parseTimeStrToSecs(bubble.time);
+
+      if (isInterviewer || currentSection === null) {
+        if (currentSection) grouped.push(currentSection);
+        currentSection = {
+          id: secIndex,
+          title: isInterviewer ? bubble.text.slice(0, 15) + (bubble.text.length > 15 ? "..." : "") : `对话段落 ${secIndex}`,
+          timeRange: bubble.time,
+          start_time: bubbleSecs,
+          end_time: bubbleSecs,
+          tag: bubble.hasWarning ? "风险" : "良好",
+          tagColor: bubble.hasWarning ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" : "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+          dialogue: []
+        };
+        secIndex++;
+      }
+      currentSection.dialogue.push(bubble);
+      currentSection.end_time = bubbleSecs;
+    });
+    if (currentSection) grouped.push(currentSection);
+    return mergeRecordSectionsToMax10(grouped);
+  };
 
   // Default transcript matching preview image
   const DEFAULT_TRANSCRIPT = 
@@ -84,6 +207,13 @@ export default function InterviewRecordAnalysisPage() {
     const savedDate = localStorage.getItem("offerPilot_session_date");
     const savedGrade = localStorage.getItem("offerPilot_session_grade");
     const savedSalary = localStorage.getItem("offerPilot_session_salary");
+    const searchParams = new URLSearchParams(window.location.search);
+    let sessionId = searchParams.get("sessionId") || localStorage.getItem("offerPilot_session_id");
+    if (sessionId) {
+      const newUrl = window.location.pathname + `?sessionId=${sessionId}`;
+      window.history.replaceState(null, "", newUrl);
+    }
+    const token = localStorage.getItem("offerPilot_token");
 
     if (savedCompany || savedRole || savedRound) {
       setMetadataForm(prev => ({
@@ -97,12 +227,87 @@ export default function InterviewRecordAnalysisPage() {
       }));
     }
 
-    if (savedText && savedText.trim().length > 0) {
-      setPasteText(savedText);
-      parseDialogueText(savedText);
+    if (sessionId) {
+      setIsLoading(true);
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      Promise.all([
+        fetch(`http://localhost:8001/api/audio/report/${sessionId}`, { headers }),
+        fetch(`http://localhost:8001/api/audio/session/${sessionId}/sections`, { headers })
+      ]).then(async ([reportRes, sectionsRes]) => {
+        if (reportRes.ok && sectionsRes.ok) {
+          const report = await reportRes.json();
+          const sectionsData = await sectionsRes.json();
+          
+          const rawTranscript = report.transcript ?? [];
+          const dbSections = sectionsData.sections ?? [];
+
+          const tagColorMap: Record<string, string> = {
+            "良好": "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+            "一般": "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+            "风险": "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+          };
+
+          const mappedSections = dbSections.map((sec: any, idx: number) => {
+            const sectionDialogue = rawTranscript.filter((utt: any) => 
+              (sec.start_time - 0.001 <= (utt.start_time ?? 0)) && 
+              ((utt.start_time ?? 0) <= sec.end_time + 0.001)
+            );
+            return {
+              id: sec.id || (idx + 1),
+              title: sec.title || `段落 ${idx + 1}`,
+              start_time: sec.start_time,
+              end_time: sec.end_time,
+              timeRange: `${fmtTime(sec.start_time)} - ${fmtTime(sec.end_time)}`,
+              tag: sec.tag || "一般",
+              tagColor: tagColorMap[sec.tag] || "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+              dialogue: sectionDialogue.map((utt: any) => ({
+                sender: utt.speaker === "Interviewer" ? "interviewer" as const : "user" as const,
+                name: utt.speaker === "Interviewer" ? "面试官" : "您",
+                time: fmtTime(utt.start_time || 0),
+                text: utt.content,
+                hasWarning: utt.speaker !== "Interviewer" && (utt.content.includes("因为 Redis 性能高") || false),
+              }))
+            };
+          });
+
+          setSections(mergeRecordSectionsToMax10(mappedSections));
+          // Set first dialogue text to pasteText so copy/export still work
+          const fullText = rawTranscript.map((utt: any) => `${utt.speaker === "Interviewer" ? "面试官" : "我"}(${fmtTime(utt.start_time || 0)}): ${utt.content}`).join("\n");
+          setPasteText(fullText);
+        } else {
+          // fallback if response failed
+          if (savedText && savedText.trim().length > 0) {
+            setPasteText(savedText);
+            parseDialogueText(savedText);
+          } else {
+            setPasteText(DEFAULT_TRANSCRIPT);
+            parseDialogueText(DEFAULT_TRANSCRIPT);
+          }
+        }
+      }).catch(err => {
+        console.error("Failed to load backend session/sections:", err);
+        // fallback on catch
+        if (savedText && savedText.trim().length > 0) {
+          setPasteText(savedText);
+          parseDialogueText(savedText);
+        } else {
+          setPasteText(DEFAULT_TRANSCRIPT);
+          parseDialogueText(DEFAULT_TRANSCRIPT);
+        }
+      }).finally(() => {
+        setIsLoading(false);
+        localStorage.removeItem("offerPilot_session_id");
+      });
     } else {
-      setPasteText(DEFAULT_TRANSCRIPT);
-      parseDialogueText(DEFAULT_TRANSCRIPT);
+      if (savedText && savedText.trim().length > 0) {
+        setPasteText(savedText);
+        parseDialogueText(savedText);
+      } else {
+        setPasteText(DEFAULT_TRANSCRIPT);
+        parseDialogueText(DEFAULT_TRANSCRIPT);
+      }
     }
   }, []);
 
@@ -227,10 +432,36 @@ export default function InterviewRecordAnalysisPage() {
     });
 
     setDialogues(parsedList);
+    const grouped = groupLocalDialoguesIntoSections(parsedList);
+    setSections(grouped);
   };
 
   // Handle Manual Form Submission
-  const handleAnalyzeSubmit = () => {
+  const handleAnalyzeSubmit = async () => {
+    // ── CHECK: Limit free users/guests to 1 analysis per type ──
+    if (!auth.isLoggedIn) {
+      if (localStorage.getItem("offerPilot_analyzed_text") === "true") {
+        auth.triggerToast("您的该项分析免费体验次数已达上限，请注册账号并升级至 PRO 会员解锁更多分析！");
+        return;
+      }
+    } else {
+      // Check registered free user limit via backend
+      const token = localStorage.getItem("offerPilot_token");
+      try {
+        const checkRes = await fetch("http://localhost:8001/api/audio/check_limit", {
+          headers: token ? { "Authorization": `Bearer ${token}` } : {}
+        });
+        if (!checkRes.ok) {
+          const errData = await checkRes.json();
+          auth.triggerToast(errData.detail || "您的该项分析免费体验次数已达上限，请升级至 PRO 会员解锁更多分析！");
+          return;
+        }
+      } catch (err) {
+        auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！");
+        return;
+      }
+    }
+
     if (!pasteText.trim()) {
       auth.triggerToast("请填写或粘贴面试对话内容！");
       return;
@@ -256,6 +487,7 @@ export default function InterviewRecordAnalysisPage() {
     localStorage.setItem("offerPilot_session_date", metadataForm.date);
     localStorage.setItem("offerPilot_session_grade", metadataForm.grade);
     localStorage.setItem("offerPilot_session_salary", metadataForm.salary);
+    localStorage.setItem("offerPilot_analyzed_text", "true");
 
     setTimeout(() => {
       setIsAnalyzing(false);
@@ -290,7 +522,7 @@ export default function InterviewRecordAnalysisPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden select-none pt-20">
+    <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-x-hidden overflow-y-auto select-none pt-20">
       
       {/* Sci-Fi Background Grids and Halos */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />
@@ -381,11 +613,13 @@ export default function InterviewRecordAnalysisPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-[#050B1A]/90 backdrop-blur-xl flex flex-col justify-center items-center"
+            className="fixed inset-0 z-50 bg-[#050B1A]/90 backdrop-blur-xl flex flex-col justify-center items-center gap-4 px-8"
           >
-            <div className="w-16 h-16 rounded-full border-4 border-[#00D4FF]/20 border-t-[#00D4FF] animate-spin mb-4" />
-            <h3 className="font-extrabold text-white text-lg animate-pulse">OfferPilot 正在分析面试记录...</h3>
-            <p className="text-xs text-white/50 mt-1">剖析答题逻辑、计算风险漏点、输出表达升级策略</p>
+            <div className="w-16 h-16 rounded-full border-4 border-[#00D4FF]/20 border-t-[#00D4FF] animate-spin mb-2" />
+            <div className="text-center space-y-3">
+              <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">OfferPilot 正在分析面试记录...</h3>
+              <p className="text-base md:text-lg text-white/70 font-semibold">剖析答题逻辑、计算风险漏点、输出表达升级策略</p>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -596,25 +830,18 @@ export default function InterviewRecordAnalysisPage() {
               </div>
 
               {/* 1.3 Question Catalog */}
-              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 flex-1">
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[500px] shrink-0">
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
                   <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-base text-[#00D4FF]">list_alt</span>
                     问题目录
                   </h4>
-                  <span className="text-sm text-white/30 font-mono">共 18 个问题</span>
+                  <span className="text-sm text-white/30 font-mono">共 {sections.length} 个片段</span>
                 </div>
 
                 <div className="flex-1 overflow-y-auto space-y-3 pr-1 select-none">
-                  {[
-                    { id: "Q1", label: "自我介绍", tag: "良好", time: "00:00 - 02:15" },
-                    { id: "Q2", label: "项目介绍", tag: "一般", time: "02:16 - 05:40" },
-                    { id: "Q3", label: "Redis 追问", tag: "风险", time: "05:41 - 09:18", isActive: true },
-                    { id: "Q4", label: "系统一致性", tag: "一般", time: "09:19 - 14:35" },
-                    { id: "Q5", label: "TCC 与 Saga", tag: "风险", time: "14:36 - 20:02" },
-                    { id: "Q6", label: "行为面试", tag: "良好", time: "20:03 - 32:18" }
-                  ].map((q) => {
-                    const isSelected = q.isActive;
+                  {sections.map((q, idx) => {
+                    const isSelected = activeSectionId === q.id || (activeSectionId === null && idx === 0);
                     const isRisk = q.tag === "风险";
                     const isGood = q.tag === "良好";
 
@@ -631,19 +858,22 @@ export default function InterviewRecordAnalysisPage() {
                     return (
                       <div 
                         key={q.id}
-                        onClick={() => alert(`切换到 ${q.id} 详细分析`)}
+                        onClick={() => scrollToSection(q.id)}
                         className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all duration-300 relative flex items-center justify-between gap-3 ${
                           isSelected
                             ? "bg-[#AFA7FF]/5 border-[#AFA7FF]/20 shadow-lg shadow-[#AFA7FF]/5"
                             : "bg-[#050B1A]/40 border-white/5 hover:border-white/10 hover:bg-[#050B1A]/80"
                         }`}
                       >
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
                           {/* Connector line dot */}
                           <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-                          <h5 className={`text-sm font-black truncate leading-tight ${isSelected ? "text-[#AFA7FF]" : "text-white"}`}>
-                            {q.id} {q.label}
-                          </h5>
+                          <div className="space-y-0.5 min-w-0">
+                            <span className="text-[10px] text-white/40 font-mono block leading-none">{q.timeRange}</span>
+                            <h5 className={`text-sm font-black truncate leading-tight ${isSelected ? "text-[#AFA7FF]" : "text-white"}`}>
+                              Q{idx + 1} {q.title}
+                            </h5>
+                          </div>
                         </div>
 
                         <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase border shrink-0 ${badgeClass}`}>
@@ -672,33 +902,7 @@ export default function InterviewRecordAnalysisPage() {
             <div className="col-span-12 lg:col-span-6 flex flex-col gap-4.5 min-w-0">
               
               {/* Main Content Board */}
-              <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4 flex-1 h-[890px]">
-                
-                {/* Board Header details */}
-                <div className="flex justify-between items-start select-none shrink-0 border-b border-white/5 pb-3">
-                  <div className="text-left space-y-1 pr-3">
-                    <h2 className="text-lg font-black text-white">面试记录分析</h2>
-                    <p className="text-[11px] text-white/30 font-bold">
-                      共识别：18 个问题 | 7 次追问 | 4 个高风险问题 | 2 个严重失分点
-                    </p>
-                  </div>
-                  
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => handleCopyToClipboard(pasteText, "面试日志原文已复制！")}
-                      className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-sm">content_copy</span>复制原文
-                    </button>
-                    <button 
-                      onClick={() => handleCopyToClipboard("面试诊断分析报告-字节跳动-后端工程师", "分析数据导出中...")}
-                      className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
-                    >
-                      <span className="material-symbols-outlined text-sm">download</span>导出分析
-                    </button>
-                  </div>
-                </div>
-
+              <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4 h-[890px] shrink-0">
                 {/* Main tabs bar with search */}
                 <div className="flex justify-between items-center border-b border-white/5 select-none shrink-0">
                   <div className="flex items-center gap-6 font-black text-base">
@@ -746,107 +950,161 @@ export default function InterviewRecordAnalysisPage() {
                 {/* Scrollable analysis area */}
                 <div className="flex-1 overflow-y-auto pr-1">
                   {activeTab === "dialogue" ? (
-                    /* Tab 1: 对话分析 Bubble list */
+                    /* Tab 1: 对话分析 Bubble list grouped by section */
                     <div className="space-y-5 pt-2 relative">
-                      {dialogues
-                        .filter(bubble => bubble.text.toLowerCase().includes(searchQuery.toLowerCase()))
-                        .map((bubble, idx) => {
-                          const isInterviewer = bubble.sender === "interviewer";
-                          return (
-                            <div 
-                              key={idx}
-                              className={`p-3.5 rounded-xl border transition-all duration-300 text-left flex flex-col gap-1.5 relative ${
-                                isInterviewer 
-                                  ? "bg-[#050B1A]/40 border-white/5 hover:border-white/10" 
-                                  : `bg-gradient-to-r from-[#050B1A]/80 to-[#AFA7FF]/3 border-[#AFA7FF]/10 hover:border-[#AFA7FF]/20 ${
-                                      bubble.hasWarning ? "border-[#FF7A95]/30 bg-[#1e132e]/30 shadow-[0_0_12px_rgba(255,122,149,0.04)]" : ""
-                                    }`
-                              }`}
-                            >
-                              <div className="flex justify-between items-center text-xs font-bold select-none">
-                                <span className="text-white/60 flex items-center gap-1.5 text-xs">
-                                  <span className={`w-2.5 h-2.5 rounded-full ${isInterviewer ? "bg-[#FF7A95]" : "bg-[#00D4FF]"}`} />
-                                  {bubble.name}
-                                </span>
-                                
-                                <div className="flex items-center gap-2">
-                                  {bubble.hasWarning && (
-                                    <span className="relative inline-block">
-                                      <span 
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setActivePopoverIdx(activePopoverIdx === idx ? null : idx);
-                                        }}
-                                        className="inline-flex items-center align-middle material-symbols-outlined text-[#FF7A95] text-base cursor-pointer select-none"
-                                        style={{ fontVariationSettings: "'FILL' 1" }}
-                                      >
-                                        warning
-                                      </span>
-                                      
-                                      {/* Warning Alert Popover aligned near warning element */}
-                                      {activePopoverIdx === idx && (
-                                        <div className="absolute right-0 bottom-full mb-3 w-64 p-4 rounded-xl bg-slate-950 border border-white/10 shadow-2xl z-50 space-y-2 text-left select-none animate-[slideIn_0.2s_ease-out]">
-                                          <div className="flex justify-between items-center pb-1.5 border-b border-white/5">
-                                            <span className="text-xs font-black text-[#FF7A95] flex items-center gap-1">
-                                              <span className="material-symbols-outlined text-xs">warning</span>
-                                              表达风险
-                                            </span>
-                                            <button 
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                setActivePopoverIdx(null);
-                                              }}
-                                              className="text-white/30 hover:text-white text-xs font-bold leading-none cursor-pointer"
-                                            >
-                                              ✕
-                                            </button>
-                                          </div>
-                                          <div className="space-y-1.5 text-xs text-white/70 font-semibold leading-relaxed">
-                                            <p>• 缺少选型依据，未说明问题背景</p>
-                                            <p>• 没有量化指标，缺乏说服力</p>
-                                          </div>
-                                          <div className="pt-2 border-t border-white/5">
-                                            <a 
-                                              href="#upgrade-expression" 
-                                              onClick={() => {
-                                                setActivePopoverIdx(null);
-                                                const el = document.getElementById("upgrade-expression");
-                                                if(el) el.scrollIntoView({ behavior: 'smooth' });
-                                              }}
-                                              className="text-xs text-[#AFA7FF] font-black hover:text-white transition-colors cursor-pointer block text-right"
-                                            >
-                                              如何优化表达 &gt;
-                                            </a>
-                                          </div>
-                                          {/* Arrow pointing down */}
-                                          <div className="absolute top-full right-2 border-solid border-t-slate-950 border-t-8 border-x-transparent border-x-8 border-b-0 drop-shadow-md"></div>
-                                        </div>
-                                      )}
-                                    </span>
-                                  )}
-                                  
-                                  {bubble.badgeText && (
-                                    <span className={`px-2 py-0.5 rounded border shrink-0 font-black text-[10px] uppercase ${bubble.badgeClass}`}>
-                                      {bubble.badgeText}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
+                      {sections.map((sec, secIdx) => {
+                        const isCollapsed = collapsedSections[sec.id];
+                        const filteredDialogue = sec.dialogue.filter((bubble: any) => 
+                          bubble.text.toLowerCase().includes(searchQuery.toLowerCase())
+                        );
 
-                              <p className="text-[13px] md:text-sm leading-relaxed text-white font-semibold">
-                                {renderHighlightedText(bubble.text)}
-                              </p>
+                        if (filteredDialogue.length === 0 && searchQuery) return null;
+
+                        return (
+                          <div key={sec.id} id={`section-block-${sec.id}`} className="space-y-3">
+                            {/* Collapsible Section Header */}
+                            <div 
+                              onClick={() => {
+                                setCollapsedSections(prev => ({
+                                  ...prev,
+                                  [sec.id]: !prev[sec.id]
+                                }));
+                              }}
+                              className="flex justify-between items-center p-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all cursor-pointer select-none"
+                            >
+                              <div className="flex items-center gap-2.5 text-xs font-bold text-left">
+                                <span className="text-[#AFA7FF] font-mono">#{secIdx + 1}</span>
+                                <span className="text-white font-black">{sec.title}</span>
+                                <span className={`px-2 py-0.5 rounded text-[10px] uppercase border font-semibold ${sec.tagColor || "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20"}`}>
+                                  {sec.tag}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px] text-white/40 font-mono">
+                                <span>{sec.timeRange}</span>
+                                <span className="material-symbols-outlined text-sm">
+                                  {isCollapsed ? "keyboard_arrow_down" : "keyboard_arrow_up"}
+                                </span>
+                              </div>
                             </div>
-                          );
-                        })}
+
+                            {/* Section content (dialogue bubbles) */}
+                            {!isCollapsed && (
+                              <div className="space-y-3.5 pl-3.5 border-l border-white/5">
+                                {filteredDialogue.map((bubble: any, idx: number) => {
+                                  const isInterviewer = bubble.sender === "interviewer";
+                                  const popoverKey = `${sec.id}-${idx}`;
+
+                                  return (
+                                    <div 
+                                      key={idx}
+                                      className={`p-3.5 rounded-xl border transition-all duration-300 text-left flex flex-col gap-1.5 relative ${
+                                        isInterviewer 
+                                          ? "bg-[#050B1A]/40 border-white/5 hover:border-white/10" 
+                                          : `bg-gradient-to-r from-[#050B1A]/80 to-[#AFA7FF]/3 border-[#AFA7FF]/10 hover:border-[#AFA7FF]/20 ${
+                                              bubble.hasWarning ? "border-[#FF7A95]/30 bg-[#1e132e]/30 shadow-[0_0_12px_rgba(255,122,149,0.04)]" : ""
+                                            }`
+                                      }`}
+                                    >
+                                      <div className="flex justify-between items-center text-xs font-bold select-none">
+                                        <span className="text-white/60 flex items-center gap-1.5 text-xs">
+                                          <span className={`w-2.5 h-2.5 rounded-full ${isInterviewer ? "bg-[#FF7A95]" : "bg-[#00D4FF]"}`} />
+                                          {bubble.name}
+                                          <span className="font-mono text-[10px] text-white/30 ml-1">{bubble.time}</span>
+                                        </span>
+                                        
+                                        <div className="flex items-center gap-2">
+                                          {bubble.hasWarning && (
+                                            <span className="relative inline-block">
+                                              <span 
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setActivePopoverIdx(activePopoverIdx === popoverKey ? null : popoverKey);
+                                                }}
+                                                className="inline-flex items-center align-middle material-symbols-outlined text-[#FF7A95] text-base cursor-pointer select-none"
+                                                style={{ fontVariationSettings: "'FILL' 1" }}
+                                              >
+                                                warning
+                                              </span>
+                                              
+                                              {/* Warning Alert Popover aligned near warning element */}
+                                              {activePopoverIdx === popoverKey && (
+                                                <div className="absolute right-0 bottom-full mb-3 w-64 p-4 rounded-xl bg-slate-950 border border-white/10 shadow-2xl z-50 space-y-2 text-left select-none animate-[slideIn_0.2s_ease-out]">
+                                                  <div className="flex justify-between items-center pb-1.5 border-b border-white/5">
+                                                    <span className="text-xs font-black text-[#FF7A95] flex items-center gap-1">
+                                                      <span className="material-symbols-outlined text-xs">warning</span>
+                                                      表达风险
+                                                    </span>
+                                                    <button 
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setActivePopoverIdx(null);
+                                                      }}
+                                                      className="text-white/30 hover:text-white text-xs font-bold leading-none cursor-pointer"
+                                                    >
+                                                      ✕
+                                                    </button>
+                                                  </div>
+                                                  <div className="space-y-1.5 text-xs text-white/70 font-semibold leading-relaxed">
+                                                    <p>• 缺少选型依据，未说明问题背景</p>
+                                                    <p>• 没有量化指标，缺乏说服力</p>
+                                                  </div>
+                                                  <div className="pt-2 border-t border-white/5">
+                                                    <a 
+                                                      href="#upgrade-expression" 
+                                                      onClick={() => {
+                                                        setActivePopoverIdx(null);
+                                                        const el = document.getElementById("upgrade-expression");
+                                                        if(el) el.scrollIntoView({ behavior: 'smooth' });
+                                                      }}
+                                                      className="text-xs text-[#AFA7FF] font-black hover:text-white transition-colors cursor-pointer block text-right"
+                                                    >
+                                                      如何优化表达 &gt;
+                                                    </a>
+                                                  </div>
+                                                  {/* Arrow pointing down */}
+                                                  <div className="absolute top-full right-2 border-solid border-t-slate-950 border-t-8 border-x-transparent border-x-8 border-b-0 drop-shadow-md"></div>
+                                                </div>
+                                              )}
+                                            </span>
+                                          )}
+                                          
+                                          {bubble.badgeText && (
+                                            <span className={`px-2 py-0.5 rounded border shrink-0 font-black text-[10px] uppercase ${bubble.badgeClass}`}>
+                                              {bubble.badgeText}
+                                            </span>
+                                          )}
+                                        </div>
+                                      </div>
+                                      
+                                      <p className="text-[13px] md:text-sm leading-relaxed text-white font-semibold">
+                                        {renderHighlightedText(bubble.text)}
+                                      </p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
 
                       {/* Bottom action panel */}
                       <div className="flex justify-end items-center pt-3 select-none shrink-0 font-black text-base text-white/40">
                         <span className="px-3 py-1 bg-white/5 border border-white/10 hover:bg-white/10 hover:text-white rounded-lg cursor-pointer flex items-center gap-1 transition-all text-xs" onClick={() => {
-                          const warningIdx = dialogues.findIndex(d => d.hasWarning);
-                          if(warningIdx !== -1) {
+                          let firstWarnSecId = null;
+                          let firstWarnIdx = null;
+                          for (const sec of sections) {
+                            const wIdx = sec.dialogue.findIndex((d: any) => d.hasWarning);
+                            if (wIdx !== -1) {
+                              firstWarnSecId = sec.id;
+                              firstWarnIdx = wIdx;
+                              break;
+                            }
+                          }
+                          if(firstWarnSecId !== null && firstWarnIdx !== null) {
                             alert("已定位到当前存在表达风险的问答段落！");
-                            setActivePopoverIdx(warningIdx);
+                            scrollToSection(firstWarnSecId);
+                            setActivePopoverIdx(`${firstWarnSecId}-${firstWarnIdx}`);
                           }
                         }}>
                           <span className="material-symbols-outlined text-xs">arrow_upward</span>定位到当前问题

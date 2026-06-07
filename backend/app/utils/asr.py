@@ -19,6 +19,7 @@ import requests
 import logging
 import time
 import uuid
+import urllib.parse
 from typing import List, Dict, Any
 from app.config import settings
 
@@ -26,6 +27,27 @@ logger = logging.getLogger(__name__)
 
 VOLC_SUBMIT_URL = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit"
 VOLC_QUERY_URL  = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query"
+
+
+def _encode_audio_url(url: str) -> str:
+    """Percent-encode the path of an audio URL so non-ASCII chars
+    (e.g. Chinese filenames in COS keys) don't break Volc's downloader.
+
+    IMPORTANT: COS presigned URLs already have their path percent-encoded
+    (e.g. %E4%B8%AD%E6%96%87). Calling urllib.parse.quote on top of that
+    produces a DOUBLE-encoded URL (%25E4%25B8%25AD...) which Volc rejects
+    with "Invalid audio URI". So we only encode when the path actually
+    contains raw non-ASCII characters."""
+    try:
+        parts = urllib.parse.urlparse(url)
+        # If no raw non-ASCII char in path, assume already encoded (or
+        # ASCII-only) and return as-is to avoid double encoding.
+        if not any(ord(c) > 127 for c in parts.path):
+            return url
+        encoded_path = urllib.parse.quote(parts.path, safe="/")
+        return urllib.parse.urlunparse(parts._replace(path=encoded_path))
+    except Exception:
+        return url
 
 
 def _headers(request_id: str) -> dict:
@@ -56,12 +78,17 @@ def call_volc_asr(audio_url: str) -> List[Dict[str, Any]]:
     """
     # Generate UUID — this IS the task_id for Volc ASR
     request_id = str(uuid.uuid4())
-    audio_fmt   = _detect_format(audio_url)
+    # URL-encode path so non-ASCII chars (e.g. Chinese filenames) don't
+    # make Volc's internal downloader choke with "Invalid audio URI".
+    audio_url_enc = _encode_audio_url(audio_url)
+    audio_fmt   = _detect_format(audio_url_enc)
+
+    logger.info(f"[Volc ASR] Encoded url: {audio_url} -> {audio_url_enc}")
 
     submit_body = {
         "user": {"uid": "offerpilot-asr"},
         "audio": {
-            "url":     audio_url,
+            "url":     audio_url_enc,
             "format":  audio_fmt,
             "codec":   "raw",
             "rate":    16000,
@@ -82,7 +109,7 @@ def call_volc_asr(audio_url: str) -> List[Dict[str, Any]]:
     }
 
     # ── Step 1: Submit ────────────────────────────────────────────────────
-    logger.info(f"[Volc ASR] Submitting: request_id={request_id}, url={audio_url}, fmt={audio_fmt}")
+    logger.info(f"[Volc ASR] Submitting: request_id={request_id}, url={audio_url_enc}, fmt={audio_fmt}")
     try:
         resp = requests.post(
             VOLC_SUBMIT_URL,
@@ -159,6 +186,74 @@ def call_volc_asr(audio_url: str) -> List[Dict[str, Any]]:
     return []
 
 
+def _determine_speaker_mapping(utterances: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    Given raw utterances, determine which speaker ID maps to 'Interviewer' and 'Candidate'.
+    Returns a dict mapping spk_str -> "Interviewer" or "Candidate".
+    """
+    stats = {} # spk_str -> {"questions": 0, "chars": 0, "first_appear": int}
+    for idx, utt in enumerate(utterances):
+        spk = utt.get("additions", {}).get("speaker") or utt.get("speaker_id") or utt.get("speaker")
+        if spk is None:
+            continue
+        spk_str = str(spk).strip()
+        if not spk_str:
+            continue
+        if spk_str not in stats:
+            stats[spk_str] = {"questions": 0, "chars": 0, "first_appear": idx}
+        
+        text = (utt.get("text") or utt.get("definite_text") or utt.get("content") or "").strip()
+        stats[spk_str]["chars"] += len(text)
+        
+        # Check if sentence looks like a question or interviewer prompt
+        is_q = False
+        if any(q in text for q in ["?", "？", "为什么", "怎么", "请介绍", "自我介绍", "说说", "谈谈", "聊聊", "你好", "欢迎"]):
+            is_q = True
+        if is_q:
+            stats[spk_str]["questions"] += 1
+
+    if not stats:
+        return {}
+
+    # If only 1 speaker, map to Interviewer
+    if len(stats) == 1:
+        return {list(stats.keys())[0]: "Interviewer"}
+
+    # Score each speaker for how likely they are to be the Interviewer
+    scores = {spk: 0 for spk in stats}
+    
+    # Heuristic 1: First appearance (usually Interviewer speaks first)
+    sorted_by_appear = sorted(stats.keys(), key=lambda k: stats[k]["first_appear"])
+    scores[sorted_by_appear[0]] += 2.0
+    
+    # Heuristic 2: Questions count (Interviewer asks more questions)
+    sorted_by_questions = sorted(stats.keys(), key=lambda k: stats[k]["questions"], reverse=True)
+    if stats[sorted_by_questions[0]]["questions"] > 0:
+        scores[sorted_by_questions[0]] += 2.0
+        for spk in sorted_by_questions[1:]:
+            if stats[spk]["questions"] == stats[sorted_by_questions[0]]["questions"]:
+                scores[spk] += 2.0
+                
+    # Heuristic 3: Total characters spoken (Candidate speaks much more)
+    sorted_by_chars = sorted(stats.keys(), key=lambda k: stats[k]["chars"])
+    scores[sorted_by_chars[0]] += 1.0 # speaker with fewest characters gets points
+    for spk in sorted_by_chars[1:]:
+        if stats[spk]["chars"] == stats[sorted_by_chars[0]]["chars"]:
+            scores[spk] += 1.0
+
+    # Find the best speaker for Interviewer
+    best_interviewer = max(scores.keys(), key=lambda k: scores[k])
+    
+    mapping = {}
+    for spk in stats:
+        if spk == best_interviewer:
+            mapping[spk] = "Interviewer"
+        else:
+            mapping[spk] = "Candidate"
+            
+    return mapping
+
+
 def _parse_volc_result(qdata: dict) -> List[Dict[str, Any]]:
     """
     Parse Volcano Engine ASR JSON result.
@@ -188,6 +283,10 @@ def _parse_volc_result(qdata: dict) -> List[Dict[str, Any]]:
     logger.info(f"[Volc ASR] Parsing {len(utterances)} utterances, "
                 f"sample keys: {list(utterances[0].keys()) if utterances else 'N/A'}")
 
+    # Build speaker mapping
+    spk_mapping = _determine_speaker_mapping(utterances)
+    logger.info(f"[Volc ASR] Determined speaker mapping: {spk_mapping}")
+
     segments: List[Dict[str, Any]] = []
     for utt in utterances:
         text = (utt.get("text") or utt.get("definite_text") or "").strip()
@@ -198,17 +297,15 @@ def _parse_volc_result(qdata: dict) -> List[Dict[str, Any]]:
         start_ms = float(utt.get("start_time", utt.get("begin_time", utt.get("start", 0))))
         end_ms   = float(utt.get("end_time",   utt.get("end",   start_ms + 2000)))
 
-        # Speaker (0-based int)
-        spk = utt.get("speaker_id", utt.get("speaker", 0))
-        try:
-            spk = int(spk)
-        except (TypeError, ValueError):
-            spk = 0
+        # Speaker (0-based int or string from additions)
+        spk = utt.get("additions", {}).get("speaker") or utt.get("speaker_id") or utt.get("speaker")
+        spk_str = str(spk).strip() if spk is not None else ""
+        role = spk_mapping.get(spk_str, "Interviewer")
 
         segments.append({
             "start_time": start_ms / 1000.0,   # ms → seconds
             "end_time":   end_ms   / 1000.0,
-            "speaker":    "Interviewer" if spk == 0 else "Candidate",
+            "speaker":    role,
             "content":    text,
         })
 

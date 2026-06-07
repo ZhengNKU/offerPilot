@@ -43,7 +43,8 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
         school=p.school or "暂无学校",
         degree=p.degree or "本科",
         hasExp=p.has_experience,
-        is_online=user.is_online
+        is_online=user.is_online,
+        membership=user.membership
     )
 
 # FastAPI dependency to fetch logged-in user details

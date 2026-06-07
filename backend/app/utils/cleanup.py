@@ -34,23 +34,28 @@ async def find_expired_files(db: AsyncSession) -> list[models.UploadedFile]:
         .outerjoin(models.User, models.UploadedFile.user_id == models.User.id)
         .where(
             or_(
-                # 访客上传 (无主) -> 免费档
+                # 访客没有登录 -> 不保存，立即删除
+                models.UploadedFile.user_id.is_(None),
+                # 用户当前未在线/未登录 (is_online 为 False) -> 不保存，立即删除
                 and_(
-                    models.UploadedFile.user_id.is_(None),
-                    models.UploadedFile.created_at < free_cutoff,
+                    models.UploadedFile.user_id.is_not(None),
+                    models.User.is_online.is_(False),
                 ),
-                # 免费用户 (membership IS NULL) -> 免费档
+                # 已登录且在线的免费用户 (membership IS NULL) -> 免费档
                 and_(
+                    models.User.is_online.is_(True),
                     models.User.membership.is_(None),
                     models.UploadedFile.created_at < free_cutoff,
                 ),
-                # Pro 用户
+                # 已登录且在线的 Pro 用户
                 and_(
+                    models.User.is_online.is_(True),
                     models.User.membership == "pro",
                     models.UploadedFile.created_at < pro_cutoff,
                 ),
-                # Max 用户
+                # 已登录且在线的 Max 用户
                 and_(
+                    models.User.is_online.is_(True),
                     models.User.membership == "max",
                     models.UploadedFile.created_at < max_cutoff,
                 ),

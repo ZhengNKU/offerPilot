@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 from sqlalchemy import ForeignKey, String, Integer, Boolean, DateTime, func, ARRAY, Float, BigInteger
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
@@ -82,7 +83,8 @@ class InterviewSession(Base):
     
     user: Mapped[Optional["User"]] = relationship("User", back_populates="sessions")
     tasks: Mapped[List["AnalysisTask"]] = relationship("AnalysisTask", back_populates="session", cascade="all, delete-orphan")
-    segments: Mapped[List["TranscriptSegment"]] = relationship("TranscriptSegment", back_populates="session", cascade="all, delete-orphan")
+    transcript: Mapped[Optional["InterviewTranscript"]] = relationship("InterviewTranscript", back_populates="session", cascade="all, delete-orphan", uselist=False)
+    sections: Mapped[List["TranscriptSection"]] = relationship("TranscriptSection", back_populates="session", cascade="all, delete-orphan")
     questions: Mapped[List["InterviewQuestion"]] = relationship("InterviewQuestion", back_populates="session", cascade="all, delete-orphan")
     risks: Mapped[List["InterviewRisk"]] = relationship("InterviewRisk", back_populates="session", cascade="all, delete-orphan")
     improvements: Mapped[List["AnswerImprovement"]] = relationship("AnswerImprovement", back_populates="session", cascade="all, delete-orphan")
@@ -104,17 +106,56 @@ class AnalysisTask(Base):
     session: Mapped["InterviewSession"] = relationship("InterviewSession", back_populates="tasks")
 
 
-class TranscriptSegment(Base):
-    __tablename__ = "transcript_segments"
-    
+class InterviewTranscript(Base):
+    """
+    整个 session 的转写结果。ASR 完成后一次性写入，
+    data 是 JSONB 数组，每个元素是一句：{start_time, end_time, speaker, content}。
+    不再一行一句（避免数据爆炸），也不再依赖不可靠的 speaker 拆分作为结构化列。
+    """
+    __tablename__ = "interview_transcripts"
+
+    session_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("interview_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    data: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    session: Mapped["InterviewSession"] = relationship("InterviewSession", back_populates="transcript")
+
+
+class TranscriptSection(Base):
+    """
+    语义分段（话题块）。一段对应面试中的一个主题（如「自我介绍」「Redis 追问」）。
+    由 LLM 在 ASR 完成后对 InterviewTranscript.data 做聚类后写入。
+    与 transcript 的关联在运行时通过 start_time/end_time 范围匹配（不在 DB 里建外键）。
+    """
+    __tablename__ = "transcript_sections"
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    session_id: Mapped[int] = mapped_column(Integer, ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False)
+    session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 0-based 排序，供前端时间线显示顺序
+    section_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 2-6 字中文标题（LLM 生成）
+    title: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 话题标签：self_intro / project / tech / system_design / behavioral / other
+    category: Mapped[str] = mapped_column(String(32), default="other", nullable=False)
+    # 评价标签：良好 / 一般 / 风险
+    tag: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
     start_time: Mapped[float] = mapped_column(Float, nullable=False)
     end_time: Mapped[float] = mapped_column(Float, nullable=False)
-    speaker: Mapped[str] = mapped_column(String(20), nullable=False) # Interviewer / Candidate
-    content: Mapped[str] = mapped_column(String, nullable=False)
-    
-    session: Mapped["InterviewSession"] = relationship("InterviewSession", back_populates="segments")
+    # LLM 生成的片段小评
+    summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    advantages: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
+    shortcomings: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
+    review_points: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
+    optimization_advice: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+    session: Mapped["InterviewSession"] = relationship("InterviewSession", back_populates="sections")
 
 
 class InterviewQuestion(Base):

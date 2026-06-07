@@ -207,7 +207,7 @@ export default function CareerDashboard() {
       return;
     }
     try {
-      const res = await fetch("http://localhost:8000/api/auth/send-code", {
+      const res = await fetch("http://localhost:8001/api/auth/send-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "email", target: securityForm.email })
@@ -235,7 +235,7 @@ export default function CareerDashboard() {
       return;
     }
     try {
-      const res = await fetch("http://localhost:8000/api/auth/send-code", {
+      const res = await fetch("http://localhost:8001/api/auth/send-code", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "phone", target: securityForm.phone })
@@ -274,7 +274,7 @@ export default function CareerDashboard() {
     }
 
     try {
-      const res = await fetch("http://localhost:8000/api/auth/security/update", {
+      const res = await fetch("http://localhost:8001/api/auth/security/update", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",

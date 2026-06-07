@@ -117,7 +117,7 @@ export default function NewAnalysisDebugger() {
     }
 
     try {
-      const res = await fetch("http://localhost:8000/api/file/upload", {
+      const res = await fetch("http://localhost:8001/api/file/upload", {
         method: "POST",
         headers,
         body: formData
@@ -132,9 +132,9 @@ export default function NewAnalysisDebugger() {
       setUploadedFileId(data.file_id);
       setSelectedFile(file);
       localStorage.setItem("offerPilot_session_audio_url", data.file_url);
-      auth.triggerToast("文件成功上传至 COS 对象存储！");
+      auth.triggerToast("文件已成功上传！");
     } catch (e: any) {
-      auth.triggerToast(e.message || "文件上传对象存储失败，请重试！");
+      auth.triggerToast(e.message || "文件上传失败，请重试！");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -187,7 +187,7 @@ export default function NewAnalysisDebugger() {
       }
 
       try {
-        const res = await fetch(`http://localhost:8000/api/file/delete?file_id=${uploadedFileId}`, {
+        const res = await fetch(`http://localhost:8001/api/file/delete?file_id=${uploadedFileId}`, {
           method: "DELETE",
           headers
         });
@@ -196,9 +196,9 @@ export default function NewAnalysisDebugger() {
           const err = await res.json();
           throw new Error(err.detail || "删除失败");
         }
-        auth.triggerToast("文件已从对象存储中删除！");
+        auth.triggerToast("文件已删除！");
       } catch (e: any) {
-        auth.triggerToast(e.message || "对象存储文件删除失败！");
+        auth.triggerToast(e.message || "文件删除失败！");
       } finally {
         setIsDeleting(false);
       }
@@ -228,6 +228,31 @@ export default function NewAnalysisDebugger() {
 
   // Launch analysis and save context to localStorage
   const triggerAnalysis = async () => {
+    // ── CHECK: Limit free users/guests to 1 analysis per type ──
+    const hasAnalyzedKey = `offerPilot_analyzed_${activeMode}`;
+    if (!auth.isLoggedIn) {
+      if (localStorage.getItem(hasAnalyzedKey) === "true") {
+        auth.triggerToast("您的该项分析免费体验次数已达上限，请注册账号并升级至 PRO 会员解锁更多分析！");
+        return;
+      }
+    } else {
+      // Check registered free user limit via backend
+      const token = localStorage.getItem("offerPilot_token");
+      try {
+        const checkRes = await fetch("http://localhost:8001/api/audio/check_limit", {
+          headers: token ? { "Authorization": `Bearer ${token}` } : {}
+        });
+        if (!checkRes.ok) {
+          const errData = await checkRes.json();
+          auth.triggerToast(errData.detail || "您的该项分析免费体验次数已达上限，请升级至 PRO 会员解锁更多分析！");
+          return;
+        }
+      } catch (err) {
+        auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！");
+        return;
+      }
+    }
+
     if (activeMode !== "text") {
       if (isUploading) {
         auth.triggerToast("文件正在上传中，请稍后...");
@@ -292,7 +317,7 @@ export default function NewAnalysisDebugger() {
 
       try {
         // Step 1: Create InterviewSession from the already-uploaded COS file
-        const sessionRes = await fetch("http://localhost:8000/api/audio/create_session", {
+        const sessionRes = await fetch("http://localhost:8001/api/audio/create_session", {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({
@@ -310,8 +335,11 @@ export default function NewAnalysisDebugger() {
         const sessionId: number = sessionData.session_id;
         localStorage.setItem("offerPilot_session_id", String(sessionId));
 
+        // Mark as analyzed for free users/guests
+        localStorage.setItem("offerPilot_analyzed_audio", "true");
+
         // Step 2: Trigger background analysis task
-        const analyzeRes = await fetch("http://localhost:8000/api/audio/analyze", {
+        const analyzeRes = await fetch("http://localhost:8001/api/audio/analyze", {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ session_id: sessionId })
@@ -325,7 +353,6 @@ export default function NewAnalysisDebugger() {
         localStorage.setItem("offerPilot_task_id", taskId);
 
         // Step 3: Poll on THIS page until analysis completes, THEN navigate
-        //         The isAnalyzing=true state shows a blocking overlay in the UI.
         const STEPS = [
           "ASR 转写中——提取音频文字...",
           "语义分段——判定说话人角色...",
@@ -338,15 +365,14 @@ export default function NewAnalysisDebugger() {
             const interval = setInterval(async () => {
               try {
                 const pollRes = await fetch(
-                  `http://localhost:8000/api/audio/task/${taskId}`,
+                  `http://localhost:8001/api/audio/task/${taskId}`,
                   { headers: token ? { Authorization: `Bearer ${token}` } : {} }
                 );
-                if (!pollRes.ok) return; // keep trying on network hiccup
+                if (!pollRes.ok) return;
                 const pollData = await pollRes.json();
 
                 const pct = pollData.progress ?? 0;
                 setTaskProgress(pct);
-                // Map progress % to a step label
                 const si = Math.min(Math.floor((pct / 100) * STEPS.length), STEPS.length - 1);
                 setTaskStep(STEPS[si]);
 
@@ -373,16 +399,18 @@ export default function NewAnalysisDebugger() {
       }
 
     } else if (activeMode === "text") {
-      // Text mode: store paste text and navigate (future: connect text analysis API)
+      // Text mode: store paste text and navigate
       localStorage.setItem("offerPilot_session_pasteText", pasteText);
       localStorage.removeItem("offerPilot_task_id");
       localStorage.removeItem("offerPilot_session_id");
+      localStorage.setItem("offerPilot_analyzed_text", "true");
       setIsAnalyzing(false);
       router.push("/debugger/record");
     } else {
       // Resume mode
       localStorage.removeItem("offerPilot_task_id");
       localStorage.removeItem("offerPilot_session_id");
+      localStorage.setItem("offerPilot_analyzed_resume", "true");
       setIsAnalyzing(false);
       router.push("/debugger/resume");
     }
@@ -508,7 +536,7 @@ export default function NewAnalysisDebugger() {
                           const token = localStorage.getItem("offerPilot_token");
                           const headers: Record<string, string> = {};
                           if (token) headers["Authorization"] = `Bearer ${token}`;
-                          fetch(`http://localhost:8000/api/file/delete?file_id=${uploadedFileId}`, {
+                          fetch(`http://localhost:8001/api/file/delete?file_id=${uploadedFileId}`, {
                             method: "DELETE",
                             headers
                           }).catch(() => {});
@@ -559,11 +587,11 @@ export default function NewAnalysisDebugger() {
                   <div className="absolute inset-2 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.1s" }} />
                 </div>
 
-                <div className="text-center space-y-1">
-                  <h3 className="font-extrabold text-white text-lg animate-pulse">
+                <div className="text-center space-y-3">
+                  <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">
                     {taskStep || "OfferPilot AI 正在分析中..."}
                   </h3>
-                  <p className="text-xs text-on-surface-variant/60">
+                  <p className="text-base md:text-lg text-white/70 font-semibold">
                     ASR 语音识别 + MiniMax-M3 智能评估，分析完成后自动进入报告
                   </p>
                 </div>
@@ -575,7 +603,7 @@ export default function NewAnalysisDebugger() {
                     style={{ width: `${taskProgress}%` }}
                   />
                 </div>
-                <p className="text-white/30 text-xs font-mono">{taskProgress}%</p>
+                <p className="text-[#5DECCB] text-2xl md:text-3xl font-black font-mono tracking-wider drop-shadow-[0_0_10px_rgba(93,236,203,0.5)] mt-2">{taskProgress}%</p>
               </div>
             )}
 
@@ -630,7 +658,7 @@ export default function NewAnalysisDebugger() {
                   ) : isDeleting ? (
                     <div className="flex flex-col items-center justify-center space-y-4">
                       <div className="w-16 h-16 rounded-full border-4 border-red-500/20 border-t-red-500 animate-spin mb-4" />
-                      <h4 className="font-extrabold text-white text-base animate-pulse">正在从对象存储中删除...</h4>
+                      <h4 className="font-extrabold text-white text-base animate-pulse">正在删除文件...</h4>
                     </div>
                   ) : selectedFile ? (
                     <div className="flex flex-col items-center justify-center space-y-4">

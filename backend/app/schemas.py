@@ -77,6 +77,7 @@ class UserProfileResponse(BaseModel):
     degree: str
     hasExp: bool
     is_online: bool = False
+    membership: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str

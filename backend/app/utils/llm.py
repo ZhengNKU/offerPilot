@@ -2,7 +2,8 @@ import requests
 import logging
 import asyncio
 import json
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, Optional, List
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -13,9 +14,38 @@ def call_minimax_sync(payload: dict) -> dict:
         "Authorization": f"Bearer {settings.MINIMAX_API_KEY}",
         "Content-Type": "application/json"
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=30.0)
+    # 120s: long transcripts (e.g. 89 segments) can take well over 30s for
+    # reasoning models to finish; 30s caused "Read timed out" in sectionize.
+    response = requests.post(url, headers=headers, json=payload, timeout=120.0)
     response.raise_for_status()
     return response.json()
+
+
+def _strip_codeblock(text: str) -> str:
+    """Strip fences so json.loads can parse the body. Two kinds of fences show
+    up in LLM output:
+      1) <think>...</think>  — MiniMax-M3 (and most reasoning models) prefix
+         their answer with a chain-of-thought block. We need to drop that
+         block before looking for the JSON body.
+      2) ```json ... ```     — model wraps JSON in a code fence.
+    """
+    cleaned = text.strip()
+    # 1) Reasoning blocks: greedy-strip all <think>...</think> regions
+    cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL)
+    cleaned = cleaned.strip()
+    # 2) Code fences: try to match ```json ... ``` or ``` ... ```
+    fence_match = re.search(r"^```(?:json)?\s*\n(.*?)\n```\s*$", cleaned, flags=re.DOTALL)
+    if fence_match:
+        cleaned = fence_match.group(1)
+    else:
+        # Fallback: drop a single leading ``` line and any trailing backticks
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            if lines and (lines[0].startswith("```json") or lines[0].startswith("```")):
+                cleaned = "\n".join(lines[1:])
+        cleaned = cleaned.rstrip("`").strip()
+    return cleaned
+
 
 async def analyze_interview_dialogue(dialogue_text: str, profile_data: Optional[dict] = None) -> Dict[str, Any]:
     """
@@ -52,17 +82,298 @@ async def analyze_interview_dialogue(dialogue_text: str, profile_data: Optional[
     try:
         res_data = await asyncio.to_thread(call_minimax_sync, payload)
         content = res_data["choices"][0]["message"]["content"]
-        
-        # Strip code block symbols if model returned them despite system instructions
-        content_clean = content.strip()
-        if content_clean.startswith("```"):
-            lines = content_clean.split("\n")
-            if lines[0].startswith("```json") or lines[0].startswith("```"):
-                content_clean = "\n".join(lines[1:-1]).strip()
-        
+        content_clean = _strip_codeblock(content)
         parsed_data = json.loads(content_clean)
         return parsed_data
     except Exception as e:
         logger.error(f"Failed calling MiniMax API: {str(e)}")
-        
+
     return {}
+
+
+async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Use MiniMax-M3 to semantically split a transcript (list of ASR segments)
+    into 3-8 topical sections like 「自我介绍」「项目深挖」「Redis 追问」.
+
+    Input  segments: [{start_time, end_time, speaker, content}, ...]  (seconds)
+    Output sections:  [{title, category, tag, start_time, end_time, summary}, ...]
+
+    IMPORTANT contract: start_time / end_time in output MUST be picked from
+    the input segment timestamps. The function enforces this by snapping any
+    out-of-range value to the nearest known segment boundary, and discards
+    sections that don't overlap any segment.
+    """
+    if not segments:
+        return []
+
+    # Build a compact dialogue list for the prompt
+    dialogue_lines = []
+    for s in segments:
+        role = "面试官" if s.get("speaker") == "Interviewer" else "候选人"
+        content = (s.get("content") or "").strip().replace("\n", " ")
+        dialogue_lines.append(
+            f"[{float(s['start_time']):.2f}, {float(s['end_time']):.2f}] {role}：{content}"
+        )
+    dialogue_text = "\n".join(dialogue_lines)
+
+    min_t = min(float(s["start_time"]) for s in segments)
+    max_t = max(float(s["end_time"])   for s in segments)
+
+    system_prompt = (
+        "你是一个专业的 AI 面试分析助手。你的任务是把一段面试转写按话题切成若干个语义段。\n"
+        "输入是一份带时间戳 of 对话列表，格式：「[start_time, end_time] speaker：content」。\n"
+        "\n"
+        "你需要：\n"
+        "1. 识别出面试中实际发生的话题块（如「自我介绍」「项目深挖」「技术追问」「算法题」「反问环节」等）\n"
+        "2. 把整段对话分成 3-8 个语义段\n"
+        "3. 为每个段给出 2-6 字中文标题\n"
+        "\n"
+        "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言）：\n"
+        "{\n"
+        '  "sections": [\n'
+        "    {\n"
+        '      "title": "2-6字中文标题",\n'
+        '      "category": "self_intro | project | tech | system_design | behavioral | reverse_question | other",\n'
+        '      "tag": "良好 | 一般 | 风险",\n'
+        '      "start_time": <浮点数秒>,\n'
+        '      "end_time": <浮点数秒>,\n'
+        '      "summary": "一句话小评（30-80字）",\n'
+        '      "advantages": ["优势1", "优势2"],\n'
+        '      "shortcomings": ["不足1", "不足2"],\n'
+        '      "review_points": ["复习重点1", "复习重点2"]\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "\n"
+        "严格要求：\n"
+        "1. start_time 和 end_time 必须从输入对话的真实时间戳里挑选，不允许凭空生成\n"
+        "2. 段与段在时间上必须连续覆盖：第 1 段 start_time = 对话最早时间，最后一段 end_time = 对话最晚时间；前一段 end_time ≤ 下一段 start_time\n"
+        "3. category 必须是上面列出的枚举值之一\n"
+        "4. tag 评价整段表现：表达流畅且技术到位=良好；明显卡顿或答错=风险；其他=一般\n"
+        "5. advantages 提取候选人在本话题回答中的闪光点（1-3个），若无则为空数组\n"
+        "6. shortcomings 指出候选人在本话题中回答的薄弱环节、答错点或不完善方案（1-3个），若无则为空数组\n"
+        "7. review_points 指出本话题对应应该深度掌握或复习的技术名词或方案（1-3个）\n"
+    )
+
+    user_content = f"对话列表（共 {len(segments)} 句，时间范围 {min_t:.2f}s - {max_t:.2f}s）：\n{dialogue_text}\n"
+
+    payload = {
+        "model": "MiniMax-M3",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user",   "content": user_content},
+        ],
+        "response_format": {"type": "json_object"},
+    }
+
+    raw_sections: List[Dict[str, Any]] = []
+    try:
+        res_data = await asyncio.to_thread(call_minimax_sync, payload)
+        content = res_data["choices"][0]["message"]["content"]
+        content_clean = _strip_codeblock(content)
+        # DEBUG: log raw content to diagnose empty-content returns
+        logger.info(f"[sectionize] raw content (first 300): {content_clean[:300]!r}")
+        parsed = json.loads(content_clean)
+        if isinstance(parsed, dict):
+            raw_sections = parsed.get("sections") or []
+        elif isinstance(parsed, list):
+            raw_sections = parsed
+    except Exception as e:
+        logger.error(f"[sectionize] MiniMax call failed: {e}")
+        # Dump the whole response so we can see what LLM actually returned
+        try:
+            logger.error(f"[sectionize] raw response_data dump: {json.dumps(res_data, ensure_ascii=False)[:2000]}")
+        except Exception:
+            logger.error(f"[sectionize] raw response_data (no json): {res_data!r}")
+        return []
+
+    if not raw_sections:
+        logger.warning("[sectionize] MiniMax returned no sections")
+        return []
+
+    # Validate & snap to known segment boundaries
+    valid_cats = {"self_intro", "project", "tech", "system_design",
+                  "behavioral", "reverse_question", "other"}
+    valid_tags = {"良好", "一般", "风险", None, ""}
+
+    cleaned: List[Dict[str, Any]] = []
+    for sec in raw_sections:
+        try:
+            st = float(sec.get("start_time", 0))
+            et = float(sec.get("end_time",   0))
+        except (TypeError, ValueError):
+            continue
+        if et <= st:
+            continue
+
+        # Snap to nearest real segment boundaries
+        st = _snap_to_segments(st, segments)
+        et = _snap_to_segments(et, segments)
+        if et <= st:
+            continue
+
+        title = (sec.get("title") or "").strip()[:64]
+        if not title:
+            continue
+        category = sec.get("category") or "other"
+        if category not in valid_cats:
+            category = "other"
+        tag = sec.get("tag")
+        if tag not in valid_tags:
+            tag = "一般"
+        summary = (sec.get("summary") or "").strip() or None
+        advantages = sec.get("advantages") or []
+        shortcomings = sec.get("shortcomings") or []
+        review_points = sec.get("review_points") or []
+
+        cleaned.append({
+            "title":     title,
+            "category":  category,
+            "tag":       tag,
+            "start_time": st,
+            "end_time":   et,
+            "summary":   summary,
+            "advantages": advantages,
+            "shortcomings": shortcomings,
+            "review_points": review_points
+        })
+
+    if not cleaned:
+        return []
+
+    # Enforce time coverage: first.start = min_t, last.end = max_t
+    cleaned.sort(key=lambda s: s["start_time"])
+    cleaned[0]["start_time"]  = min_t
+    cleaned[-1]["end_time"]   = max_t
+
+    # Drop duplicates / overlaps
+    deduped: List[Dict[str, Any]] = []
+    for s in cleaned:
+        if deduped and s["start_time"] < deduped[-1]["end_time"]:
+            # merge into previous
+            deduped[-1]["end_time"] = max(deduped[-1]["end_time"], s["end_time"])
+        else:
+            deduped.append(s)
+
+    logger.info(f"[sectionize] Produced {len(deduped)} sections")
+    return deduped
+
+
+def _snap_to_segments(t: float, segments: List[Dict[str, Any]]) -> float:
+    """Snap a timestamp to the nearest real segment boundary."""
+    if not segments:
+        return t
+    starts = [float(s["start_time"]) for s in segments]
+    ends   = [float(s["end_time"])   for s in segments]
+    candidates = starts + ends
+    if not candidates:
+        return t
+    return min(candidates, key=lambda x: abs(x - t))
+
+
+async def generate_section_optimization_advice(dialogue_text: str) -> Dict[str, Any]:
+    """
+    Generate diagnostic conclusion, candidate original answer, and high-score answer recommendation.
+    """
+    system_prompt = (
+        "你是一个顶尖的大厂架构师和 AI 面试教练。你需要对下面这段面试对话中候选人的回答进行深度诊断，并生成优化建议。\n"
+        "你需要提供三个部分：\n"
+        "1. AI 诊断结论：指出候选人回答中的核心技术漏洞、不完美的设计选择、或者表达欠缺（比如对于提到的技术点指出其优缺点或潜在问题）。字数 80-150 字。\n"
+        "2. 候选人原版回答：从对话中提取或提炼出候选人的主要回答内容，保持其口语化和原样。\n"
+        "3. 大厂架构师版高分话术推荐：编写一个近乎完美、符合大厂架构师/高级开发期望的回答话术，突出技术深度、Trade-off 权衡、真实项目经验、以及正确的解决方案。字数 150-300 字，可以包含对核心概念的强调（不要使用 Markdown 标记；如需高亮关键词，请使用 <strong class='text-[#5DECCB] font-black'> 与 </strong>，注意 HTML 属性必须用单引号；可以合理使用 <br /><br /> 换行分段）。\n"
+        "\n"
+        "你必须返回严格符合以下结构的 JSON 对象（不要包含任何 Markdown 标记或其它前后导言，只返回纯 JSON 对象）：\n"
+        "{\n"
+        "  \"conclusion\": \"AI 诊断结论内容...\",\n"
+        "  \"original\": \"候选人原版回答内容...\",\n"
+        "  \"optimized\": \"大厂架构师版高分话术推荐内容...\"\n"
+        "}"
+    )
+
+    payload = {
+        "model": "MiniMax-M3",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"面试对话片段：\n{dialogue_text}"}
+        ],
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        res_data = await asyncio.to_thread(call_minimax_sync, payload)
+        content = res_data["choices"][0]["message"]["content"]
+        content_clean = _strip_codeblock(content)
+        parsed_data = json.loads(content_clean)
+        return parsed_data
+    except Exception as e:
+        logger.error(f"Failed to generate optimization advice: {e}")
+        return {
+            "conclusion": "分析失败，请稍后重试",
+            "original": "无法提取原版回答",
+            "optimized": "暂无高分话术推荐"
+        }
+
+
+async def generate_transcript_highlights(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Calls MiniMax-M3 LLM to analyze candidate's utterances, returning highlights
+    with type ('strength', 'risk', 'tech') and 'tip' explanation.
+    """
+    if not segments:
+        return []
+
+    # Build a dialogue list with indices so the LLM can reference segment index
+    dialogue_lines = []
+    for idx, s in enumerate(segments):
+        role = "面试官" if s.get("speaker") == "Interviewer" else "候选人"
+        content = (s.get("content") or "").strip().replace("\n", " ")
+        dialogue_lines.append(f"[{idx}] {role}：{content}")
+    dialogue_text = "\n".join(dialogue_lines)
+
+    system_prompt = (
+        "你是一个专业的 AI 面试分析助手。你的任务是在候选人的回答中找出亮点、表达风险和专业词汇，并给出解析（高亮提示）。\n"
+        "输入是一份带索引的对话列表，格式：「[索引] speaker：content」。\n"
+        "\n"
+        "你需要分析每个候选人的回答，找出以下三类需要高亮的部分：\n"
+        "1. strength (亮点)：阐述清晰、论据充分、体现大厂高并发架构思维或有数据量化背书的内容；\n"
+        "2. risk (风险)：口癖、啰嗦、语病、逻辑硬伤、没有深度或明显的常识/技术方案错误；\n"
+        "3. tech (核心词)：核心技术名词、架构方法论或业务指标词（如 Redis、SLA、双删、QPS 等）。\n"
+        "\n"
+        "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言，只返回纯 JSON 对象）：\n"
+        "{\n"
+        '  "highlights": [\n'
+        "    {\n"
+        '      "segment_index": <整数索引，必须在输入的索引范围内>,\n'
+        '      "text": "对应内容里的具体文本子串，必须和该索引对应回答中的原文字符串完全相同",\n'
+        '      "type": "strength | risk | tech",\n'
+        '      "tip": "浮动框显示的 AI 分析提示话语（30-80字）"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "\n"
+        "严格要求：\n"
+        "1. text 中的内容必须能从对应 segment_index 的原文字串中完全匹配上，不能做任何字词的删改或拼写调整。\n"
+        "2. 高亮内容不要太长，尽量是 4-20 个字的关键短句或词语。\n"
+        "3. 高亮总数量要适中（每个回答片段 1-3 个高亮即可）。\n"
+        "4. 不要在提示话语（tip）中提及具体的段落索引或段号（如‘与第76段重复’），因为前台用户不知道具体的段落索引。如需表达内容重复，应直接说‘存在内容重复’或‘与前面的回答内容重复’。\n"
+    )
+
+    payload = {
+        "model": "MiniMax-M3",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f"对话列表：\n{dialogue_text}"}
+        ],
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        res_data = await asyncio.to_thread(call_minimax_sync, payload)
+        content = res_data["choices"][0]["message"]["content"]
+        content_clean = _strip_codeblock(content)
+        parsed = json.loads(content_clean)
+        return parsed.get("highlights") or []
+    except Exception as e:
+        logger.error(f"Failed to generate highlights: {e}")
+        return []

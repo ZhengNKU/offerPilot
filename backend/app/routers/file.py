@@ -151,8 +151,23 @@ async def upload_file(
             detail=f"上传到腾讯云对象存储失败: {str(e)}"
         )
 
-    # File URL
-    file_url = f"https://{bucket}.cos.{region}.myqcloud.com/{cos_key}"
+    # File URL — must be a presigned URL so Volc ASR (and the frontend audio
+    # player) can actually download from a private bucket. 1h expiry is
+    # long enough for ASR submit + report viewing.
+    try:
+        client = get_cos_client()
+        file_url = await asyncio.to_thread(
+            client.get_presigned_download_url,
+            Bucket=bucket,
+            Key=cos_key,
+            Expired=3600,
+        )
+    except Exception as e:
+        # Fallback to plain URL so DB write doesn't fail; downstream will
+        # surface 45000006 again if bucket is private.
+        file_url = f"https://{bucket}.cos.{region}.myqcloud.com/{cos_key}"
+        import logging as _logging
+        _logging.getLogger(__name__).warning(f"presigned URL fallback: {e}")
 
     # Save to database
     db_file = models.UploadedFile(

@@ -25,10 +25,6 @@ class Settings(BaseSettings):
     MINIMAX_API_KEY: str = "sk-cp-MWMKKxL_Pw6DnMDlTOsoH-r0CuKRlIjej1HllThrp0W5ibWrTW9-7c4AZR3OjV0fQDckONY9mtTgYxLARigGIKatRyJXStX1aeLadgwlirjSp2PREMklY_g"
     MINIMAX_BASE_URL: str = "https://api.minimaxi.com/v1"
 
-    # Alibaba DashScope — used for ASR (Paraformer-v2)
-    # The key from the Aliyun Bailian WebSearch MCP config: sk-7eb9032977794d2694d46116fb8db4a4
-    DASHSCOPE_API_KEY: str = "sk-7eb9032977794d2694d46116fb8db4a4"
-
     # Volcano Engine (ByteDance Doubao) ASR
     VOLC_ASR_API_KEY: str = "91b64a7e-bd24-41ba-95e7-b1dbca5cb6b3"
     VOLC_ASR_RESOURCE_ID: str = "volc.seedasr.auc"

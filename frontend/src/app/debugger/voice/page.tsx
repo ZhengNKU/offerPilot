@@ -16,6 +16,11 @@ interface DialogueItem {
   text: string;
   badgeText?: string;
   badgeClass?: string;
+  highlights?: Array<{
+    text: string;
+    type: "strength" | "risk" | "tech";
+    tip: string;
+  }>;
 }
 
 interface SegmentData {
@@ -43,6 +48,12 @@ interface SegmentData {
     implementation: number;
   };
   dialogue: DialogueItem[];
+  dbSectionId?: number;
+  optimizationAdvice?: {
+    conclusion: string;
+    original: string;
+    optimized: string;
+  };
 }
 
 const SEGMENTS_DATA: SegmentData[] = [
@@ -79,7 +90,12 @@ const SEGMENTS_DATA: SegmentData[] = [
         seconds: 15,
         text: "面试官您好，我叫张三，拥有6年后端高并发开发经验。曾在前公司作为核心成员设计了亿级DAU的数据分发和缓存架构，主导了秒杀一致性系统的落地...",
         badgeText: "回答较好",
-        badgeClass: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20"
+        badgeClass: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+        highlights: [
+          { text: "6年后端高并发开发经验", type: "strength", tip: "💡 核心闪光点：有效突出了技术深厚的履历积累，能在前10秒直接抓住面试官注意力。" },
+          { text: "亿级DAU的数据分发和缓存架构", type: "strength", tip: "💡 亮点：给出了非常出色的海量用户场景，证明具备大厂大规模系统的设计能力。" },
+          { text: "缓存架构", type: "tech", tip: "🔧 核心技术：代表熟悉 Redis/Memcached 等核心缓存体系的设计与性能调优。" }
+        ]
       }
     ]
   },
@@ -116,7 +132,11 @@ const SEGMENTS_DATA: SegmentData[] = [
         seconds: 165,
         text: "我们当时主要是通过在写入时加入本地轻量队列，并将写事件单向异步广播到 Redis 来完成削峰，同时对数据库做批量写入限制。",
         badgeText: "回答不够全面",
-        badgeClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+        badgeClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
+        highlights: [
+          { text: "单向异步广播到 Redis", type: "risk", tip: "⚠️ 表达风险：单向异步广播在高并发下可能发生网络分区、乱序，导致缓存与DB数据永久不一致，需要补充数据一致性兜底方案。" },
+          { text: "Redis", type: "tech", tip: "🔧 核心技术：核心内存数据库，此处用于高速缓存及写缓冲。" }
+        ]
       }
     ]
   },
@@ -132,7 +152,7 @@ const SEGMENTS_DATA: SegmentData[] = [
     score: 68,
     badgeText: "中等表现",
     badgeColor: "bg-[#5DECCB]/10 text-[#5DECCB]",
-    summary: "在 Redis 相关问题上，对基本原理掌握较好，但在一致性方案和并发场景的处理上回答不够深入，缺乏具体实践经验和优化思考。建议加强对缓存一致性方案的理解，并准备更多实际项目中的难题方案。",
+    summary: "在 Redis 相关问题上，对基本原理掌握较好，但在一致性方案和并发场景的处理上回答不够深入，缺乏具体实践经验 and 优化思考。建议加强对缓存一致性方案的理解，并准备更多实际项目中的难题方案。",
     advantages: ["理解 Redis 基本原理", "能主动思考并发问题"],
     shortcomings: ["一致性方案不够完整", "缺乏具体项目案例支撑"],
     reviewPoints: ["缓存一致性方案", "并发场景处理", "热点问题优化"],
@@ -151,7 +171,10 @@ const SEGMENTS_DATA: SegmentData[] = [
         name: "您",
         time: "05:52",
         seconds: 352,
-        text: "因为 Redis 性能高，可以做缓存，提升接口响应速度。"
+        text: "因为 Redis 性能高，可以做缓存，提升接口响应速度。",
+        highlights: [
+          { text: "做缓存，提升接口响应速度", type: "strength", tip: "💡 亮点：简洁明了地归纳了 Redis 在缓存层加速接口响应的常见实用价值。" }
+        ]
       },
       {
         sender: "interviewer",
@@ -167,7 +190,10 @@ const SEGMENTS_DATA: SegmentData[] = [
         seconds: 382,
         text: "可以用双删策略，先删缓存，再更新数据库，最后再删一次缓存。",
         badgeText: "回答不够全面",
-        badgeClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+        badgeClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
+        highlights: [
+          { text: "双删策略", type: "risk", tip: "⚠️ 表达风险：双删是教科书式的非生产方案。高并发下仍有一致性漏洞。建议深入学习『Binlog异步订阅 + Canal』方案或『Redisson读写锁』。" }
+        ]
       },
       {
         sender: "interviewer",
@@ -325,13 +351,165 @@ const ANALYSIS_STEPS = [
 ];
 
 // =========================================================================
+// MERGE SEGMENTS TO MAX 10 BLOCKS
+// Consolidates adjacent segments if they exceed 10 blocks.
+// =========================================================================
+function mergeSegmentsToMax10(segments: SegmentData[]): SegmentData[] {
+  if (segments.length <= 10) return segments;
+
+  const N = segments.length;
+  const M = 10;
+  const merged: SegmentData[] = [];
+
+  const fmtSecs = (s: number) => {
+    const m = Math.floor(Math.abs(s) / 60);
+    const sec = Math.floor(Math.abs(s) % 60);
+    return `${m.toString().padStart(2, "0")}:${sec.toString().padStart(2, "0")}`;
+  };
+
+  const tagColorMap: Record<string, string> = {
+    "良好": "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+    "一般": "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+    "风险": "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+  };
+
+  for (let j = 0; j < M; j++) {
+    const startIdx = Math.floor((j * N) / M);
+    const endIdx = Math.floor(((j + 1) * N) / M);
+    const group = segments.slice(startIdx, endIdx);
+
+    if (group.length === 0) continue;
+
+    const first = group[0];
+    const last = group[group.length - 1];
+
+    const secondsStart = first.secondsStart;
+    const secondsEnd = last.secondsEnd;
+    const durationText = fmtSecs(secondsEnd - secondsStart);
+
+    // Merge label
+    const uniqueLabels = Array.from(new Set(group.map(g => g.label)));
+    let label = uniqueLabels.join(" & ");
+    if (label.length > 28) {
+      label = label.slice(0, 25) + "...";
+    }
+
+    // Merge dialogue
+    const dialogue: DialogueItem[] = [];
+    group.forEach(g => {
+      dialogue.push(...g.dialogue);
+    });
+
+    // Merge tags: worst tag wins (风险 > 一般 > 良好)
+    let tag: "良好" | "一般" | "风险" = "良好";
+    if (group.some(g => g.tag === "风险")) {
+      tag = "风险";
+    } else if (group.some(g => g.tag === "一般")) {
+      tag = "一般";
+    }
+
+    // Merge summary
+    const summary = group.map(g => g.summary).filter(Boolean).join(" ");
+
+    // Merge scores
+    const avgScore = Math.round(group.reduce((sum, g) => sum + g.score, 0) / group.length);
+
+    // Merge other details
+    const advantages: string[] = [];
+    const shortcomings: string[] = [];
+    const reviewPoints: string[] = [];
+    group.forEach(g => {
+      advantages.push(...(g.advantages || []));
+      shortcomings.push(...(g.shortcomings || []));
+      reviewPoints.push(...(g.reviewPoints || []));
+    });
+
+    merged.push({
+      id: j + 1,
+      label,
+      timeRange: `${fmtSecs(secondsStart)} - ${fmtSecs(secondsEnd)}`,
+      durationText,
+      secondsStart,
+      secondsEnd,
+      tag,
+      tagColor: tagColorMap[tag] || first.tagColor,
+      score: avgScore,
+      badgeText: tag === "良好" ? "表现优秀" : tag === "一般" ? "中等表现" : "表现预警",
+      badgeColor: tagColorMap[tag] || first.badgeColor,
+      summary,
+      advantages: Array.from(new Set(advantages)).slice(0, 3),
+      shortcomings: Array.from(new Set(shortcomings)).slice(0, 3),
+      reviewPoints: Array.from(new Set(reviewPoints)).slice(0, 3),
+      ipiTrendPoints: first.ipiTrendPoints,
+      radarScores: deriveRadarScores(tag, label),
+      dialogue,
+      dbSectionId: first.dbSectionId,
+      optimizationAdvice: first.optimizationAdvice
+    });
+  }
+
+  return merged;
+}
+
+// =========================================================================
+// DERIVE RADAR SCORES DYNAMICALLY based on tag and label category
+// =========================================================================
+function deriveRadarScores(tag: "良好" | "一般" | "风险", label: string) {
+  let base = 70;
+  if (tag === "良好") base = 85;
+  else if (tag === "风险") base = 58;
+
+  const scores = {
+    depth: base,
+    system: base,
+    expression: base,
+    solving: base,
+    implementation: base
+  };
+
+  const l = label.toLowerCase();
+  if (l.includes("介绍") || l.includes("intro")) {
+    scores.expression += 6;
+    scores.depth -= 6;
+    scores.system -= 4;
+  } else if (l.includes("设计") || l.includes("system") || l.includes("架构")) {
+    scores.system += 7;
+    scores.implementation += 5;
+    scores.depth += 3;
+  } else if (l.includes("事务") || l.includes("一致性") || l.includes("redis") || l.includes("mysql") || l.includes("并发") || l.includes("算法") || l.includes("项目")) {
+    scores.depth += 8;
+    scores.solving += 4;
+    scores.system += 2;
+  } else if (l.includes("行为") || l.includes("沟通") || l.includes("behavior")) {
+    scores.expression += 7;
+    scores.solving += 5;
+    scores.depth -= 5;
+  }
+
+  const clamp = (val: number) => Math.max(40, Math.min(98, val));
+  return {
+    depth: clamp(scores.depth),
+    system: clamp(scores.system),
+    expression: clamp(scores.expression),
+    solving: clamp(scores.solving),
+    implementation: clamp(scores.implementation)
+  };
+}
+
+// =========================================================================
 // BUILD DYNAMIC SEGMENTS FROM REAL TRANSCRIPT
 // Groups utterances by interviewer questions to form meaningful topic blocks.
 // Returns a SegmentData[] that is structurally identical to SEGMENTS_DATA
 // but populated 100% from real ASR data.
 // =========================================================================
 function buildDynamicSegments(
-  utterances: Array<{ start_time: number; end_time: number; speaker: string; content: string }>
+  utterances: Array<{
+    start_time: number;
+    end_time: number;
+    speaker: string;
+    content: string;
+    highlights?: Array<{ text: string; type: "strength" | "risk" | "tech"; tip: string }>;
+  }>
 ): SegmentData[] {
   if (utterances.length === 0) return SEGMENTS_DATA; // fallback to mock if no transcript
 
@@ -398,16 +576,125 @@ function buildDynamicSegments(
       shortcomings: [],
       reviewPoints: [],
       ipiTrendPoints: [70, 72, 74, 73, 75, 76, 78],
-      radarScores:  { depth: 70, system: 70, expression: 72, solving: 70, implementation: 70 },
+      radarScores:  deriveRadarScores(tagCycle[idx % tagCycle.length], topicLabels[idx % topicLabels.length]),
       dialogue: group.map(utt => ({
         sender:  utt.speaker === "Interviewer" ? "interviewer" as const : "user" as const,
         name:    utt.speaker === "Interviewer" ? "面试官" : "您",
         time:    fmtSecs(Math.floor(utt.start_time)),
         seconds: Math.floor(utt.start_time),
         text:    utt.content,
+        highlights: utt.highlights || []
       })),
     };
   });
+}
+
+// =========================================================================
+// RENDER DIALOGUE TEXT WITH DYNAMIC AI HIGHLIGHTS & TOOLTIPS
+// =========================================================================
+function renderHighlightText(
+  text: string,
+  highlights: Array<{ text: string; type: "strength" | "risk" | "tech"; tip: string }> = [],
+  isPlayed: boolean,
+  isToggledOn: boolean
+) {
+  if (!isToggledOn || !highlights || highlights.length === 0) {
+    return <span className={isPlayed ? "text-white font-black" : "text-white/50"}>{text}</span>;
+  }
+
+  interface Match {
+    start: number;
+    end: number;
+    text: string;
+    type: "strength" | "risk" | "tech";
+    tip: string;
+  }
+
+  const matches: Match[] = [];
+  highlights.forEach(h => {
+    if (!h.text) return;
+    let index = text.indexOf(h.text);
+    while (index !== -1) {
+      const isOverlapping = matches.some(m => 
+        (index >= m.start && index < m.end) || 
+        (index + h.text.length > m.start && index + h.text.length <= m.end)
+      );
+      if (!isOverlapping) {
+        matches.push({
+          start: index,
+          end: index + h.text.length,
+          text: h.text,
+          type: h.type,
+          tip: h.tip
+        });
+      }
+      index = text.indexOf(h.text, index + 1);
+    }
+  });
+
+  matches.sort((a, b) => a.start - b.start);
+
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+
+  matches.forEach((m, idx) => {
+    if (m.start > lastIndex) {
+      parts.push(
+        <span key={`plain-${idx}`} className={isPlayed ? "text-white font-black" : "text-white/50"}>
+          {text.slice(lastIndex, m.start)}
+        </span>
+      );
+    }
+
+    let highlightClass = "";
+    if (m.type === "strength") {
+      highlightClass = "text-[#5DECCB] bg-[#5DECCB]/10 border-b border-[#5DECCB]/40 px-1 py-0.5 rounded cursor-help font-extrabold relative group";
+    } else if (m.type === "risk") {
+      highlightClass = "text-[#FF7A95] bg-[#FF7A95]/8 border-b border-dashed border-[#FF7A95]/40 px-1 py-0.5 rounded cursor-help font-extrabold relative group";
+    } else if (m.type === "tech") {
+      highlightClass = "text-[#00D4FF] bg-[#00D4FF]/8 border-b border-[#00D4FF]/40 px-1 py-0.5 rounded cursor-help font-extrabold relative group";
+    }
+
+    const displayTip = (m.tip || "")
+      .replace(/与\s*第?\s*\d+\s*段(?:几乎)?(?:逐字)?重复/g, "与前面的回答内容存在高度重复")
+      .replace(/与\s*第?\s*\d+\s*段/g, "与之前的表述");
+
+    const ratio = m.start / text.length;
+    const tooltipAlignClass = ratio < 0.45 ? "left-0" : "right-0 left-auto";
+
+    parts.push(
+      <span key={`hl-${idx}`} className={highlightClass}>
+        {m.text}
+        <span className={`invisible group-hover:visible absolute top-full ${tooltipAlignClass} mt-1.5 w-64 p-3 bg-[#050B1A]/95 border border-white/10 text-white text-xs rounded-xl shadow-2xl z-55 text-left pointer-events-none transition-all duration-200 select-none backdrop-blur-md`}>
+          <span className="flex items-center gap-1.5 font-bold mb-1 select-none">
+            <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${
+              m.type === 'strength' ? 'bg-[#5DECCB]' : m.type === 'risk' ? 'bg-[#FF7A95]' : 'bg-[#00D4FF]'
+            }`} />
+            <span className={
+              m.type === 'strength' ? 'text-[#5DECCB]' : m.type === 'risk' ? 'text-[#FF7A95]' : 'text-[#00D4FF]'
+            }>
+              {m.type === 'strength' ? 'AI 亮点分析' : m.type === 'risk' ? 'AI 表达风险' : 'AI 技术解析'}
+            </span>
+          </span>
+          <span className="text-white/80 font-medium leading-relaxed block select-none">
+            {displayTip}
+          </span>
+        </span>
+      </span>
+    );
+
+    lastIndex = m.end;
+  });
+
+  if (lastIndex < text.length) {
+    parts.push(
+      <span key="plain-end" className={isPlayed ? "text-white font-black" : "text-white/50"}>
+        {text.slice(lastIndex)}
+      </span>
+    );
+  }
+
+  return <>{parts}</>;
 }
 
 // =========================================================================
@@ -424,6 +711,7 @@ export default function InterviewVoiceAnalysisPage() {
   const [pageStatus, setPageStatus] = useState<"analyzing" | "ready" | "no_session">("analyzing");
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisStep, setAnalysisStep] = useState(0);
+  const [hasActiveTask, setHasActiveTask] = useState(false);
   const [reportData, setReportData] = useState<{
     ipi_score: number;
     offer_probability: number;
@@ -436,6 +724,7 @@ export default function InterviewVoiceAnalysisPage() {
 
   // Live segments: starts as mock, replaced with real transcript once analysis completes
   const [liveSegmentsData, setLiveSegmentsData] = useState(SEGMENTS_DATA);
+  const [collapsedSections, setCollapsedSections] = useState<Record<number, boolean>>({});
 
   // Onboarding / AI Segmenting Animation States
   const [isSegmenting, setIsSegmenting] = useState(false);
@@ -445,11 +734,48 @@ export default function InterviewVoiceAnalysisPage() {
   const [activeSegIdx, setActiveSegIdx] = useState(0);
   const activeSeg = liveSegmentsData[activeSegIdx] ?? liveSegmentsData[0];
 
+  // Dynamic IPI Line Chart points based on real segment scores
+  const chartPoints = liveSegmentsData.map((seg, idx) => {
+    const x = liveSegmentsData.length > 1 ? (idx / (liveSegmentsData.length - 1)) * 240 : 120;
+    const y = 60 - ((seg.score ?? 70) / 100) * 50;
+    return { x, y, score: seg.score, label: seg.label, timeRange: seg.timeRange };
+  });
+
+  const linePath = chartPoints.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
+  const areaPath = chartPoints.length > 0
+    ? `${linePath} L ${chartPoints[chartPoints.length - 1].x} 70 L ${chartPoints[0].x} 70 Z`
+    : '';
+
+  const activePt = chartPoints[activeSegIdx] || chartPoints[0] || { x: 120, y: 40 };
+
+  // Dynamic risks list derived from segments with "风险" or "一般" tag
+  const dynamicRisks = liveSegmentsData
+    .filter(seg => seg.tag === "风险" || seg.tag === "一般")
+    .map(seg => {
+      const timeStr = seg.timeRange ? seg.timeRange.split(" - ")[0] : "00:00";
+      const label = seg.shortcomings && seg.shortcomings.length > 0
+        ? seg.shortcomings[0]
+        : `【${seg.label}】答题表现一般`;
+      const isRisk = seg.tag === "风险";
+      return {
+        time: timeStr,
+        label: label,
+        segmentLabel: seg.label,
+        tag: isRisk ? "高风险" : "中风险",
+        tagClass: isRisk 
+          ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" 
+          : "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+        sec: seg.secondsStart,
+        suggestions: seg.reviewPoints || []
+      };
+    });
+
   // Simulated Player States
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackTime, setPlaybackTime] = useState(SEGMENTS_DATA[2].secondsStart);
-  const segmentDuration = activeSeg.secondsEnd - activeSeg.secondsStart;
-  const playedPercent = segmentDuration > 0 ? ((playbackTime - activeSeg.secondsStart) / segmentDuration) * 100 : 0;
+  const [playbackTime, setPlaybackTime] = useState(0);
+  const totalDuration = liveSegmentsData.length > 0 ? liveSegmentsData[liveSegmentsData.length - 1].secondsEnd : 0;
+  const segmentDuration = totalDuration;
+  const playedPercent = totalDuration > 0 ? (playbackTime / totalDuration) * 100 : 0;
   const [playSpeed, setPlaySpeed] = useState(1.0);
   const playTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -496,7 +822,13 @@ export default function InterviewVoiceAnalysisPage() {
     }
 
     const taskId    = localStorage.getItem("offerPilot_task_id");
-    const sessionId = localStorage.getItem("offerPilot_session_id");
+    const searchParams = new URLSearchParams(window.location.search);
+    let sessionId = searchParams.get("sessionId") || localStorage.getItem("offerPilot_session_id");
+    if (sessionId) {
+      const newUrl = window.location.pathname + `?sessionId=${sessionId}`;
+      window.history.replaceState(null, "", newUrl);
+    }
+    setHasActiveTask(!!taskId);
 
     // ── GATE: no session → redirect ──────────────────────────────────
     // session_id should always be present because the debugger page
@@ -526,7 +858,7 @@ export default function InterviewVoiceAnalysisPage() {
           let ready = false;
           for (let i = 0; i < 120; i++) {            // max 4 min wait
             const taskRes = await fetch(
-              `http://localhost:8000/api/audio/task/${taskId}`,
+              `http://localhost:8001/api/audio/task/${taskId}`,
               { headers }
             );
             if (taskRes.ok) {
@@ -550,21 +882,32 @@ export default function InterviewVoiceAnalysisPage() {
           localStorage.removeItem("offerPilot_task_id");
         }
 
-        // Fetch the report
-        const reportRes = await fetch(
-          `http://localhost:8000/api/audio/report/${sessionId}`,
-          { headers }
-        );
+        // Fetch both report and sections
+        const [reportRes, sectionsRes] = await Promise.all([
+          fetch(`http://localhost:8001/api/audio/report/${sessionId}`, { headers }),
+          fetch(`http://localhost:8001/api/audio/session/${sessionId}/sections`, { headers })
+        ]);
+
         if (!reportRes.ok) {
           setPageStatus("no_session");
           setTimeout(() => router.push("/debugger"), 2500);
           return;
         }
         const report = await reportRes.json();
+        if (report.audio_url) {
+          setAudioUrl(report.audio_url);
+        }
+
+        let dbSections = [];
+        if (sectionsRes.ok) {
+          const sectionsData = await sectionsRes.json();
+          dbSections = sectionsData.sections || [];
+        }
 
         // Set scores + summary
+        const overallIpi = report.scores?.ipi ?? 70;
         setReportData({
-          ipi_score:         report.scores?.ipi          ?? 0,
+          ipi_score:         overallIpi,
           offer_probability: report.scores?.offer_probability ?? 0,
           executive_summary: report.summary?.executive_summary ?? "",
           strengths:         report.summary?.strengths  ?? [],
@@ -578,11 +921,152 @@ export default function InterviewVoiceAnalysisPage() {
           end_time: number;
           speaker: string;
           content: string;
+          highlights?: Array<{ text: string; type: "strength" | "risk" | "tech"; tip: string }>;
         }> = report.transcript ?? [];
 
-        const dynamicSegments = buildDynamicSegments(rawTranscript);
-        setLiveSegmentsData(dynamicSegments);
+        let dynamicSegments = [];
+        if (dbSections.length > 0) {
+          const tagColorMap: Record<string, string> = {
+            "良好": "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+            "一般": "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+            "风险": "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+          };
+          const tagColorCycle = [
+            "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+            "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+            "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+          ];
+          dynamicSegments = dbSections.map((sec: any, idx: number) => {
+            const startSecs = sec.start_time;
+            const endSecs = sec.end_time;
+            const durSecs = endSecs - startSecs;
+            
+            const sectionDialogue = rawTranscript.filter(utt => 
+              (sec.start_time - 0.001 <= (utt.start_time ?? 0)) && 
+              ((utt.start_time ?? 0) <= sec.end_time + 0.001)
+            );
+
+            const tag = (sec.tag === "良好" || sec.tag === "一般" || sec.tag === "风险") ? sec.tag : "一般";
+            const tagColor = tagColorMap[tag] || tagColorCycle[idx % tagColorCycle.length];
+
+            let rawScore = overallIpi;
+            if (tag === "良好") rawScore = overallIpi + 15;
+            else if (tag === "风险") rawScore = overallIpi - 15;
+
+            return {
+              id: sec.id || (idx + 1),
+              label: sec.title || sec.category || `Section ${idx + 1}`,
+              timeRange: `${fmtTime(startSecs)} - ${fmtTime(endSecs)}`,
+              durationText: fmtTime(durSecs),
+              secondsStart: Math.floor(startSecs),
+              secondsEnd: Math.ceil(endSecs),
+              tag: tag,
+              tagColor: tagColor,
+              score: Math.max(40, Math.min(98, rawScore)),
+              badgeText: sec.category || "AI 分析",
+              badgeColor: tagColor,
+              summary: sec.summary || "AI 正在生成片段分析...",
+              advantages: sec.advantages || [],
+              shortcomings: sec.shortcomings || [],
+              reviewPoints: sec.review_points || [],
+              ipiTrendPoints: [70, 72, 74, 73, 75, 76, 78],
+              radarScores: deriveRadarScores(tag, sec.title || sec.category || ""),
+              dialogue: sectionDialogue.map(utt => ({
+                sender: utt.speaker === "Interviewer" ? "interviewer" as const : "user" as const,
+                name: utt.speaker === "Interviewer" ? "面试官" : "您",
+                time: fmtTime(Math.floor(utt.start_time)),
+                seconds: Math.floor(utt.start_time),
+                text: utt.content,
+                highlights: utt.highlights || []
+              })),
+              dbSectionId: sec.id,
+              optimizationAdvice: sec.optimization_advice || undefined,
+            };
+          });
+
+          // Normalize segment scores so their average exactly equals overallIpi
+          if (dynamicSegments.length > 0) {
+            const targetSum = overallIpi * dynamicSegments.length;
+            let currentSum = dynamicSegments.reduce((sum, s) => sum + s.score, 0);
+            let diff = targetSum - currentSum;
+            if (diff !== 0) {
+              const step = diff > 0 ? 1 : -1;
+              const absDiff = Math.abs(diff);
+              for (let i = 0; i < absDiff; i++) {
+                let adjusted = false;
+                for (let j = 0; j < dynamicSegments.length; j++) {
+                  const idx = (i + j) % dynamicSegments.length;
+                  const s = dynamicSegments[idx];
+                  const newScore = s.score + step;
+                  if (newScore >= 40 && newScore <= 98) {
+                    s.score = newScore;
+                    currentSum += step;
+                    adjusted = true;
+                    break;
+                  }
+                }
+                if (!adjusted) break;
+              }
+            }
+          }
+        } else {
+          dynamicSegments = buildDynamicSegments(rawTranscript);
+          if (dynamicSegments.length > 0) {
+            const targetSum = overallIpi * dynamicSegments.length;
+            let currentSum = dynamicSegments.reduce((sum, s) => sum + s.score, 0);
+            let diff = targetSum - currentSum;
+            if (diff !== 0) {
+              const step = diff > 0 ? 1 : -1;
+              const absDiff = Math.abs(diff);
+              for (let i = 0; i < absDiff; i++) {
+                let adjusted = false;
+                for (let j = 0; j < dynamicSegments.length; j++) {
+                  const idx = (i + j) % dynamicSegments.length;
+                  const s = dynamicSegments[idx];
+                  const newScore = s.score + step;
+                  if (newScore >= 40 && newScore <= 98) {
+                    s.score = newScore;
+                    currentSum += step;
+                    adjusted = true;
+                    break;
+                  }
+                }
+                if (!adjusted) break;
+              }
+            }
+          }
+        }
+
+        const mergedSegments = mergeSegmentsToMax10(dynamicSegments);
+        if (mergedSegments.length > 0) {
+          const targetSum = overallIpi * mergedSegments.length;
+          let currentSum = mergedSegments.reduce((sum, s) => sum + s.score, 0);
+          let diff = targetSum - currentSum;
+          if (diff !== 0) {
+            const step = diff > 0 ? 1 : -1;
+            const absDiff = Math.abs(diff);
+            for (let i = 0; i < absDiff; i++) {
+              let adjusted = false;
+              for (let j = 0; j < mergedSegments.length; j++) {
+                const idx = (i + j) % mergedSegments.length;
+                const s = mergedSegments[idx];
+                const newScore = s.score + step;
+                if (newScore >= 40 && newScore <= 98) {
+                  s.score = newScore;
+                  currentSum += step;
+                  adjusted = true;
+                  break;
+                }
+              }
+              if (!adjusted) break;
+            }
+          }
+        }
+        setLiveSegmentsData(mergedSegments);
         setActiveSegIdx(0); // reset to first real segment
+        if (mergedSegments.length > 0) {
+          setPlaybackTime(mergedSegments[0].secondsStart);
+        }
 
         // Clean up and show dashboard
         localStorage.removeItem("offerPilot_session_id");
@@ -605,7 +1089,10 @@ export default function InterviewVoiceAnalysisPage() {
 
   // Next steps optimizer script generation modal
   const [showOptimizer, setShowOptimizer] = useState(false);
+  const [showRisksModal, setShowRisksModal] = useState(false);
   const [optPhase, setOptPhase] = useState("idle");
+  const [isHighlightEnabled, setIsHighlightEnabled] = useState(true);
+  const [optAdvice, setOptAdvice] = useState<{ conclusion: string; original: string; optimized: string } | null>(null);
 
   // Search state variables
   const [showSearch, setShowSearch] = useState(false);
@@ -626,13 +1113,21 @@ export default function InterviewVoiceAnalysisPage() {
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !audioUrl) return;
-    audio.src = audioUrl;
-    audio.load();
-    setAudioLoaded(false);
 
     const onCanPlay = () => setAudioLoaded(true);
-    audio.addEventListener("canplaythrough", onCanPlay);
-    return () => audio.removeEventListener("canplaythrough", onCanPlay);
+    const onError = () => setAudioLoaded(true); // fallback so play button is never stuck spinning
+
+    audio.addEventListener("canplay", onCanPlay);
+    audio.addEventListener("error", onError);
+
+    setAudioLoaded(audio.readyState >= 3);
+    audio.src = audioUrl;
+    audio.load();
+
+    return () => {
+      audio.removeEventListener("canplay", onCanPlay);
+      audio.removeEventListener("error", onError);
+    };
   }, [audioUrl]);
 
   // Sync playbackTime state from audio timeupdate events
@@ -645,17 +1140,14 @@ export default function InterviewVoiceAnalysisPage() {
       setPlaybackTime(t);
 
       // Auto-switch active segment as audio plays through timeline
-      const newSegIdx = liveSegmentsData.findIndex(
-        s => t >= s.secondsStart && t <= s.secondsEnd
-      );
+      const newSegIdx = liveSegmentsData.findIndex((s, idx) => {
+        if (idx === liveSegmentsData.length - 1) {
+          return t >= s.secondsStart && t <= s.secondsEnd;
+        }
+        return t >= s.secondsStart && t < s.secondsEnd;
+      });
       if (newSegIdx !== -1) {
         setActiveSegIdx(prev => prev !== newSegIdx ? newSegIdx : prev);
-      }
-
-      // Stop at end of current segment (optional boundary enforcement)
-      if (t >= activeSeg.secondsEnd) {
-        audio.pause();
-        setIsPlaying(false);
       }
     };
 
@@ -674,25 +1166,25 @@ export default function InterviewVoiceAnalysisPage() {
       audio.removeEventListener("pause", onPause);
       audio.removeEventListener("ended", onEnded);
     };
-  }, [activeSeg, liveSegmentsData]);
+  }, [liveSegmentsData]);
 
   // When switching segment via sidebar, seek audio to segment start
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) {
-      // Fallback: fake-timer reset for no-audio mode
       setIsPlaying(false);
       setPlaybackTime(activeSeg.secondsStart);
-      if (playTimerRef.current) clearInterval(playTimerRef.current);
       return;
     }
     const wasPlaying = !audio.paused;
-    audio.pause();
     audio.currentTime = activeSeg.secondsStart;
     setPlaybackTime(activeSeg.secondsStart);
-    setIsPlaying(false);
-    // Optional: auto-resume when switching segments while playing
-    // if (wasPlaying) audio.play();
+    if (wasPlaying) {
+      audio.play().catch(() => {});
+      setIsPlaying(true);
+    } else {
+      setIsPlaying(false);
+    }
   }, [activeSegIdx]);
 
   // Format seconds to MM:SS
@@ -721,14 +1213,19 @@ export default function InterviewVoiceAnalysisPage() {
   const skipTime = (offset: number) => {
     const audio = audioRef.current;
     const target = playbackTime + offset;
-    const clamped = Math.max(activeSeg.secondsStart, Math.min(activeSeg.secondsEnd, target));
+    const clamped = Math.max(0, Math.min(totalDuration, target));
     setPlaybackTime(clamped);
     if (audio) audio.currentTime = clamped;
   };
 
   // Jump playhead to exact second (cross-segment aware)
   const jumpPlayhead = (sec: number) => {
-    const targetSegIdx = liveSegmentsData.findIndex(s => sec >= s.secondsStart && sec <= s.secondsEnd);
+    const targetSegIdx = liveSegmentsData.findIndex((s, idx) => {
+      if (idx === liveSegmentsData.length - 1) {
+        return sec >= s.secondsStart && sec <= s.secondsEnd;
+      }
+      return sec >= s.secondsStart && sec < s.secondsEnd;
+    });
     if (targetSegIdx !== -1 && targetSegIdx !== activeSegIdx) {
       setActiveSegIdx(targetSegIdx);
       // Audio seek happens in the activeSegIdx useEffect + manual set below
@@ -753,20 +1250,299 @@ export default function InterviewVoiceAnalysisPage() {
   };
 
   // Trigger Action Advice generation
-  const startOptimizationGen = () => {
-    setOptPhase("loading");
-    setTimeout(() => {
+  const handleOpenOptimizer = async (forceRegenerate = false) => {
+    setShowOptimizer(true);
+
+    const sectionId = activeSeg?.dbSectionId;
+    if (!sectionId) {
+      // Fallback: If no database section ID exists (mock data), simulate delay and display a high-quality mock response
+      if (activeSeg?.optimizationAdvice && !forceRegenerate) {
+        setOptAdvice(activeSeg.optimizationAdvice);
+        setOptPhase("completed");
+        return;
+      }
+      setOptPhase("loading");
+      await new Promise(r => setTimeout(r, 1500));
+      const mockAdvice = {
+        conclusion: `针对【${activeSeg?.label || "片段分析"}】环节，表现总体${activeSeg?.tag || "良好"}。但原话术在专业度及系统深度上仍有提升空间。`,
+        original: activeSeg?.dialogue?.filter(d => d.sender === "user").map(d => d.text).join(" ") || "（未检测到用户回答）",
+        optimized: `在${activeSeg?.label || "本"}场景下，建议采用结构化叙事方法（STAR原则）。<br/><br/><strong>大厂高分话术推荐：</strong><br/>“针对这个问题，我们核心的解决思路是：首先评估受损面，其次通过引入多级缓存/Redisson读写锁/消息队列等方式进行异步化和服务解耦。这不仅降低了系统的直接负载，也确保了数据一致性。我们在生产环境中测试该方案后，QPS提升了大约50%。”`
+      };
+      setOptAdvice(mockAdvice);
+      // Cache inside the segment data
+      const updated = [...liveSegmentsData];
+      updated[activeSegIdx] = {
+        ...updated[activeSegIdx],
+        optimizationAdvice: mockAdvice
+      };
+      setLiveSegmentsData(updated);
       setOptPhase("completed");
-    }, 1800);
+      return;
+    }
+
+    // If already generated and not forcing regeneration, show cached
+    if (activeSeg?.optimizationAdvice && !forceRegenerate) {
+      setOptAdvice(activeSeg.optimizationAdvice);
+      setOptPhase("completed");
+      return;
+    }
+
+    // Otherwise, fetch from backend
+    setOptPhase("loading");
+    try {
+      const token = localStorage.getItem("offerPilot_token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`http://localhost:8001/api/audio/section/${sectionId}/optimize`, {
+        method: "POST",
+        headers
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to generate optimization advice");
+      }
+
+      const data = await res.json();
+      const advice = {
+        conclusion: data.conclusion,
+        original: data.original,
+        optimized: data.optimized
+      };
+
+      setOptAdvice(advice);
+      
+      // Update in local state cache
+      const updated = [...liveSegmentsData];
+      updated[activeSegIdx] = {
+        ...updated[activeSegIdx],
+        optimizationAdvice: advice
+      };
+      setLiveSegmentsData(updated);
+      setOptPhase("completed");
+    } catch (err) {
+      console.error("Error generating advice:", err);
+      setOptAdvice({
+        conclusion: "大模型生成失败，请重试。",
+        original: "分析请求失败",
+        optimized: "服务暂时不可用，请稍后重试。"
+      });
+      setOptPhase("completed");
+    }
+  };
+
+  // Export all dialogue logs to PDF
+  // Export all dialogue logs to PDF
+  const handleExportPDF = async () => {
+    if (liveSegmentsData.length === 0) {
+      alert("没有可导出的对话记录！");
+      return;
+    }
+
+    const company = interviewInfo.company || "面试公司";
+    const role = interviewInfo.role || "面试岗位";
+    const round = interviewInfo.round || "面试轮次";
+    const date = interviewInfo.time || "2026-06-07";
+    const score = reportData ? reportData.ipi_score : activeSeg?.score || 0;
+    const grade = reportData ? (reportData.ipi_score >= 80 ? "优秀" : reportData.ipi_score >= 65 ? "中等" : "预警") : activeSeg?.badgeText || "";
+
+    let htmlContent = `
+      <html>
+      <head>
+        <title>${company} - ${role} 面试对话记录</title>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+          body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background-color: #ffffff;
+            color: #1a202c;
+            margin: 0;
+            padding: 40px;
+          }
+          .header {
+            border-bottom: 2px solid #edf2f7;
+            padding-bottom: 24px;
+            margin-bottom: 30px;
+          }
+          .header-title {
+            font-size: 24px;
+            font-weight: 800;
+            color: #0d1326;
+            margin: 0 0 8px 0;
+          }
+          .header-meta {
+            font-size: 14px;
+            color: #718096;
+            font-weight: 600;
+            display: flex;
+            gap: 16px;
+          }
+          .score-badge {
+            color: #afa7ff;
+            font-weight: 800;
+          }
+          .section-block {
+            margin-bottom: 35px;
+            page-break-inside: avoid;
+          }
+          .section-header {
+            font-size: 16px;
+            font-weight: 800;
+            background: #f7fafc;
+            border-left: 4px solid #afa7ff;
+            padding: 8px 12px;
+            margin-bottom: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          .section-time {
+            font-size: 13px;
+            color: #a0aec0;
+            font-family: monospace;
+          }
+          .bubble {
+            margin-bottom: 12px;
+            padding: 12px 16px;
+            border-radius: 12px;
+            border: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+          }
+          .bubble-interviewer {
+            background-color: #f8fafc;
+            border-color: #e2e8f0;
+          }
+          .bubble-user {
+            background-color: #f5f3ff;
+            border-color: #e9d5ff;
+          }
+          .bubble-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: #4a5568;
+          }
+          .speaker-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+          }
+          .dot-interviewer { background-color: #ff7a95; }
+          .dot-user { background-color: #00d4ff; }
+          .bubble-time {
+            font-family: monospace;
+            color: #a0aec0;
+            margin-left: 6px;
+          }
+          .bubble-text {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #2d3748;
+            margin: 4px 0 0 0;
+            white-space: pre-wrap;
+          }
+          .badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 800;
+            text-transform: uppercase;
+          }
+          .badge-warning {
+            background-color: #fff5f5;
+            color: #c53030;
+            border: 1px solid #fed7d7;
+          }
+          .badge-good {
+            background-color: #f0fff4;
+            color: #22543d;
+            border: 1px solid #c6f6d5;
+          }
+          @media print {
+            body { padding: 20px; }
+            .section-block { page-break-inside: avoid; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1 class="header-title">${company} · ${role} (${round})</h1>
+          <div class="header-meta">
+            <span>面试时间: ${date}</span>
+            <span>|</span>
+            <span>综合得分: <span class="score-badge">${score}分 (${grade})</span></span>
+          </div>
+        </div>
+    `;
+
+    liveSegmentsData.forEach((seg, idx) => {
+      htmlContent += `
+        <div class="section-block">
+          <div class="section-header">
+            <div>段落 #${idx + 1}: ${seg.label}</div>
+            <div class="section-time">${seg.timeRange}</div>
+          </div>
+      `;
+
+      seg.dialogue.forEach((bubble) => {
+        const isInterviewer = bubble.sender === "interviewer";
+        const bubbleClass = isInterviewer ? "bubble-interviewer" : "bubble-user";
+        const dotClass = isInterviewer ? "dot-interviewer" : "dot-user";
+        const badgeHtml = bubble.badgeText 
+          ? `<span class="badge ${bubble.badgeClass?.includes("FF7A95") ? "badge-warning" : "badge-good"}">${bubble.badgeText}</span>` 
+          : "";
+
+        htmlContent += `
+          <div class="bubble ${bubbleClass}">
+            <div class="bubble-header">
+              <span>
+                <span class="speaker-dot ${dotClass}"></span>
+                <strong>${bubble.name}</strong>
+                <span class="bubble-time">${bubble.time}</span>
+              </span>
+              ${badgeHtml}
+            </div>
+            <p class="bubble-text">${bubble.text}</p>
+          </div>
+        `;
+      });
+
+      htmlContent += `</div>`;
+    });
+
+    htmlContent += `
+      </body>
+      </html>
+    `;
+
+    const printWindow = window.open("", "_blank");
+    if (!printWindow) {
+      alert("请允许弹出窗口以进行 PDF 导出");
+      return;
+    }
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+    printWindow.focus();
+
+    setTimeout(() => {
+      printWindow.print();
+    }, 500);
   };
 
   return (
-    <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden select-none pt-20">
+    <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-x-hidden overflow-y-auto select-none pt-20">
 
       {/* Hidden real audio element — drives all playback */}
       <audio
         ref={audioRef}
-        crossOrigin="anonymous"
         preload="auto"
         style={{ display: "none" }}
       />
@@ -778,41 +1554,50 @@ export default function InterviewVoiceAnalysisPage() {
       {/* ── ANALYZING: full-screen loading while polling ────────────── */}
       {pageStatus === "analyzing" && (
         <div className="fixed inset-0 z-50 bg-[#050B1A] flex flex-col items-center justify-center gap-8">
-          <div className="flex flex-col items-center gap-5 max-w-md w-full px-8">
-            {/* Dual-ring Spinner */}
-            <div className="relative w-20 h-20">
-              <div className="absolute inset-0 rounded-full border-4 border-[#AFA7FF]/20 border-t-[#AFA7FF] animate-spin" />
-              <div className="absolute inset-3 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.2s" }} />
-            </div>
+          {hasActiveTask ? (
+            <div className="flex flex-col items-center gap-5 max-w-md w-full px-8">
+              {/* Dual-ring Spinner */}
+              <div className="relative w-20 h-20">
+                <div className="absolute inset-0 rounded-full border-4 border-[#AFA7FF]/20 border-t-[#AFA7FF] animate-spin" />
+                <div className="absolute inset-3 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.2s" }} />
+              </div>
 
-            <div className="text-center space-y-1.5">
-              <h3 className="text-white font-black text-lg animate-pulse">{ANALYSIS_STEPS[analysisStep]}</h3>
-              <p className="text-white/40 text-base font-mono">AI 智能分析中，分析完成后自动进入报告页面…</p>
-            </div>
+              <div className="text-center space-y-3">
+                <h3 className="text-white font-black text-2xl md:text-xl animate-pulse tracking-wide">{ANALYSIS_STEPS[analysisStep]}</h3>
+                <p className="text-base md:text-lg text-white/70 font-semibold">AI 智能分析中，分析完成后自动进入报告页面…</p>
+              </div>
 
-            <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-[#AFA7FF] to-[#5DECCB] transition-all duration-700"
-                style={{ width: `${analysisProgress}%` }}
-              />
-            </div>
-            <p className="text-white/30 text-xs font-mono">{analysisProgress}%</p>
+              <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-[#AFA7FF] to-[#5DECCB] transition-all duration-700"
+                  style={{ width: `${analysisProgress}%` }}
+                />
+              </div>
+              <p className="text-[#5DECCB] text-2xl md:text-3xl font-black font-mono tracking-wider drop-shadow-[0_0_10px_rgba(93,236,203,0.5)] mt-2">{analysisProgress}%</p>
 
-            <div className="w-full space-y-2">
-              {ANALYSIS_STEPS.slice(0, -1).map((step, idx) => (
-                <div key={idx} className={`flex items-center gap-2.5 text-xs font-semibold transition-all ${
-                  idx < analysisStep ? "text-[#5DECCB]" :
-                  idx === analysisStep ? "text-white animate-pulse" :
-                  "text-white/20"
-                }`}>
-                  <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
-                    {idx < analysisStep ? "check_circle" : idx === analysisStep ? "radio_button_checked" : "radio_button_unchecked"}
-                  </span>
-                  {step}
-                </div>
-              ))}
+              <div className="w-full space-y-2">
+                {ANALYSIS_STEPS.slice(0, -1).map((step, idx) => (
+                  <div key={idx} className={`flex items-center gap-2.5 text-xs font-semibold transition-all ${
+                    idx < analysisStep ? "text-[#5DECCB]" :
+                    idx === analysisStep ? "text-white animate-pulse" :
+                    "text-white/20"
+                  }`}>
+                    <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
+                      {idx < analysisStep ? "check_circle" : idx === analysisStep ? "radio_button_checked" : "radio_button_unchecked"}
+                    </span>
+                    {step}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="flex flex-col items-center gap-4">
+              <div className="relative w-16 h-16">
+                <div className="absolute inset-0 rounded-full border-4 border-[#AFA7FF]/20 border-t-[#AFA7FF] animate-spin" />
+              </div>
+              <p className="text-white/70 font-bold text-sm tracking-wide animate-pulse">正在加载历史分析报告...</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -944,10 +1729,10 @@ export default function InterviewVoiceAnalysisPage() {
               {/* ----------------------------------------------------
                   COLUMN 1: Left Sidebar (3 cols)
                  ---------------------------------------------------- */}
-              <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5">
+              <div className="col-span-12 lg:col-span-3 flex flex-col gap-[18px]">
 
                 {/* 1.1 Interview Metadata Card */}
-                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5">
+                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[260px] shrink-0">
                   <div className="flex justify-between items-center pb-2 border-b border-white/5">
                     <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-base text-[#00D4FF]">assignment_ind</span>
@@ -1000,18 +1785,18 @@ export default function InterviewVoiceAnalysisPage() {
                 </div>
 
                 {/* 1.2 Interview Vertical Timeline Selector */}
-                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 flex-1">
+                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[500px] shrink-0">
                   <div className="flex justify-between items-center pb-2 border-b border-white/5">
                     <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-base text-[#00D4FF]">list_alt</span>
                       面试时间线
                     </h4>
-                    <span className="text-sm text-white/40 font-mono">共 6 个片段, 32:18</span>
+                    <span className="text-sm text-white/40 font-mono">共 {liveSegmentsData.length} 个片段, {formatTime(liveSegmentsData.length > 0 ? liveSegmentsData[liveSegmentsData.length - 1].secondsEnd : 0)}</span>
                   </div>
 
                   {/* Vertical Segment items */}
                   <div className="flex-1 overflow-y-auto space-y-3 pr-1 select-none">
-                    {SEGMENTS_DATA.map((seg, idx) => {
+                    {liveSegmentsData.map((seg, idx) => {
                       const isSelected = activeSegIdx === idx;
                       const isRisk = seg.tag === "风险";
                       const isGood = seg.tag === "良好";
@@ -1032,6 +1817,8 @@ export default function InterviewVoiceAnalysisPage() {
                           onClick={() => {
                             setActiveSegIdx(idx);
                             setPlaybackTime(seg.secondsStart);
+                            // Ensure the clicked section is expanded
+                            setCollapsedSections(prev => ({ ...prev, [seg.id]: false }));
                           }}
                           className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all duration-300 relative flex items-center justify-between gap-3 ${
                             isSelected
@@ -1059,7 +1846,7 @@ export default function InterviewVoiceAnalysisPage() {
                   </div>
 
                   <button 
-                    onClick={() => alert("完整全场 32 分钟日志已下载！")}
+                    onClick={handleExportPDF}
                     className="w-full py-2 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-sm font-black rounded-xl transition-all cursor-pointer text-center"
                   >
                     导出完整日志
@@ -1071,10 +1858,10 @@ export default function InterviewVoiceAnalysisPage() {
               {/* ----------------------------------------------------
                   COLUMN 2: Center Workspace (6 cols)
                  ---------------------------------------------------- */}
-              <div className="col-span-12 lg:col-span-5.5 xl:col-span-6 flex flex-col gap-4.5">
+              <div className="col-span-12 lg:col-span-5.5 xl:col-span-6 flex flex-col gap-[18px]">
                 
                 {/* 2.1 Wave Player & Info Header */}
-                <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4.5">
+                <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4.5 h-[210px] shrink-0">
                   
                   {/* Title & Metadata */}
                   <div className="flex justify-between items-center pb-2 border-b border-white/5">
@@ -1090,23 +1877,6 @@ export default function InterviewVoiceAnalysisPage() {
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2 select-none">
-                      <button 
-                        onClick={() => alert("本段 32kbps 音频文件下载中...")}
-                        className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-sm">download</span>下载片段
-                      </button>
-                      <button 
-                        onClick={() => {
-                          navigator.clipboard.writeText(window.location.href);
-                          alert("本段诊断页面链接已复制！");
-                        }}
-                        className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
-                      >
-                        <span className="material-symbols-outlined text-sm">link</span>复制链接
-                      </button>
-                    </div>
                   </div>
 
                   {/* Elegant Thin Waveform Player */}
@@ -1135,7 +1905,7 @@ export default function InterviewVoiceAnalysisPage() {
                       <div className="flex-1 h-9 relative flex items-center justify-between gap-[1.5px] select-none py-1">
                         {Array.from({ length: 66 }).map((_, wIdx) => {
                           const percentIndex = (wIdx / 66) * 100;
-                          const isPlayed = percentIndex <= playedPercent;
+                          const isPlayed = percentIndex <= (playbackTime / totalDuration) * 100;
                           
                           // Fine mirrored height profiles
                           const heightMap = [
@@ -1145,8 +1915,7 @@ export default function InterviewVoiceAnalysisPage() {
                           ];
                           const hValue = heightMap[wIdx] || 15;
 
-                          const segSeconds = activeSeg.secondsEnd - activeSeg.secondsStart;
-                          const targetSecs = activeSeg.secondsStart + Math.round((wIdx / 66) * segSeconds);
+                          const targetSecs = Math.round((wIdx / 66) * totalDuration);
 
                           return (
                             <div
@@ -1219,8 +1988,8 @@ export default function InterviewVoiceAnalysisPage() {
 
                     {/* Timeline boundaries */}
                     <div className="flex justify-between items-center text-xs text-white/30 font-mono font-bold mt-1 px-1 select-none">
-                      <span>{formatTime(activeSeg.secondsStart)}</span>
-                      <span>{formatTime(activeSeg.secondsEnd)}</span>
+                      <span>00:00</span>
+                      <span>{formatTime(totalDuration)}</span>
                     </div>
 
                   </div>
@@ -1228,7 +1997,7 @@ export default function InterviewVoiceAnalysisPage() {
                 </div>
 
                 {/* 2.2 Dialogue Transcript Card */}
-                <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4 flex-1 h-[360px]">
+                <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4 h-[550px] shrink-0">
                   
                   {/* Sub Header & AI Tools row */}
                   <div className="flex justify-between items-center select-none shrink-0">
@@ -1238,12 +2007,24 @@ export default function InterviewVoiceAnalysisPage() {
                     </h3>
                     
                     <div className="flex items-center gap-2 text-xs font-bold">
-                      <button className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 text-[#00D4FF] rounded-lg transition-all flex items-center gap-1 cursor-pointer text-xs">
-                        <span className="material-symbols-outlined text-xs">auto_awesome</span>AI 高亮
-                      </button>
-                      <button className="px-2.5 py-1 bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 rounded-lg transition-all flex items-center gap-1 cursor-pointer text-xs">
-                        <span className="material-symbols-outlined text-xs">article</span>显示建议
-                      </button>
+                      <div className="relative group/btn">
+                        <button 
+                          onClick={() => setIsHighlightEnabled(!isHighlightEnabled)}
+                          className={`px-2.5 py-1 border rounded-lg transition-all flex items-center gap-1 cursor-pointer text-xs font-bold ${
+                            isHighlightEnabled 
+                              ? "bg-[#00D4FF]/10 border-[#00D4FF]/30 text-[#00D4FF] shadow-[0_0_8px_rgba(0,212,255,0.2)]" 
+                              : "bg-white/5 border-white/10 text-white/60 hover:text-white"
+                          }`}
+                        >
+                          <span className="material-symbols-outlined text-xs">auto_awesome</span>AI 高亮
+                        </button>
+                        
+                        {/* Hover Tooltip for the button itself */}
+                        <div className="invisible group-hover/btn:visible absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 p-3 bg-[#050B1A]/95 border border-white/10 text-white text-xs rounded-xl shadow-2xl z-50 text-left pointer-events-none select-none backdrop-blur-md font-semibold leading-relaxed">
+                          <span className="text-[#00D4FF] font-black block mb-0.5">智能对话分析定位</span>
+                          <span className="text-white/60 text-[11px] block">开启后可在对话气泡中高亮展示面试亮点、表达风险和专业词汇，悬浮查看 AI 评语。</span>
+                        </div>
+                      </div>
                       
                       <div className="flex items-center bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 w-36 md:w-48">
                         <input
@@ -1265,49 +2046,81 @@ export default function InterviewVoiceAnalysisPage() {
                     </div>
                   </div>
 
-                  {/* Transcript bubbles list (Clean single layout) */}
+                  {/* Transcript bubbles list (Only active segment) */}
                   <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-                    {activeSeg.dialogue
-                      .filter(bubble => bubble.text.toLowerCase().includes(searchQuery.toLowerCase()))
-                      .map((bubble, idx) => {
-                        const isInterviewer = bubble.sender === "interviewer";
-                        const isPlayed = playbackTime >= bubble.seconds;
+                    {activeSeg && (() => {
+                      const seg = activeSeg;
+                      const segIdx = activeSegIdx;
+                      const filteredDialogue = seg.dialogue.filter(bubble => 
+                        bubble.text.toLowerCase().includes(searchQuery.toLowerCase())
+                      );
 
+                      if (filteredDialogue.length === 0 && searchQuery) {
                         return (
-                          <div 
-                            key={idx}
-                            onClick={() => jumpPlayhead(bubble.seconds)}
-                            className={`p-3.5 rounded-xl border transition-all duration-300 text-left cursor-pointer flex flex-col gap-1.5 ${
-                              isInterviewer 
-                                ? "bg-[#050B1A]/40 border-white/5 hover:border-white/10" 
-                                : "bg-gradient-to-r from-[#050B1A]/80 to-[#AFA7FF]/3 border-[#AFA7FF]/10 hover:border-[#AFA7FF]/20"
-                            } ${isPlayed && !isInterviewer ? "border-[#00D4FF]/25 shadow-[0_0_12px_rgba(0,212,255,0.04)]" : ""}`}
-                          >
-                            <div className="flex justify-between items-center text-xs font-bold select-none">
-                              <span className="text-white/60 flex items-center gap-1.5 text-xs">
-                                <span className={`w-2.5 h-2.5 rounded-full ${isInterviewer ? "bg-[#FF7A95]" : "bg-[#00D4FF]"}`} />
-                                {bubble.name} <span className="font-mono text-[10px] text-white/30">{bubble.time}</span>
-                              </span>
-                              {bubble.badgeText && (
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border ${bubble.badgeClass}`}>
-                                  {bubble.badgeText}
-                                </span>
-                              )}
-                            </div>
-                            <p className={`text-[13px] md:text-sm leading-relaxed ${isPlayed ? "text-white font-black" : "text-white/50"}`}>
-                              {bubble.text}
-                            </p>
+                          <div className="text-center py-8 text-white/30 text-xs select-none">
+                            没有找到匹配的对话内容
                           </div>
                         );
-                      })}
+                      }
+
+                      return (
+                        <div key={seg.id} id={`section-block-${seg.id}`} className="space-y-3 scroll-mt-6">
+                          {/* Segment Header */}
+                          <div className="flex justify-between items-center p-3 rounded-xl bg-white/5 border border-white/10 select-none">
+                            <div className="flex items-center gap-2 text-sm font-bold">
+                              <span className="text-[#AFA7FF] font-mono">#{segIdx + 1}</span>
+                              <span className="text-white font-black text-sm md:text-base">{seg.label}</span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] uppercase border font-semibold ${seg.tagColor}`}>
+                                {seg.tag}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-white/40 font-mono">
+                              <span>{seg.timeRange}</span>
+                            </div>
+                          </div>
+
+                          {/* Dialogue bubbles */}
+                          <div className="space-y-3 pl-3 border-l border-white/5">
+                            {filteredDialogue.map((bubble, idx) => {
+                              const isInterviewer = bubble.sender === "interviewer";
+                              const isPlayed = playbackTime >= bubble.seconds;
+
+                              return (
+                                <div 
+                                  key={idx}
+                                  onClick={() => jumpPlayhead(bubble.seconds)}
+                                  className={`p-3.5 rounded-xl border transition-all duration-300 text-left cursor-pointer flex flex-col gap-1.5 ${
+                                    isInterviewer 
+                                      ? "bg-[#050B1A]/40 border-white/5 hover:border-white/10" 
+                                      : "bg-gradient-to-r from-[#050B1A]/80 to-[#AFA7FF]/3 border-[#AFA7FF]/10 hover:border-[#AFA7FF]/20"
+                                  } ${isPlayed && !isInterviewer ? "border-[#00D4FF]/25 shadow-[0_0_12px_rgba(0,212,255,0.04)]" : ""}`}
+                                >
+                                  <div className="flex justify-between items-center text-xs font-bold select-none">
+                                    <span className="text-white/60 flex items-center gap-1.5 text-xs">
+                                      <span className={`w-2.5 h-2.5 rounded-full ${isInterviewer ? "bg-[#FF7A95]" : "bg-[#00D4FF]"}`} />
+                                      {bubble.name} <span className="font-mono text-[10px] text-white/30">{bubble.time}</span>
+                                    </span>
+                                    {bubble.badgeText && (
+                                      <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border ${bubble.badgeClass}`}>
+                                        {bubble.badgeText}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[13px] md:text-sm leading-relaxed">
+                                    {renderHighlightText(bubble.text, bubble.highlights, isPlayed, isHighlightEnabled)}
+                                  </p>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div className="pt-2 text-center select-none shrink-0 border-t border-white/5">
                     <span 
-                      onClick={() => {
-                        setShowOptimizer(true);
-                        startOptimizationGen();
-                      }}
+                      onClick={() => handleOpenOptimizer()}
                       className="text-sm font-black text-[#AFA7FF] hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
                     >
                       查看片段分析与建议 
@@ -1322,16 +2135,15 @@ export default function InterviewVoiceAnalysisPage() {
               {/* ----------------------------------------------------
                   COLUMN 3: Right Sidebar (3.5 cols)
                  ---------------------------------------------------- */}
-              <div className="col-span-12 lg:col-span-3.5 xl:col-span-3 flex flex-col gap-4.5">
+              <div className="col-span-12 lg:col-span-3.5 xl:col-span-3 flex flex-col gap-[18px]">
                 
-                {/* 3.1 IPI Performance Index widget with line chart */}
-                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5">
+                 {/* 3.1 IPI Performance Index widget with line chart */}
+                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[230px] shrink-0">
                   <div className="flex justify-between items-center pb-2 border-b border-white/5 select-none">
                     <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-sm text-[#00D4FF]">monitoring</span>
                       面试表现指数 (IPI)
                     </h4>
-                    <span className="material-symbols-outlined text-sm text-white/40 hover:text-white cursor-pointer">share</span>
                   </div>
 
                   <div className="flex items-center gap-3">
@@ -1372,83 +2184,77 @@ export default function InterviewVoiceAnalysisPage() {
 
                       {/* Area mapping */}
                       <path 
-                        d="M 0 35 L 34 25 L 68 20 L 102 32 L 136 45 L 170 55 L 204 42 L 240 48 V 70 H 0 Z" 
+                        d={areaPath} 
                         fill="url(#line-area-grad)" 
                       />
 
                       {/* Neon Curve */}
                       <path 
-                        d="M 0 35 L 34 25 L 68 20 L 102 32 L 136 45 L 170 55 L 204 42 L 240 48" 
+                        d={linePath} 
                         fill="none" 
                         stroke="url(#line-neon-grad)" 
                         strokeWidth="2" 
                         strokeLinecap="round" 
                       />
 
-                      {/* Vertical line indicator at 08:15 */}
-                      <line x1="120" y1="5" x2="120" y2="65" stroke="#FF7A95" strokeWidth="0.75" strokeDasharray="2 2" />
-                      <circle cx="120" cy="40" r="3" fill="white" stroke="#FF7A95" strokeWidth="1.5" />
+                      {/* Vertical line indicator at active segment */}
+                      <line x1={activePt.x} y1="5" x2={activePt.x} y2="65" stroke="#FF7A95" strokeWidth="0.75" strokeDasharray="2 2" />
+                      <circle cx={activePt.x} cy={activePt.y} r="3" fill="white" stroke="#FF7A95" strokeWidth="1.5" />
                     </svg>
 
                     {/* Dotted playhead marker readout label */}
-                    <div className="absolute top-[28px] left-[40%] bg-[#FF7A95]/15 border border-[#FF7A95]/30 px-1 py-0.2 rounded font-mono text-xs text-[#FF7A95] font-black">
-                      08:15
+                    <div 
+                      style={{ left: `${(activePt.x / 240) * 100}%` }}
+                      className="absolute top-[28px] -translate-x-1/2 bg-[#FF7A95]/15 border border-[#FF7A95]/30 px-1.5 py-0.5 rounded font-mono text-[10px] text-[#FF7A95] font-black pointer-events-none"
+                    >
+                      {activeSeg?.timeRange?.split(" - ")[0] || "00:00"}
                     </div>
                   </div>
 
                   <p className="text-xs text-white/50 leading-relaxed font-semibold">
-                    整体趋势：表现波动较大。在 6 分钟后出现明显下滑
+                    整体趋势：表现{(reportData?.ipi_score || activeSeg?.score || 70) >= 80 ? "非常优秀" : (reportData?.ipi_score || activeSeg?.score || 70) >= 65 ? "比较稳健" : "波动较大"}。当前片段得分为 <span className="text-[#AFA7FF] font-extrabold">{activeSeg?.score || 70}分</span>
                   </p>
-
-                  <div className="pt-1.5 border-t border-white/5 select-none text-center">
-                    <span 
-                      onClick={() => {
-                        setShowOptimizer(true);
-                        startOptimizationGen();
-                      }}
-                      className="text-sm font-black text-[#AFA7FF] hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
-                    >
-                      查看全场表现趋势 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
-                    </span>
-                  </div>
                 </div>
 
                 {/* 3.2 Risk Moments list */}
-                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5">
+                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[212px] shrink-0">
                   <div className="flex justify-between items-center pb-2 border-b border-white/5 select-none">
                     <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-sm text-[#FF7A95]">report</span>
                       关键风险点
                     </h4>
-                    <span className="text-xs text-[#FF7A95] font-mono font-black">3 个风险点</span>
+                    <span className="text-xs text-[#FF7A95] font-mono font-black">{dynamicRisks.length} 个风险点</span>
                   </div>
 
-                  <div className="space-y-2.5">
-                    {GENERAL_RISKS.map((risk, idx) => (
-                      <div 
-                        key={idx}
-                        onClick={() => jumpPlayhead(risk.sec)}
-                        className="p-2.5 rounded-xl bg-[#050B1A]/80 border border-white/5 hover:border-white/10 transition-all text-left flex justify-between items-center gap-2 cursor-pointer"
-                      >
-                        <div className="flex items-center gap-2 truncate">
-                          <span className="px-2 py-0.5 rounded bg-white/5 text-[#00D4FF] font-mono font-bold text-xs select-none shrink-0">
-                            {risk.time}
+                  <div className="space-y-2.5 flex-1 overflow-y-auto pr-1">
+                    {dynamicRisks.length > 0 ? (
+                      dynamicRisks.map((risk, idx) => (
+                        <div 
+                          key={idx}
+                          onClick={() => jumpPlayhead(risk.sec)}
+                          className="p-2.5 rounded-xl bg-[#050B1A]/80 border border-white/5 hover:border-white/10 transition-all text-left flex justify-between items-center gap-2 cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <span className="px-2 py-0.5 rounded bg-white/5 text-[#00D4FF] font-mono font-bold text-xs select-none shrink-0">
+                              {risk.time}
+                            </span>
+                            <span className="text-xs md:text-sm text-white font-semibold truncate">{risk.label}</span>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase shrink-0 ${risk.tagClass}`}>
+                            {risk.tag}
                           </span>
-                          <span className="text-xs md:text-sm text-white font-semibold truncate">{risk.label}</span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase shrink-0 ${risk.tagClass}`}>
-                          {risk.tag}
-                        </span>
+                      ))
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-xs text-white/30 italic select-none">
+                        暂无明显关键风险点
                       </div>
-                    ))}
+                    )}
                   </div>
 
                   <div className="pt-1.5 border-t border-white/5 select-none text-center">
                     <span 
-                      onClick={() => {
-                        setShowOptimizer(true);
-                        startOptimizationGen();
-                      }}
+                      onClick={() => setShowRisksModal(true)}
                       className="text-sm font-black text-[#AFA7FF] hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
                     >
                       查看全部风险点 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
@@ -1457,7 +2263,7 @@ export default function InterviewVoiceAnalysisPage() {
                 </div>
 
                 {/* 3.3 Skill Constellation Pentagon Radar Chart */}
-                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3">
+                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3 h-[300px] shrink-0">
                   <div className="pb-2 border-b border-white/5 select-none">
                     <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-sm text-[#00D4FF]">radar</span>
@@ -1649,21 +2455,18 @@ export default function InterviewVoiceAnalysisPage() {
               </div>
 
               {/* Section 5: 下一步建议 (2 cols) */}
-              <div className="col-span-12 sm:col-span-6 lg:col-span-2 pl-2 flex flex-col justify-between gap-2.5">
+              <div className="col-span-12 sm:col-span-6 lg:col-span-2 pl-2 flex flex-col justify-start gap-2.5">
                 <div>
                   <h4 className="text-sm font-black text-white uppercase tracking-wider">下一步建议</h4>
                   <p className="text-xs text-white/40 leading-snug font-bold mt-1">
-                    生成本片段的表达优化建议，提升回答质量
+                    {activeSeg?.optimizationAdvice ? "已生成表达优化建议，可直接查看或重新生成" : "生成本片段的表达优化建议，提升回答质量"}
                   </p>
                 </div>
                 <button 
-                  onClick={() => {
-                    setShowOptimizer(true);
-                    startOptimizationGen();
-                  }}
+                  onClick={() => handleOpenOptimizer()}
                   className="w-full py-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white text-xs md:text-sm font-black rounded-lg transition-all cursor-pointer shadow-lg shadow-purple-500/10"
                 >
-                  生成优化建议
+                  {activeSeg?.optimizationAdvice ? "查看优化建议" : "生成优化建议"}
                 </button>
               </div>
 
@@ -1717,13 +2520,13 @@ export default function InterviewVoiceAnalysisPage() {
                 <div className="space-y-4">
                   <div className="p-3.5 rounded-2xl bg-[#FF7A95]/10 border border-[#FF7A95]/20 text-xs text-[#FF7A95] leading-relaxed font-bold">
                     <span className="text-[10px] font-black uppercase tracking-wider block mb-1.5 select-none">AI 诊断结论</span>
-                    你在答题中提到了经典的“延时双删”，但这极易被资深面试官攻击“网络分区导致的延时数值选取难题”与“秒杀并发脏写异常”。
+                    {optAdvice?.conclusion || "暂无结论"}
                   </div>
 
                   <div className="space-y-3.5 text-xs text-white/70 leading-relaxed font-bold max-h-[280px] overflow-y-auto pr-1">
                     <div className="space-y-1">
                       <span className="text-white font-black text-sm block">💡 你的原版回答：</span>
-                      <p className="bg-white/[0.01] border border-white/5 p-3 rounded-xl text-white/50">“可以用双删策略，先删缓存，再更新数据库，最后再删一次缓存。”</p>
+                      <p className="bg-white/[0.01] border border-white/5 p-3 rounded-xl text-white/50">{optAdvice?.original || "暂无"}</p>
                     </div>
 
                     <div className="space-y-1 mt-4">
@@ -1731,17 +2534,21 @@ export default function InterviewVoiceAnalysisPage() {
                         <span className="material-symbols-outlined text-base">verified</span>
                         🎯 大厂架构师版高分话术推荐：
                       </span>
-                      <div className="bg-slate-950/60 border border-[#5DECCB]/20 p-3.5 rounded-xl font-mono text-white whitespace-pre-wrap leading-relaxed text-xs">
-                        “在处理缓存双写一致性时，由于网络延迟的不可控性，经典的延时双删并非万无一失。
-                        <br /><br />
-                        我更倾向于采用 <strong className="text-[#5DECCB] font-black">订阅 MySQL binlog + 消息队列（MQ）做异步淘汰的方案</strong>。具体流程是：应用端只负责写数据库，数据变更生成 binlog 后，利用 <strong className="text-[#5DECCB] font-black">Canal 订阅工具</strong> 异步推送到 Kafka。下游淘汰模块监听 Kafka 并异步清理 Redis 缓存。如果淘汰失败，则利用 MQ 自身的重试机制重试，确保达到最终一致性。
-                        <br /><br />
-                        对于极少数需要保证强一致的账务节点，我会在底层引入 <strong className="text-[#5DECCB] font-black">Redisson 读写锁机制</strong>，将写请求排他化，确保缓存与数据库的强一致。”
-                      </div>
+                      <div 
+                        className="bg-slate-950/60 border border-[#5DECCB]/20 p-3.5 rounded-xl font-mono text-white whitespace-pre-wrap leading-relaxed text-xs"
+                        dangerouslySetInnerHTML={{ __html: optAdvice?.optimized || "暂无" }}
+                      />
                     </div>
                   </div>
 
                   <div className="flex justify-end gap-3 pt-2">
+                    <button
+                      onClick={() => handleOpenOptimizer(true)}
+                      className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-black rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                    >
+                      <span className="material-symbols-outlined text-sm">cached</span>
+                      重新生成
+                    </button>
                     <button
                       onClick={() => setShowOptimizer(false)}
                       className="px-5 py-2.5 bg-[#5DECCB] text-[#050B1A] text-xs font-black rounded-xl transition-all cursor-pointer shadow-lg shadow-cyan-500/20"
@@ -1751,6 +2558,97 @@ export default function InterviewVoiceAnalysisPage() {
                   </div>
                 </div>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ========================================================
+          ALL RISKS SUMMARY MODAL DRAWER
+         ======================================================== */}
+      <AnimatePresence>
+        {showRisksModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowRisksModal(false)}
+              className="absolute inset-0 bg-[#050B1A]/80 backdrop-blur-md"
+            />
+
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-[#050B1A] border border-white/10 rounded-3xl p-6.5 max-w-2xl w-full text-left relative z-10 space-y-4 shadow-2xl overflow-hidden max-h-[85vh] flex flex-col"
+            >
+              <div className="flex justify-between items-center pb-2.5 border-b border-white/5 select-none shrink-0">
+                <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[#FF7A95]">report</span>
+                  关键风险点汇总记录
+                </h3>
+                <button
+                  onClick={() => setShowRisksModal(false)}
+                  className="text-white/40 hover:text-white transition-colors cursor-pointer flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/5"
+                >
+                  <span className="material-symbols-outlined text-base">close</span>
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 py-1">
+                {dynamicRisks.length > 0 ? (
+                  dynamicRisks.map((risk, idx) => (
+                    <div key={idx} className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex flex-col md:flex-row md:items-start justify-between gap-3.5 hover:border-white/10 transition-all">
+                      <div className="space-y-2 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2 py-0.5 rounded bg-white/5 text-[#00D4FF] font-mono font-bold text-xs">
+                            {risk.time}
+                          </span>
+                          <span className="text-white font-extrabold text-xs">
+                            {risk.segmentLabel}
+                          </span>
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border ${risk.tagClass}`}>
+                            {risk.tag}
+                          </span>
+                        </div>
+                        <p className="text-sm font-semibold text-white/80 leading-relaxed">
+                          {risk.label}
+                        </p>
+                        {risk.suggestions.length > 0 && (
+                          <div className="text-xs text-white/40 font-bold flex items-center gap-1">
+                            <span className="material-symbols-outlined text-xs">auto_stories</span>
+                            建议重点复习：{risk.suggestions.join("、")}
+                          </div>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => {
+                          jumpPlayhead(risk.sec);
+                          setShowRisksModal(false);
+                        }}
+                        className="px-4.5 py-2 bg-[#AFA7FF] hover:bg-white text-[#050B1A] font-black text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0 align-self-end md:align-self-center"
+                      >
+                        <span className="material-symbols-outlined text-xs font-black">play_circle</span>
+                        定位片段
+                      </button>
+                    </div>
+                  ))
+                ) : (
+                  <div className="py-12 text-center text-white/30 text-sm italic select-none">
+                    暂无明显关键风险点
+                  </div>
+                )}
+              </div>
+
+              <div className="flex justify-end pt-2 shrink-0 border-t border-white/5 select-none">
+                <button
+                  onClick={() => setShowRisksModal(false)}
+                  className="px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-black rounded-xl transition-all cursor-pointer"
+                >
+                  关闭
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
