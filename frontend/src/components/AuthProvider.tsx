@@ -23,6 +23,8 @@ export interface UserProfile {
   gradYear?: string;
   hasExp?: boolean;
   membership?: string;
+  phone?: string;
+  email?: string;
 }
 
 interface AuthContextType {
@@ -92,6 +94,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } else {
         localStorage.setItem("offerPilot_user", JSON.stringify(defaultUser));
+      }
+
+      // If we have a token, refresh user data from backend so fields
+      // like phone / email (not stored in localStorage) are populated.
+      const token = localStorage.getItem("offerPilot_token");
+      if (token) {
+        fetch("http://localhost:8001/api/auth/me", {
+          headers: { "Authorization": `Bearer ${token}` }
+        })
+          .then(res => {
+            if (res.status === 401) {
+              // Token has expired or is invalid, clear credentials and log out
+              localStorage.removeItem("offerPilot_token");
+              setIsLoggedIn(false);
+              localStorage.setItem("offerPilot_isLoggedIn", "false");
+              setUser(defaultUser);
+              localStorage.removeItem("offerPilot_user");
+              window.dispatchEvent(new Event("storage"));
+              return null;
+            }
+            return res.ok ? res.json() : null;
+          })
+          .then(data => {
+            if (data) {
+              const merged = { ...defaultUser, ...user, ...data };
+              setUser(merged);
+              localStorage.setItem("offerPilot_user", JSON.stringify(merged));
+              window.dispatchEvent(new Event("storage"));
+            }
+          })
+          .catch(() => {});
       }
     }
   }, []);

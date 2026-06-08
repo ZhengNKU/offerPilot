@@ -92,12 +92,12 @@ export default function NewAnalysisDebugger() {
       }
     }
 
-    const maxLimit = 20 * 1024 * 1024; // 20MB limit
+    const maxLimit = activeMode === "resume" ? 5 * 1024 * 1024 : 20 * 1024 * 1024;
     if (file.size > maxLimit) {
       auth.triggerToast(
         activeMode === "audio"
           ? "上传失败：录音文件大小不能超过 20MB！"
-          : "上传失败：简历文档大小不能超过 20MB！"
+          : "上传失败：简历文件大小不能超过 5MB！"
       );
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -408,11 +408,74 @@ export default function NewAnalysisDebugger() {
       router.push("/debugger/record");
     } else {
       // Resume mode
-      localStorage.removeItem("offerPilot_task_id");
-      localStorage.removeItem("offerPilot_session_id");
-      localStorage.setItem("offerPilot_analyzed_resume", "true");
-      setIsAnalyzing(false);
-      router.push("/debugger/resume");
+      if (!uploadedFileId) {
+        auth.triggerToast("请先选择并上传您的简历文件！");
+        return;
+      }
+      setIsAnalyzing(true);
+      setTaskStep("正在提取简历文字，校验排版格式...");
+      setTaskProgress(15);
+
+      const token = localStorage.getItem("offerPilot_token");
+      const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+
+      let progress = 15;
+      const progressSteps = [
+        { limit: 40, step: "正在深度解析简历结构与技术栈...", rate: 0.5 },
+        { limit: 65, step: "正在对比目标岗位画像，评估匹配契合度...", rate: 0.3 },
+        { limit: 85, step: "正在实施大厂 STAR 原则，深度优化工作经历...", rate: 0.15 },
+        { limit: 95, step: "正在诊断简历雷区与 ATS 机器人可读性...", rate: 0.05 }
+      ];
+      
+      let currentStepIdx = 0;
+      const progressInterval = setInterval(() => {
+        if (progress < 95) {
+          const currentStep = progressSteps[currentStepIdx];
+          progress += currentStep.rate;
+          setTaskProgress(Math.floor(progress));
+          setTaskStep(currentStep.step);
+          
+          if (progress >= currentStep.limit && currentStepIdx < progressSteps.length - 1) {
+            currentStepIdx++;
+          }
+        }
+      }, 1000);
+
+      try {
+        const analyzeRes = await fetch("http://localhost:8001/api/resume/analyze", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({ file_id: uploadedFileId })
+        });
+
+        clearInterval(progressInterval);
+
+        if (!analyzeRes.ok) {
+          const err = await analyzeRes.json();
+          throw new Error(err.detail || "简历深度诊断失败");
+        }
+
+        setTaskProgress(98);
+        setTaskStep("完成分析 — 正在生成高维诊断报告...");
+        const analysisData = await analyzeRes.json();
+
+        // Cache the analysis data to localStorage
+        localStorage.setItem("offerPilot_resume_analysis_result", JSON.stringify(analysisData));
+        localStorage.setItem("offerPilot_analyzed_resume", "true");
+        setTaskProgress(100);
+
+        // 跳转带上 id，方便后续从历史列表/分享链接重新进入同一份报告
+        const target = analysisData?.id
+          ? `/debugger/resume?id=${analysisData.id}`
+          : "/debugger/resume";
+        router.push(target);
+      } catch (e: any) {
+        clearInterval(progressInterval);
+        auth.triggerToast(e.message || "分析简历失败，请重试！");
+      } finally {
+        setIsAnalyzing(false);
+      }
     }
   };
 
@@ -592,7 +655,11 @@ export default function NewAnalysisDebugger() {
                     {taskStep || "OfferPilot AI 正在分析中..."}
                   </h3>
                   <p className="text-base md:text-lg text-white/70 font-semibold">
-                    ASR 语音识别 + MiniMax-M3 智能评估，分析完成后自动进入报告
+                    {activeMode === "resume"
+                      ? "PDF/DOCX 文本提取 + MiniMax-M3 智能评估，分析完成后自动进入报告"
+                      : activeMode === "text"
+                      ? "文本诊断 + MiniMax-M3 智能评估，分析完成后自动进入报告"
+                      : "ASR 语音识别 + MiniMax-M3 智能评估，分析完成后自动进入报告"}
                   </p>
                 </div>
 
@@ -707,7 +774,7 @@ export default function NewAnalysisDebugger() {
                         {activeMode === "audio" ? "拖拽录音文件到此处，或点击浏览上传" : "拖拽简历文档到此处，或点击浏览上传"}
                       </h4>
                       <p className="text-xs md:text-sm text-on-surface-variant/60">
-                        {activeMode === "audio" ? "支持 wav, mp3 格式，最大 20MB (时长限10分钟)" : "支持 PDF, DOCX 格式，最大 20MB"}
+                        {activeMode === "audio" ? "支持 wav, mp3 格式，最大 20MB (时长限10分钟)" : "支持 PDF, DOCX 格式，最大 5MB"}
                       </p>
                     </>
                   )}

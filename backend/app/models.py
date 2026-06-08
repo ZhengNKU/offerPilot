@@ -202,7 +202,7 @@ class AnswerImprovement(Base):
 
 class UploadedFile(Base):
     __tablename__ = "files"
-    
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -210,8 +210,39 @@ class UploadedFile(Base):
     file_url: Mapped[str] = mapped_column(String, nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, default=0)
     file_type: Mapped[str] = mapped_column(String(50), nullable=False) # audio, resume
-    
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+
     user: Mapped[Optional["User"]] = relationship("User", back_populates="files")
+    resume_analyses: Mapped[List["ResumeAnalysis"]] = relationship(
+        "ResumeAnalysis", back_populates="file", cascade="all, delete-orphan"
+    )
+
+
+class ResumeAnalysis(Base):
+    """
+    一次简历诊断任务的完整结果。
+    result_json 是 LLM 完整输出（score/profile/work_experiences/risks/match_analysis
+    /optimization_suggestions/keywords_analysis/ats_checks 等），
+    冗余提取 score/optimized_score/ats_pass_rate 三个高频摘要字段方便列表展示。
+    """
+    __tablename__ = "resume_analyses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    file_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    optimized_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    ats_pass_rate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    result_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    user: Mapped[Optional["User"]] = relationship("User")
+    file: Mapped["UploadedFile"] = relationship("UploadedFile", back_populates="resume_analyses")

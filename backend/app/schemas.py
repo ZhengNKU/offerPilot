@@ -78,6 +78,8 @@ class UserProfileResponse(BaseModel):
     hasExp: bool
     is_online: bool = False
     membership: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str

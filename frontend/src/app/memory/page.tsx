@@ -105,6 +105,12 @@ export default function CareerMemoryDashboard() {
   const [historyItems, setHistoryItems] = useState<SessionHistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
+  const [avatarError, setAvatarError] = useState(false);
+
+  useEffect(() => {
+    setAvatarError(false);
+  }, [auth.user.avatar]);
+
   // New deletion states
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -112,64 +118,119 @@ export default function CareerMemoryDashboard() {
   const [deleteTarget, setDeleteTarget] = useState<string | "batch" | null>(null);
 
   const fetchSessions = async () => {
-    if (!auth.isLoggedIn) {
-      setHistoryItems([]);
+    const token = typeof window !== "undefined" ? localStorage.getItem("offerPilot_token") : null;
+    if (!auth.isLoggedIn || !token) {
+      setHistoryItems(INITIAL_HISTORY);
       return;
     }
     setIsLoadingHistory(true);
     try {
-      const token = localStorage.getItem("offerPilot_token");
-      const headers: Record<string, string> = {};
-      if (token) headers["Authorization"] = `Bearer ${token}`;
+      const headers: Record<string, string> = {
+        "Authorization": `Bearer ${token}`
+      };
 
-      const res = await fetch("http://localhost:8001/api/audio/sessions", { headers });
-      if (res.ok) {
-        const data = await res.json();
-        const mapped: SessionHistoryItem[] = data.map((session: any) => {
-          // Parse date
-          let dateStr = "06-01 14:32";
-          if (session.created_at) {
-            const d = new Date(session.created_at);
-            const mm = String(d.getMonth() + 1).padStart(2, '0');
-            const dd = String(d.getDate()).padStart(2, '0');
-            const hh = String(d.getHours()).padStart(2, '0');
-            const min = String(d.getMinutes()).padStart(2, '0');
-            dateStr = `${mm}-${dd} ${hh}:${min}`;
-          }
-
-          // Parse company, role, round from title
-          let company = "面试会话";
-          let role = "录音分析";
-          let round = "技术面试";
-          if (session.title && session.title.includes(" · ")) {
-            const parts = session.title.split(" · ");
-            if (parts.length >= 1) company = parts[0];
-            if (parts.length >= 2) role = parts[1];
-            if (parts.length >= 3) round = parts[2];
-          } else {
-            company = session.title || "语音面试";
-          }
-
-          // Determine grade based on score
-          let grade = "待提升候选人";
-          if (session.ipi_score >= 80) grade = "优秀候选人";
-          else if (session.ipi_score >= 70) grade = "中级候选人";
-
-          return {
-            id: String(session.id),
-            date: dateStr,
-            type: "audio", // Database sessions are voice/audio analyses
-            title: session.title || "未命名面试分析",
-            score: session.ipi_score || 0,
-            grade,
-            company,
-            role,
-            round,
-            details: session.executive_summary || "暂无详细摘要信息。"
-          };
-        });
-        setHistoryItems(mapped);
+      // 1. Fetch audio sessions
+      const audioRes = await fetch("http://localhost:8001/api/audio/sessions", { headers });
+      let audioItems: any[] = [];
+      if (audioRes.status === 401) {
+        localStorage.removeItem("offerPilot_token");
+        auth.logout();
+        return;
       }
+      if (audioRes.ok) {
+        audioItems = await audioRes.json();
+      }
+
+      // 2. Fetch resume analyses
+      const resumeRes = await fetch("http://localhost:8001/api/resume/analyses", { headers });
+      let resumeRawItems: any[] = [];
+      if (resumeRes.ok) {
+        const resumeData = await resumeRes.json();
+        resumeRawItems = resumeData.items || [];
+      }
+
+      // 3. Map audio sessions
+      const mappedAudio = audioItems.map((session: any) => {
+        let dateStr = "06-01 14:32";
+        if (session.created_at) {
+          const d = new Date(session.created_at);
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          const hh = String(d.getHours()).padStart(2, '0');
+          const min = String(d.getMinutes()).padStart(2, '0');
+          dateStr = `${mm}-${dd} ${hh}:${min}`;
+        }
+
+        let company = "面试会话";
+        let role = "录音分析";
+        let round = "技术面试";
+        if (session.title && session.title.includes(" · ")) {
+          const parts = session.title.split(" · ");
+          if (parts.length >= 1) company = parts[0];
+          if (parts.length >= 2) role = parts[1];
+          if (parts.length >= 3) round = parts[2];
+        } else {
+          company = session.title || "语音面试";
+        }
+
+        let grade = "待提升候选人";
+        if (session.ipi_score >= 80) grade = "优秀候选人";
+        else if (session.ipi_score >= 70) grade = "中级候选人";
+
+        return {
+          id: String(session.id),
+          date: dateStr,
+          raw_created_at: session.created_at || "",
+          type: "audio" as const,
+          title: session.title || "未命名面试分析",
+          score: session.ipi_score || 0,
+          grade,
+          company,
+          role,
+          round,
+          details: session.executive_summary || "暂无详细摘要信息。"
+        };
+      });
+
+      // 4. Map resume analyses
+      const mappedResume = resumeRawItems.map((ra: any) => {
+        let dateStr = "06-01 14:32";
+        if (ra.created_at) {
+          const d = new Date(ra.created_at);
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          const hh = String(d.getHours()).padStart(2, '0');
+          const min = String(d.getMinutes()).padStart(2, '0');
+          dateStr = `${mm}-${dd} ${hh}:${min}`;
+        }
+
+        let grade = "待提升简历";
+        if (ra.score >= 85) grade = "优秀简历";
+        else if (ra.score >= 70) grade = "良好简历";
+
+        return {
+          id: String(ra.id),
+          date: dateStr,
+          raw_created_at: ra.created_at || "",
+          type: "resume" as const,
+          title: `简历优化 · ${ra.filename || "简历"}`,
+          score: ra.score || 0,
+          grade,
+          company: "个人简历",
+          role: ra.filename || "未知岗位",
+          round: "简历深度分析",
+          details: `大厂 ATS 机器人通过率 ${ra.ats_pass_rate || 0}%。简历优化前评分 ${ra.score || 0}分，AI 预计优化后可提升至 ${ra.optimized_score || 0}分。`
+        };
+      });
+
+      // 5. Merge and sort by raw_created_at descending
+      const combined = [...mappedAudio, ...mappedResume].sort((a, b) => {
+        const dateA = a.raw_created_at ? new Date(a.raw_created_at).getTime() : 0;
+        const dateB = b.raw_created_at ? new Date(b.raw_created_at).getTime() : 0;
+        return dateB - dateA;
+      });
+
+      setHistoryItems(combined);
     } catch (err) {
       console.error("Failed to fetch history sessions:", err);
     } finally {
@@ -179,6 +240,12 @@ export default function CareerMemoryDashboard() {
 
   useEffect(() => {
     fetchSessions();
+
+    const handleStorageChange = () => {
+      fetchSessions();
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
   }, [auth.isLoggedIn]);
 
   const handleInterceptAction = () => {
@@ -203,7 +270,7 @@ export default function CareerMemoryDashboard() {
     } else if (item.type === "text") {
       router.push("/debugger/record");
     } else if (item.type === "resume") {
-      router.push("/debugger/resume");
+      router.push(`/debugger/resume?id=${item.id}`);
     } else {
       router.push("/debugger/report");
     }
@@ -243,22 +310,55 @@ export default function CareerMemoryDashboard() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       if (deleteTarget === "batch") {
-        const session_ids = selectedIds.map(Number).filter(id => !isNaN(id));
-        const res = await fetch("http://localhost:8001/api/audio/sessions/batch-delete", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ session_ids })
+        // Find which selected IDs are audio and which are resume
+        const audioSessionIds: number[] = [];
+        const resumeAnalysisIds: number[] = [];
+
+        selectedIds.forEach(id => {
+          const item = historyItems.find(x => x.id === id);
+          if (item) {
+            if (item.type === "resume") {
+              resumeAnalysisIds.push(Number(id));
+            } else {
+              audioSessionIds.push(Number(id));
+            }
+          }
         });
-        
-        if (res.ok) {
-          setSelectedIds([]);
-          await fetchSessions();
-        } else {
-          const errData = await res.json();
-          alert(errData.detail || "批量删除失败");
+
+        // Delete audio sessions in batch
+        if (audioSessionIds.length > 0) {
+          const res = await fetch("http://localhost:8001/api/audio/sessions/batch-delete", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ session_ids: audioSessionIds })
+          });
+          if (!res.ok) {
+            const errData = await res.json();
+            alert(errData.detail || "语音会话批量删除失败");
+          }
         }
+
+        // Delete resume sessions in parallel
+        if (resumeAnalysisIds.length > 0) {
+          const deletePromises = resumeAnalysisIds.map(id =>
+            fetch(`http://localhost:8001/api/resume/analyses/${id}`, {
+              method: "DELETE",
+              headers
+            })
+          );
+          await Promise.all(deletePromises);
+        }
+
+        setSelectedIds([]);
+        await fetchSessions();
       } else if (deleteTarget) {
-        const res = await fetch(`http://localhost:8001/api/audio/session/${deleteTarget}`, {
+        const item = historyItems.find(x => x.id === deleteTarget);
+        const isResume = item?.type === "resume";
+        const deleteUrl = isResume
+          ? `http://localhost:8001/api/resume/analyses/${deleteTarget}`
+          : `http://localhost:8001/api/audio/session/${deleteTarget}`;
+
+        const res = await fetch(deleteUrl, {
           method: "DELETE",
           headers
         });
@@ -500,20 +600,21 @@ export default function CareerMemoryDashboard() {
           <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 text-left relative overflow-hidden w-full">
             <div className="flex items-center gap-5 flex-wrap w-full xl:w-auto">
               {/* User Avatar */}
-              <div className="relative shrink-0">
-                <div className="w-16 h-16 rounded-full border-2 border-primary/40 overflow-hidden bg-slate-900 flex items-center justify-center shadow-lg">
-                  <img
-                    src={auth.user.avatar}
-                    alt={auth.user.name}
-                    className="w-full h-full object-cover opacity-80"
-                    onError={(e) => {
-                      (e.target as HTMLElement).style.display = "none";
-                    }}
-                  />
-                  <span className="material-symbols-outlined text-3xl text-primary opacity-60">person</span>
+              <div className="relative shrink-0 select-none">
+                <div className="w-20 h-20 rounded-full border border-primary/30 overflow-hidden bg-slate-900 flex items-center justify-center shadow-2xl relative z-10">
+                  {!avatarError ? (
+                    <img
+                      src={auth.user.avatar}
+                      alt={auth.user.name}
+                      className="w-full h-full object-cover"
+                      onError={() => setAvatarError(true)}
+                    />
+                  ) : (
+                    <span className="material-symbols-outlined text-4xl text-primary opacity-60">person</span>
+                  )}
                 </div>
-                <div className="absolute -bottom-1 -right-1 bg-tertiary w-4 h-4 rounded-full border-2 border-background flex items-center justify-center">
-                  <span className="w-1.5 h-1.5 bg-white rounded-full"></span>
+                <div className="absolute -bottom-1 -right-1 bg-tertiary w-4.5 h-4.5 rounded-full border-2 border-background flex items-center justify-center z-20">
+                  <span className="w-1.5 h-1.5 bg-white rounded-full" />
                 </div>
               </div>
 

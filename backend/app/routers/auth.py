@@ -44,7 +44,9 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
         degree=p.degree or "本科",
         hasExp=p.has_experience,
         is_online=user.is_online,
-        membership=user.membership
+        membership=user.membership,
+        phone=user.phone,
+        email=user.email
     )
 
 # FastAPI dependency to fetch logged-in user details
@@ -89,26 +91,36 @@ async def get_current_user_optional(
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ) -> Optional[models.User]:
-    if not credentials:
+    if not credentials or not credentials.credentials:
         return None
     token = credentials.credentials
-    try:
-        is_blacklisted = await redis_client.get(f"auth:blacklist:{token}")
-        if is_blacklisted:
-            return None
-            
-        user_id = verify_access_token(token)
-        if not user_id:
-            return None
-            
-        result = await db.execute(
-            select(models.User)
-            .options(selectinload(models.User.profile))
-            .where(models.User.id == user_id)
+    
+    is_blacklisted = await redis_client.get(f"auth:blacklist:{token}")
+    if is_blacklisted:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token已废弃，请重新登录"
         )
-        return result.scalars().first()
-    except Exception:
-        return None
+        
+    user_id = verify_access_token(token)
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="会话无效或已过期"
+        )
+        
+    result = await db.execute(
+        select(models.User)
+        .options(selectinload(models.User.profile))
+        .where(models.User.id == user_id)
+    )
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="用户账户不存在"
+        )
+    return user
 
 
 @router.post("/send-code")
@@ -481,6 +493,13 @@ async def delete_account(
     await redis_client.setex(f"auth:blacklist:{token}", 86400, "revoked")
     
     return {"message": "账户及关联所有分析报告已彻底注销且清除成功"}
+
+
+@router.get("/me", response_model=schemas.UserProfileResponse)
+async def get_me(
+    current_user: models.User = Depends(get_current_user)
+):
+    return format_user_profile(current_user)
 
 
 @router.put("/profile/update", response_model=schemas.UserProfileResponse)

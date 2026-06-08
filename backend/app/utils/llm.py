@@ -122,7 +122,7 @@ async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str
 
     system_prompt = (
         "你是一个专业的 AI 面试分析助手。你的任务是把一段面试转写按话题切成若干个语义段。\n"
-        "输入是一份带时间戳 of 对话列表，格式：「[start_time, end_time] speaker：content」。\n"
+        "输入是一份带时间戳的对话列表，格式：「[start_time, end_time] speaker：content」。\n"
         "\n"
         "你需要：\n"
         "1. 识别出面试中实际发生的话题块（如「自我介绍」「项目深挖」「技术追问」「算法题」「反问环节」等）\n"
@@ -377,3 +377,167 @@ async def generate_transcript_highlights(segments: List[Dict[str, Any]]) -> List
     except Exception as e:
         logger.error(f"Failed to generate highlights: {e}")
         return []
+
+
+def call_minimax_stream(payload: dict, timeout: float = 300.0) -> dict:
+    """
+    流式调用 MiniMax API，把所有 chunk 拼接后返回与非流式格式一致的 dict。
+    用于：简历分析等长输出场景，避免 MiniMax 网关 ~90s 的 idle timeout
+    在推理 + 大 JSON 输出过程中主动断开连接（RemoteDisconnected）。
+    """
+    url = f"{settings.MINIMAX_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.MINIMAX_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    stream_payload = {**payload, "stream": True}
+    content_parts: list[str] = []
+    with requests.post(
+        url, headers=headers, json=stream_payload, timeout=timeout,
+        proxies={"http": None, "https": None}, stream=True,
+    ) as resp:
+        resp.raise_for_status()
+        for raw in resp.iter_lines(decode_unicode=True):
+            if not raw:
+                continue
+            line = raw.strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[len("data:"):].strip()
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            try:
+                delta = chunk["choices"][0].get("delta") or {}
+                piece = delta.get("content")
+                if piece:
+                    content_parts.append(piece)
+            except (KeyError, IndexError, TypeError):
+                continue
+    return {
+        "choices": [{"message": {"content": "".join(content_parts)}}]
+    }
+
+
+async def analyze_resume_text(resume_text: str, profile_data: Optional[dict] = None) -> Dict[str, Any]:
+    """
+    Calls MiniMax LLM to analyze the extracted resume text and return structured analysis in JSON.
+    使用流式调用绕开 MiniMax 网关 ~90s 的 idle timeout，禁用系统代理。
+    """
+    system_prompt = (
+        "你是一个专业的 AI 简历分析教练。你的任务是对候选人的简历进行深度雷区检测与优化建议。\n"
+        "你需要根据提取出的简历文本内容，结合候选人的求职期望画像（如果提供了），完成以下工作：\n"
+        "1. 计算简历综合评分（0-100，当前表现）以及优化后预计提升的综合评分（0-100）。\n"
+        "2. 计算大厂 ATS 机器可读性通过率百分比（0-100）。\n"
+        "3. 提取候选人基础档案：姓名、求职状态、当前职级职位、工作年限、当前公司、当前岗位、当前薪资；并结合目标画像提取目标公司、目标岗位、目标职级、目标薪资。\n"
+        "4. 重构并优化工作经历（work_experiences）：\n"
+        "   - 对于工作经历中的每一条核心描述（bullets），同时保留原始描述（originalText）和优化后的描述（optimizedText）。\n"
+        "   - 给出该描述在原始简历中的诊断风险（originalTag 为 '风险'，originalDesc 说明缺失或问题所在；或者 originalTag 为 '亮点'）并赋予对应样式类名。\n"
+        "   - 给出优化后的标签（optimizedTag 为 '已优化'）与样式类名。\n"
+        "5. 诊断并列出简历中的所有风险点（risks），包含风险标题、详细说明、严重程度（高风险/中风险/低风险）。\n"
+        "6. 进行目标岗位画像匹配度分析（match_analysis），包括匹配得分、文字说明、具体各维度的覆盖情况（coverages）。\n"
+        "7. 输出简历优化的核心AI建议（optimization_suggestions），每条建议包含标题和详细描述。\n"
+        "8. 分析关键词覆盖率（keywords_analysis），找出已覆盖的高频词（current_keywords）和推荐补齐的核心行业热点词（recommended_keywords）。\n"
+        "9. 提供 ATS 兼容性各项检测指标结果（ats_checks），每一项包括检测名、状态（通过/警告）及具体指标评分情况。\n"
+        "\n"
+        "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言，只返回纯 JSON 对象，且属性键和值必须使用双引号）：\n"
+        "{\n"
+        "  \"score\": 84, \n"
+        "  \"optimized_score\": 89, \n"
+        "  \"ats_pass_rate\": 92, \n"
+        "  \"profile\": {\n"
+        "    \"name\": \"候选人姓名\",\n"
+        "    \"status\": \"在职/离职/在校生\",\n"
+        "    \"title\": \"当前职位名称\",\n"
+        "    \"years\": \"工作年限\",\n"
+        "    \"company\": \"当前公司名称\",\n"
+        "    \"role\": \"当前岗位名\",\n"
+        "    \"salary\": \"当前薪资，如 30K * 16\",\n"
+        "    \"targetCompany\": \"目标公司，如 字节跳动\",\n"
+        "    \"targetRole\": \"目标岗位名\",\n"
+        "    \"targetGrade\": \"目标职级，如 P7\",\n"
+        "    \"targetSalary\": \"目标期望薪资，如 40K-50K\"\n"
+        "  },\n"
+        "  \"work_experiences\": [\n"
+        "    {\n"
+        "      \"company\": \"公司名称\",\n"
+        "      \"role\": \"职位/岗位名\",\n"
+        "      \"period\": \"工作时间段，如 2022.07 - 至今\",\n"
+        "      \"bullets\": [\n"
+        "        {\n"
+        "          \"originalText\": \"原始描述句子\",\n"
+        "          \"optimizedText\": \"使用STAR原则优化后、包含量化业绩与大厂架构思维的资深表述\",\n"
+        "          \"originalTag\": \"风险/亮点\",\n"
+        "          \"originalTagClass\": \"text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20\", \n"
+        "          \"originalDesc\": \"诊断说明说明为什么是风险或亮点\",\n"
+        "          \"optimizedTag\": \"已优化\",\n"
+        "          \"optimizedTagClass\": \"text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20\"\n"
+        "        }\n"
+        "      ]\n"
+        "    }\n"
+        "  ],\n"
+        "  \"risks\": [\n"
+        "    {\n"
+        "      \"title\": \"核心业绩缺少量化指标\",\n"
+        "      \"desc\": \"具体风险点详细解析说明...\",\n"
+        "      \"severity\": \"高风险/中风险/低风险\"\n"
+        "    }\n"
+        "  ],\n"
+        "  \"match_analysis\": {\n"
+        "    \"match_score\": 83,\n"
+        "    \"match_desc\": \"岗位契合度总体评估描述...\",\n"
+        "    \"coverages\": [\n"
+        "      {\n"
+        "        \"item\": \"匹配评估的技术项/业务项\",\n"
+        "        \"status\": \"完美覆盖/基础具备/描述较弱\",\n"
+        "        \"percent\": \"90%\"\n"
+        "      }\n"
+        "    ]\n"
+        "  },\n"
+        "  \"optimization_suggestions\": [\n"
+        "    {\n"
+        "      \"title\": \"建议 1：重塑“动作词”，剔除事务型字眼\",\n"
+        "      \"desc\": \"具体建议内容详细阐述...\"\n"
+        "    }\n"
+        "  ],\n"
+        "  \"keywords_analysis\": {\n"
+        "    \"current_keywords\": [\"高频词1\", \"高频词2\"],\n"
+        "    \"recommended_keywords\": [\"推荐补齐词1\", \"推荐补齐词2\"]\n"
+        "  },\n"
+        "  \"ats_checks\": [\n"
+        "    {\n"
+        "      \"name\": \"检查项名称\",\n"
+        "      \"status\": \"通过/警告\",\n"
+        "      \"score\": \"诊断简述评分\"\n"
+        "    }\n"
+        "  ]\n"
+        "}"
+    )
+
+    user_content = f"简历文本内容：\n{resume_text}\n"
+    if profile_data:
+        user_content += f"\n求职期望画像信息：\n{json.dumps(profile_data, ensure_ascii=False)}\n"
+
+    payload = {
+        "model": "MiniMax-M3",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ],
+        "response_format": {"type": "json_object"}
+    }
+
+    try:
+        logger.info(f"[resume] analyzing resume_text len={len(resume_text)} chars")
+        res_data = await asyncio.to_thread(call_minimax_stream, payload, 300.0)
+        content = res_data["choices"][0]["message"]["content"]
+        logger.info(f"[resume] received content len={len(content)} chars")
+        content_clean = _strip_codeblock(content)
+        parsed_data = json.loads(content_clean)
+        return parsed_data
+    except Exception as e:
+        logger.error(f"Failed to analyze resume via MiniMax: {e}")
+        return {}

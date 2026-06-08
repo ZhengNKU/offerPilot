@@ -4,8 +4,11 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import auth, audio, file
+from app.routers import auth, audio, file, resume
 from app.utils.cleanup import run_periodic_cleanup
+
+from fastapi import Request
+import time
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
@@ -14,6 +17,23 @@ app = FastAPI(
     description="Backend user authentication, profiles management, and LangGraph APIs.",
     version="1.0.0"
 )
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    auth_header = request.headers.get("Authorization", "None")
+    auth_prefix = auth_header[:15] if auth_header != "None" else "None"
+    
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+    
+    logging.info(
+        f"Request: {request.method} {request.url.path} | "
+        f"Auth: {auth_prefix}... | "
+        f"Status: {response.status_code} | "
+        f"Duration: {duration:.3f}s"
+    )
+    return response
 
 # CORS configurations - Allow local frontend access
 app.add_middleware(
@@ -28,6 +48,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(audio.router)
 app.include_router(file.router)
+app.include_router(resume.router)
 
 
 @app.on_event("startup")
@@ -50,4 +71,4 @@ def read_root():
     return {"message": "OfferPilot Backend Services are running."}
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=True)

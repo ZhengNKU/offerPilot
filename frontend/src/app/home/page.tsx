@@ -41,9 +41,9 @@ export default function CareerDashboard() {
   });
 
   const [accountSecurity, setAccountSecurity] = useState({
-    email: "zhangsan@email.com",
-    phone: "138****8888",
-    loginMethod: "微信登录",
+    email: "未绑定",
+    phone: "未绑定",
+    loginMethod: "密码登录",
     password: ""
   });
 
@@ -147,6 +147,11 @@ export default function CareerDashboard() {
         level: auth.user.targetGrade || prev.level,
         salary: auth.user.targetSalary || prev.salary,
         company: auth.user.targetCompany || prev.company
+      }));
+      setAccountSecurity(prev => ({
+        ...prev,
+        email: auth.user.email || "未绑定",
+        phone: auth.user.phone || "未绑定"
       }));
     }
   }, [auth.isLoggedIn, auth.user]);

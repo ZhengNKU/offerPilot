@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 
-export default function ResumeAnalysisPage() {
+function ResumeAnalysisPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const auth = useAuth();
 
   // =========================================================================
@@ -37,30 +38,84 @@ export default function ResumeAnalysisPage() {
   // Modals Visibility
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showNotification, setShowNotification] = useState<string | null>(null);
+  const [showScoreMetricsModal, setShowScoreMetricsModal] = useState(false);
+
+  const [analysisResult, setAnalysisResult] = useState<any>(null);
 
   // Prefill metadata from localStorage if available
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const storedCompany = localStorage.getItem("offerPilot_session_company");
-      const storedRole = localStorage.getItem("offerPilot_session_role");
-      const storedGrade = localStorage.getItem("offerPilot_session_grade");
-      const storedSalary = localStorage.getItem("offerPilot_session_salary");
-      const storedYears = localStorage.getItem("offerPilot_session_years");
-      const storedDate = localStorage.getItem("offerPilot_session_date");
+      const storedResult = localStorage.getItem("offerPilot_resume_analysis_result");
+      if (storedResult) {
+        try {
+          const parsed = JSON.parse(storedResult);
+          setAnalysisResult(parsed);
+          if (parsed.profile) {
+            setProfile((prev) => ({ ...prev, ...parsed.profile }));
+          }
+        } catch (e) {
+          console.error("Failed to parse resume analysis result:", e);
+        }
+      } else {
+        const storedCompany = localStorage.getItem("offerPilot_session_company");
+        const storedRole = localStorage.getItem("offerPilot_session_role");
+        const storedGrade = localStorage.getItem("offerPilot_session_grade");
+        const storedSalary = localStorage.getItem("offerPilot_session_salary");
+        const storedYears = localStorage.getItem("offerPilot_session_years");
+        const storedDate = localStorage.getItem("offerPilot_session_date");
 
-      if (storedCompany || storedRole || storedGrade || storedSalary) {
-        setProfile((prev) => ({
-          ...prev,
-          targetCompany: storedCompany || prev.targetCompany,
-          targetRole: storedRole || prev.targetRole,
-          targetGrade: storedGrade || prev.targetGrade,
-          targetSalary: storedSalary || prev.targetSalary,
-          years: storedYears ? `${storedYears}` : prev.years,
-          uploadTime: storedDate ? `${storedDate} 14:30` : prev.uploadTime
-        }));
+        if (storedCompany || storedRole || storedGrade || storedSalary) {
+          setProfile((prev) => ({
+            ...prev,
+            targetCompany: storedCompany || prev.targetCompany,
+            targetRole: storedRole || prev.targetRole,
+            targetGrade: storedGrade || prev.targetGrade,
+            targetSalary: storedSalary || prev.targetSalary,
+            years: storedYears ? `${storedYears}` : prev.years,
+            uploadTime: storedDate ? `${storedDate} 14:30` : prev.uploadTime
+          }));
+        }
       }
     }
   }, []);
+
+  // If URL has ?id=<analysis_id>, fetch that historical analysis from backend
+  // and overwrite localStorage so the page renders the right report.
+  useEffect(() => {
+    const id = searchParams?.get("id");
+    if (!id) return;
+
+    const token = typeof window !== "undefined"
+      ? localStorage.getItem("offerPilot_token")
+      : null;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`http://localhost:8001/api/resume/analyses/${id}`, { headers });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.detail || `加载历史报告失败 (${res.status})`);
+        }
+        const data = await res.json();
+        if (cancelled) return;
+        localStorage.setItem("offerPilot_resume_analysis_result", JSON.stringify(data));
+        localStorage.setItem("offerPilot_analyzed_resume", "true");
+        setAnalysisResult(data);
+        if (data.profile) {
+          setProfile((prev) => ({ ...prev, ...data.profile }));
+        }
+      } catch (e: any) {
+        if (cancelled) return;
+        console.error("Failed to load historical resume analysis:", e);
+        auth.triggerToast(e?.message || "加载历史报告失败");
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [searchParams, auth]);
 
   const triggerToast = (msg: string) => {
     setShowNotification(msg);
@@ -76,7 +131,7 @@ export default function ResumeAnalysisPage() {
   };
 
   // Mock Work Experience list with original vs optimized data
-  const workExperiences = [
+  const DEFAULT_WORK_EXPERIENCES = [
     {
       company: "字节跳动",
       role: "后端开发工程师",
@@ -164,6 +219,27 @@ export default function ResumeAnalysisPage() {
       ]
     }
   ];
+
+  const workExperiences = analysisResult?.work_experiences || DEFAULT_WORK_EXPERIENCES;
+
+  const DEFAULT_RISKS = [
+    { title: "核心业绩缺少量化指标", desc: "在字节跳动开发推荐服务时，未明确写出提升了多少吞吐量或降低了多少毫秒耗时。高水平架构师极度看重数据支撑。", severity: "高风险" },
+    { title: "技术名词拼写混乱", desc: "把 Redis 写为 redis，或者 Kafka 拼写为 kafka，甚至拼写不一致。暴露了文档编写不够严谨与规范。", severity: "中风险" },
+    { title: "职责描述流于日常化", desc: "使用过多“负责...”、“参与...”等日常事务词汇，缺少能够凸显个人独立设计决策力、技术攻关突破点的措辞（如：主导、设计、重塑）。", severity: "高风险" },
+    { title: "架构Trade-off思考为零", desc: "介绍消息总线或缓存链路时，未能对为什么使用此项技术，以及其背后的架构边界、容灾方案进行深层次的技术解剖。", severity: "中风险" }
+  ];
+
+  const risksList = analysisResult?.risks || DEFAULT_RISKS;
+
+  const highRisksCount = risksList.filter((r: any) => (r.severity || r.priority) === "高风险").length;
+  const medRisksCount = risksList.filter((r: any) => (r.severity || r.priority) === "中风险").length;
+  const lowRisksCount = risksList.filter((r: any) => (r.severity || r.priority) === "低风险").length;
+  const totalRisksCount = highRisksCount + medRisksCount + lowRisksCount;
+
+  const circ = 2 * Math.PI * 16; // 100.53
+  const lowLen = totalRisksCount > 0 ? (lowRisksCount / totalRisksCount) * circ : circ;
+  const medLen = totalRisksCount > 0 ? (medRisksCount / totalRisksCount) * circ : 0;
+  const highLen = totalRisksCount > 0 ? (highRisksCount / totalRisksCount) * circ : 0;
 
   return (
     <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden select-none pt-20">
@@ -257,26 +333,20 @@ export default function ResumeAnalysisPage() {
         {/* ========================================================
             2. MAIN DASHBOARD CONTENT AREA (Left Sidebar, Center content, Right Stats)
            ======================================================== */}
-        <div className="flex-1 grid grid-cols-12 gap-5.5 items-stretch min-w-0">
+        <div className="flex-1 grid grid-cols-12 gap-5.5 items-start min-w-0">
           
           {/* ----------------------------------------------------
               COLUMN 1: Left Sidebar (3 cols)
              ---------------------------------------------------- */}
-          <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5">
+          <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5 lg:h-[960px] lg:max-h-[960px] lg:min-h-0">
             
             {/* Sidebar Profile Card */}
-            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 text-left">
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 text-left lg:min-h-[402px] shrink-0">
               <div className="flex justify-between items-center pb-2.5 border-b border-white/5">
                 <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-base text-[#00D4FF]">assignment_ind</span>
                   简历信息
                 </h4>
-                <span
-                  onClick={() => setShowEditProfileModal(true)}
-                  className="text-base font-black text-[#AFA7FF] hover:text-white transition-colors cursor-pointer"
-                >
-                  编辑
-                </span>
               </div>
 
               {/* Avatar and basic info */}
@@ -297,44 +367,44 @@ export default function ResumeAnalysisPage() {
 
               {/* Attributes list */}
               <div className="space-y-2.5 text-xs font-bold text-white/60">
-                <div className="flex justify-between items-center">
-                  <span>工作年限</span>
-                  <span className="text-white font-extrabold">{profile.years}</span>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="shrink-0">工作年限</span>
+                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.years}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span>当前公司</span>
-                  <span className="text-white font-extrabold">{profile.company}</span>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="shrink-0">当前公司</span>
+                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.company}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span>当前岗位</span>
-                  <span className="text-white font-extrabold">{profile.role}</span>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="shrink-0">当前岗位</span>
+                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.role}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span>当前薪资</span>
-                  <span className="text-white font-extrabold">{profile.salary}</span>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="shrink-0">当前薪资</span>
+                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.salary}</span>
                 </div>
                 <div className="h-px bg-white/5 my-1" />
-                <div className="flex justify-between items-center">
-                  <span>目标公司</span>
-                  <span className="text-white font-extrabold">{profile.targetCompany}</span>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="shrink-0">目标公司</span>
+                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetCompany}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span>目标岗位</span>
-                  <span className="text-white font-extrabold">{profile.targetRole}</span>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="shrink-0">目标岗位</span>
+                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetRole}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span>目标职级</span>
-                  <span className="text-white font-extrabold">{profile.targetGrade}</span>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="shrink-0">目标职级</span>
+                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetGrade}</span>
                 </div>
-                <div className="flex justify-between items-center">
-                  <span>目标薪资</span>
-                  <span className="text-white font-extrabold">{profile.targetSalary}</span>
+                <div className="flex justify-between items-start gap-3">
+                  <span className="shrink-0">目标薪资</span>
+                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetSalary}</span>
                 </div>
               </div>
             </div>
 
             {/* Sidebar Structure Status Card */}
-            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 text-left flex-1 min-h-[300px]">
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 text-left flex-1 lg:h-0 lg:min-h-0 overflow-hidden">
               <div className="flex justify-between items-center pb-2.5 border-b border-white/5">
                 <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-base text-[#00D4FF]">map</span>
@@ -378,7 +448,7 @@ export default function ResumeAnalysisPage() {
           {/* ----------------------------------------------------
               COLUMN 2: Center Workspace (6 cols)
              ---------------------------------------------------- */}
-          <div className="col-span-12 lg:col-span-6 flex flex-col gap-4.5 min-w-0">
+          <div className="col-span-12 lg:col-span-6 flex flex-col gap-4.5 min-w-0 lg:h-[960px] lg:max-h-[960px] lg:min-h-0">
             
             {/* Center Header Details */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 select-none text-left">
@@ -417,7 +487,7 @@ export default function ResumeAnalysisPage() {
             </div>
 
             {/* Interactive Tab Switcher Panel */}
-            <div className="glass-panel rounded-2xl border-white/5 p-4 flex flex-col gap-4 flex-1 h-[610px]">
+            <div className="glass-panel rounded-2xl border-white/5 p-4 flex flex-col gap-4 flex-1 lg:h-0 lg:min-h-0 min-h-[600px] overflow-hidden">
               
               {/* Tab Header Row */}
               <div className="flex border-b border-white/5 pb-2.5 overflow-x-auto gap-2 shrink-0 select-none no-scrollbar">
@@ -497,7 +567,10 @@ export default function ResumeAnalysisPage() {
                               const isOriginal = viewMode === "original";
                               const textContent = isOriginal ? bullet.originalText : bullet.optimizedText;
                               const badgeLabel = isOriginal ? bullet.originalTag : bullet.optimizedTag;
-                              const badgeStyle = isOriginal ? bullet.originalTagClass : bullet.optimizedTagClass;
+                              const badgeStyle = (isOriginal ? bullet.originalTagClass : bullet.optimizedTagClass) || 
+                                (badgeLabel === "风险" 
+                                  ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" 
+                                  : "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20");
                               const isRisk = isOriginal && bullet.originalTag === "风险";
 
                               return (
@@ -515,7 +588,7 @@ export default function ResumeAnalysisPage() {
                                     <p className="text-[13px] md:text-sm leading-relaxed text-white font-semibold flex-1">
                                       {textContent}
                                     </p>
-                                    <span className={`px-2 py-0.2 rounded text-[10px] font-black uppercase border shrink-0 ${badgeStyle}`}>
+                                    <span className={`px-2.5 py-0.5 rounded text-xs font-black uppercase border shrink-0 ${badgeStyle}`}>
                                       {badgeLabel}
                                     </span>
                                   </div>
@@ -547,27 +620,30 @@ export default function ResumeAnalysisPage() {
                       简历风险漏洞诊断报告
                     </h4>
                     <div className="space-y-3">
-                      {[
-                        { title: "核心业绩缺少量化指标", desc: "在字节跳动开发推荐服务时，未明确写出提升了多少吞吐量或降低了多少毫秒耗时。高水平架构师极度看重数据支撑。", priority: "高风险", color: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" },
-                        { title: "技术名词拼写混乱", desc: "把 Redis 写为 redis，或者 Kafka 拼写为 kafka，甚至拼写不一致。暴露了文档编写不够严谨与规范。", priority: "中风险", color: "text-amber-400 bg-amber-400/10 border-amber-400/20" },
-                        { title: "职责描述流于日常化", desc: "使用过多“负责...”、“参与...”等日常事务词汇，缺少能够凸显个人独立设计决策力、技术攻关突破点的措辞（如：主导、设计、重塑）。", priority: "高风险", color: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" },
-                        { title: "架构Trade-off思考为零", desc: "介绍消息总线或缓存链路时，未能对为什么使用此项技术，以及其背后的架构边界、容灾方案进行深层次的技术解剖。", priority: "中风险", color: "text-amber-400 bg-amber-400/10 border-amber-400/20" }
-                      ].map((item, idx) => (
-                        <div key={idx} className="p-3.5 rounded-xl border border-white/5 bg-[#050B1A]/80 space-y-1.5 text-sm md:text-sm">
-                          <div className="flex justify-between items-center">
-                            <span className="font-extrabold text-white flex items-center gap-2">
-                              <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center font-mono text-[10px] font-black text-white/55">{idx + 1}</span>
-                              {item.title}
-                            </span>
-                            <span className={`px-2 py-0.2 rounded border text-[10px] font-black shrink-0 ${item.color}`}>
-                              {item.priority}
-                            </span>
+                      {risksList.map((item: any, idx: number) => {
+                        const priority = item.severity || item.priority || "中风险";
+                        const color = priority === "高风险"
+                          ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+                          : priority === "中风险"
+                            ? "text-amber-400 bg-amber-400/10 border-amber-400/20"
+                            : "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20";
+                        return (
+                          <div key={idx} className="p-3.5 rounded-xl border border-white/5 bg-[#050B1A]/80 space-y-1.5 text-sm md:text-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="font-extrabold text-white flex items-center gap-2">
+                                <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center font-mono text-[10px] font-black text-white/55">{idx + 1}</span>
+                                {item.title}
+                              </span>
+                              <span className={`px-2.5 py-0.5 rounded border text-xs font-black shrink-0 ${color}`}>
+                                {priority}
+                              </span>
+                            </div>
+                            <p className="text-xs text-white/45 leading-relaxed font-bold pl-7">
+                              {item.desc}
+                            </p>
                           </div>
-                          <p className="text-xs text-white/45 leading-relaxed font-bold pl-7">
-                            {item.desc}
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -585,30 +661,38 @@ export default function ResumeAnalysisPage() {
                       <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 flex items-center gap-5 justify-between">
                         <div className="space-y-1">
                           <span className="text-xs text-white/45 font-bold">画像符合度估值</span>
-                          <h3 className="text-2xl font-black text-[#5DECCB] font-mono">83% Match</h3>
+                          <h3 className="text-2xl font-black text-[#5DECCB] font-mono">{analysisResult?.match_analysis?.match_score ?? 83}% Match</h3>
                         </div>
                         <p className="text-xs text-white/60 leading-relaxed font-bold flex-1 max-w-sm">
-                          您的技术背景与阿里/腾讯等主流大厂的【高并发微服务后端专家】JD极其吻合。重点缺失项主要集中在“业务闭环指标”和“管理/带人经验”描述。
+                          {analysisResult?.match_analysis?.match_desc ?? "您的技术背景与阿里/腾讯等主流大厂的【高并发微服务后端专家】JD极其吻合。重点缺失项主要集中在“业务闭环指标”和“管理/带人经验”描述。"}
                         </p>
                       </div>
 
                       <div className="space-y-2.5">
-                        {[
-                          { item: "分布式多级缓存 (Redis/Guava)", status: "完美覆盖", percent: "95%", tagStyle: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20" },
-                          { item: "高吞吐消息中间件 (Kafka/RocketMQ)", status: "完美覆盖", percent: "90%", tagStyle: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20" },
-                          { item: "分布式一致性方案 (TCC/Saga/2PC)", status: "基础具备", percent: "75%", tagStyle: "text-amber-400 bg-amber-400/10 border-amber-400/20" },
-                          { item: "全链路线上大促压测与高可用设计", status: "描述较弱", percent: "45%", tagStyle: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" }
-                        ].map((m, idx) => (
-                          <div key={idx} className="p-3 rounded-xl border border-white/5 bg-[#050B1A]/40 flex justify-between items-center text-xs md:text-sm font-bold">
-                            <span className="text-white/80">{m.item}</span>
-                            <div className="flex items-center gap-3">
-                              <span className="font-mono text-white/50">{m.percent}</span>
-                              <span className={`px-2 py-0.2 rounded border text-[10px] font-black uppercase ${m.tagStyle}`}>
-                                {m.status}
-                              </span>
+                        {(analysisResult?.match_analysis?.coverages || [
+                          { item: "分布式多级缓存 (Redis/Guava)", status: "完美覆盖", percent: "95%" },
+                          { item: "高吞吐消息中间件 (Kafka/RocketMQ)", status: "完美覆盖", percent: "90%" },
+                          { item: "分布式一致性方案 (TCC/Saga/2PC)", status: "基础具备", percent: "75%" },
+                          { item: "全链路线上大促压测与高可用设计", status: "描述较弱", percent: "45%" }
+                        ]).map((m: any, idx: number) => {
+                          let tagStyle = "text-amber-400 bg-amber-400/10 border-amber-400/25";
+                          if (m.status === "完美覆盖" || m.status === "覆盖") {
+                            tagStyle = "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25";
+                          } else if (m.status === "描述较弱" || m.status === "缺失") {
+                            tagStyle = "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25";
+                          }
+                          return (
+                            <div key={idx} className="p-3 rounded-xl border border-white/5 bg-[#050B1A]/40 flex justify-between items-center text-xs md:text-sm font-bold">
+                              <span className="text-white/80">{m.item}</span>
+                              <div className="flex items-center gap-3">
+                                <span className="font-mono text-white/55 font-black">{m.percent}</span>
+                                <span className={`px-2.5 py-0.5 rounded border text-xs font-black uppercase ${tagStyle}`}>
+                                  {m.status}
+                                </span>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -624,26 +708,16 @@ export default function ResumeAnalysisPage() {
                       AI 简历深度优化建议书
                     </h4>
                     <div className="space-y-3.5 text-xs md:text-sm text-white/70 font-semibold leading-relaxed">
-                      <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 space-y-2">
-                        <h5 className="font-black text-[#AFA7FF] text-sm">建议 1：重塑“动作词”，剔除事务型字眼</h5>
-                        <p className="text-white/50 font-bold leading-normal">
-                          在简历中，避免将自己的工作描绘为“被动执行”。将所有的“负责开发”、“配合维护”替换为“主导设计”、“构建”、“重塑”、“突破”等主动掌控性动词。
-                        </p>
-                      </div>
-
-                      <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 space-y-2">
-                        <h5 className="font-black text-[#AFA7FF] text-sm">建议 2：STAR 法则全盘套用，补齐 Result (成果)</h5>
-                        <p className="text-white/50 font-bold leading-normal">
-                          每一个项目经历必须遵循：背景与挑战(Situation) &rarr; 目标(Task) &rarr; 采取的架构行动(Action) &rarr; 业务/技术产出成果(Result)。特别是必须把性能提高比例、节省机器成本、解决事故次数等量化。
-                        </p>
-                      </div>
-
-                      <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 space-y-2">
-                        <h5 className="font-black text-[#AFA7FF] text-sm">建议 3：精修技术栈，提升高级段位感</h5>
-                        <p className="text-white/50 font-bold leading-normal">
-                          不要笼统写“精通 Java/Go”，应当写“深入研究 Spring/JVM 垃圾回收调优逻辑，阅读 Kafka 源码；掌握 Redis 缓存穿透与大 Key 多级缓冲治理架构”。
-                        </p>
-                      </div>
+                      {(analysisResult?.optimization_suggestions || [
+                        { title: "建议 1：重塑“动作词”，剔除事务型字眼", desc: "在简历中，避免将自己的工作描绘为“被动执行”。将所有的“负责开发”、“配合维护”替换为“主导设计”、“构建”、“重塑”、“突破”等主动掌控性动词。" },
+                        { title: "建议 2：STAR 法则全盘套用，补齐 Result (成果)", desc: "每一个项目经历必须遵循：背景与挑战(Situation) → 目标(Task) → 采取的架构行动(Action) → 业务/技术产出成果(Result)。特别是必须把性能提高比例、节省机器成本、解决事故次数等量化。" },
+                        { title: "建议 3：精修技术栈，提升高级段位感", desc: "不要笼统写“精通 Java/Go”，应当写“深入研究 Spring/JVM 垃圾回收调优逻辑，阅读 Kafka 源码；掌握 Redis 缓存穿透与大 Key 多级缓冲治理架构”。" }
+                      ]).map((item: any, idx: number) => (
+                        <div key={idx} className="p-4 rounded-xl bg-white/[0.01] border border-white/5 space-y-2">
+                          <h5 className="font-black text-[#AFA7FF] text-sm">{item.title}</h5>
+                          <p className="text-white/50 font-bold leading-normal">{item.desc}</p>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 )}
@@ -661,7 +735,7 @@ export default function ResumeAnalysisPage() {
                       <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 text-xs text-white/50 font-bold leading-relaxed space-y-2">
                         <p>大厂AI筛简历系统（ATS）会根据JD权重匹配核心词频。当前简历关键词权重最高的为：</p>
                         <div className="flex flex-wrap gap-2 pt-1.5">
-                          {["Redis", "Kafka", "分布式系统", "高并发", "后端开发", "架构设计", "接口优化"].map((word, idx) => (
+                          {(analysisResult?.keywords_analysis?.current_keywords || ["Redis", "Kafka", "分布式系统", "高并发", "后端开发", "架构设计", "接口优化"]).map((word: string, idx: number) => (
                             <span key={idx} className="px-2.5 py-1 rounded-md bg-[#AFA7FF]/10 text-[#AFA7FF] border border-[#AFA7FF]/20 text-xs font-black">
                               {word} (高频)
                             </span>
@@ -672,7 +746,7 @@ export default function ResumeAnalysisPage() {
                       <div className="space-y-2.5">
                         <h5 className="text-xs font-black text-white">推荐补齐的行业热点词：</h5>
                         <div className="flex flex-wrap gap-2">
-                          {["Service Mesh", "高可用容灾", "限流熔断", "多机房多活", "性能调优", "微服务编排"].map((word, idx) => (
+                          {(analysisResult?.keywords_analysis?.recommended_keywords || ["Service Mesh", "高可用容灾", "限流熔断", "多机房多活", "性能调优", "微服务编排"]).map((word: string, idx: number) => (
                             <span key={idx} className="px-2.5 py-1 rounded-md bg-white/5 text-white/50 border border-white/10 text-xs font-bold">
                               {word}
                             </span>
@@ -693,22 +767,30 @@ export default function ResumeAnalysisPage() {
                       大厂 ATS 机器人可读性诊断
                     </h4>
                     <div className="space-y-3">
-                      {[
-                        { name: "双栏/复杂排版可读性", status: "通过", score: "结构规范", color: "text-[#5DECCB] border-[#5DECCB]/20 bg-[#5DECCB]/10" },
-                        { name: "PDF 字体及文本提取无乱码", status: "通过", score: "高保真", color: "text-[#5DECCB] border-[#5DECCB]/20 bg-[#5DECCB]/10" },
-                        { name: "简历总字数阈值控制", status: "通过", score: "适中 (3.8k字)", color: "text-[#5DECCB] border-[#5DECCB]/20 bg-[#5DECCB]/10" },
-                        { name: "非标准分隔符识别", status: "警告", score: "图表/虚线可能截断", color: "text-amber-400 border-amber-400/20 bg-amber-400/10" }
-                      ].map((item, idx) => (
-                        <div key={idx} className="p-3 rounded-xl border border-white/5 bg-[#050B1A]/40 flex justify-between items-center text-xs md:text-sm font-bold">
-                          <span className="text-white/80">{item.name}</span>
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono text-white/45">{item.score}</span>
-                            <span className={`px-2 py-0.2 rounded border text-[10px] font-black uppercase ${item.color}`}>
-                              {item.status}
-                            </span>
+                      {(analysisResult?.ats_checks || [
+                        { name: "双栏/复杂排版可读性", status: "通过", score: "结构规范" },
+                        { name: "PDF 字体及文本提取无乱码", status: "通过", score: "高保真" },
+                        { name: "简历总字数阈值控制", status: "通过", score: "适中 (3.8k字)" },
+                        { name: "非标准分隔符识别", status: "警告", score: "图表/虚线可能截断" }
+                      ]).map((item: any, idx: number) => {
+                        let color = "text-amber-400 border-amber-400/20 bg-amber-400/10";
+                        if (item.status === "通过") {
+                          color = "text-[#5DECCB] border-[#5DECCB]/20 bg-[#5DECCB]/10";
+                        } else if (item.status === "警告" || item.status === "不通过") {
+                          color = "text-[#FF7A95] border-[#FF7A95]/20 bg-[#FF7A95]/10";
+                        }
+                        return (
+                          <div key={idx} className="p-3 rounded-xl border border-white/5 bg-[#050B1A]/40 flex justify-between items-center text-xs md:text-sm font-bold">
+                            <span className="text-white/80">{item.name}</span>
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono text-white/45">{item.score}</span>
+                              <span className={`px-2.5 py-0.5 rounded border text-xs font-black uppercase ${color}`}>
+                                {item.status}
+                              </span>
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -721,16 +803,23 @@ export default function ResumeAnalysisPage() {
           {/* ----------------------------------------------------
               COLUMN 3: Right Panel Stats Grid (3 cols)
              ---------------------------------------------------- */}
-          <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5">
+          <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5 lg:h-[960px] lg:max-h-[960px] lg:min-h-0">
             
             {/* 3.1 Resume Hiring Score */}
-            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 select-none">
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-3 select-none lg:h-[250px] shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
                 <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-sm text-[#00D4FF]">verified</span>
                   简历综合评分
                 </h4>
-                <span className="material-symbols-outlined text-sm text-white/30 cursor-pointer" title="点击查看计算指标">info</span>
+                <button
+                  type="button"
+                  onClick={() => setShowScoreMetricsModal(true)}
+                  className="material-symbols-outlined text-sm text-white/30 hover:text-[#00D4FF] transition-colors cursor-pointer bg-transparent border-none p-0 outline-none flex items-center justify-center z-20"
+                  title="点击查看计算指标"
+                >
+                  info
+                </button>
               </div>
 
               <div className="flex flex-col items-center justify-center py-2.5 relative">
@@ -745,7 +834,7 @@ export default function ResumeAnalysisPage() {
                       stroke="url(#resume-ring-grad)"
                       strokeWidth="8"
                       strokeDasharray={2 * Math.PI * 56}
-                      strokeDashoffset={2 * Math.PI * 56 * (1 - 84 / 100)}
+                      strokeDashoffset={2 * Math.PI * 56 * (1 - (analysisResult?.score ?? 84) / 100)}
                       strokeLinecap="round"
                     />
                     <defs>
@@ -755,19 +844,19 @@ export default function ResumeAnalysisPage() {
                       </linearGradient>
                     </defs>
                   </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-3xl font-black text-white font-mono">84</span>
-                    <span className="text-[10px] text-white/30 font-bold block scale-90 -mt-0.5">/100 优秀</span>
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center leading-none">
+                    <span className="text-3xl font-black text-white font-mono">{analysisResult?.score ?? 84}</span>
+                    <span className="text-[10px] text-white/30 font-bold block mt-0.5">/100 { (analysisResult?.score ?? 84) >= 85 ? "优秀" : (analysisResult?.score ?? 84) >= 70 ? "良好" : "一般" }</span>
                   </div>
                 </div>
                 <div className="space-y-1 mt-4 text-center">
-                  <p className="text-xs text-white/40 font-bold">超过 <span className="text-[#00D4FF] font-black">76%</span> 同岗位候选人</p>
+                  <p className="text-sm text-white/45 font-bold">超过 <span className="text-[#00D4FF] font-black text-base">{Math.min(99, Math.round((analysisResult?.score ?? 84) * 0.9))}%</span> 同岗位候选人</p>
                 </div>
               </div>
             </div>
 
             {/* 3.2 Offer Probability */}
-            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 select-none">
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-3 select-none lg:h-[240px] shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
                 <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-sm text-[#AFA7FF]">trending_up</span>
@@ -777,40 +866,42 @@ export default function ResumeAnalysisPage() {
 
               <div className="flex items-center justify-between gap-3 py-2 px-1">
                 {/* Current */}
-                <div className="flex flex-col items-center justify-center flex-1 py-2.5 rounded-xl bg-white/[0.01] border border-white/5 relative">
-                  {/* Small progress circle */}
-                  <svg className="w-20 h-20 -rotate-90">
-                    <circle cx="40" cy="40" r="32" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="4" />
-                    <circle cx="40" cy="40" r="32" fill="transparent" stroke="#AFA7FF" strokeWidth="4" strokeDasharray={2 * Math.PI * 32} strokeDashoffset={2 * Math.PI * 32 * (1 - 72 / 100)} strokeLinecap="round" />
-                  </svg>
-                  <div className="absolute top-[21px] text-center w-full">
-                    <span className="text-base font-black text-white font-mono block">72%</span>
-                    <span className="text-[11px] text-white/30 font-bold block -mt-0.5">当前简历</span>
+                <div className="flex flex-col items-center justify-center flex-1 py-3.5 rounded-xl bg-white/[0.01] border border-white/5 relative">
+                  <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
+                    <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 96 96">
+                      <circle cx="48" cy="48" r="40" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="4.5" />
+                      <circle cx="48" cy="48" r="40" fill="transparent" stroke="#AFA7FF" strokeWidth="4.5" strokeDasharray={2 * Math.PI * 40} strokeDashoffset={2 * Math.PI * 40 * (1 - (analysisResult ? Math.min(99, Math.round(analysisResult.score * 0.85)) : 72) / 100)} strokeLinecap="round" />
+                    </svg>
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center leading-none">
+                      <span className="text-xl font-black text-white font-mono block">{analysisResult ? Math.min(99, Math.round(analysisResult.score * 0.85)) : 72}%</span>
+                      <span className="text-[10px] text-white/35 font-bold mt-0.5">当前简历</span>
+                    </div>
                   </div>
-                  <span className="text-xs text-white/50 font-bold mt-3">获得面试概率</span>
+                  <span className="text-[11px] text-white/50 font-bold mt-2.5">获得面试概率</span>
                 </div>
 
                 {/* Arrow */}
                 <span className="material-symbols-outlined text-white/20 select-none">arrow_forward</span>
 
                 {/* Optimized */}
-                <div className="flex flex-col items-center justify-center flex-1 py-2.5 rounded-xl bg-white/[0.01] border border-white/5 relative">
-                  {/* Small progress circle */}
-                  <svg className="w-20 h-20 -rotate-90">
-                    <circle cx="40" cy="40" r="32" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="4" />
-                    <circle cx="40" cy="40" r="32" fill="transparent" stroke="#5DECCB" strokeWidth="4" strokeDasharray={2 * Math.PI * 32} strokeDashoffset={2 * Math.PI * 32 * (1 - 89 / 100)} strokeLinecap="round" />
-                  </svg>
-                  <div className="absolute top-[21px] text-center w-full">
-                    <span className="text-base font-black text-[#5DECCB] font-mono block">89%</span>
-                    <span className="text-[11px] text-[#5DECCB]/50 font-bold block -mt-0.5">优化后</span>
+                <div className="flex flex-col items-center justify-center flex-1 py-3.5 rounded-xl bg-white/[0.01] border border-white/5 relative">
+                  <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
+                    <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 96 96">
+                      <circle cx="48" cy="48" r="40" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="4.5" />
+                      <circle cx="48" cy="48" r="40" fill="transparent" stroke="#5DECCB" strokeWidth="4.5" strokeDasharray={2 * Math.PI * 40} strokeDashoffset={2 * Math.PI * 40 * (1 - (analysisResult ? Math.min(99, Math.round(analysisResult.optimized_score * 0.95)) : 89) / 100)} strokeLinecap="round" />
+                    </svg>
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center leading-none">
+                      <span className="text-xl font-black text-[#5DECCB] font-mono block">{analysisResult ? Math.min(99, Math.round(analysisResult.optimized_score * 0.95)) : 89}%</span>
+                      <span className="text-[10px] text-[#5DECCB]/55 font-bold mt-0.5">优化后</span>
+                    </div>
                   </div>
-                  <span className="text-xs text-[#5DECCB]/85 font-bold mt-3">预计提升概率</span>
+                  <span className="text-[11px] text-[#5DECCB]/85 font-bold mt-2.5">预计提升概率</span>
                 </div>
               </div>
             </div>
 
             {/* 3.3 ATS Checks checklist */}
-            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 select-none">
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-3 select-none shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
                 <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-sm text-[#00D4FF]">analytics</span>
@@ -827,42 +918,42 @@ export default function ResumeAnalysisPage() {
 
               <div className="flex items-center gap-6 py-2.5 px-1">
                 {/* ATS Circle Gauge */}
-                <div className="relative w-22 h-22 flex items-center justify-center shrink-0">
-                  <svg className="w-full h-full -rotate-90">
-                    <circle cx="44" cy="44" r="36" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="4.5" />
+                <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
+                  <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 96 96">
+                    <circle cx="48" cy="48" r="40" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="5" />
                     <circle
-                      cx="44"
-                      cy="44"
-                      r="36"
+                      cx="48"
+                      cy="48"
+                      r="40"
                       fill="transparent"
                       stroke="#00D4FF"
-                      strokeWidth="4.5"
-                      strokeDasharray={2 * Math.PI * 36}
-                      strokeDashoffset={2 * Math.PI * 36 * (1 - 92 / 100)}
+                      strokeWidth="5"
+                      strokeDasharray={2 * Math.PI * 40}
+                      strokeDashoffset={2 * Math.PI * 40 * (1 - (analysisResult?.ats_pass_rate ?? 92) / 100)}
                       strokeLinecap="round"
                     />
                   </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-lg font-black text-white font-mono">92%</span>
-                    <span className="text-[10px] text-white/40 font-bold block -mt-0.5">通过率</span>
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center leading-none">
+                    <span className="text-xl font-black text-white font-mono">{analysisResult?.ats_pass_rate ?? 92}%</span>
+                    <span className="text-[10px] text-white/40 font-bold mt-0.5">通过率</span>
                   </div>
                 </div>
 
-                <div className="space-y-2 text-left text-[13px] font-bold text-white/70 flex-1 pl-2">
+                <div className="space-y-2.5 text-left text-sm font-bold text-white/85 flex-1 pl-3">
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-sm text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span className="material-symbols-outlined text-base text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                     <span>关键词覆盖</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-sm text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span className="material-symbols-outlined text-base text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                     <span>结构规范</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-sm text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span className="material-symbols-outlined text-base text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                     <span>PDF 兼容</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-sm text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span className="material-symbols-outlined text-base text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                     <span>机器可读</span>
                   </div>
                 </div>
@@ -870,7 +961,7 @@ export default function ResumeAnalysisPage() {
             </div>
 
             {/* 3.4 Risk Distribution donut */}
-            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 select-none flex-1 min-h-[180px]">
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-3 select-none shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
                 <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-sm text-[#FF7A95]">pie_chart</span>
@@ -878,16 +969,16 @@ export default function ResumeAnalysisPage() {
                 </h4>
               </div>
 
-              <div className="flex items-center gap-6 justify-center flex-1 py-2 px-1">
+              <div className="flex items-center gap-5 justify-center flex-1 px-1">
                 {/* SVG Ring Donut */}
-                <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
-                  <svg className="w-full h-full -rotate-90" viewBox="0 0 44 44">
-                    {/* Ring for Low Risk: 8 points */}
-                    <circle cx="22" cy="22" r="16" fill="transparent" stroke="#5DECCB" strokeWidth="3.5" strokeDasharray="100.5" strokeDashoffset="0" />
-                    {/* Ring for Medium Risk: 4 points */}
-                    <circle cx="22" cy="22" r="16" fill="transparent" stroke="url(#medium-grad)" strokeWidth="3.5" strokeDasharray="100.5" strokeDashoffset="54" />
-                    {/* Ring for High Risk: 3 points */}
-                    <circle cx="22" cy="22" r="16" fill="transparent" stroke="#FF7A95" strokeWidth="3.5" strokeDasharray="100.5" strokeDashoffset="81" />
+                <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
+                  <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 44 44">
+                    {/* Ring for Low Risk */}
+                    <circle cx="22" cy="22" r="16" fill="transparent" stroke="#5DECCB" strokeWidth="3.5" strokeDasharray={`${lowLen} ${circ - lowLen}`} strokeDashoffset={0} />
+                    {/* Ring for Medium Risk */}
+                    <circle cx="22" cy="22" r="16" fill="transparent" stroke="url(#medium-grad)" strokeWidth="3.5" strokeDasharray={`${medLen} ${circ - medLen}`} strokeDashoffset={-lowLen} />
+                    {/* Ring for High Risk */}
+                    <circle cx="22" cy="22" r="16" fill="transparent" stroke="#FF7A95" strokeWidth="3.5" strokeDasharray={`${highLen} ${circ - highLen}`} strokeDashoffset={-(lowLen + medLen)} />
                     <defs>
                       <linearGradient id="medium-grad" x1="0" y1="0" x2="1" y2="1">
                         <stop offset="0%" stopColor="#fbbf24" />
@@ -895,33 +986,33 @@ export default function ResumeAnalysisPage() {
                       </linearGradient>
                     </defs>
                   </svg>
-                  <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-lg font-black text-white font-mono">15</span>
-                    <span className="text-[10px] text-white/40 font-bold block -mt-0.5">总项数</span>
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center leading-none">
+                    <span className="text-lg font-black text-white font-mono">{totalRisksCount}</span>
+                    <span className="text-[9px] text-white/40 font-bold block mt-0.5">总项数</span>
                   </div>
                 </div>
 
-                <div className="space-y-2.5 text-left text-[13px] font-bold text-white/70 flex-1 pl-2">
+                <div className="space-y-2.5 text-left text-base font-bold text-white/70 flex-1 pl-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-[#FF7A95] shrink-0" />
                       <span>高风险</span>
                     </div>
-                    <span className="font-mono text-white/55 font-black">{3}</span>
+                    <span className="font-mono text-white/55 font-black">{highRisksCount}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
                       <span>中风险</span>
                     </div>
-                    <span className="font-mono text-white/55 font-black">{4}</span>
+                    <span className="font-mono text-white/55 font-black">{medRisksCount}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-[#5DECCB] shrink-0" />
                       <span>低风险</span>
                     </div>
-                    <span className="font-mono text-white/55 font-black">{8}</span>
+                    <span className="font-mono text-white/55 font-black">{lowRisksCount}</span>
                   </div>
                 </div>
               </div>
@@ -1180,6 +1271,79 @@ export default function ResumeAnalysisPage() {
       )}
 
       {/* ========================================================
+          MODAL: SCORE METRICS BREAKDOWN
+         ======================================================== */}
+      {showScoreMetricsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          {/* Overlay blur shadow */}
+          <div
+            onClick={() => setShowScoreMetricsModal(false)}
+            className="absolute inset-0 bg-[#050B1A]/85 backdrop-blur-md transition-opacity duration-300 cursor-pointer"
+          />
+
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-[#171f33]/95 backdrop-blur-xl border border-white/10 rounded-3xl p-6 max-w-md w-full text-left relative z-10 space-y-5 shadow-2xl"
+          >
+            <div className="flex justify-between items-center pb-3 border-b border-white/5">
+              <h3 className="font-extrabold text-white text-[16px] flex items-center gap-2">
+                <span className="material-symbols-outlined text-[#00D4FF] text-base">verified</span>
+                综合评分计算指标
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowScoreMetricsModal(false)}
+                className="text-white/30 hover:text-white transition-colors cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <p className="text-xs text-white/50 leading-relaxed font-bold">
+                简历综合评分由 OfferPilot AI 根据您的目标求职画像（<span className="text-white">{profile.targetCompany} · {profile.targetRole}</span>）进行多维度智能分析评估得出：
+              </p>
+
+              <div className="space-y-3">
+                {[
+                  { name: "关键词匹配度 (权重 30%)", desc: "检测简历中行业核心词及大厂JD高频词的覆盖情况", score: 85, color: "bg-[#00D4FF]" },
+                  { name: "工作经历含金量 (权重 30%)", desc: "评估履历背景、项目规模、独立决策力及技术突破", score: 82, color: "bg-[#AFA7FF]" },
+                  { name: "技术栈深度 (权重 20%)", desc: "考察高并发、缓存、消息队列等架构设计 with Trade-off", score: 78, color: "bg-amber-400" },
+                  { name: "ATS 兼容性与规范 (权重 10%)", desc: "检测 PDF 可读性、双栏排版解析以及文字规范", score: 92, color: "bg-[#5DECCB]" },
+                  { name: "风险防范 (权重 10%)", desc: "检测错别字、名词拼写规范以及核心指标空洞情况", score: 88, color: "bg-[#FF7A95]" }
+                ].map((item, idx) => (
+                  <div key={idx} className="space-y-1.5 p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                    <div className="flex justify-between items-center text-xs font-black">
+                      <span className="text-white/95">{item.name}</span>
+                      <span className="text-white/80 font-mono">{item.score}分</span>
+                    </div>
+                    <p className="text-[10px] text-white/40 font-bold leading-normal">{item.desc}</p>
+                    <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden mt-1">
+                      <div className={`h-full ${item.color} rounded-full`} style={{ width: `${item.score}%` }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="pt-3 border-t border-white/5 flex justify-between items-center text-xs font-bold text-white/40">
+                <span>综合评分计算公式</span>
+                <span className="font-mono text-white/60">加权平均得分 - 风险扣分项</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowScoreMetricsModal(false)}
+                className="w-full py-3 bg-gradient-to-r from-[#AFA7FF] to-[#00D4FF] text-[#050B1A] rounded-xl font-black text-center cursor-pointer mt-2"
+              >
+                我知道了
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ========================================================
           FLOATING GLOBAL TOAST NOTIFICATION
          ======================================================== */}
       <AnimatePresence>
@@ -1196,5 +1360,20 @@ export default function ResumeAnalysisPage() {
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+export default function ResumeAnalysisPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="w-12 h-12 border-4 border-[#AFA7FF] border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-sm font-bold text-white/50">正在加载报告...</p>
+        </div>
+      </div>
+    }>
+      <ResumeAnalysisPageContent />
+    </Suspense>
   );
 }
