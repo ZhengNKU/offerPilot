@@ -12,3 +12,8 @@ python-dotenv
 python-multipart
 cos-python-sdk-v5
 
+# DOCX resume rewrite (preserve original style, only replace bullet text)
+python-docx>=1.0
+# PDF -> DOCX conversion (PyMuPDF backend, no LibreOffice needed)
+pdf2docx>=0.5
+

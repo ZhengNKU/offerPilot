@@ -480,7 +480,7 @@ export default function NewAnalysisDebugger() {
   };
 
   return (
-    <main className="pt-20 bg-background text-on-surface select-none min-h-screen flex flex-col justify-between relative overflow-hidden pb-4">
+    <main className="pt-20 bg-background text-on-surface min-h-screen flex flex-col justify-between relative overflow-hidden pb-4">
       {/* Absolute Ambient Halo */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-primary/5 rounded-full blur-[140px] -z-10 pointer-events-none"></div>
 

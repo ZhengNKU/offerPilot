@@ -634,7 +634,15 @@ function AuthModals() {
                 </div>
 
                 {/* Form */}
-                <form onSubmit={handleLoginSubmit} className="space-y-4 text-sm font-semibold text-white/60 text-left">
+                <form
+                  onSubmit={handleLoginSubmit}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleLoginSubmit(e);
+                    }
+                  }}
+                  className="space-y-4 text-sm font-semibold text-white/60 text-left"
+                >
                   {loginTab === "password" ? (
                     <>
                       <div>
@@ -803,7 +811,15 @@ function AuthModals() {
                 </div>
 
                 {/* Form */}
-                <form onSubmit={handleForgotSubmit} className="space-y-4 text-sm font-semibold text-white/60 text-left">
+                <form
+                  onSubmit={handleForgotSubmit}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleForgotSubmit(e);
+                    }
+                  }}
+                  className="space-y-4 text-sm font-semibold text-white/60 text-left"
+                >
                   {forgotTab === "phone" ? (
                     <div>
                       <label className="block mb-1.5">手机号码</label>

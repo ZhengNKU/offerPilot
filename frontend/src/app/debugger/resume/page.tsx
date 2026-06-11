@@ -39,8 +39,13 @@ function ResumeAnalysisPageContent() {
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showNotification, setShowNotification] = useState<string | null>(null);
   const [showScoreMetricsModal, setShowScoreMetricsModal] = useState(false);
+  const [showStructureModal, setShowStructureModal] = useState(false);
+  const [selectedStructureSection, setSelectedStructureSection] = useState<number>(0);
 
   const [analysisResult, setAnalysisResult] = useState<any>(null);
+
+  // Download button state machine
+  const [downloadState, setDownloadState] = useState<"idle" | "loading" | "success" | "error">("idle");
 
   // Prefill metadata from localStorage if available
   useEffect(() => {
@@ -122,6 +127,97 @@ function ResumeAnalysisPageContent() {
     setTimeout(() => {
       setShowNotification(null);
     }, 2500);
+  };
+
+  const handleDownloadPDF = async () => {
+    const analysisId = analysisResult?.id;
+    if (!analysisId) {
+      triggerToast("未找到分析记录，请刷新后重试");
+      setDownloadState("error");
+      setTimeout(() => setDownloadState("idle"), 2500);
+      return;
+    }
+    if (downloadState === "loading") return;
+
+    setDownloadState("loading");
+    try {
+      const token = typeof window !== "undefined"
+        ? localStorage.getItem("offerPilot_token")
+        : null;
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(
+        `http://localhost:8001/api/resume/analyses/${analysisId}/download?view=optimized`,
+        { headers }
+      );
+
+      if (!res.ok) {
+        // 鉴权失败：弹登录引导（用 .detail 文案但不抛 error，避免通用 catch 噪音）
+        if (res.status === 401 || res.status === 403) {
+          setDownloadState("error");
+          triggerToast("登录已失效，请重新登录后再下载");
+          // 同时唤起登录弹窗（如果有 AuthProvider 暴露的方法）
+          try {
+            auth.setShowLogin?.(true);
+          } catch {
+            /* AuthProvider 不可用时不阻塞 */
+          }
+          setTimeout(() => setDownloadState("idle"), 2500);
+          return;
+        }
+        let errMsg = `下载失败 (${res.status})`;
+        try {
+          const errBody = await res.json();
+          if (errBody?.detail) errMsg = errBody.detail;
+        } catch {
+          /* non-JSON error */
+        }
+        throw new Error(errMsg);
+      }
+
+      // 解析响应头里的 UTF-8 文件名 (RFC 5987)
+      const dispo = res.headers.get("Content-Disposition") || "";
+      let filename = "";
+      const utf8Match = dispo.match(/filename\*=UTF-8''([^;]+)/i);
+      if (utf8Match) {
+        try {
+          filename = decodeURIComponent(utf8Match[1]);
+        } catch {
+          /* ignore */
+        }
+      }
+      if (!filename) {
+        const asciiMatch = dispo.match(/filename="([^"]+)"/i);
+        if (asciiMatch) filename = asciiMatch[1];
+      }
+      if (!filename) {
+        const safeName = (profile.name || "候选人").replace(/[\\/:*?"<>|\r\n\t]+/g, "_");
+        const today = new Date().toISOString().slice(0, 10);
+        filename = `OfferPilot_简历_${safeName}_${today}.docx`;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // 延迟 revoke，避免某些浏览器下载未完成就 revoke
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+      setDownloadState("success");
+      triggerToast(`已下载 ${filename}`);
+      setTimeout(() => setDownloadState("idle"), 2500);
+    } catch (e: any) {
+      console.error("Download DOCX failed:", e);
+      setDownloadState("error");
+      triggerToast(e?.message || "下载失败，请稍后重试");
+      setTimeout(() => setDownloadState("idle"), 2500);
+    }
   };
 
   const handleEditProfile = (e: React.FormEvent) => {
@@ -241,8 +337,304 @@ function ResumeAnalysisPageContent() {
   const medLen = totalRisksCount > 0 ? (medRisksCount / totalRisksCount) * circ : 0;
   const highLen = totalRisksCount > 0 ? (highRisksCount / totalRisksCount) * circ : 0;
 
+  // 8 个 section 索引 ↔ 后端 structure_analysis 字段 key（顺序与按钮列表一致）
+  const STRUCTURE_KEYS = [
+    "personal_info", "work_experience", "projects", "tech_stack",
+    "education", "open_source", "business_outcomes", "management",
+  ] as const;
+
+  // 8 个 section 的中文名（供 LLM 兜底不足时使用）
+  const STRUCTURE_NAMES = [
+    "个人信息", "工作经历", "项目经历", "技术栈",
+    "教育背景", "开源经历", "业务成果", "管理经验",
+  ];
+
+  // 后端 status 文本 → 前端颜色/默认分数映射
+  const STRUCTURE_STATUS_MAP: Record<string, { color: string; barColor: string; defaultScore: number }> = {
+    "优秀": { color: "text-[#5DECCB]", barColor: "bg-[#5DECCB]", defaultScore: 88 },
+    "亮点": { color: "text-[#00D4FF]", barColor: "bg-[#00D4FF]", defaultScore: 85 },
+    "风险": { color: "text-amber-400", barColor: "bg-amber-400", defaultScore: 65 },
+    "缺失": { color: "text-[#FF7A95]", barColor: "bg-[#FF7A95]", defaultScore: 45 },
+  };
+
+  // 从 LLM 返回的 structure_analysis 读取 status + score + 颜色配置
+  const getAISectionStatus = (sectionIdx: number) => {
+    const aiSec = analysisResult?.structure_analysis?.[STRUCTURE_KEYS[sectionIdx]];
+    if (!aiSec || !aiSec.status) return null;
+    const m = STRUCTURE_STATUS_MAP[aiSec.status];
+    if (!m) return null;
+    return {
+      status: aiSec.status,
+      score: typeof aiSec.score === "number" ? aiSec.score : m.defaultScore,
+      color: m.color,
+      barColor: m.barColor,
+    };
+  };
+
+  // Dynamically extract a Before/After example from workExperiences
+  const getDynamicBulletExample = (sectionIdx: number) => {
+    let matchedBullet: any = null;
+    
+    const searchKeywords = [
+      ["email", "mail", "微信", "联系方式"], // 个人信息
+      ["工作", "开发", "实现", "负责", "优化"], // 工作经历
+      ["项目", "重构", "分布式", "架构", "设计"], // 项目经历
+      ["Redis", "Kafka", "JVM", "MySQL", "技术栈", "掌握", "精通"], // 技术栈
+      ["南开", "大学", "硕士", "本科", "论文", "奖学金", "毕业"], // 教育背景
+      ["Github", "开源", "vllm", "vLLM", "笔记", "贡献"], // 开源经历
+      ["%", "QPS", "吞吐", "万", "亿", "指标", "日活"], // 业务成果
+      ["Mentor", "带人", "规范", "指导", "统筹", "主导"] // 管理经验
+    ][sectionIdx];
+
+    for (const exp of workExperiences) {
+      for (const bullet of exp.bullets || []) {
+        if (bullet.originalText && bullet.optimizedText) {
+          const text = (bullet.originalText + bullet.optimizedText).toLowerCase();
+          const hasKeyword = searchKeywords.some(kw => text.includes(kw.toLowerCase()));
+          if (hasKeyword) {
+            matchedBullet = bullet;
+            break;
+          }
+        }
+      }
+      if (matchedBullet) break;
+    }
+
+    if (!matchedBullet) {
+      for (const exp of workExperiences) {
+        for (const bullet of exp.bullets || []) {
+          if (bullet.originalText && bullet.optimizedText) {
+            matchedBullet = bullet;
+            break;
+          }
+        }
+        if (matchedBullet) break;
+      }
+    }
+
+    if (matchedBullet) {
+      return {
+        before: matchedBullet.originalText,
+        after: matchedBullet.optimizedText
+      };
+    }
+
+    const staticFallbacks = [
+      {
+        before: "微信: xxxxx | 邮箱: " + (profile.name === "郑泽其" ? "471815124@qq.com" : "myemail@qq.com"),
+        after: "手机: 186-xxxx-xxxx | 邮箱: " + (profile.name ? profile.name.toLowerCase().replace(/\s+/g, '') : "candidate") + "@outlook.com"
+      },
+      {
+        before: `负责在${profile.company || "公司"}研发常用业务系统开发与维护。`,
+        after: `主导${profile.company || "公司"}核心高并发服务接口优化，响应延迟缩短 40%，大幅提升系统吞吐率。`
+      },
+      {
+        before: "参与分布式事务相关业务开发，解决多服务调用一致性问题。",
+        after: "基于 Seata TCC 模式与 Saga 事务补偿机制重写复杂嵌套交易链路，规避异构系统账实不符风险。"
+      },
+      {
+        before: "熟练掌握 Java/Spring 框架、Redis 缓存、Kafka 消息队列开发。",
+        after: "深入理解 JVM 内存调优；熟练掌握 Redis 大Key/热Key治理；主导落地 Kafka 消息堆积治理方案。"
+      },
+      {
+        before: "硕士/本科 (仅列出专业与学校学历，无重点技术亮点突出)",
+        after: "硕士/本科 | 主导研发课题并获一等奖学金，论文被评为校级优秀论文。"
+      },
+      {
+        before: "业余在 GitHub 上开发了一些小工具 / 无开源经历。",
+        after: "活跃开源社区贡献者（附个人Github链接），产出多篇源码深度剖析文档，社区 Star 累计超 100+。"
+      },
+      {
+        before: "重构了系统召回算法，提高了推荐效率。",
+        after: "核心召回链路重构，API 吞吐量整体提升 25%，带来核心业务漏斗转化率（CTR）相对提升 2.3%。"
+      },
+      {
+        before: "日常配合团队研发工作，编写开发文档并协助部署。",
+        after: "作为团队技术骨干，担任 3 名研发新人的技术 Mentor，主导制定并推广团队通用分布式部署规范。"
+      }
+    ];
+
+    return staticFallbacks[sectionIdx];
+  };
+
+  const getDynamicSectionStatus = (sectionIdx: number) => {
+    // AI 优先：直接读 LLM 返回的 structure_analysis；老分析记录（无该字段）→ 走 legacy
+    const ai = getAISectionStatus(sectionIdx);
+    if (ai) return ai;
+    return legacyGetDynamicSectionStatus(sectionIdx);
+  };
+
+  const legacyGetDynamicSectionStatus = (sectionIdx: number) => {
+    const risksText = risksList.map((r: any) => (r.title + r.desc).toLowerCase()).join(" ");
+    const hasRisk = (keywords: string[]) => keywords.some(kw => risksText.includes(kw));
+
+    switch (sectionIdx) {
+      case 0:
+        return { status: "优秀", score: 95, color: "text-[#5DECCB]", barColor: "bg-[#5DECCB]" };
+      case 1:
+        return { status: "优秀", score: 90, color: "text-[#5DECCB]", barColor: "bg-[#5DECCB]" };
+      case 2:
+        const projRisk = hasRisk(["项目", "设计", "日常"]);
+        return {
+          status: projRisk ? "风险" : "优秀",
+          score: projRisk ? 70 : 88,
+          color: projRisk ? "text-amber-400" : "text-[#5DECCB]",
+          barColor: projRisk ? "bg-amber-400" : "bg-[#5DECCB]"
+        };
+      case 3:
+        const techRisk = hasRisk(["技术", "拼写", "redis", "kafka", "jvm", "名词"]);
+        return {
+          status: techRisk ? "风险" : "优秀",
+          score: techRisk ? 68 : 86,
+          color: techRisk ? "text-amber-400" : "text-[#5DECCB]",
+          barColor: techRisk ? "bg-amber-400" : "bg-[#5DECCB]"
+        };
+      case 4:
+        return { status: "优秀", score: 92, color: "text-[#5DECCB]", barColor: "bg-[#5DECCB]" };
+      case 5:
+        const hasOpenSource = workExperiences.some((exp: any) => 
+          (exp.company + exp.role + (exp.bullets || []).map((b: any) => b.originalText + b.optimizedText).join(" ")).toLowerCase().includes("github") ||
+          (exp.company + exp.role + (exp.bullets || []).map((b: any) => b.originalText + b.optimizedText).join(" ")).includes("开源")
+        );
+        return {
+          status: hasOpenSource ? "亮点" : "缺失",
+          score: hasOpenSource ? 85 : 45,
+          color: hasOpenSource ? "text-[#00D4FF]" : "text-[#FF7A95]",
+          barColor: hasOpenSource ? "bg-[#00D4FF]" : "bg-[#FF7A95]"
+        };
+      case 6:
+        const bizRisk = hasRisk(["量化", "指标", "成果", "业绩", "数据"]);
+        return {
+          status: bizRisk ? "缺失" : "优秀",
+          score: bizRisk ? 40 : 90,
+          color: bizRisk ? "text-[#FF7A95]" : "text-[#5DECCB]",
+          barColor: bizRisk ? "bg-[#FF7A95]" : "bg-[#5DECCB]"
+        };
+      case 7:
+        const mgtRisk = hasRisk(["管理", "带人", "导师", "mentor", "统统", "团队", "规模"]);
+        return {
+          status: mgtRisk ? "缺失" : "优秀",
+          score: mgtRisk ? 30 : 85,
+          color: mgtRisk ? "text-[#FF7A95]" : "text-[#5DECCB]",
+          barColor: mgtRisk ? "bg-[#FF7A95]" : "bg-[#5DECCB]"
+        };
+      default:
+        return { status: "优秀", score: 90, color: "text-[#5DECCB]", barColor: "bg-[#5DECCB]" };
+    }
+  };
+
+  const getDynamicSectionDetails = (idx: number) => {
+    // AI 优先：用 LLM 给的 desc/advice/before/after；缺失时回退到 legacy 硬编码模板
+    const ds = getDynamicSectionStatus(idx);
+    const aiSec = analysisResult?.structure_analysis?.[STRUCTURE_KEYS[idx]];
+    if (aiSec && (aiSec.desc || (Array.isArray(aiSec.advice) && aiSec.advice.length) || aiSec.before || aiSec.after)) {
+      const advice = Array.isArray(aiSec.advice) && aiSec.advice.length
+        ? aiSec.advice.map((a: any) => String(a))
+        : ["继续优化此部分以提升简历竞争力"];
+      return {
+        ...ds,
+        name: STRUCTURE_NAMES[idx],
+        desc: aiSec.desc || "暂无分析",
+        advice,
+        before: aiSec.before || "",
+        after: aiSec.after || "",
+      };
+    }
+    return legacyGetDynamicSectionDetails(idx);
+  };
+
+  const legacyGetDynamicSectionDetails = (idx: number) => {
+    const ds = getDynamicSectionStatus(idx);
+    const bulletEx = getDynamicBulletExample(idx);
+
+    const targetRole = profile.targetRole || "架构师";
+    const targetGrade = profile.targetGrade || "高级";
+    const company = profile.company || "当前公司";
+    const school = profile.school || "教育背景";
+
+    const sectionsInfo = [
+      {
+        name: "个人信息",
+        desc: `基本信息开发梳理完整，求职意向非常明确，对基本学历、联系方式的梳理符合大厂简历推荐规范。`,
+        advice: [
+          "建议使用专业的国内或海外主流邮箱系统（如 Outlook、Gmail ），替代娱乐性强的邮箱后缀以表现严谨的工作作风。",
+          `求职意向明确为‘${targetRole}’，后续技术面试需着重体现系统性架构思维与架构匹配度。`
+        ]
+      },
+      {
+        name: "工作经历",
+        desc: `工作年限（约${profile.years || '1.5年'}）以及公司（${company}）背景交代清晰。核心职责描述包含了日常研发，但建议突出主导架构设计的成分。`,
+        advice: [
+          "部分重要动作缺少核心技术的说明（如多线程调优、数据传输保障机制、核心系统重构等）。",
+          "建议将优化动作和量化结果直接串联成一句话，突出独立解决复杂架构难点的业务价值。"
+        ]
+      },
+      {
+        name: "项目经历",
+        desc: `项目细节描述重在日常业务模块的‘编写与实现’，未能体现技术攻关、架构设计决策以及作为${targetGrade}岗位候选人对高并发一致性、灾备设计等深度的Trade-off思考。`,
+        advice: [
+          "避免使用‘参与开发’、‘负责维护’等被动词，应该改用‘设计’、‘主导’、‘重写’等具有架构把控性的动词。",
+          "补充分布式环境下数据一致性及高可用方案的具体落地手段，让大厂面试评估更具技术说服力。"
+        ]
+      },
+      {
+        name: "技术栈",
+        desc: "技术栈偏向常规工具罗列，容易给面试官留下‘泛而不精’的印象。高并发、消息队列、分布式存储等底层原理与调优描述不足。",
+        advice: [
+          "不要简单罗列框架，需补充能够体现底层原理和源码级别认知的关键词（如：GC调优、大Key治理、零拷贝）。",
+          "技术描述应该体现深度，把被动掌握转换成主动源码与架构细节掌控。"
+        ]
+      },
+      {
+        name: "教育背景",
+        desc: `学历背景（${school}）交代清晰。在目标岗位为高级开发/架构师级别时，建议突出理论积累与工程底蕴。`,
+        advice: [
+          "在学历信息下方可以添加在校期间 of 算法竞赛、奖学金、或者是软件研发课题实践，进一步建立技术可信度。",
+          "强调硕士/本科期间 of 计算机编程实践，淡化非相关专业课程的影响。"
+        ]
+      },
+      {
+        name: "开源经历",
+        desc: ds.status === "亮点" 
+          ? "简历中体现了开源或社区贡献经历，这是一个非常好的差异化亮点，能够体现个人的技术追求与极客精神。"
+          : "目前简历中缺少开源经历或社区贡献。对于高级技术岗位，参与开源社区或拥有个人技术积累能大幅提升简历竞争力。",
+        advice: [
+          "如果有个人GitHub仓库或分析文章链接，必须标注在简历中，保证该亮点的真实性和可考核性。",
+          "量化开源产出（如Star数、贡献的PR数量、沉淀的解析文章字数等），让亮点更有说服力。"
+        ]
+      },
+      {
+        name: "业务成果",
+        desc: ds.status === "缺失"
+          ? "简历的重大软肋。简历对项目产出只有纯技术指标描述，缺失了系统在业务维度（如日活用户、业务吞吐量、省下的机器成本等）的商业闭环结果展示。"
+          : "简历具备量化的核心业务成果，能够清晰说明项目上线带来的商业价值或吞吐指标增益。",
+        advice: [
+          "大厂非常关注技术带来的实际业务增值。必须将技术吞吐指标与核心业务转化（如转化率CTR、节省开支）融合描述。",
+          "补充大容量业务场景下的真实落地规模数据，体现系统的高并发含金量。"
+        ]
+      },
+      {
+        name: "管理经验",
+        desc: ds.status === "缺失"
+          ? `对于目标定位是‘${targetRole}’的求职者，简历缺乏带人（Mentor）、技术规范主导、项目统筹以及跨团队影响力描述。`
+          : "简历中体现了技术指导、Mentor、工程规范落地或项目统筹的骨干职责，具备团队技术影响力支撑。",
+        advice: [
+          "即使没有正式的团队主管头衔，也应该以非行政管理者的身份写出：带新人（Mentor）、项目统筹管理、规范落地、或是在架构委员会推动基础设施建设等经历。",
+          "突出跨团队的技术协同和影响力半径。"
+        ]
+      }
+    ][idx];
+
+    return {
+      ...ds,
+      ...sectionsInfo,
+      before: bulletEx.before,
+      after: bulletEx.after
+    };
+  };
+
   return (
-    <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden select-none pt-20">
+    <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden pt-20">
       {/* Background visual grid elements */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-[#AFA7FF]/5 rounded-full blur-[160px] pointer-events-none z-0" />
@@ -357,7 +749,7 @@ function ResumeAnalysisPageContent() {
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-1.5">
                     <span className="text-base font-black text-white">{profile.name}</span>
-                    <span className="px-1.5 py-0.2 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/25 text-[9px] font-black uppercase">
+                    <span className="px-1.5 py-0.2 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/25 text-xs font-black uppercase">
                       {profile.status}
                     </span>
                   </div>
@@ -436,7 +828,7 @@ function ResumeAnalysisPageContent() {
               </div>
 
               <button
-                onClick={() => triggerToast("简历完整结构图正在渲染中...")}
+                onClick={() => setShowStructureModal(true)}
                 className="w-full pt-3.5 border-t border-white/5 text-sm text-[#AFA7FF] font-black hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
               >
                 查看完整结构分析 <span className="material-symbols-outlined text-xs">arrow_forward</span>
@@ -514,7 +906,7 @@ function ResumeAnalysisPageContent() {
               </div>
 
               {/* Tab Workspace Scroll Window */}
-              <div className="flex-1 overflow-y-auto pr-1">
+              <div className="flex-1 overflow-y-auto pr-1 min-h-0 custom-scrollbar">
                 {activeTab === "preview" && (
                   /* ========================================================
                       TAB 1: RESUME PREVIEW (HIGH-FIDELITY EXPERIENCE BLOCKS)
@@ -806,7 +1198,7 @@ function ResumeAnalysisPageContent() {
           <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5 lg:h-[960px] lg:max-h-[960px] lg:min-h-0">
             
             {/* 3.1 Resume Hiring Score */}
-            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-3 select-none lg:h-[250px] shrink-0">
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-2.5 select-none lg:flex-1 lg:min-h-0 shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
                 <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-sm text-[#00D4FF]">verified</span>
@@ -822,19 +1214,17 @@ function ResumeAnalysisPageContent() {
                 </button>
               </div>
 
-              <div className="flex flex-col items-center justify-center py-2.5 relative">
-                <div className="relative w-36 h-36 flex items-center justify-center">
+              <div className="flex flex-col items-center justify-center relative">
+                <div className="relative w-32 h-32 flex items-center justify-center">
                   <svg className="w-full h-full -rotate-90">
-                    <circle cx="72" cy="72" r="56" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="8" />
+                    <circle cx="64" cy="64" r="50" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="7" />
                     <circle
-                      cx="72"
-                      cy="72"
-                      r="56"
+                      cx="64" cy="64" r="50"
                       fill="transparent"
                       stroke="url(#resume-ring-grad)"
-                      strokeWidth="8"
-                      strokeDasharray={2 * Math.PI * 56}
-                      strokeDashoffset={2 * Math.PI * 56 * (1 - (analysisResult?.score ?? 84) / 100)}
+                      strokeWidth="7"
+                      strokeDasharray={2 * Math.PI * 50}
+                      strokeDashoffset={2 * Math.PI * 50 * (1 - (analysisResult?.score ?? 84) / 100)}
                       strokeLinecap="round"
                     />
                     <defs>
@@ -846,17 +1236,17 @@ function ResumeAnalysisPageContent() {
                   </svg>
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center leading-none">
                     <span className="text-3xl font-black text-white font-mono">{analysisResult?.score ?? 84}</span>
-                    <span className="text-[10px] text-white/30 font-bold block mt-0.5">/100 { (analysisResult?.score ?? 84) >= 85 ? "优秀" : (analysisResult?.score ?? 84) >= 70 ? "良好" : "一般" }</span>
+                    <span className="text-xs text-white/30 font-bold block mt-0.5">/100 { (analysisResult?.score ?? 84) >= 85 ? "优秀" : (analysisResult?.score ?? 84) >= 70 ? "良好" : "一般" }</span>
                   </div>
                 </div>
-                <div className="space-y-1 mt-4 text-center">
+                <div className="space-y-0.5 mt-0.5 text-center">
                   <p className="text-sm text-white/45 font-bold">超过 <span className="text-[#00D4FF] font-black text-base">{Math.min(99, Math.round((analysisResult?.score ?? 84) * 0.9))}%</span> 同岗位候选人</p>
                 </div>
               </div>
             </div>
 
             {/* 3.2 Offer Probability */}
-            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-3 select-none lg:h-[240px] shrink-0">
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-2.5 select-none lg:flex-1 lg:min-h-0 shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
                 <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-sm text-[#AFA7FF]">trending_up</span>
@@ -901,7 +1291,7 @@ function ResumeAnalysisPageContent() {
             </div>
 
             {/* 3.3 ATS Checks checklist */}
-            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-3 select-none shrink-0">
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-2.5 select-none lg:flex-1 lg:min-h-0 shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
                 <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-sm text-[#00D4FF]">analytics</span>
@@ -935,7 +1325,7 @@ function ResumeAnalysisPageContent() {
                   </svg>
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center leading-none">
                     <span className="text-xl font-black text-white font-mono">{analysisResult?.ats_pass_rate ?? 92}%</span>
-                    <span className="text-[10px] text-white/40 font-bold mt-0.5">通过率</span>
+                    <span className="text-sm text-white/40 font-bold mt-0.5">通过率</span>
                   </div>
                 </div>
 
@@ -961,7 +1351,7 @@ function ResumeAnalysisPageContent() {
             </div>
 
             {/* 3.4 Risk Distribution donut */}
-            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-3 select-none shrink-0">
+            <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-2.5 select-none lg:flex-1 lg:min-h-0 shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
                 <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-sm text-[#FF7A95]">pie_chart</span>
@@ -971,7 +1361,7 @@ function ResumeAnalysisPageContent() {
 
               <div className="flex items-center gap-5 justify-center flex-1 px-1">
                 {/* SVG Ring Donut */}
-                <div className="relative w-28 h-28 flex items-center justify-center shrink-0">
+                <div className="relative w-32 h-32 flex items-center justify-center shrink-0">
                   <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 44 44">
                     {/* Ring for Low Risk */}
                     <circle cx="22" cy="22" r="16" fill="transparent" stroke="#5DECCB" strokeWidth="3.5" strokeDasharray={`${lowLen} ${circ - lowLen}`} strokeDashoffset={0} />
@@ -987,32 +1377,32 @@ function ResumeAnalysisPageContent() {
                     </defs>
                   </svg>
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center leading-none">
-                    <span className="text-lg font-black text-white font-mono">{totalRisksCount}</span>
-                    <span className="text-[9px] text-white/40 font-bold block mt-0.5">总项数</span>
+                    <span className="text-3xl font-black text-white font-mono">{totalRisksCount}</span>
+                    <span className="text-xs text-white/45 font-bold block mt-1">总项数</span>
                   </div>
                 </div>
 
-                <div className="space-y-2.5 text-left text-base font-bold text-white/70 flex-1 pl-2">
+                <div className="space-y-3 text-left text-sm md:text-base font-black text-white/85 flex-1 pl-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-[#FF7A95] shrink-0" />
                       <span>高风险</span>
                     </div>
-                    <span className="font-mono text-white/55 font-black">{highRisksCount}</span>
+                    <span className="font-mono text-white/90 font-black text-base md:text-lg">{highRisksCount}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
                       <span>中风险</span>
                     </div>
-                    <span className="font-mono text-white/55 font-black">{medRisksCount}</span>
+                    <span className="font-mono text-white/90 font-black text-base md:text-lg">{medRisksCount}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <span className="w-2.5 h-2.5 rounded-full bg-[#5DECCB] shrink-0" />
                       <span>低风险</span>
                     </div>
-                    <span className="font-mono text-white/55 font-black">{lowRisksCount}</span>
+                    <span className="font-mono text-white/90 font-black text-base md:text-lg">{lowRisksCount}</span>
                   </div>
                 </div>
               </div>
@@ -1023,7 +1413,7 @@ function ResumeAnalysisPageContent() {
           {/* ========================================================
               3. BOTTOM ROW: AI RESUME REBUILD ENGINE (Full-width 12 cols)
              ======================================================== */}
-          <div className="col-span-12 relative overflow-hidden rounded-3xl border border-white/10 bg-[#060e20]/60 backdrop-blur-xl p-6 md:py-8 md:px-10 flex flex-col md:flex-row justify-between items-center gap-6 shadow-2xl group min-h-[120px] select-none mt-1">
+          <div className="col-span-12 relative overflow-hidden rounded-3xl border border-white/10 bg-[#060e20]/60 backdrop-blur-xl p-6 md:py-8 md:px-10 flex flex-col md:flex-row justify-between items-center gap-6 shadow-2xl group min-h-[120px] select-none mt-10">
             
             {/* Background Glow Layer */}
             <div className="absolute inset-0 bg-gradient-to-r from-[#AFA7FF]/5 via-[#5DECCB]/3 to-transparent pointer-events-none" />
@@ -1073,24 +1463,42 @@ function ResumeAnalysisPageContent() {
               </button>
               
               <button
-                onClick={() => triggerToast("已为您载入简历对比视图...")}
-                className="flex-1 md:flex-none px-4.5 py-3 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer whitespace-nowrap"
+                onClick={handleDownloadPDF}
+                disabled={downloadState === "loading"}
+                className={`flex-1 md:flex-none px-6 py-3 rounded-xl transition-all shadow-md whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer ${
+                  downloadState === "loading"
+                    ? "bg-white/10 text-white/60 cursor-not-allowed shadow-none"
+                    : downloadState === "success"
+                      ? "bg-[#5DECCB] text-[#050B1A] shadow-[#5DECCB]/30"
+                      : downloadState === "error"
+                        ? "bg-[#FF7A95] text-[#050B1A] shadow-[#FF7A95]/30"
+                        : "bg-gradient-to-r from-[#AFA7FF] to-[#00D4FF] text-[#050B1A] hover:scale-[1.01] active:scale-98 shadow-[#AFA7FF]/25"
+                }`}
               >
-                对比修改内容
-              </button>
-
-              <button
-                onClick={() => triggerToast("Word 简历导出正在生成...")}
-                className="flex-1 md:flex-none px-4.5 py-3 rounded-xl bg-white/5 border border-white/10 text-white hover:bg-white/10 hover:border-white/20 transition-all cursor-pointer whitespace-nowrap"
-              >
-                导出 Word
-              </button>
-
-              <button
-                onClick={() => triggerToast("正在为您导出 AI 优化版 PDF...")}
-                className="flex-1 md:flex-none px-6 py-3 bg-gradient-to-r from-[#AFA7FF] to-[#00D4FF] text-[#050B1A] rounded-xl hover:scale-[1.01] active:scale-98 transition-all shadow-md shadow-[#AFA7FF]/25 cursor-pointer whitespace-nowrap flex items-center justify-center gap-1"
-              >
-                下载 AI 优化版 PDF <span className="material-symbols-outlined text-sm">download</span>
+                {downloadState === "loading" && (
+                  <>
+                    <span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                    正在生成 DOCX…
+                  </>
+                )}
+                {downloadState === "success" && (
+                  <>
+                    <span className="material-symbols-outlined text-sm">check_circle</span>
+                    下载成功
+                  </>
+                )}
+                {downloadState === "error" && (
+                  <>
+                    <span className="material-symbols-outlined text-sm">error</span>
+                    重试下载
+                  </>
+                )}
+                {downloadState === "idle" && (
+                  <>
+                    下载 AI 优化版 DOCX
+                    <span className="material-symbols-outlined text-sm">download</span>
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -1344,6 +1752,206 @@ function ResumeAnalysisPageContent() {
       )}
 
       {/* ========================================================
+          MODAL: FULL RESUME STRUCTURE ANALYSIS MAP
+         ======================================================== */}
+      {showStructureModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          {/* Overlay blur shadow */}
+          <div
+            onClick={() => setShowStructureModal(false)}
+            className="absolute inset-0 bg-[#050B1A]/85 backdrop-blur-md transition-opacity duration-300 cursor-pointer"
+          />
+
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-[#171f33]/95 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 max-w-5xl w-full h-[85vh] text-left relative z-10 flex flex-col shadow-2xl overflow-hidden"
+          >
+            {/* Modal Header */}
+            <div className="flex justify-between items-center pb-4 border-b border-white/5 shrink-0">
+              <div>
+                <h3 className="font-extrabold text-white text-lg md:text-xl flex items-center gap-2">
+                  <span className="material-symbols-outlined text-[#AFA7FF] text-base md:text-lg">map</span>
+                  简历完整结构分析地图
+                </h3>
+                <p className="text-xs text-white/40 font-bold mt-1">
+                  全面分析简历，精确定位硬伤，对比黄金范例，助力拿到心仪 Offer
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowStructureModal(false)}
+                className="text-white/30 hover:text-white transition-colors cursor-pointer bg-white/5 hover:bg-white/10 p-2 rounded-full flex items-center justify-center"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            {/* Modal Body: Split-pane Layout */}
+            <div className="flex-1 flex flex-col md:flex-row gap-6 mt-6 overflow-hidden min-h-0">
+              
+              {/* Left Pane: Vertical Node Roadmap */}
+              <div className="w-full md:w-[38%] flex flex-col bg-[#050B1A]/40 border border-white/5 rounded-2xl p-4 overflow-y-auto min-h-0 custom-scrollbar relative">
+                <h4 className="text-sm font-black text-white/60 tracking-wider uppercase mb-4 shrink-0 flex items-center gap-1.5 select-none">
+                  <span className="material-symbols-outlined text-base text-[#00D4FF]">account_tree</span>
+                  简历结构健康度地图
+                </h4>
+
+                {/* Vertical glowing timeline line */}
+                <div className="absolute left-[35px] top-[74px] bottom-[30px] w-0.5 bg-gradient-to-b from-[#5DECCB] via-amber-400 to-[#FF7A95]/30 pointer-events-none hidden md:block" />
+
+                <div className="space-y-3 relative z-10">
+                  {[
+                    "1. 个人信息",
+                    "2. 工作经历",
+                    "3. 项目经历",
+                    "4. 技术栈",
+                    "5. 教育背景",
+                    "6. 开源经历",
+                    "7. 业务成果",
+                    "8. 管理经验"
+                  ].map((name, idx) => {
+                    const isActive = selectedStructureSection === idx;
+                    const ds = getDynamicSectionStatus(idx);
+                    let badgeStyle = "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25";
+                    if (ds.status === "优秀") {
+                      badgeStyle = "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25";
+                    } else if (ds.status === "亮点") {
+                      badgeStyle = "text-[#00D4FF] bg-[#00D4FF]/10 border-[#00D4FF]/25";
+                    } else if (ds.status === "风险") {
+                      badgeStyle = "text-amber-400 bg-amber-400/10 border-amber-400/25";
+                    }
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => setSelectedStructureSection(idx)}
+                        className={`p-3 rounded-xl border transition-all duration-200 flex justify-between items-center text-sm font-bold cursor-pointer ${
+                          isActive
+                            ? "bg-[#AFA7FF]/15 border-[#AFA7FF]/40 shadow-[0_0_15px_rgba(175,167,255,0.1)]"
+                            : "bg-[#050B1A]/40 border-white/5 hover:border-white/20 hover:bg-[#050B1A]/60"
+                        }`}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-base font-black shrink-0 ${
+                            isActive ? "bg-[#AFA7FF] text-[#050B1A]" : "bg-white/5 text-white/50"
+                          }`}>
+                            {idx + 1}
+                          </span>
+                          <span className={`text-[14.5px] transition-colors ${isActive ? "text-white font-extrabold" : "text-white/80"}`}>
+                            {name.substring(3)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-2 py-0.5 rounded text-[11px] font-black uppercase border shrink-0 ${badgeStyle}`}>
+                            {ds.status}
+                          </span>
+                          {isActive && (
+                            <span className="material-symbols-outlined text-xs text-[#AFA7FF] animate-pulse hidden md:inline">chevron_right</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Right Pane: Detailed Section Diagnoses and Before/After Rewrite Diffs */}
+              <div className="flex-1 bg-[#050B1A]/40 border border-white/5 rounded-2xl p-5 md:p-6 overflow-y-auto min-h-0 custom-scrollbar flex flex-col gap-4 text-left">
+                {(() => {
+                  const section = getDynamicSectionDetails(selectedStructureSection);
+
+                  return (
+                    <>
+                      {/* Section Info Header */}
+                      <div className="flex justify-between items-start pb-3.5 border-b border-white/5 shrink-0">
+                        <div>
+                          <h4 className="text-base font-black text-white flex items-center gap-2">
+                            {section.name} (模块分析)
+                          </h4>
+                          <div className="flex items-center gap-3 mt-1.5">
+                            <span className="text-xs text-white/45 font-bold">健康度评分:</span>
+                            <span className={`text-sm font-mono font-black ${section.color}`}>{section.score}分</span>
+                            <div className="w-24 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                              <div className={`h-full ${section.barColor} rounded-full`} style={{ width: `${section.score}%` }} />
+                            </div>
+                          </div>
+                        </div>
+                        <span className={`px-2.5 py-0.5 rounded text-xs font-black uppercase border shrink-0 bg-white/5 ${section.color} border-white/10`}>
+                          {section.status}
+                        </span>
+                      </div>
+
+                      {/* Diagnosis Block */}
+                      <div className="bg-[#050B1A]/30 border border-white/5 p-4 rounded-xl flex flex-col gap-2 shrink-0">
+                        <h5 className="text-xs font-black text-white flex items-center gap-1.5 select-none">
+                          <span className="material-symbols-outlined text-sm text-[#FF7A95]">analytics</span>
+                          深度诊断分析
+                        </h5>
+                        <p className="text-xs text-white/60 leading-relaxed font-bold">
+                          {section.desc}
+                        </p>
+                      </div>
+
+                      {/* Suggestions Block */}
+                      <div className="flex flex-col gap-2 shrink-0">
+                        <h5 className="text-xs font-black text-white flex items-center gap-1.5 select-none">
+                          <span className="material-symbols-outlined text-sm text-[#00D4FF]">lightbulb</span>
+                          针对性优化建议
+                        </h5>
+                        <ul className="space-y-2 text-xs text-white/50 font-bold pl-5 list-disc leading-relaxed">
+                          {section.advice.map((item, i) => (
+                            <li key={i}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      {/* Before / After Diff Block */}
+                      <div className="flex-1 flex flex-col gap-3 min-h-0">
+                        <h5 className="text-xs font-black text-white flex items-center gap-1.5 select-none shrink-0">
+                          <span className="material-symbols-outlined text-sm text-[#5DECCB]">code</span>
+                          黄金润色范例 (Before vs After)
+                        </h5>
+                        
+                        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3 min-h-0 overflow-y-auto custom-scrollbar">
+                          {/* Before Card */}
+                          <div className="bg-red-950/[0.03] border border-red-500/10 rounded-xl p-4 flex flex-col gap-2 min-h-[100px]">
+                            <div className="flex justify-between items-center shrink-0">
+                              <span className="text-[10px] font-black text-[#FF7A95] bg-[#FF7A95]/10 border border-[#FF7A95]/25 px-1.5 py-0.2 rounded uppercase">
+                                原始描述 (Before)
+                              </span>
+                              <span className="material-symbols-outlined text-xs text-[#FF7A95]/40 select-none">remove_circle_outline</span>
+                            </div>
+                            <p className="text-xs text-white/45 leading-relaxed font-semibold italic flex-1 flex items-center">
+                              “ {section.before} ”
+                            </p>
+                          </div>
+
+                          {/* After Card */}
+                          <div className="bg-emerald-950/[0.05] border border-emerald-500/15 rounded-xl p-4 flex flex-col gap-2 min-h-[100px]">
+                            <div className="flex justify-between items-center shrink-0">
+                              <span className="text-[10px] font-black text-[#5DECCB] bg-[#5DECCB]/10 border border-[#5DECCB]/25 px-1.5 py-0.2 rounded uppercase">
+                                黄金重构 (After)
+                              </span>
+                              <span className="material-symbols-outlined text-xs text-[#5DECCB]/80 select-none">add_circle_outline</span>
+                            </div>
+                            <p className="text-xs text-white leading-relaxed font-bold flex-1 flex items-center">
+                              “ {section.after} ”
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+
+            </div>
+
+          </motion.div>
+        </div>
+      )}
+
+      {/* ========================================================
           FLOATING GLOBAL TOAST NOTIFICATION
          ======================================================== */}
       <AnimatePresence>
@@ -1377,3 +1985,11 @@ export default function ResumeAnalysisPage() {
     </Suspense>
   );
 }
+
+
+
+
+
+
+
+

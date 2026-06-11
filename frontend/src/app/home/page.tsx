@@ -1563,6 +1563,54 @@ export default function CareerDashboard() {
 
       </AnimatePresence>
 
+      {/* UNAUTHENTICATED OVERLAY */}
+      {!auth.isLoggedIn && (
+        <div className="fixed inset-0 z-30 bg-background/55 backdrop-blur-md flex items-center justify-center px-4">
+          <div className="glass-panel relative rounded-3xl border border-white/10 p-8 sm:p-10 max-w-md w-full text-center space-y-6 shadow-[0_20px_60px_rgba(0,0,0,0.4)] overflow-hidden">
+            <div className="absolute -top-16 -right-16 w-40 h-40 bg-primary/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-secondary/15 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative space-y-5">
+              <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/15 border border-primary/30 flex items-center justify-center shadow-[0_0_30px_rgba(192,193,255,0.2)]">
+                <span className="material-symbols-outlined text-3xl text-primary">lock</span>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-[10px] font-label-mono tracking-widest text-primary font-bold uppercase block">
+                  Career Cockpit
+                </span>
+                <h3 className="text-2xl font-black text-white leading-tight">登录解锁你的职业驾驶舱</h3>
+                <p className="text-sm text-on-surface-variant/70 font-semibold leading-relaxed">
+                  AI 实时监控你的求职进度、面试转化漏斗与 Offer 概率，并基于长期数据提供专属的成长策略与晋升路线。
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="flex-1 py-3 bg-primary text-on-primary font-black rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_24px_rgba(192,193,255,0.35)] cursor-pointer"
+                >
+                  立即登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="flex-1 py-3 bg-white/5 border border-white/10 text-white font-black rounded-xl hover:bg-white/10 transition-all cursor-pointer"
+                >
+                  免费注册
+                </button>
+              </div>
+
+              <button
+                onClick={() => router.push("/")}
+                className="text-base font-bold text-on-surface-variant/50 hover:text-on-surface-variant transition-colors cursor-pointer"
+              >
+                返回首页
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

@@ -18,57 +18,6 @@ interface SessionHistoryItem {
   details: string;
 }
 
-const INITIAL_HISTORY: SessionHistoryItem[] = [
-  {
-    id: "session-1",
-    date: "06-01 14:32",
-    type: "audio",
-    title: "Redis 深挖 · 技术面",
-    score: 86,
-    grade: "优秀候选人",
-    company: "字节跳动",
-    role: "后端开发工程师",
-    round: "技术一面",
-    details: "主攻Redis分布式锁、灰度一致性权衡。技术分扎实，但Saga补偿机制在技术细节深挖阶段出现了逻辑断层。"
-  },
-  {
-    id: "session-2",
-    date: "06-30 10:15",
-    type: "text",
-    title: "项目介绍 · 一面",
-    score: 72,
-    grade: "中级候选人",
-    company: "阿里巴巴",
-    role: "Java开发专家",
-    round: "技术一面",
-    details: "对高并发和高可用架构描述存在一定模糊性。AI判定核心痛点在于系统架构底座思维模糊，表达缺少Trade-off论证。"
-  },
-  {
-    id: "session-3",
-    date: "05-28 16:45",
-    type: "text",
-    title: "系统设计 · 二面",
-    score: 68,
-    grade: "待提升候选人",
-    company: "腾讯",
-    role: "后台开发工程师",
-    round: "技术二面",
-    details: "在秒杀高并发大题中，没解释为什么选择RabbitMQ而不是Kafka，表现出八股感，缺少系统架构思考能力。"
-  },
-  {
-    id: "session-4",
-    date: "06-25 09:10",
-    type: "resume",
-    title: "简历优化 · 后端开发",
-    score: 82,
-    grade: "优秀简历",
-    company: "美团",
-    role: "高级后端专家",
-    round: "简历智能筛选",
-    details: "简历主攻推荐系统与云原生落地图案。AI检索核心雷区在于量化指标不足，同时未突出个人作为主程Owner的角色定位。"
-  }
-];
-
 export default function CareerMemoryDashboard() {
   const router = useRouter();
   const auth = useAuth();
@@ -120,7 +69,7 @@ export default function CareerMemoryDashboard() {
   const fetchSessions = async () => {
     const token = typeof window !== "undefined" ? localStorage.getItem("offerPilot_token") : null;
     if (!auth.isLoggedIn || !token) {
-      setHistoryItems(INITIAL_HISTORY);
+      setHistoryItems([]);
       return;
     }
     setIsLoadingHistory(true);
@@ -486,7 +435,7 @@ export default function CareerMemoryDashboard() {
             <div className="flex flex-col gap-1.5 w-full">
               {[
                 { id: "overview", label: "总览看板", icon: "dashboard" },
-                { id: "timeline", label: "面试时间轴", icon: "schedule" },
+                { id: "timeline", label: "分析时间轴", icon: "schedule" },
                 { id: "projects", label: "项目记忆库", icon: "folder_shared" },
                 { id: "knowledge", label: "知识库", icon: "auto_stories" },
                 { id: "weaknesses", label: "弱点分析", icon: "analytics" },
@@ -724,14 +673,14 @@ export default function CareerMemoryDashboard() {
               {activeTab === "overview" && (
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch w-full">
                   
-                  {/* CARD 1: 面试时间轴 (Interview Timeline) */}
+                  {/* CARD 1: 分析时间轴 (Interview Timeline) */}
                   <div className="col-span-12 md:col-span-4 flex flex-col">
                     <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-5">
                       <div className="space-y-4 flex-1">
                         <div>
                           <h4 className="text-base font-black text-white flex items-center gap-2">
                             <span className="material-symbols-outlined text-base text-primary">schedule</span>
-                            面试时间轴
+                            分析时间轴
                           </h4>
                           <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">完整记录你的每一次面试经历</p>
                         </div>
@@ -775,7 +724,7 @@ export default function CareerMemoryDashboard() {
                         onClick={() => handleTabChange("timeline")}
                         className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer"
                       >
-                        查看全部 {historyItems.length} 次面试
+                        查看全部 {historyItems.length} 次分析
                       </button>
                     </div>
                   </div>
@@ -2066,6 +2015,54 @@ export default function CareerMemoryDashboard() {
             <div className="absolute inset-0 rounded-full border-4 border-t-primary animate-spin" />
           </div>
           <p className="text-sm font-bold text-white tracking-wider animate-pulse">删除中，请稍候...</p>
+        </div>
+      )}
+
+      {/* UNAUTHENTICATED OVERLAY */}
+      {!auth.isLoggedIn && (
+        <div className="fixed inset-0 z-30 bg-background/55 backdrop-blur-md flex items-center justify-center px-4">
+          <div className="glass-panel relative rounded-3xl border border-white/10 p-8 sm:p-10 max-w-md w-full text-center space-y-6 shadow-[0_20px_60px_rgba(0,0,0,0.4)] overflow-hidden">
+            <div className="absolute -top-16 -right-16 w-40 h-40 bg-primary/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-secondary/15 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative space-y-5">
+              <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/15 border border-primary/30 flex items-center justify-center shadow-[0_0_30px_rgba(192,193,255,0.2)]">
+                <span className="material-symbols-outlined text-3xl text-primary">lock</span>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-[10px] font-label-mono tracking-widest text-primary font-bold uppercase block">
+                  Career Memory
+                </span>
+                <h3 className="text-2xl font-black text-white leading-tight">登录解锁你的职业记忆看板</h3>
+                <p className="text-sm text-on-surface-variant/70 font-semibold leading-relaxed">
+                  AI 长期记忆会持续学习你的面试表现，沉淀项目亮点、追踪技能波动，并生成定制化的成长轨迹与 Offer 概率预测。
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="flex-1 py-3 bg-primary text-on-primary font-black rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_24px_rgba(192,193,255,0.35)] cursor-pointer"
+                >
+                  立即登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="flex-1 py-3 bg-white/5 border border-white/10 text-white font-black rounded-xl hover:bg-white/10 transition-all cursor-pointer"
+                >
+                  免费注册
+                </button>
+              </div>
+
+              <button
+                onClick={() => router.push("/")}
+                className="text-base font-bold text-on-surface-variant/50 hover:text-on-surface-variant transition-colors cursor-pointer"
+              >
+                返回首页
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </main>

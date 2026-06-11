@@ -3,10 +3,42 @@ import logging
 import asyncio
 import json
 import re
+import time
 from typing import Dict, Any, Optional, List
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _build_resilient_session() -> requests.Session:
+    """构造一个能扛瞬时 SSL / 连接抖动的 requests Session。
+
+    现象：minimaxi 网关偶发在 TLS 握手或流式首包时返回 SSLEOFError
+    ("UNEXPECTED_EOF_WHILE_READING")，单次直连 100% 失败。
+    解决：自动重试 SSL/连接类错误 + 指数退避，最多 4 次。
+    """
+    session = requests.Session()
+    retries = Retry(
+        total=4,
+        connect=4,
+        read=2,
+        status=2,
+        backoff_factor=0.8,
+        backoff_jitter=0.5,
+        status_forcelist=(429, 500, 502, 503, 504, 529),
+        allowed_methods=frozenset(["POST"]),
+        raise_on_status=False,
+        respect_retry_after_header=True,
+    )
+    adapter = HTTPAdapter(max_retries=retries, pool_maxsize=10)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
+
+_RESILIENT_SESSION = _build_resilient_session()
 
 def call_minimax_sync(payload: dict) -> dict:
     url = f"{settings.MINIMAX_BASE_URL}/chat/completions"
@@ -16,7 +48,7 @@ def call_minimax_sync(payload: dict) -> dict:
     }
     # 120s: long transcripts (e.g. 89 segments) can take well over 30s for
     # reasoning models to finish; 30s caused "Read timed out" in sectionize.
-    response = requests.post(url, headers=headers, json=payload, timeout=120.0)
+    response = _RESILIENT_SESSION.post(url, headers=headers, json=payload, timeout=120.0)
     response.raise_for_status()
     return response.json()
 
@@ -384,6 +416,9 @@ def call_minimax_stream(payload: dict, timeout: float = 300.0) -> dict:
     流式调用 MiniMax API，把所有 chunk 拼接后返回与非流式格式一致的 dict。
     用于：简历分析等长输出场景，避免 MiniMax 网关 ~90s 的 idle timeout
     在推理 + 大 JSON 输出过程中主动断开连接（RemoteDisconnected）。
+
+    重试策略：MiniMax 上游偶发 429 / 5xx / 529(Overloaded)。stream 模式下
+    urllib3 的 Retry adapter 帮不上（response 已建立连接才 raise），手写指数退避。
     """
     url = f"{settings.MINIMAX_BASE_URL}/chat/completions"
     headers = {
@@ -391,43 +426,90 @@ def call_minimax_stream(payload: dict, timeout: float = 300.0) -> dict:
         "Content-Type": "application/json"
     }
     stream_payload = {**payload, "stream": True}
-    content_parts: list[str] = []
-    with requests.post(
-        url, headers=headers, json=stream_payload, timeout=timeout,
-        proxies={"http": None, "https": None}, stream=True,
-    ) as resp:
-        resp.raise_for_status()
-        for raw in resp.iter_lines(decode_unicode=True):
-            if not raw:
-                continue
-            line = raw.strip()
-            if not line.startswith("data:"):
-                continue
-            data = line[len("data:"):].strip()
-            if data == "[DONE]":
-                break
-            try:
-                chunk = json.loads(data)
-            except json.JSONDecodeError:
-                continue
-            try:
-                delta = chunk["choices"][0].get("delta") or {}
-                piece = delta.get("content")
-                if piece:
-                    content_parts.append(piece)
-            except (KeyError, IndexError, TypeError):
-                continue
-    return {
-        "choices": [{"message": {"content": "".join(content_parts)}}]
-    }
+    retryable_status = {429, 500, 502, 503, 504, 529}
+    max_attempts = 4
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(max_attempts):
+        try:
+            content_parts: list[str] = []
+            with requests.post(
+                url, headers=headers, json=stream_payload, timeout=timeout,
+                proxies={"http": None, "https": None}, stream=True,
+            ) as resp:
+                if resp.status_code in retryable_status:
+                    # 抬到 HTTPError，由下面的 except 决定是否重试
+                    raise requests.HTTPError(
+                        f"{resp.status_code} retryable from MiniMax upstream",
+                        response=resp,
+                    )
+                resp.raise_for_status()
+                for raw in resp.iter_lines(decode_unicode=True):
+                    if not raw:
+                        continue
+                    line = raw.strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[len("data:"):].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    try:
+                        delta = chunk["choices"][0].get("delta") or {}
+                        piece = delta.get("content")
+                        if piece:
+                            content_parts.append(piece)
+                    except (KeyError, IndexError, TypeError):
+                        continue
+            return {
+                "choices": [{"message": {"content": "".join(content_parts)}}]
+            }
+        except requests.HTTPError as e:
+            last_exc = e
+            status_code = e.response.status_code if e.response is not None else None
+            if status_code not in retryable_status or attempt == max_attempts - 1:
+                raise
+            wait = 1.5 * (2 ** attempt)  # 1.5s, 3s, 6s
+            logger.warning(
+                "[MiniMax stream] upstream %s, retry %d/%d after %.1fs",
+                status_code, attempt + 1, max_attempts - 1, wait,
+            )
+            time.sleep(wait)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_exc = e
+            if attempt == max_attempts - 1:
+                raise
+            wait = 1.5 * (2 ** attempt)
+            logger.warning(
+                "[MiniMax stream] %s, retry %d/%d after %.1fs",
+                type(e).__name__, attempt + 1, max_attempts - 1, wait,
+            )
+            time.sleep(wait)
+    raise last_exc if last_exc else RuntimeError("call_minimax_stream exhausted retries")
 
 
-async def analyze_resume_text(resume_text: str, profile_data: Optional[dict] = None) -> Dict[str, Any]:
+async def analyze_resume_text(
+    resume_text: str,
+    profile_data: Optional[dict] = None,
+    parsed_structure: Optional[dict] = None,
+) -> Dict[str, Any]:
     """
     Calls MiniMax LLM to analyze the extracted resume text and return structured analysis in JSON.
     使用流式调用绕开 MiniMax 网关 ~90s 的 idle timeout，禁用系统代理。
+
+    parsed_structure: 服务端正则解析出的结构化简历（公司/岗位/时间/bullets 等原文），
+    传给 LLM 仅作为 "verbatim 参照表"，避免 LLM 把 "ByteDance" 改写成 "字节跳动"、
+    改写公司名/时间等原文。LLM 仍可在结构上自由发挥，但所有公司名/岗位/时间/原文 bullet
+    必须 verbatim 等于解析器给出的值。
     """
+    from datetime import datetime
+    current_date = datetime.now().strftime("%Y-%m-%d")
+
     system_prompt = (
+        f"【系统时间上下文】当前北京时间是：{current_date}。在提取或计算候选人的工作年限（例如将 '2023.07 - 至今' 或其他时间段与当前时间对比）时，请严格以该时间作为当前的'至今/Present'基准进行逻辑计算，避免算错工作年限。\n"
         "你是一个专业的 AI 简历分析教练。你的任务是对候选人的简历进行深度雷区检测与优化建议。\n"
         "你需要根据提取出的简历文本内容，结合候选人的求职期望画像（如果提供了），完成以下工作：\n"
         "1. 计算简历综合评分（0-100，当前表现）以及优化后预计提升的综合评分（0-100）。\n"
@@ -437,11 +519,22 @@ async def analyze_resume_text(resume_text: str, profile_data: Optional[dict] = N
         "   - 对于工作经历中的每一条核心描述（bullets），同时保留原始描述（originalText）和优化后的描述（optimizedText）。\n"
         "   - 给出该描述在原始简历中的诊断风险（originalTag 为 '风险'，originalDesc 说明缺失或问题所在；或者 originalTag 为 '亮点'）并赋予对应样式类名。\n"
         "   - 给出优化后的标签（optimizedTag 为 '已优化'）与样式类名。\n"
+        "   - **【最重要！严禁虚构无关业务场景】**：优化后的描述（optimizedText）必须基于候选人简历原文的**真实项目背景与技术路线**进行表达重构。**严禁凭空捏造与原项目完全无关的高并发/大流量业务场景**（例如：如果原简历不涉及电商、大促、秒杀等，绝对不能在优化版中将其改写或虚构成“大促压测”、“双十一流量洪峰保障”等无中生有的场景；如果原简历没有提到相关技术栈，绝不能虚构其参与了该技术的研发）。所有优化的目标是润色表述和体现技术深度，而非伪造工作背景。\n"
         "5. 诊断并列出简历中的所有风险点（risks），包含风险标题、详细说明、严重程度（高风险/中风险/低风险）。\n"
         "6. 进行目标岗位画像匹配度分析（match_analysis），包括匹配得分、文字说明、具体各维度的覆盖情况（coverages）。\n"
         "7. 输出简历优化的核心AI建议（optimization_suggestions），每条建议包含标题和详细描述。\n"
         "8. 分析关键词覆盖率（keywords_analysis），找出已覆盖的高频词（current_keywords）和推荐补齐的核心行业热点词（recommended_keywords）。\n"
         "9. 提供 ATS 兼容性各项检测指标结果（ats_checks），每一项包括检测名、状态（通过/警告）及具体指标评分情况。\n"
+        "\n"
+        "10. **输出简历的完整结构分析地图（structure_analysis）**：把简历按 8 个固定 section 切片，\n"
+        "    给出每个 section 的健康度诊断和黄金润色范例。**关键约束**：\n"
+        "    - 8 个 section key 必须严格使用下面 schema 列出的英文 key，不要新增也不要省略\n"
+        "    - 每个 section 必须输出 status / score / desc / advice / before / after 六个字段\n"
+        "    - status 必须是 \"优秀\" / \"亮点\" / \"风险\" / \"缺失\" 之一\n"
+        "    - score 必须是 0-100 的整数\n"
+        "    - advice 是 1-3 条字符串的数组\n"
+        "    - 工作经历 / 项目经历 section 的 before / after 优先用简历中真实 bullets 的 originalText / optimizedText；\n"
+        "      其他 section（教育 / 开源 / 业务成果 / 管理 / 技术栈 / 个人信息）原简历可能没对应内容，按目标岗位画像自由生成合理范例\n"
         "\n"
         "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言，只返回纯 JSON 对象，且属性键和值必须使用双引号）：\n"
         "{\n"
@@ -471,7 +564,7 @@ async def analyze_resume_text(resume_text: str, profile_data: Optional[dict] = N
         "          \"originalText\": \"原始描述句子\",\n"
         "          \"optimizedText\": \"使用STAR原则优化后、包含量化业绩与大厂架构思维的资深表述\",\n"
         "          \"originalTag\": \"风险/亮点\",\n"
-        "          \"originalTagClass\": \"text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20\", \n"
+        "          \"originalTagClass\": \"如果是风险请填 'text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20'，如果是亮点请填 'text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20'\", \n"
         "          \"originalDesc\": \"诊断说明说明为什么是风险或亮点\",\n"
         "          \"optimizedTag\": \"已优化\",\n"
         "          \"optimizedTagClass\": \"text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20\"\n"
@@ -513,11 +606,32 @@ async def analyze_resume_text(resume_text: str, profile_data: Optional[dict] = N
         "      \"status\": \"通过/警告\",\n"
         "      \"score\": \"诊断简述评分\"\n"
         "    }\n"
-        "  ]\n"
-        "}"
+        ",\n"
+        "  \"structure_analysis\": {\n"
+        "    \"personal_info\": { \"status\": \"优秀\", \"score\": 90, \"desc\": \"...\", \"advice\": [\"...\"], \"before\": \"...\", \"after\": \"...\" },\n"
+        "    \"work_experience\": { \"status\": \"优秀\", \"score\": 90, \"desc\": \"...\", \"advice\": [\"...\"], \"before\": \"...\", \"after\": \"...\" },\n"
+        "    \"projects\": { \"status\": \"优秀\", \"score\": 90, \"desc\": \"...\", \"advice\": [\"...\"], \"before\": \"...\", \"after\": \"...\" },\n"
+        "    \"tech_stack\": { \"status\": \"优秀\", \"score\": 90, \"desc\": \"...\", \"advice\": [\"...\"], \"before\": \"...\", \"after\": \"...\" },\n"
+        "    \"education\": { \"status\": \"优秀\", \"score\": 90, \"desc\": \"...\", \"advice\": [\"...\"], \"before\": \"...\", \"after\": \"...\" },\n"
+        "    \"open_source\": { \"status\": \"优秀\", \"score\": 90, \"desc\": \"...\", \"advice\": [\"...\"], \"before\": \"...\", \"after\": \"...\" },\n"
+        "    \"business_outcomes\": { \"status\": \"优秀\", \"score\": 90, \"desc\": \"...\", \"advice\": [\"...\"], \"before\": \"...\", \"after\": \"...\" },\n"
+        "    \"management\": { \"status\": \"优秀\", \"score\": 90, \"desc\": \"...\", \"advice\": [\"...\"], \"before\": \"...\", \"after\": \"...\" }\n"
+        "  }\n"
+        "}\n"
     )
 
-    user_content = f"简历文本内容：\n{resume_text}\n"
+    user_content = ""
+    if parsed_structure:
+        user_content += (
+            "\n【verbatim 参照表 - 服务端解析的原文结构】\n"
+            "以下公司名、岗位、时间、bullet 原文是从简历里 verbatim 抽出的，"
+            "你输出的 work_experiences / profile 里所有这些字段必须 1:1 等于下表，"
+            "禁止翻译/规范化/合并/拆分（如 \"ByteDance\" 不得改写为 \"字节跳动\"，"
+            "\"2022.07-2024.06\" 不得改写为 \"2022年7月 - 2024年6月\"）。"
+            "对 bullet 你只需给出诊断/优化版本（optimizedText/originalTag/...），originalText 必须原样照抄。\n"
+            f"{json.dumps(parsed_structure, ensure_ascii=False, indent=2)}\n"
+        )
+    user_content += f"\n简历文本内容：\n{resume_text}\n"
     if profile_data:
         user_content += f"\n求职期望画像信息：\n{json.dumps(profile_data, ensure_ascii=False)}\n"
 

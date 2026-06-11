@@ -297,7 +297,6 @@ export default function Home() {
             {/* Sidebar Left */}
             <div className="md:col-span-3">
               <div className="p-7 rounded-2xl bg-surface-container-low border border-white/5 h-fit">
-                <h4 className="text-on-surface-variant text-[16px] mb-6 font-label-mono uppercase tracking-widest font-bold">面试时间轴</h4>
                 <div className="space-y-5">
                   <div className="flex gap-4 text-[15px] items-center opacity-75 py-1">
                     <span className="text-on-surface-variant opacity-50 font-mono">00:01</span>

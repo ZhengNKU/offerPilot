@@ -122,7 +122,7 @@ export default function CareerDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-on-background font-body-md flex flex-col relative overflow-hidden select-none">
+    <div className="min-h-screen bg-background text-on-background font-body-md flex flex-col relative overflow-hidden">
       
       {/* Background visual scifi canvas grid */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px),linear-gradient(to_bottom,#ffffff03_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />

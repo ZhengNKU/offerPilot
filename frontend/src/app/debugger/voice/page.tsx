@@ -1353,7 +1353,6 @@ export default function InterviewVoiceAnalysisPage() {
       <head>
         <title>${company} - ${role} 面试对话记录</title>
         <style>
-          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
           body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             background-color: #ffffff;
