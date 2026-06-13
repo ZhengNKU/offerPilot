@@ -130,14 +130,14 @@ export default function InterviewTrainingPage() {
     if (activeQuestionIndex >= 5) {
       alert("模拟面试已完成所有环节！正在生成AI面试报告...");
       setIsTrainingStarted(false);
-      localStorage.setItem("offerPilot_viewing_session", "true");
-      localStorage.setItem("offerPilot_report_mode", "audio");
-      localStorage.setItem("offerPilot_session_company", companyStyle);
-      localStorage.setItem("offerPilot_session_role", targetRole);
-      localStorage.setItem("offerPilot_session_round", interviewType);
-      localStorage.setItem("offerPilot_session_grade", "P6 / L5");
-      localStorage.setItem("offerPilot_session_salary", "25K * 16薪");
-      localStorage.setItem("offerPilot_session_date", "2026-05-31");
+      localStorage.setItem("interviewVar_viewing_session", "true");
+      localStorage.setItem("interviewVar_report_mode", "audio");
+      localStorage.setItem("interviewVar_session_company", companyStyle);
+      localStorage.setItem("interviewVar_session_role", targetRole);
+      localStorage.setItem("interviewVar_session_round", interviewType);
+      localStorage.setItem("interviewVar_session_grade", "P6 / L5");
+      localStorage.setItem("interviewVar_session_salary", "25K * 16薪");
+      localStorage.setItem("interviewVar_session_date", "2026-05-31");
       router.push("/debugger/report");
       return;
     }
@@ -221,7 +221,7 @@ export default function InterviewTrainingPage() {
                 </linearGradient>
               </defs>
             </svg>
-            OfferPilot
+            面试VAR
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -406,7 +406,7 @@ export default function InterviewTrainingPage() {
                   {isTrainingStarted ? "正在进行模拟面试" : "开始模拟面试"}
                 </button>
                 <span 
-                  onClick={() => alert("模拟面试将调用摄像头与麦克风，录音本地加密处理，OfferPilot 深度保护您的隐私权益。")}
+                  onClick={() => alert("模拟面试将调用摄像头与麦克风，录音本地加密处理，面试VAR 深度保护您的隐私权益。")}
                   className="text-[10px] font-bold text-on-surface-variant/30 hover:text-white transition-colors cursor-pointer text-center block"
                 >
                   开始即表示同意 <span className="text-primary hover:underline">训练规范与用户权益 →</span>
@@ -518,14 +518,14 @@ export default function InterviewTrainingPage() {
                         onClick={() => {
                           if(confirm("确定要提前结束本次模拟面试并导出分析报告吗？")) {
                             setIsTrainingStarted(false);
-                            localStorage.setItem("offerPilot_viewing_session", "true");
-                            localStorage.setItem("offerPilot_report_mode", "audio");
-                            localStorage.setItem("offerPilot_session_company", companyStyle);
-                            localStorage.setItem("offerPilot_session_role", targetRole);
-                            localStorage.setItem("offerPilot_session_round", interviewType);
-                            localStorage.setItem("offerPilot_session_grade", "P6 / L5");
-                            localStorage.setItem("offerPilot_session_salary", "25K * 16薪");
-                            localStorage.setItem("offerPilot_session_date", "2026-05-31");
+                            localStorage.setItem("interviewVar_viewing_session", "true");
+                            localStorage.setItem("interviewVar_report_mode", "audio");
+                            localStorage.setItem("interviewVar_session_company", companyStyle);
+                            localStorage.setItem("interviewVar_session_role", targetRole);
+                            localStorage.setItem("interviewVar_session_round", interviewType);
+                            localStorage.setItem("interviewVar_session_grade", "P6 / L5");
+                            localStorage.setItem("interviewVar_session_salary", "25K * 16薪");
+                            localStorage.setItem("interviewVar_session_date", "2026-05-31");
                             router.push("/debugger/report");
                           }
                         }}
@@ -689,7 +689,7 @@ export default function InterviewTrainingPage() {
                 <div className="flex items-center gap-5 border-b border-white/5 pb-2 font-black text-xs md:text-[13px] select-none">
                   <span className="text-white border-b-2 border-primary pb-2 cursor-pointer relative z-10">实时对话</span>
                   <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => alert("AI 面试官已自动为您记录面试笔记。")}>面试笔记</span>
-                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => alert("答题结束后，OfferPilot 会基于您的整体表现生成全维度 AI 诊断意见。")}>AI 建议</span>
+                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => alert("答题结束后，面试VAR 会基于您的整体表现生成全维度 AI 诊断意见。")}>AI 建议</span>
                   <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => alert("本环节的参考答案：深入剖析秒杀高并发一致性读写流程，推荐使用分布式削峰缓冲。")}>参考答案</span>
                 </div>
 
@@ -945,7 +945,7 @@ export default function InterviewTrainingPage() {
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 OfferPilot AI. All rights reserved.
+            © 2026 面试VAR AI. All rights reserved.
           </span>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
             <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">
@@ -1017,7 +1017,7 @@ export default function InterviewTrainingPage() {
                 <button
                   onClick={() => {
                     if (feedbackText.trim()) {
-                      alert("感谢您的反馈！OfferPilot 的 AI 技术团队将尽快诊断并优化。");
+                      alert("感谢您的反馈！面试VAR 的 AI 技术团队将尽快诊断并优化。");
                       setFeedbackText('');
                       setShowFeedbackModal(false);
                     } else {

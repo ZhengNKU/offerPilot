@@ -13,7 +13,7 @@ import time
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
 app = FastAPI(
-    title="OfferPilot AI Coach - Backend Services",
+    title="面试VAR - Backend Services",
     description="Backend user authentication, profiles management, and LangGraph APIs.",
     version="1.0.0"
 )
@@ -68,7 +68,7 @@ async def shutdown_event():
 
 @app.get("/")
 def read_root():
-    return {"message": "OfferPilot Backend Services are running."}
+    return {"message": "面试VAR Backend Services are running."}
 
 if __name__ == "__main__":
     uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=True)

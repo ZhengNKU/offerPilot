@@ -146,7 +146,7 @@ export default function CareerDashboard() {
                 </linearGradient>
               </defs>
             </svg>
-            OfferPilot
+            面试VAR
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -294,7 +294,7 @@ export default function CareerDashboard() {
                   </span>
                   <span className="flex items-center gap-1.5 whitespace-nowrap">
                     <span className="material-symbols-outlined text-xs text-primary">calendar_today</span>
-                    加入 OfferPilot {profile.joinDays} 天
+                    加入 面试VAR {profile.joinDays} 天
                   </span>
                 </div>
               </div>
@@ -752,7 +752,7 @@ export default function CareerDashboard() {
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 OfferPilot AI. All rights reserved.
+            © 2026 面试VAR AI. All rights reserved.
           </span>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
             <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">
@@ -1119,7 +1119,7 @@ export default function CareerDashboard() {
               <div className="flex justify-between items-center pb-4 border-b border-white/5">
                 <h3 className="font-extrabold text-white text-lg flex items-center gap-2">
                   <span className="material-symbols-outlined text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>workspace_premium</span>
-                  解锁 OfferPilot 顶配 AI 职业大招：会员计划对比
+                  解锁 面试VAR 顶配 AI 职业大招：会员计划对比
                 </h3>
                 <button
                   onClick={() => setShowUpgradeModal(false)}

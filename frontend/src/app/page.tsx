@@ -190,7 +190,7 @@ export default function Home() {
                 </linearGradient>
               </defs>
             </svg>
-            OfferPilot
+            面试VAR
           </div>
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
             <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
@@ -254,7 +254,7 @@ export default function Home() {
           
           <div className="w-full max-w-[1200px] block mx-auto">
             <p className="text-on-surface-variant whitespace-normal break-words" style={{ fontSize: "20px", lineHeight: "1.7", fontWeight: 400, fontFamily: "Inter, sans-serif" }}>
-              OfferPilot 分析真实面试录音，定位信任崩溃时刻，揭示面试官真实想法，帮你获得心仪 Offer。
+              面试VAR 分析真实面试录音，定位信任崩溃时刻，揭示面试官真实想法，帮你获得心仪 Offer。
             </p>
           </div>
           
@@ -593,7 +593,7 @@ export default function Home() {
       <section className="py-section-padding px-gutter w-full overflow-hidden block">
         <div className="max-w-container-max mx-auto w-full flex flex-col items-center">
           <div className="text-center mb-16 space-y-4 w-full">
-            <h2 className="text-on-surface font-black tracking-tight" style={{ fontSize: "52px", fontFamily: "'Hanken Grotesk', sans-serif" }}>他们用 OfferPilot 拿到了更好的 Offer</h2>
+            <h2 className="text-on-surface font-black tracking-tight" style={{ fontSize: "52px", fontFamily: "'Hanken Grotesk', sans-serif" }}>他们用 面试VAR 拿到了更好的 Offer</h2>
             <p className="text-on-surface-variant font-label-mono font-bold tracking-widest uppercase" style={{ fontSize: "14px" }}>5,200+ 职业人士的真实反馈</p>
           </div>
 
@@ -603,7 +603,7 @@ export default function Home() {
                 avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAoBpggRj1UtigDFdEnOK0sAAmSdS-IVJ2H9W38TRex37DPfiHqEvwoY6eQcy4GeTPpfeEJDjyuoSFA55gzpIvv7R5Mfz9ZSXKlQbqUKTzPLxqLTXr-9tvsKlzmM1X0EAYIJVwDIewcFXEEh6EIHymYLEHtaG3QthqZnrrX0q-U87O-FrecJz9XcdHZoz2ZndesMcgGuwEkcaCDeujsrkHIVZ2b_s1ue1sD9aCOzimyGM0EZ6xbYMXOZYnG5fMTc5XCa01xnjuPbNeK",
                 name: "张同学",
                 title: "字节跳动 · 后端开发工程师",
-                quote: "“之前总是不知道为什么面试挂了，OfferPilot 帮我找到了问题所在。最佩服的是 00:18 的那个信任崩溃点，让我恍然大悟！”",
+                quote: "“之前总是不知道为什么面试挂了，面试VAR 帮我找到了问题所在。最佩服的是 00:18 的那个信任崩溃点，让我恍然大悟！”",
                 tagColor: "text-primary",
                 tag: "拿到字节跳动 Offer"
               },
@@ -619,7 +619,7 @@ export default function Home() {
                 avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuDq0oV8NegQm719QROkK-ggi194pRkwKl7fHB8GEkJwwxEDaGssftR2ZcL4XT3Iu35dejN5439XwRofApsNIVCKgZBrKYNaUhrbwoHxbvncKbDFu1dXrqkTGOxvL4VcAut8iUIAlSvE8TiAIkhn03XFAGoK0knqMY51qStDuYjR2L3bNHY4Sxn502nwfstmS1SsoSFUQxP86Imppj1BGJ2vIUH8tEeclAtdMMFYo856Zpim5zG7DD2nTHwiokYtUOCmtq6SU81uMO5u",
                 name: "王同学",
                 title: "腾讯 · 高级产品经理",
-                quote: "“从简历优化到面试复盘，再到表达升级，OfferPilot 是我求职路上最亲密的战友，成功拿到了腾讯的 Offer！”",
+                quote: "“从简历优化到面试复盘，再到表达升级，面试VAR 是我求职路上最亲密的战友，成功拿到了腾讯的 Offer！”",
                 tagColor: "text-secondary",
                 tag: "拿到腾讯 Offer"
               }
@@ -799,7 +799,7 @@ export default function Home() {
           
           <div className="w-full max-w-3xl mx-auto block mb-10 relative z-10">
             <p className="text-on-surface-variant whitespace-normal break-words" style={{ fontSize: "18px", lineHeight: "1.6", fontWeight: 400, fontFamily: "Inter, sans-serif" }}>
-              立即体验 OfferPilot，发现你的面试优势，拿到心仪 Offer。
+              立即体验 面试VAR，发现你的面试优势，拿到心仪 Offer。
             </p>
           </div>
           
@@ -818,7 +818,7 @@ export default function Home() {
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-stack-gap px-gutter py-section-padding max-w-container-max mx-auto text-left">
           <div className="col-span-1 md:col-span-2 space-y-6">
-            <div className="text-xl font-black text-on-surface" style={{ fontSize: "32px", fontFamily: "'Hanken Grotesk', sans-serif" }}>OfferPilot</div>
+            <div className="text-xl font-black text-on-surface" style={{ fontSize: "32px", fontFamily: "'Hanken Grotesk', sans-serif" }}>面试VAR</div>
             <div className="w-full max-w-xs block">
               <p className="text-on-surface-variant text-sm font-medium leading-relaxed">
                 AI Interview OS · 全流程面试分析引擎 让每一次面试都成为通往 Offer 的阶梯。
@@ -866,7 +866,7 @@ export default function Home() {
         </div>
         
         <div className="px-gutter py-8 border-t border-white/5 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">© 2026 OfferPilot AI. All rights reserved.</p>
+          <p className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">© 2026 面试VAR AI. All rights reserved.</p>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
             <a className="hover:text-primary transition-colors" href="#">隐私政策</a>
             <a className="hover:text-primary transition-colors" href="#">服务条款</a>

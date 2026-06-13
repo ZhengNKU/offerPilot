@@ -3,8 +3,8 @@ import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 
 export const metadata: Metadata = {
-  title: "OfferPilot - AI 面试分析专家",
-  description: "OfferPilot 分析真实面试录音，定位信任崩溃时刻，揭示面试官真实想法，帮你获得心仪 Offer。",
+  title: "面试VAR - AI 面试分析专家",
+  description: "面试VAR 分析真实面试录音，定位信任崩溃时刻，揭示面试官真实想法，帮你获得心仪 Offer。",
 };
 
 export default function RootLayout({

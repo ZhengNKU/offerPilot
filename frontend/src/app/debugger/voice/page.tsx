@@ -797,16 +797,16 @@ export default function InterviewVoiceAnalysisPage() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    const savedGuest = localStorage.getItem("offerPilot_is_guest_session");
+    const savedGuest = localStorage.getItem("interviewVar_is_guest_session");
     if (savedGuest === "true") setIsGuest(true);
 
-    const savedCompany = localStorage.getItem("offerPilot_session_company");
-    const savedRole    = localStorage.getItem("offerPilot_session_role");
-    const savedRound   = localStorage.getItem("offerPilot_session_round");
-    const savedDate    = localStorage.getItem("offerPilot_session_date");
-    const savedGrade   = localStorage.getItem("offerPilot_session_grade");
-    const savedSalary  = localStorage.getItem("offerPilot_session_salary");
-    const savedYears   = localStorage.getItem("offerPilot_session_years");
+    const savedCompany = localStorage.getItem("interviewVar_session_company");
+    const savedRole    = localStorage.getItem("interviewVar_session_role");
+    const savedRound   = localStorage.getItem("interviewVar_session_round");
+    const savedDate    = localStorage.getItem("interviewVar_session_date");
+    const savedGrade   = localStorage.getItem("interviewVar_session_grade");
+    const savedSalary  = localStorage.getItem("interviewVar_session_salary");
+    const savedYears   = localStorage.getItem("interviewVar_session_years");
 
     if (savedCompany || savedRole || savedRound) {
       setInterviewInfo(prev => ({
@@ -821,9 +821,9 @@ export default function InterviewVoiceAnalysisPage() {
       }));
     }
 
-    const taskId    = localStorage.getItem("offerPilot_task_id");
+    const taskId    = localStorage.getItem("interviewVar_task_id");
     const searchParams = new URLSearchParams(window.location.search);
-    let sessionId = searchParams.get("sessionId") || localStorage.getItem("offerPilot_session_id");
+    let sessionId = searchParams.get("sessionId") || localStorage.getItem("interviewVar_session_id");
     if (sessionId) {
       const newUrl = window.location.pathname + `?sessionId=${sessionId}`;
       window.history.replaceState(null, "", newUrl);
@@ -849,7 +849,7 @@ export default function InterviewVoiceAnalysisPage() {
 
     const loadReport = async () => {
       try {
-        const token = localStorage.getItem("offerPilot_token");
+        const token = localStorage.getItem("interviewVar_token");
         const headers: Record<string, string> = {};
         if (token) headers["Authorization"] = `Bearer ${token}`;
 
@@ -879,7 +879,7 @@ export default function InterviewVoiceAnalysisPage() {
             setPageStatus("no_session");
             return;
           }
-          localStorage.removeItem("offerPilot_task_id");
+          localStorage.removeItem("interviewVar_task_id");
         }
 
         // Fetch both report and sections
@@ -1069,7 +1069,7 @@ export default function InterviewVoiceAnalysisPage() {
         }
 
         // Clean up and show dashboard
-        localStorage.removeItem("offerPilot_session_id");
+        localStorage.removeItem("interviewVar_session_id");
         setPageStatus("ready");
 
 
@@ -1105,7 +1105,7 @@ export default function InterviewVoiceAnalysisPage() {
 
   // Load audio URL from localStorage on mount
   useEffect(() => {
-    const savedUrl = localStorage.getItem("offerPilot_session_audio_url");
+    const savedUrl = localStorage.getItem("interviewVar_session_audio_url");
     if (savedUrl) setAudioUrl(savedUrl);
   }, []);
 
@@ -1290,7 +1290,7 @@ export default function InterviewVoiceAnalysisPage() {
     // Otherwise, fetch from backend
     setOptPhase("loading");
     try {
-      const token = localStorage.getItem("offerPilot_token");
+      const token = localStorage.getItem("interviewVar_token");
       const headers: Record<string, string> = {
         "Content-Type": "application/json"
       };
@@ -1641,7 +1641,7 @@ export default function InterviewVoiceAnalysisPage() {
                 </linearGradient>
               </defs>
             </svg>
-            OfferPilot
+            面试VAR
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -2497,7 +2497,7 @@ export default function InterviewVoiceAnalysisPage() {
               <div className="flex justify-between items-center pb-2.5 border-b border-white/5 select-none">
                 <h3 className="font-extrabold text-white text-base flex items-center gap-2">
                   <span className="material-symbols-outlined text-[#00D4FF] animate-pulse">auto_awesome</span>
-                  OfferPilot AI 表达重塑对策建议
+                  面试VAR AI 表达重塑对策建议
                 </h3>
                 <button
                   onClick={() => setShowOptimizer(false)}

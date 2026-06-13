@@ -195,25 +195,25 @@ export default function InterviewRecordAnalysisPage() {
 
   // Pre-load default or local storage text
   useEffect(() => {
-    const savedGuest = localStorage.getItem("offerPilot_is_guest_session");
+    const savedGuest = localStorage.getItem("interviewVar_is_guest_session");
     if (savedGuest === "true") {
       setIsGuest(true);
     }
 
-    const savedText = localStorage.getItem("offerPilot_session_pasteText");
-    const savedCompany = localStorage.getItem("offerPilot_session_company");
-    const savedRole = localStorage.getItem("offerPilot_session_role");
-    const savedRound = localStorage.getItem("offerPilot_session_round");
-    const savedDate = localStorage.getItem("offerPilot_session_date");
-    const savedGrade = localStorage.getItem("offerPilot_session_grade");
-    const savedSalary = localStorage.getItem("offerPilot_session_salary");
+    const savedText = localStorage.getItem("interviewVar_session_pasteText");
+    const savedCompany = localStorage.getItem("interviewVar_session_company");
+    const savedRole = localStorage.getItem("interviewVar_session_role");
+    const savedRound = localStorage.getItem("interviewVar_session_round");
+    const savedDate = localStorage.getItem("interviewVar_session_date");
+    const savedGrade = localStorage.getItem("interviewVar_session_grade");
+    const savedSalary = localStorage.getItem("interviewVar_session_salary");
     const searchParams = new URLSearchParams(window.location.search);
-    let sessionId = searchParams.get("sessionId") || localStorage.getItem("offerPilot_session_id");
+    let sessionId = searchParams.get("sessionId") || localStorage.getItem("interviewVar_session_id");
     if (sessionId) {
       const newUrl = window.location.pathname + `?sessionId=${sessionId}`;
       window.history.replaceState(null, "", newUrl);
     }
-    const token = localStorage.getItem("offerPilot_token");
+    const token = localStorage.getItem("interviewVar_token");
 
     if (savedCompany || savedRole || savedRound) {
       setMetadataForm(prev => ({
@@ -298,7 +298,7 @@ export default function InterviewRecordAnalysisPage() {
         }
       }).finally(() => {
         setIsLoading(false);
-        localStorage.removeItem("offerPilot_session_id");
+        localStorage.removeItem("interviewVar_session_id");
       });
     } else {
       if (savedText && savedText.trim().length > 0) {
@@ -440,13 +440,13 @@ export default function InterviewRecordAnalysisPage() {
   const handleAnalyzeSubmit = async () => {
     // ── CHECK: Limit free users/guests to 1 analysis per type ──
     if (!auth.isLoggedIn) {
-      if (localStorage.getItem("offerPilot_analyzed_text") === "true") {
+      if (localStorage.getItem("interviewVar_analyzed_text") === "true") {
         auth.triggerToast("您的该项分析免费体验次数已达上限，请注册账号并升级至 PRO 会员解锁更多分析！");
         return;
       }
     } else {
       // Check registered free user limit via backend
-      const token = localStorage.getItem("offerPilot_token");
+      const token = localStorage.getItem("interviewVar_token");
       try {
         const checkRes = await fetch("http://localhost:8001/api/audio/check_limit", {
           headers: token ? { "Authorization": `Bearer ${token}` } : {}
@@ -480,14 +480,14 @@ export default function InterviewRecordAnalysisPage() {
     }
 
     setIsAnalyzing(true);
-    localStorage.setItem("offerPilot_session_pasteText", pasteText);
-    localStorage.setItem("offerPilot_session_company", metadataForm.company);
-    localStorage.setItem("offerPilot_session_role", metadataForm.role);
-    localStorage.setItem("offerPilot_session_round", metadataForm.round);
-    localStorage.setItem("offerPilot_session_date", metadataForm.date);
-    localStorage.setItem("offerPilot_session_grade", metadataForm.grade);
-    localStorage.setItem("offerPilot_session_salary", metadataForm.salary);
-    localStorage.setItem("offerPilot_analyzed_text", "true");
+    localStorage.setItem("interviewVar_session_pasteText", pasteText);
+    localStorage.setItem("interviewVar_session_company", metadataForm.company);
+    localStorage.setItem("interviewVar_session_role", metadataForm.role);
+    localStorage.setItem("interviewVar_session_round", metadataForm.round);
+    localStorage.setItem("interviewVar_session_date", metadataForm.date);
+    localStorage.setItem("interviewVar_session_grade", metadataForm.grade);
+    localStorage.setItem("interviewVar_session_salary", metadataForm.salary);
+    localStorage.setItem("interviewVar_analyzed_text", "true");
 
     setTimeout(() => {
       setIsAnalyzing(false);
@@ -549,7 +549,7 @@ export default function InterviewRecordAnalysisPage() {
                 </linearGradient>
               </defs>
             </svg>
-              <span className="flex items-baseline">OfferPilot</span>
+              <span className="flex items-baseline">面试VAR</span>
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -617,7 +617,7 @@ export default function InterviewRecordAnalysisPage() {
           >
             <div className="w-16 h-16 rounded-full border-4 border-[#00D4FF]/20 border-t-[#00D4FF] animate-spin mb-2" />
             <div className="text-center space-y-3">
-              <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">OfferPilot 正在分析面试记录...</h3>
+              <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">面试VAR 正在分析面试记录...</h3>
               <p className="text-base md:text-lg text-white/70 font-semibold">剖析答题逻辑、计算风险漏点、输出表达升级策略</p>
             </div>
           </motion.div>

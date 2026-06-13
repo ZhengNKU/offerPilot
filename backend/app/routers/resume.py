@@ -380,11 +380,11 @@ async def _download_from_cos(cos_key: str) -> bytes:
 
 def _make_file_response(file_bytes: bytes, safe_name: str, today: str):
     """构造带 RFC 5987 中文文件名的 DOCX 下载 Response。"""
-    filename = f"OfferPilot_简历_{safe_name}_{today}.docx"
+    filename = f"面试VAR_简历_{safe_name}_{today}.docx"
     encoded_filename = quote(filename)
     content_disposition = (
         f"attachment; "
-        f'filename="OfferPilot_Resume_{today}.docx"; '  # ASCII fallback
+        f'filename="InterviewVAR_Resume_{today}.docx"; '  # ASCII fallback
         f"filename*=UTF-8''{encoded_filename}"
     )
     return Response(

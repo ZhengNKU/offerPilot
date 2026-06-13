@@ -110,7 +110,7 @@ export default function NewAnalysisDebugger() {
     formData.append("file", file);
     formData.append("file_type", activeMode);
 
-    const token = localStorage.getItem("offerPilot_token");
+    const token = localStorage.getItem("interviewVar_token");
     const headers: Record<string, string> = {};
     if (token) {
       headers["Authorization"] = `Bearer ${token}`;
@@ -131,7 +131,7 @@ export default function NewAnalysisDebugger() {
       const data = await res.json();
       setUploadedFileId(data.file_id);
       setSelectedFile(file);
-      localStorage.setItem("offerPilot_session_audio_url", data.file_url);
+      localStorage.setItem("interviewVar_session_audio_url", data.file_url);
       auth.triggerToast("文件已成功上传！");
     } catch (e: any) {
       auth.triggerToast(e.message || "文件上传失败，请重试！");
@@ -180,7 +180,7 @@ export default function NewAnalysisDebugger() {
 
     if (uploadedFileId) {
       setIsDeleting(true);
-      const token = localStorage.getItem("offerPilot_token");
+      const token = localStorage.getItem("interviewVar_token");
       const headers: Record<string, string> = {};
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
@@ -206,7 +206,7 @@ export default function NewAnalysisDebugger() {
 
     setSelectedFile(null);
     setUploadedFileId(null);
-    localStorage.removeItem("offerPilot_session_audio_url");
+    localStorage.removeItem("interviewVar_session_audio_url");
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -229,7 +229,7 @@ export default function NewAnalysisDebugger() {
   // Launch analysis and save context to localStorage
   const triggerAnalysis = async () => {
     // ── CHECK: Limit free users/guests to 1 analysis per type ──
-    const hasAnalyzedKey = `offerPilot_analyzed_${activeMode}`;
+    const hasAnalyzedKey = `interviewVar_analyzed_${activeMode}`;
     if (!auth.isLoggedIn) {
       if (localStorage.getItem(hasAnalyzedKey) === "true") {
         auth.triggerToast("您的该项分析免费体验次数已达上限，请注册账号并升级至 PRO 会员解锁更多分析！");
@@ -237,7 +237,7 @@ export default function NewAnalysisDebugger() {
       }
     } else {
       // Check registered free user limit via backend
-      const token = localStorage.getItem("offerPilot_token");
+      const token = localStorage.getItem("interviewVar_token");
       try {
         const checkRes = await fetch("http://localhost:8001/api/audio/check_limit", {
           headers: token ? { "Authorization": `Bearer ${token}` } : {}
@@ -296,23 +296,23 @@ export default function NewAnalysisDebugger() {
     setIsAnalyzing(true);
 
     // Save form meta to localStorage so result pages can read them
-    localStorage.setItem("offerPilot_report_mode", activeMode);
-    localStorage.setItem("offerPilot_session_company", audioForm.company || "字节跳动");
-    localStorage.setItem("offerPilot_session_role", audioForm.role || "后端开发工程师");
-    localStorage.setItem("offerPilot_session_years", "3-5年");
-    localStorage.setItem("offerPilot_session_round", audioForm.round || "二面 - 技术面");
-    localStorage.setItem("offerPilot_session_date", audioForm.date || getTodayString());
-    localStorage.setItem("offerPilot_session_grade", audioForm.grade || "P6 / L5");
-    localStorage.setItem("offerPilot_session_salary", audioForm.salary || "25K * 16薪");
-    localStorage.setItem("offerPilot_viewing_session", "true");
+    localStorage.setItem("interviewVar_report_mode", activeMode);
+    localStorage.setItem("interviewVar_session_company", audioForm.company || "字节跳动");
+    localStorage.setItem("interviewVar_session_role", audioForm.role || "后端开发工程师");
+    localStorage.setItem("interviewVar_session_years", "3-5年");
+    localStorage.setItem("interviewVar_session_round", audioForm.round || "二面 - 技术面");
+    localStorage.setItem("interviewVar_session_date", audioForm.date || getTodayString());
+    localStorage.setItem("interviewVar_session_grade", audioForm.grade || "P6 / L5");
+    localStorage.setItem("interviewVar_session_salary", audioForm.salary || "25K * 16薪");
+    localStorage.setItem("interviewVar_viewing_session", "true");
 
     if (activeMode === "audio") {
       // ── AUDIO MODE: create session → start analysis → poll → navigate ──
-      const token = localStorage.getItem("offerPilot_token");
+      const token = localStorage.getItem("interviewVar_token");
       const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
       if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
-      const audioUrl = localStorage.getItem("offerPilot_session_audio_url") || "";
+      const audioUrl = localStorage.getItem("interviewVar_session_audio_url") || "";
       const sessionTitle = `${audioForm.company || "面试"} · ${audioForm.role || "岗位"} · ${audioForm.date || getTodayString()}`;
 
       try {
@@ -333,10 +333,10 @@ export default function NewAnalysisDebugger() {
         }
         const sessionData = await sessionRes.json();
         const sessionId: number = sessionData.session_id;
-        localStorage.setItem("offerPilot_session_id", String(sessionId));
+        localStorage.setItem("interviewVar_session_id", String(sessionId));
 
         // Mark as analyzed for free users/guests
-        localStorage.setItem("offerPilot_analyzed_audio", "true");
+        localStorage.setItem("interviewVar_analyzed_audio", "true");
 
         // Step 2: Trigger background analysis task
         const analyzeRes = await fetch("http://localhost:8001/api/audio/analyze", {
@@ -350,7 +350,7 @@ export default function NewAnalysisDebugger() {
         }
         const analyzeData = await analyzeRes.json();
         const taskId: string = analyzeData.task_id;
-        localStorage.setItem("offerPilot_task_id", taskId);
+        localStorage.setItem("interviewVar_task_id", taskId);
 
         // Step 3: Poll on THIS page until analysis completes, THEN navigate
         const STEPS = [
@@ -400,10 +400,10 @@ export default function NewAnalysisDebugger() {
 
     } else if (activeMode === "text") {
       // Text mode: store paste text and navigate
-      localStorage.setItem("offerPilot_session_pasteText", pasteText);
-      localStorage.removeItem("offerPilot_task_id");
-      localStorage.removeItem("offerPilot_session_id");
-      localStorage.setItem("offerPilot_analyzed_text", "true");
+      localStorage.setItem("interviewVar_session_pasteText", pasteText);
+      localStorage.removeItem("interviewVar_task_id");
+      localStorage.removeItem("interviewVar_session_id");
+      localStorage.setItem("interviewVar_analyzed_text", "true");
       setIsAnalyzing(false);
       router.push("/debugger/record");
     } else {
@@ -416,7 +416,7 @@ export default function NewAnalysisDebugger() {
       setTaskStep("正在提取简历文字，校验排版格式...");
       setTaskProgress(15);
 
-      const token = localStorage.getItem("offerPilot_token");
+      const token = localStorage.getItem("interviewVar_token");
       const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
       if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
@@ -461,8 +461,8 @@ export default function NewAnalysisDebugger() {
         const analysisData = await analyzeRes.json();
 
         // Cache the analysis data to localStorage
-        localStorage.setItem("offerPilot_resume_analysis_result", JSON.stringify(analysisData));
-        localStorage.setItem("offerPilot_analyzed_resume", "true");
+        localStorage.setItem("interviewVar_resume_analysis_result", JSON.stringify(analysisData));
+        localStorage.setItem("interviewVar_analyzed_resume", "true");
         setTaskProgress(100);
 
         // 跳转带上 id，方便后续从历史列表/分享链接重新进入同一份报告
@@ -501,7 +501,7 @@ export default function NewAnalysisDebugger() {
                 </linearGradient>
               </defs>
             </svg>
-            OfferPilot
+            面试VAR
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -596,7 +596,7 @@ export default function NewAnalysisDebugger() {
                       onClick={async () => {
                         if (uploadedFileId) {
                           // Silently delete in background to avoid orphan file
-                          const token = localStorage.getItem("offerPilot_token");
+                          const token = localStorage.getItem("interviewVar_token");
                           const headers: Record<string, string> = {};
                           if (token) headers["Authorization"] = `Bearer ${token}`;
                           fetch(`http://localhost:8001/api/file/delete?file_id=${uploadedFileId}`, {
@@ -607,7 +607,7 @@ export default function NewAnalysisDebugger() {
                         setActiveMode(item.mode as any);
                         setSelectedFile(null);
                         setUploadedFileId(null);
-                        localStorage.removeItem("offerPilot_session_audio_url");
+                        localStorage.removeItem("interviewVar_session_audio_url");
                         if (fileInputRef.current) {
                           fileInputRef.current.value = "";
                         }
@@ -652,7 +652,7 @@ export default function NewAnalysisDebugger() {
 
                 <div className="text-center space-y-3">
                   <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">
-                    {taskStep || "OfferPilot AI 正在分析中..."}
+                    {taskStep || "面试VAR AI 正在分析中..."}
                   </h3>
                   <p className="text-base md:text-lg text-white/70 font-semibold">
                     {activeMode === "resume"
@@ -936,7 +936,7 @@ export default function NewAnalysisDebugger() {
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <div className="flex items-center gap-4">
             <span className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-              © 2024 OfferPilot AI. All rights reserved.
+              © 2024 面试VAR AI. All rights reserved.
             </span>
           </div>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest animate-pulse">

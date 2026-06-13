@@ -60,7 +60,7 @@ class EmailHelper:
             return True
 
         try:
-            subject = "OfferPilot 验证码"
+            subject = "面试VAR 验证码"
             
             # Use CID image reference for logo
             content = f"""
@@ -87,7 +87,7 @@ class EmailHelper:
                                                     </svg>
                                                 </td>
                                                 <td style="vertical-align: middle;">
-                                                    <span style="font-size: 22px; font-weight: 800; color: #FFFFFF; letter-spacing: -0.5px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; display: block; line-height: 1.1;">OfferPilot</span>
+                                                    <span style="font-size: 22px; font-weight: 800; color: #FFFFFF; letter-spacing: -0.5px; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; display: block; line-height: 1.1;">面试VAR</span>
                                                     <span style="font-size: 10px; font-weight: bold; color: #5DECCB; letter-spacing: 1px; text-transform: uppercase; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; display: block; margin-top: 2px;">AI Interview Coach</span>
                                                 </td>
                                             </tr>
@@ -103,7 +103,7 @@ class EmailHelper:
                                     <td style="padding-top: 24px; padding-bottom: 16px;">
                                         <h3 style="font-size: 18px; font-weight: 800; color: #FFFFFF; margin: 0 0 12px 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">验证您的邮箱地址</h3>
                                         <p style="font-size: 14px; color: #A4B3E6; line-height: 1.6; margin: 0 0 24px 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
-                                            您好！感谢您选择 <strong>OfferPilot AI 面试教练</strong>。您正在进行账号的安全验证操作，请在验证输入框中填写以下验证码：
+                                            您好！感谢您选择 <strong>面试VAR AI 面试教练</strong>。您正在进行账号的安全验证操作，请在验证输入框中填写以下验证码：
                                         </p>
                                     </td>
                                 </tr>
@@ -136,7 +136,7 @@ class EmailHelper:
                                 <tr>
                                     <td style="padding-top: 20px; text-align: center;">
                                         <p style="font-size: 11px; color: #475569; margin: 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
-                                            © 2026 OfferPilot AI. All rights reserved.
+                                            © 2026 面试VAR AI. All rights reserved.
                                         </p>
                                         <p style="font-size: 11px; color: #475569; margin: 4px 0 0 0; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;">
                                             让每一次面试都成为下一次 Offer 的养料。
@@ -153,19 +153,19 @@ class EmailHelper:
             
             # Construct alternative multipart message (no attachments/related parts)
             message = MIMEMultipart("alternative")
-            message["From"] = Header(f"OfferPilot <{self.sender}>", "utf-8")
+            message["From"] = Header(f"面试VAR <{self.sender}>", "utf-8")
             message["To"] = Header(email, "utf-8")
             message["Subject"] = Header(subject, "utf-8")
             
             # Plain-text alternative must come first (RFC 2046 order)
             plain_text = (
-                f"OfferPilot 验证码\n\n"
-                f"您好！感谢您选择 OfferPilot AI 面试教练。\n"
+                f"面试VAR 验证码\n\n"
+                f"您好！感谢您选择 面试VAR AI 面试教练。\n"
                 f"您正在进行账号的安全验证操作，请在验证输入框中填写以下验证码：\n\n"
                 f"    {code}\n\n"
                 f"验证码 5 分钟内有效。\n"
                 f"如果您本人未发起此项申请，请忽略此邮件。为了您的账号安全，请勿将验证码泄露给他人。\n\n"
-                f"© 2026 OfferPilot AI. All rights reserved.\n"
+                f"© 2026 面试VAR AI. All rights reserved.\n"
                 f"让每一次面试都成为下一次 Offer 的养料。"
             )
             msg_plain = MIMEText(plain_text, "plain", "utf-8")

@@ -86,7 +86,7 @@ def call_volc_asr(audio_url: str) -> List[Dict[str, Any]]:
     logger.info(f"[Volc ASR] Encoded url: {audio_url} -> {audio_url_enc}")
 
     submit_body = {
-        "user": {"uid": "offerpilot-asr"},
+        "user": {"uid": "interviewvar-asr"},
         "audio": {
             "url":     audio_url_enc,
             "format":  audio_fmt,

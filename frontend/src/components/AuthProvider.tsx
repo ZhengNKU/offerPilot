@@ -78,14 +78,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Load state on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const storedLoggedIn = localStorage.getItem("offerPilot_isLoggedIn");
+      const storedLoggedIn = localStorage.getItem("interviewVar_isLoggedIn");
       if (storedLoggedIn === "false") {
         setIsLoggedIn(false);
       } else {
         setIsLoggedIn(true);
       }
 
-      const storedUser = localStorage.getItem("offerPilot_user");
+      const storedUser = localStorage.getItem("interviewVar_user");
       if (storedUser) {
         try {
           setUser(JSON.parse(storedUser));
@@ -93,12 +93,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(defaultUser);
         }
       } else {
-        localStorage.setItem("offerPilot_user", JSON.stringify(defaultUser));
+        localStorage.setItem("interviewVar_user", JSON.stringify(defaultUser));
       }
 
       // If we have a token, refresh user data from backend so fields
       // like phone / email (not stored in localStorage) are populated.
-      const token = localStorage.getItem("offerPilot_token");
+      const token = localStorage.getItem("interviewVar_token");
       if (token) {
         fetch("http://localhost:8001/api/auth/me", {
           headers: { "Authorization": `Bearer ${token}` }
@@ -106,11 +106,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .then(res => {
             if (res.status === 401) {
               // Token has expired or is invalid, clear credentials and log out
-              localStorage.removeItem("offerPilot_token");
+              localStorage.removeItem("interviewVar_token");
               setIsLoggedIn(false);
-              localStorage.setItem("offerPilot_isLoggedIn", "false");
+              localStorage.setItem("interviewVar_isLoggedIn", "false");
               setUser(defaultUser);
-              localStorage.removeItem("offerPilot_user");
+              localStorage.removeItem("interviewVar_user");
               window.dispatchEvent(new Event("storage"));
               return null;
             }
@@ -120,7 +120,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (data) {
               const merged = { ...defaultUser, ...user, ...data };
               setUser(merged);
-              localStorage.setItem("offerPilot_user", JSON.stringify(merged));
+              localStorage.setItem("interviewVar_user", JSON.stringify(merged));
               window.dispatchEvent(new Event("storage"));
             }
           })
@@ -138,11 +138,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = (data?: Partial<UserProfile>) => {
     setIsLoggedIn(true);
-    localStorage.setItem("offerPilot_isLoggedIn", "true");
+    localStorage.setItem("interviewVar_isLoggedIn", "true");
     if (data) {
       const newUser = { ...user, ...data };
       setUser(newUser);
-      localStorage.setItem("offerPilot_user", JSON.stringify(newUser));
+      localStorage.setItem("interviewVar_user", JSON.stringify(newUser));
     }
     setShowLogin(false);
     triggerToast("登录成功，欢迎回来！");
@@ -151,7 +151,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
-    const token = localStorage.getItem("offerPilot_token");
+    const token = localStorage.getItem("interviewVar_token");
     if (token) {
       try {
         await fetch("http://localhost:8001/api/auth/logout", {
@@ -160,9 +160,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
       } catch (e) {}
     }
-    localStorage.removeItem("offerPilot_token");
+    localStorage.removeItem("interviewVar_token");
     setIsLoggedIn(false);
-    localStorage.setItem("offerPilot_isLoggedIn", "false");
+    localStorage.setItem("interviewVar_isLoggedIn", "false");
     setShowLogout(false);
     triggerToast("已安全退出登录！");
     router.push("/");
@@ -170,7 +170,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const deleteAccount = async () => {
-    const token = localStorage.getItem("offerPilot_token");
+    const token = localStorage.getItem("interviewVar_token");
     if (token) {
       try {
         const res = await fetch("http://localhost:8001/api/auth/delete-account", {
@@ -187,10 +187,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
     }
-    localStorage.removeItem("offerPilot_token");
+    localStorage.removeItem("interviewVar_token");
     setIsLoggedIn(false);
-    localStorage.setItem("offerPilot_isLoggedIn", "false");
-    localStorage.removeItem("offerPilot_user");
+    localStorage.setItem("interviewVar_isLoggedIn", "false");
+    localStorage.removeItem("interviewVar_user");
     setUser(defaultUser);
     setShowDelete(false);
     triggerToast("账号已注销成功，感谢您的使用！");
@@ -201,10 +201,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const updateUser = async (data: Partial<UserProfile>) => {
     const newUser = { ...user, ...data };
     setUser(newUser);
-    localStorage.setItem("offerPilot_user", JSON.stringify(newUser));
+    localStorage.setItem("interviewVar_user", JSON.stringify(newUser));
     window.dispatchEvent(new Event("storage"));
 
-    const token = localStorage.getItem("offerPilot_token");
+    const token = localStorage.getItem("interviewVar_token");
     if (token) {
       try {
         const body: any = {};
@@ -263,9 +263,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Sync state between tabs/windows
   useEffect(() => {
     const handleStorageChange = () => {
-      const storedLoggedIn = localStorage.getItem("offerPilot_isLoggedIn");
+      const storedLoggedIn = localStorage.getItem("interviewVar_isLoggedIn");
       setIsLoggedIn(storedLoggedIn !== "false");
-      const storedUser = localStorage.getItem("offerPilot_user");
+      const storedUser = localStorage.getItem("interviewVar_user");
       if (storedUser) {
         try {
           setUser(JSON.parse(storedUser));
@@ -449,8 +449,10 @@ function AuthModals() {
       }
 
       const data = await res.json();
-      localStorage.setItem("offerPilot_token", data.access_token);
+      localStorage.setItem("interviewVar_token", data.access_token);
       auth.login(data.user);
+      // 登录成功 → 跳转到落地页
+      router.push("/");
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！");
     }
@@ -583,7 +585,7 @@ function AuthModals() {
               <>
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
                   <span className="font-label-mono text-xs text-[#AFA7FF] tracking-widest uppercase font-extrabold">
-                    OfferPilot Login
+                    面试VAR Login
                   </span>
                   <button
                     onClick={() => auth.setShowLogin(false)}
@@ -607,7 +609,7 @@ function AuthModals() {
                       </defs>
                     </svg>
                   </div>
-                  <h3 className="font-black text-white text-xl md:text-2xl">欢迎登录 OfferPilot</h3>
+                  <h3 className="font-black text-white text-xl md:text-2xl">欢迎登录 面试VAR</h3>
                   <p className="text-white/45 text-xs md:text-sm font-bold">AI 助力，高效求职</p>
                 </div>
 
@@ -744,7 +746,7 @@ function AuthModals() {
               <>
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
                   <span className="font-label-mono text-xs text-[#AFA7FF] tracking-widest uppercase font-extrabold">
-                    OfferPilot Recovery
+                    面试VAR Recovery
                   </span>
                   <button
                     onClick={() => { setShowForgot(false); auth.setShowLogin(false); }}

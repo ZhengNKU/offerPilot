@@ -50,7 +50,7 @@ function ResumeAnalysisPageContent() {
   // Prefill metadata from localStorage if available
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const storedResult = localStorage.getItem("offerPilot_resume_analysis_result");
+      const storedResult = localStorage.getItem("interviewVar_resume_analysis_result");
       if (storedResult) {
         try {
           const parsed = JSON.parse(storedResult);
@@ -62,12 +62,12 @@ function ResumeAnalysisPageContent() {
           console.error("Failed to parse resume analysis result:", e);
         }
       } else {
-        const storedCompany = localStorage.getItem("offerPilot_session_company");
-        const storedRole = localStorage.getItem("offerPilot_session_role");
-        const storedGrade = localStorage.getItem("offerPilot_session_grade");
-        const storedSalary = localStorage.getItem("offerPilot_session_salary");
-        const storedYears = localStorage.getItem("offerPilot_session_years");
-        const storedDate = localStorage.getItem("offerPilot_session_date");
+        const storedCompany = localStorage.getItem("interviewVar_session_company");
+        const storedRole = localStorage.getItem("interviewVar_session_role");
+        const storedGrade = localStorage.getItem("interviewVar_session_grade");
+        const storedSalary = localStorage.getItem("interviewVar_session_salary");
+        const storedYears = localStorage.getItem("interviewVar_session_years");
+        const storedDate = localStorage.getItem("interviewVar_session_date");
 
         if (storedCompany || storedRole || storedGrade || storedSalary) {
           setProfile((prev) => ({
@@ -91,7 +91,7 @@ function ResumeAnalysisPageContent() {
     if (!id) return;
 
     const token = typeof window !== "undefined"
-      ? localStorage.getItem("offerPilot_token")
+      ? localStorage.getItem("interviewVar_token")
       : null;
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -106,8 +106,8 @@ function ResumeAnalysisPageContent() {
         }
         const data = await res.json();
         if (cancelled) return;
-        localStorage.setItem("offerPilot_resume_analysis_result", JSON.stringify(data));
-        localStorage.setItem("offerPilot_analyzed_resume", "true");
+        localStorage.setItem("interviewVar_resume_analysis_result", JSON.stringify(data));
+        localStorage.setItem("interviewVar_analyzed_resume", "true");
         setAnalysisResult(data);
         if (data.profile) {
           setProfile((prev) => ({ ...prev, ...data.profile }));
@@ -142,7 +142,7 @@ function ResumeAnalysisPageContent() {
     setDownloadState("loading");
     try {
       const token = typeof window !== "undefined"
-        ? localStorage.getItem("offerPilot_token")
+        ? localStorage.getItem("interviewVar_token")
         : null;
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -194,7 +194,7 @@ function ResumeAnalysisPageContent() {
       if (!filename) {
         const safeName = (profile.name || "候选人").replace(/[\\/:*?"<>|\r\n\t]+/g, "_");
         const today = new Date().toISOString().slice(0, 10);
-        filename = `OfferPilot_简历_${safeName}_${today}.docx`;
+        filename = `面试VAR_简历_${safeName}_${today}.docx`;
       }
 
       const blob = await res.blob();
@@ -659,7 +659,7 @@ function ResumeAnalysisPageContent() {
                 </linearGradient>
               </defs>
             </svg>
-            OfferPilot
+            面试VAR
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -1514,7 +1514,7 @@ function ResumeAnalysisPageContent() {
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left select-none">
           <div className="flex items-center gap-4">
             <span className="text-xs text-white/30 font-label-mono font-bold tracking-widest">
-              © 2026 OfferPilot AI. All rights reserved.
+              © 2026 面试VAR AI. All rights reserved.
             </span>
           </div>
           <div className="flex gap-8 text-xs text-white/30 font-label-mono font-bold tracking-widest animate-pulse">
@@ -1710,7 +1710,7 @@ function ResumeAnalysisPageContent() {
 
             <div className="space-y-4">
               <p className="text-xs text-white/50 leading-relaxed font-bold">
-                简历综合评分由 OfferPilot AI 根据您的目标求职画像（<span className="text-white">{profile.targetCompany} · {profile.targetRole}</span>）进行多维度智能分析评估得出：
+                简历综合评分由 面试VAR AI 根据您的目标求职画像（<span className="text-white">{profile.targetCompany} · {profile.targetRole}</span>）进行多维度智能分析评估得出：
               </p>
 
               <div className="space-y-3">

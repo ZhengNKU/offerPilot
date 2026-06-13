@@ -67,7 +67,7 @@ export default function CareerMemoryDashboard() {
   const [deleteTarget, setDeleteTarget] = useState<string | "batch" | null>(null);
 
   const fetchSessions = async () => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("offerPilot_token") : null;
+    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
     if (!auth.isLoggedIn || !token) {
       setHistoryItems([]);
       return;
@@ -82,7 +82,7 @@ export default function CareerMemoryDashboard() {
       const audioRes = await fetch("http://localhost:8001/api/audio/sessions", { headers });
       let audioItems: any[] = [];
       if (audioRes.status === 401) {
-        localStorage.removeItem("offerPilot_token");
+        localStorage.removeItem("interviewVar_token");
         auth.logout();
         return;
       }
@@ -202,17 +202,17 @@ export default function CareerMemoryDashboard() {
   };
 
   const handleViewDetails = (item: SessionHistoryItem) => {
-    localStorage.setItem("offerPilot_report_mode", item.type);
-    localStorage.setItem("offerPilot_session_company", item.company);
-    localStorage.setItem("offerPilot_session_role", item.role);
-    localStorage.setItem("offerPilot_session_years", "3-5年");
-    localStorage.setItem("offerPilot_session_round", item.round);
-    localStorage.setItem("offerPilot_session_date", item.date.includes("202") ? item.date.split(" ")[0] : "2026-06-01");
-    localStorage.setItem("offerPilot_session_grade", item.type === "resume" ? "L8 / P7" : "P6");
-    localStorage.setItem("offerPilot_session_salary", item.type === "resume" ? "35K-45K" : "35-40K");
-    localStorage.setItem("offerPilot_viewing_session", "true");
-    localStorage.setItem("offerPilot_session_id", item.id);
-    localStorage.removeItem("offerPilot_task_id");
+    localStorage.setItem("interviewVar_report_mode", item.type);
+    localStorage.setItem("interviewVar_session_company", item.company);
+    localStorage.setItem("interviewVar_session_role", item.role);
+    localStorage.setItem("interviewVar_session_years", "3-5年");
+    localStorage.setItem("interviewVar_session_round", item.round);
+    localStorage.setItem("interviewVar_session_date", item.date.includes("202") ? item.date.split(" ")[0] : "2026-06-01");
+    localStorage.setItem("interviewVar_session_grade", item.type === "resume" ? "L8 / P7" : "P6");
+    localStorage.setItem("interviewVar_session_salary", item.type === "resume" ? "35K-45K" : "35-40K");
+    localStorage.setItem("interviewVar_viewing_session", "true");
+    localStorage.setItem("interviewVar_session_id", item.id);
+    localStorage.removeItem("interviewVar_task_id");
     
     if (item.type === "audio") {
       router.push("/debugger/voice");
@@ -252,7 +252,7 @@ export default function CareerMemoryDashboard() {
     setIsDeleting(true);
     
     try {
-      const token = localStorage.getItem("offerPilot_token");
+      const token = localStorage.getItem("interviewVar_token");
       const headers: Record<string, string> = {
         "Content-Type": "application/json"
       };
@@ -366,7 +366,7 @@ export default function CareerMemoryDashboard() {
                 </linearGradient>
               </defs>
             </svg>
-            OfferPilot
+            面试VAR
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -1644,7 +1644,7 @@ export default function CareerMemoryDashboard() {
                             <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-tertiary border-2 border-background"></span>
                           </div>
                           <div>
-                            <h4 className="text-base font-black text-white">OfferPilot 智能职业顾问</h4>
+                            <h4 className="text-base font-black text-white">面试VAR 智能职业顾问</h4>
                             <p className="text-xs text-tertiary font-extrabold mt-0.5">在线 · 基于您142次测评学习中</p>
                           </div>
                         </div>
@@ -1873,7 +1873,7 @@ export default function CareerMemoryDashboard() {
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <div className="flex items-center gap-4">
             <span className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-              © 2026 OfferPilot AI. All rights reserved.
+              © 2026 面试VAR AI. All rights reserved.
             </span>
           </div>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
@@ -1901,7 +1901,7 @@ export default function CareerMemoryDashboard() {
           <div className="bg-surface-container-high border border-white/10 rounded-3xl p-8 max-w-sm w-full text-center relative z-10 space-y-6 shadow-2xl transition-all scale-100 animate-fade-in">
             <div className="flex justify-between items-center">
               <span className="font-label-mono text-[10px] text-primary tracking-widest uppercase font-bold">
-                OfferPilot Intelligence
+                面试VAR Intelligence
               </span>
               <button
                 onClick={() => setShowLoginModal(false)}

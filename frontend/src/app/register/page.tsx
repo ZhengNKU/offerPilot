@@ -5,10 +5,10 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
 
-const agreementMarkdown = `欢迎您使用 OfferPilot AI 面试教练系统（以下简称“本服务”）。本协议由您与 OfferPilot 运营团队共同缔结。在注册或开始使用本服务前，请您务必仔细阅读并理解本《用户服务协议》。
+const agreementMarkdown = `欢迎您使用 面试VAR AI 面试教练系统（以下简称“本服务”）。本协议由您与 面试VAR 运营团队共同缔结。在注册或开始使用本服务前，请您务必仔细阅读并理解本《用户服务协议》。
 
 ## 一、 服务内容与规则
-1. **服务定位**：OfferPilot 是一款 AI 驱动的面试智能分析及职业成长辅助系统，主要为您提供简历深度分析、面试录音/记录分析、AI 模拟面试场景训练以及 Offer 概率预测等服务。
+1. **服务定位**：面试VAR 是一款 AI 驱动的面试智能分析及职业成长辅助系统，主要为您提供简历深度分析、面试录音/记录分析、AI 模拟面试场景训练以及 Offer 概率预测等服务。
 2. **免责声明**：您理解并同意，本服务生成的评估数据、分析结果、STAR 优化话术等内容均为 AI 模型根据您提供的信息推理得出，仅供您的求职参考，我们不保证其绝对的准确性、完整性或对最终面试结果的保证性。
 
 ## 二、 账户注册与安全
@@ -22,9 +22,9 @@ const agreementMarkdown = `欢迎您使用 OfferPilot AI 面试教练系统（�
 * 恶意攻击、破解、逆向工程本服务后台系统，或者干扰其他用户的正常使用。
 
 ## 四、 服务的修改与终止
-OfferPilot 有权根据系统维护、AI 模型迭代或业务调整需要，对本服务的部分或全部内容进行优化、升级、暂停或终止。您可以在职业驾驶舱中随时注销并删除您的账号，注销后我们将立即抹除您的所有关联数据。`;
+面试VAR 有权根据系统维护、AI 模型迭代或业务调整需要，对本服务的部分或全部内容进行优化、升级、暂停或终止。您可以在职业驾驶舱中随时注销并删除您的账号，注销后我们将立即抹除您的所有关联数据。`;
 
-const privacyMarkdown = `我们非常重视您的隐私。本《隐私政策》详细说明了 OfferPilot 在您使用我们的服务时，如何收集、使用、存储 and 保护您的个人信息。
+const privacyMarkdown = `我们非常重视您的隐私。本《隐私政策》详细说明了 面试VAR 在您使用我们的服务时，如何收集、使用、存储 and 保护您的个人信息。
 
 ## 一、 我们如何收集和使用信息
 1. **基本账号信息**：当您注册本服务时，我们将收集您的手机号码或邮箱，用于身份认证和账号创建。
@@ -515,7 +515,7 @@ export default function RegisterPage() {
       }
 
       const data = await response.json();
-      localStorage.setItem("offerPilot_token", data.access_token);
+      localStorage.setItem("interviewVar_token", data.access_token);
       auth.login(data.user);
       router.push("/debugger");
     } catch (err) {
@@ -550,13 +550,13 @@ export default function RegisterPage() {
                 </linearGradient>
               </defs>
             </svg>
-            OfferPilot
+            面试VAR
           </div>
 
           <div className="flex items-center gap-4 text-sm font-bold">
             <span className="text-white/40">已有账号？</span>
             <button
-              onClick={() => auth.setShowLogin(true)}
+              onClick={() => { auth.setShowLogin(true); router.push("/"); }}
               className="px-6 py-2 bg-white/5 border border-white/10 rounded-full text-white hover:bg-white/10 transition-all cursor-pointer"
             >
               去登录
@@ -673,7 +673,7 @@ export default function RegisterPage() {
                         <div className="space-y-4.5 w-full">
                           <div>
                             <h2 className="text-xl md:text-2xl font-black text-white">创建账号</h2>
-                            <p className="text-xs md:text-sm text-white/40 font-bold mt-1">选择您喜欢的方式注册 OfferPilot</p>
+                            <p className="text-xs md:text-sm text-white/40 font-bold mt-1">选择您喜欢的方式注册 面试VAR</p>
                           </div>
 
                           {/* Login Method Toggle */}
@@ -1659,7 +1659,7 @@ export default function RegisterPage() {
                           onClick={handleFinishRegister}
                           className="flex-1 py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] text-base rounded-xl hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center shadow-lg shadow-[#AFA7FF]/15 group"
                         >
-                          完成，进入 OfferPilot
+                          完成，进入 面试VAR
                           <span className="material-symbols-outlined text-lg leading-none transform transition-transform duration-200 group-hover:translate-x-0.5 select-none">
                             arrow_forward
                           </span>
@@ -1690,7 +1690,7 @@ export default function RegisterPage() {
               <div>
                 <h4 className="text-xs md:text-base font-black text-white">我们承诺您的数据安全</h4>
                 <p className="text-[10px] md:text-sm text-white/40 leading-relaxed font-bold mt-0.5">
-                  OfferPilot 采用职业画像引擎构建个性化分析模型。您的姓名、公司、学校等敏感信息在 AI 分析过程中自动脱敏处理，<br />
+                  面试VAR 采用职业画像引擎构建个性化分析模型。您的姓名、公司、学校等敏感信息在 AI 分析过程中自动脱敏处理，<br />
                   仅保留与岗位能力相关的逻辑数据用于推理与评估，您的个人信息不会被公开展示或用于未经授权的用途。
                 </p>
               </div>
@@ -1724,7 +1724,7 @@ export default function RegisterPage() {
 
           <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-left">
             <span className="text-xs md:text-sm text-white/30 font-label-mono font-bold tracking-widest">
-              © 2026 OfferPilot AI. All rights reserved.
+              © 2026 面试VAR AI. All rights reserved.
             </span>
             <div className="flex gap-8 text-xs md:text-sm text-white/30 font-label-mono font-bold tracking-widest">
               <a onClick={() => router.push("/")} className="hover:text-[#AFA7FF] transition-colors cursor-pointer">
@@ -1757,7 +1757,7 @@ export default function RegisterPage() {
             >
               <div className="flex justify-between items-center pb-3 border-b border-white/5">
                 <span className="font-label-mono text-[10px] text-[#AFA7FF] tracking-widest uppercase font-bold">
-                  OfferPilot User Agreement
+                  面试VAR User Agreement
                 </span>
                 <button
                   onClick={() => setShowAgreementModal(false)}
@@ -1768,7 +1768,7 @@ export default function RegisterPage() {
               </div>
 
               <div className="space-y-1">
-                <h3 className="font-extrabold text-white text-lg">OfferPilot 用户服务协议</h3>
+                <h3 className="font-extrabold text-white text-lg">面试VAR 用户服务协议</h3>
                 <p className="text-white/45 text-xs">更新日期：2026年6月4日</p>
               </div>
 
@@ -1810,7 +1810,7 @@ export default function RegisterPage() {
             >
               <div className="flex justify-between items-center pb-3 border-b border-white/5">
                 <span className="font-label-mono text-[10px] text-[#AFA7FF] tracking-widest uppercase font-bold">
-                  OfferPilot Privacy Policy
+                  面试VAR Privacy Policy
                 </span>
                 <button
                   onClick={() => setShowPrivacyModal(false)}
@@ -1821,7 +1821,7 @@ export default function RegisterPage() {
               </div>
 
               <div className="space-y-1">
-                <h3 className="font-extrabold text-white text-lg">OfferPilot 用户隐私政策</h3>
+                <h3 className="font-extrabold text-white text-lg">面试VAR 用户隐私政策</h3>
                 <p className="text-white/45 text-xs">更新日期：2026年6月4日</p>
               </div>
 
