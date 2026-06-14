@@ -160,7 +160,7 @@ class EmailHelper:
             # Plain-text alternative must come first (RFC 2046 order)
             plain_text = (
                 f"面试VAR 验证码\n\n"
-                f"您好！感谢您选择 面试VAR AI 面试教练。\n"
+                f"您好！感谢您选择 面试VAR。\n"
                 f"您正在进行账号的安全验证操作，请在验证输入框中填写以下验证码：\n\n"
                 f"    {code}\n\n"
                 f"验证码 5 分钟内有效。\n"
