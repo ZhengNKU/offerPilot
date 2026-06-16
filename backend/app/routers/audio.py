@@ -95,6 +95,7 @@ async def create_session(
 
 
 class CreateRecordSessionRequest(BaseModel):
+    session_id: Optional[int] = None
     paste_text: str
     title: Optional[str] = None
     company: Optional[str] = None
@@ -112,7 +113,7 @@ def parse_dialogue_to_segments(raw_text: str) -> list:
     count = 0
     prev_speaker = "Candidate"
     
-    for line in lines:
+    for idx, line in enumerate(lines):
         clean_line = line.strip()
         if not clean_line:
             continue
@@ -143,21 +144,17 @@ def parse_dialogue_to_segments(raw_text: str) -> list:
             content_val = re.sub(r'^(我|您|A|a|答)\d*\s*[：:\s]', '', remaining_text).strip()
         else:
             # Heuristics
-            if remaining_text.startswith("答"):
-                speaker = "Candidate"
-                content_val = re.sub(r'^答\s*[：:\s]?', '', remaining_text).strip()
-            elif remaining_text.endswith("？") or remaining_text.endswith("?"):
-                speaker = "Interviewer"
+            parts = line.split(":", 1)
+            if len(parts) == 2:
+                speaker = parts[0].strip()
+                content_val = parts[1].strip()
             else:
-                # Alternate speaker based on prev_speaker
-                speaker = "Candidate" if prev_speaker == "Interviewer" else "Interviewer"
-        
-        prev_speaker = speaker
-        count += 1
+                speaker = "Candidate" if idx % 2 == 1 else "Interviewer"
+                content_val = line.strip()
         
         segments.append({
-            "start_time": start_time,
-            "end_time": start_time + 10.0,
+            "start_time": start_time + (idx * 10.0),
+            "end_time": start_time + (idx * 10.0) + 10.0,
             "speaker": speaker,
             "content": content_val
         })
@@ -170,33 +167,90 @@ async def create_record_session(
     current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):
     """
-    Create an InterviewSession for text/record analysis.
-    This parses the raw pasted text into transcripts and saves the session.
+    Create or update an InterviewSession for text/record analysis.
+    This parses the raw pasted text into transcripts and saves/updates the session.
     """
-    if current_user and current_user.membership is None:
+    session = None
+    if req.session_id:
         result = await db.execute(
-            select(models.InterviewSession).where(models.InterviewSession.user_id == current_user.id)
+            select(models.InterviewSession).where(models.InterviewSession.id == req.session_id)
         )
-        existing_sessions = result.scalars().all()
-        if len(existing_sessions) >= 1:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="免费用户仅有一次体验机会，请升级至 PRO 会员解锁更多分析！"
+        session = result.scalars().first()
+        if session:
+            # Update fields of the existing session
+            session.title = req.title or session.title
+            session.company = req.company or session.company
+            session.role = req.role or session.role
+            session.round = req.round or session.round
+            session.date = req.date or session.date
+            session.grade = req.grade if req.grade is not None else session.grade
+            session.salary = req.salary if req.salary is not None else session.salary
+            session.job_description = req.job_description
+            session.status = "uploaded"
+            
+            # Reset scores & summaries to clean slate for re-analysis
+            session.ipi_score = 0
+            session.offer_probability = 0
+            session.summary_strengths = []
+            session.summary_weaknesses = []
+            session.summary_suggestions = []
+            session.executive_summary = None
+            session.analysis_result = None
+            
+            # Wipe prior related tables (cascade-like cleanup before re-analyze)
+            await db.execute(
+                models.InterviewTranscript.__table__.delete().where(
+                    models.InterviewTranscript.session_id == session.id
+                )
             )
+            await db.execute(
+                models.TranscriptSection.__table__.delete().where(
+                    models.TranscriptSection.session_id == session.id
+                )
+            )
+            await db.execute(
+                models.InterviewRisk.__table__.delete().where(
+                    models.InterviewRisk.session_id == session.id
+                )
+            )
+            await db.execute(
+                models.AnswerImprovement.__table__.delete().where(
+                    models.AnswerImprovement.session_id == session.id
+                )
+            )
+            await db.execute(
+                models.InterviewQuestion.__table__.delete().where(
+                    models.InterviewQuestion.session_id == session.id
+                )
+            )
+            await db.commit()
 
-    session_title = req.title or f"{datetime.now().strftime('%Y-%m-%d %H:%M')} 面试记录分析"
-    session = models.InterviewSession(
-        user_id=current_user.id if current_user else None,
-        title=session_title,
-        audio_url="text_mode",
-        duration=0,
-        file_size=len(req.paste_text.encode('utf-8')),
-        status="uploaded",
-        job_description=req.job_description
-    )
-    db.add(session)
-    await db.commit()
-    await db.refresh(session)
+    if not session:
+        # Create a new session
+        if current_user and current_user.membership is None:
+            result = await db.execute(
+                select(models.InterviewSession).where(models.InterviewSession.user_id == current_user.id)
+            )
+            existing_sessions = result.scalars().all()
+            if len(existing_sessions) >= 1:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="免费用户仅有一次体验机会，请升级至 PRO 会员解锁更多分析！"
+                )
+
+        session_title = req.title or f"{datetime.now().strftime('%Y-%m-%d %H:%M')} 面试记录分析"
+        session = models.InterviewSession(
+            user_id=current_user.id if current_user else None,
+            title=session_title,
+            audio_url="text_mode",
+            duration=0,
+            file_size=len(req.paste_text.encode('utf-8')),
+            status="uploaded",
+            job_description=req.job_description
+        )
+        db.add(session)
+        await db.commit()
+        await db.refresh(session)
 
     # Parse and save transcript
     segments = parse_dialogue_to_segments(req.paste_text)
@@ -369,6 +423,22 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
         await db.execute(
             models.TranscriptSection.__table__.delete().where(
                 models.TranscriptSection.session_id == session_id
+            )
+        )
+        # Clear old risks, questions, improvements
+        await db.execute(
+            models.InterviewRisk.__table__.delete().where(
+                models.InterviewRisk.session_id == session_id
+            )
+        )
+        await db.execute(
+            models.AnswerImprovement.__table__.delete().where(
+                models.AnswerImprovement.session_id == session_id
+            )
+        )
+        await db.execute(
+            models.InterviewQuestion.__table__.delete().where(
+                models.InterviewQuestion.session_id == session_id
             )
         )
         if raw_segments:

@@ -788,7 +788,7 @@ export default function InterviewVoiceAnalysisPage() {
     role: "后端开发工程师",
     round: "技术一面",
     time: "",
-    level: "P6",
+    level: "",
     salary: "35-40K",
     years: "3-5年",
     isOnJob: "在职"
@@ -816,8 +816,8 @@ export default function InterviewVoiceAnalysisPage() {
         role:    savedRole    || prev.role,
         round:   savedRound   || prev.round,
         time:    savedDate    || prev.time,
-        level:   savedGrade   || prev.level,
-        salary:  savedSalary  || prev.salary,
+        level:   savedGrade !== null ? savedGrade : prev.level,
+        salary:  savedSalary !== null ? savedSalary : prev.salary,
         years:   savedYears   || prev.years
       }));
     }
@@ -1337,7 +1337,7 @@ export default function InterviewVoiceAnalysisPage() {
   // Export all dialogue logs to PDF
   const handleExportPDF = async () => {
     if (liveSegmentsData.length === 0) {
-      alert("没有可导出的对话记录！");
+      auth.triggerToast("没有可导出的对话记录！");
       return;
     }
 
@@ -1524,7 +1524,7 @@ export default function InterviewVoiceAnalysisPage() {
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
-      alert("请允许弹出窗口以进行 PDF 导出");
+      auth.triggerToast("请允许弹出窗口以进行 PDF 导出");
       return;
     }
     printWindow.document.write(htmlContent);
@@ -1737,12 +1737,6 @@ export default function InterviewVoiceAnalysisPage() {
                       <span className="material-symbols-outlined text-base text-[#00D4FF]">assignment_ind</span>
                       面试信息
                     </h4>
-                    <span 
-                      onClick={() => alert("录音分析模式下面试信息修改请重新启动调试Session")}
-                      className="text-base font-black text-[#AFA7FF] hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
-                    >
-                      编辑
-                    </span>
                   </div>
 
                   <div className="space-y-2.5 text-xs font-bold text-white/60">

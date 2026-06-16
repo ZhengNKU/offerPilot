@@ -17,9 +17,9 @@ class User(Base):
     # 会员等级: NULL=免费, "pro", "max"。决定文件保留时长。
     membership: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
     profile: Mapped["UserProfile"] = relationship("UserProfile", back_populates="user", cascade="all, delete-orphan", uselist=False)
     sessions: Mapped[List["InterviewSession"]] = relationship("InterviewSession", back_populates="user", cascade="all, delete-orphan")
     files: Mapped[List["UploadedFile"]] = relationship("UploadedFile", back_populates="user", cascade="all, delete-orphan")
@@ -54,8 +54,8 @@ class UserProfile(Base):
     target_salary_min: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     target_salary_max: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
     user: Mapped["User"] = relationship("User", back_populates="profile")
 
 
@@ -81,9 +81,9 @@ class InterviewSession(Base):
     
     analysis_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
     user: Mapped[Optional["User"]] = relationship("User", back_populates="sessions")
     tasks: Mapped[List["AnalysisTask"]] = relationship("AnalysisTask", back_populates="session", cascade="all, delete-orphan")
     transcript: Mapped[Optional["InterviewTranscript"]] = relationship("InterviewTranscript", back_populates="session", cascade="all, delete-orphan", uselist=False)
@@ -103,8 +103,8 @@ class AnalysisTask(Base):
     status: Mapped[str] = mapped_column(String(50), default="pending") # pending, running, completed, failed
     error_message: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     
-    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
-    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     
     session: Mapped["InterviewSession"] = relationship("InterviewSession", back_populates="tasks")
 
@@ -123,8 +123,8 @@ class InterviewTranscript(Base):
         primary_key=True,
     )
     data: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     session: Mapped["InterviewSession"] = relationship("InterviewSession", back_populates="transcript")
 
@@ -214,8 +214,8 @@ class UploadedFile(Base):
     file_size: Mapped[int] = mapped_column(BigInteger, default=0)
     file_type: Mapped[str] = mapped_column(String(50), nullable=False) # audio, resume
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user: Mapped[Optional["User"]] = relationship("User", back_populates="files")
     resume_analyses: Mapped[List["ResumeAnalysis"]] = relationship(
@@ -244,8 +244,8 @@ class ResumeAnalysis(Base):
     ats_pass_rate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     result_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user: Mapped[Optional["User"]] = relationship("User")
     file: Mapped["UploadedFile"] = relationship("UploadedFile", back_populates="resume_analyses")

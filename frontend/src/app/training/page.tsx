@@ -128,7 +128,7 @@ export default function InterviewTrainingPage() {
   // Skip / Move to next question simulator
   const handleSkipQuestion = () => {
     if (activeQuestionIndex >= 5) {
-      alert("模拟面试已完成所有环节！正在生成AI面试报告...");
+      auth.triggerToast("模拟面试已完成所有环节！正在生成AI面试报告...");
       setIsTrainingStarted(false);
       localStorage.setItem("interviewVar_viewing_session", "true");
       localStorage.setItem("interviewVar_report_mode", "audio");
@@ -406,7 +406,7 @@ export default function InterviewTrainingPage() {
                   {isTrainingStarted ? "正在进行模拟面试" : "开始模拟面试"}
                 </button>
                 <span 
-                  onClick={() => alert("模拟面试将调用摄像头与麦克风，录音本地加密处理，面试VAR 深度保护您的隐私权益。")}
+                  onClick={() => auth.triggerToast("模拟面试将调用摄像头与麦克风，录音本地加密处理，面试VAR 深度保护您的隐私权益。")}
                   className="text-[10px] font-bold text-on-surface-variant/30 hover:text-white transition-colors cursor-pointer text-center block"
                 >
                   开始即表示同意 <span className="text-primary hover:underline">训练规范与用户权益 →</span>
@@ -688,9 +688,9 @@ export default function InterviewTrainingPage() {
                 {/* Custom Dialogue Tab Headers */}
                 <div className="flex items-center gap-5 border-b border-white/5 pb-2 font-black text-xs md:text-[13px] select-none">
                   <span className="text-white border-b-2 border-primary pb-2 cursor-pointer relative z-10">实时对话</span>
-                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => alert("AI 面试官已自动为您记录面试笔记。")}>面试笔记</span>
-                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => alert("答题结束后，面试VAR 会基于您的整体表现生成全维度 AI 诊断意见。")}>AI 建议</span>
-                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => alert("本环节的参考答案：深入剖析秒杀高并发一致性读写流程，推荐使用分布式削峰缓冲。")}>参考答案</span>
+                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => auth.triggerToast("AI 面试官已自动为您记录面试笔记。")}>面试笔记</span>
+                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => auth.triggerToast("答题结束后，面试VAR 会基于您的整体表现生成全维度 AI 诊断意见。")}>AI 建议</span>
+                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => auth.triggerToast("本环节的参考答案：深入剖析秒杀高并发一致性读写流程，推荐使用分布式削峰缓冲。")}>参考答案</span>
                 </div>
 
                 {/* Dialog Content Stream Area */}
@@ -822,7 +822,7 @@ export default function InterviewTrainingPage() {
 
               <div className="flex justify-between items-center text-[13px] md:text-[14px] text-on-surface-variant/50 font-bold select-none">
                 <span>追问次数: 1 / 2</span>
-                <span className="text-secondary font-black cursor-pointer hover:text-white transition-colors" onClick={() => alert("追问环节将由 AI 根据您前面的回答深度逻辑深挖！")}>关于追问机制 →</span>
+                <span className="text-secondary font-black cursor-pointer hover:text-white transition-colors" onClick={() => auth.triggerToast("追问环节将由 AI 根据您前面的回答深度逻辑深挖！")}>关于追问机制 →</span>
               </div>
             </div>
 
@@ -859,7 +859,7 @@ export default function InterviewTrainingPage() {
               </p>
 
               <span 
-                onClick={() => alert("本位面试官偏好：结构清晰，逻辑紧密，重视容灾防御设计。")}
+                onClick={() => auth.triggerToast("本位面试官偏好：结构清晰，逻辑紧密，重视容灾防御设计。")}
                 className="text-[13px] md:text-[14px] text-tertiary font-bold hover:text-white transition-colors cursor-pointer"
               >
                 查看面试官性格偏好 →
@@ -1017,11 +1017,11 @@ export default function InterviewTrainingPage() {
                 <button
                   onClick={() => {
                     if (feedbackText.trim()) {
-                      alert("感谢您的反馈！面试VAR 的 AI 技术团队将尽快诊断并优化。");
+                      auth.triggerToast("感谢您的反馈！面试VAR 的 AI 技术团队将尽快诊断并优化。");
                       setFeedbackText('');
                       setShowFeedbackModal(false);
                     } else {
-                      alert("请输入反馈内容。");
+                      auth.triggerToast("请输入反馈内容。");
                     }
                   }}
                   className="px-4.5 py-2 bg-primary text-on-primary text-xs font-black rounded-lg transition-all shadow-md shadow-primary/20 cursor-pointer"

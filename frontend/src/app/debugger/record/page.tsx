@@ -49,7 +49,7 @@ export default function InterviewRecordAnalysisPage() {
     role: "后端开发工程师",
     round: "二面",
     date: "2025-06-01",
-    grade: "P6",
+    grade: "",
     salary: "35-40K",
     years: "3-5年",
     isOnJob: "在职",
@@ -586,6 +586,8 @@ export default function InterviewRecordAnalysisPage() {
 
   // Handle Manual Form Submission
   const handleAnalyzeSubmit = async () => {
+    const searchParams = new URLSearchParams(window.location.search);
+    const existingSessionId = searchParams.get("sessionId") || localStorage.getItem("interviewVar_session_id");
     // ── CHECK: Limit free users/guests to 1 analysis per type ──
     if (!auth.isLoggedIn) {
       if (localStorage.getItem("interviewVar_analyzed_text") === "true") {
@@ -658,7 +660,8 @@ export default function InterviewRecordAnalysisPage() {
           date: metadataForm.date,
           grade: metadataForm.grade,
           salary: metadataForm.salary,
-          job_description: metadataForm.jobDescription
+          job_description: metadataForm.jobDescription,
+          session_id: existingSessionId ? Number(existingSessionId) : null
         })
       });
       if (!sessionRes.ok) {
@@ -987,13 +990,13 @@ export default function InterviewRecordAnalysisPage() {
                 <div className="flex justify-end gap-3 pt-4">
                   <button
                     onClick={() => setShowInputForm(false)}
-                    className="px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-black cursor-pointer text-white"
+                    className="px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm font-black cursor-pointer text-white"
                   >
                     取消
                   </button>
                   <button
                     onClick={handleAnalyzeSubmit}
-                    className="px-6 py-2.5 bg-[#AFA7FF] text-[#050B1A] rounded-xl text-xs font-black cursor-pointer transition-all shadow-lg shadow-purple-500/10"
+                    className="px-6 py-2.5 bg-[#AFA7FF] text-[#050B1A] rounded-xl text-sm font-black cursor-pointer transition-all shadow-lg shadow-purple-500/10"
                   >
                     开始 AI 智能分析
                   </button>

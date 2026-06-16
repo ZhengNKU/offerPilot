@@ -283,7 +283,7 @@ export default function CareerMemoryDashboard() {
           });
           if (!res.ok) {
             const errData = await res.json();
-            alert(errData.detail || "语音会话批量删除失败");
+            auth.triggerToast(errData.detail || "语音会话批量删除失败");
           }
         }
 
@@ -317,12 +317,12 @@ export default function CareerMemoryDashboard() {
           await fetchSessions();
         } else {
           const errData = await res.json();
-          alert(errData.detail || "删除失败");
+          auth.triggerToast(errData.detail || "删除失败");
         }
       }
     } catch (err) {
       console.error("Deletion failed:", err);
-      alert("删除请求失败，请稍后重试");
+      auth.triggerToast("删除请求失败，请稍后重试");
     } finally {
       setIsDeleting(false);
       setDeleteTarget(null);

@@ -342,7 +342,7 @@ export default function RegisterPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1025 * 1025) {
-      alert("上传头像文件大小不能超过 5MB！");
+      auth.triggerToast("上传头像文件大小不能超过 5MB！");
       return;
     }
     const reader = new FileReader();
