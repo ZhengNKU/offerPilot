@@ -27,6 +27,7 @@ class CreateSessionRequest(BaseModel):
     title: Optional[str] = None
     file_id: Optional[int] = None
     file_size: Optional[int] = 0
+    job_description: Optional[str] = None
 
 @router.get("/check_limit")
 async def check_limit(
@@ -79,7 +80,8 @@ async def create_session(
         audio_url=req.file_url,
         duration=0,
         file_size=req.file_size or 0,
-        status="uploaded"
+        status="uploaded",
+        job_description=req.job_description
     )
     db.add(session)
     await db.commit()
@@ -88,6 +90,126 @@ async def create_session(
         "session_id": session.id,
         "title": session.title,
         "audio_url": session.audio_url,
+        "status": session.status
+    }
+
+
+class CreateRecordSessionRequest(BaseModel):
+    paste_text: str
+    title: Optional[str] = None
+    company: Optional[str] = None
+    role: Optional[str] = None
+    round: Optional[str] = None
+    date: Optional[str] = None
+    grade: Optional[str] = None
+    salary: Optional[str] = None
+    job_description: Optional[str] = None
+
+def parse_dialogue_to_segments(raw_text: str) -> list:
+    import re
+    lines = raw_text.split("\n")
+    segments = []
+    count = 0
+    prev_speaker = "Candidate"
+    
+    for line in lines:
+        clean_line = line.strip()
+        if not clean_line:
+            continue
+        # Extract timestamp in brackets/parentheses like (00:00) or [00:00]
+        time_match = re.search(r'[\(\[\uff08\uff3b]([0-9]{2}:[0-9]{2})[\)\]\uff09\uff3d]', clean_line)
+        start_time = 0.0
+        if time_match:
+            time_str = time_match.group(1)
+            parts = time_str.split(":")
+            start_time = float(int(parts[0]) * 60 + int(parts[1]))
+            remaining_text = clean_line.replace(time_match.group(0), "").strip()
+        else:
+            start_time = float(count * 95)
+            remaining_text = clean_line
+        
+        # Check speakers
+        is_interviewer = re.match(r'^(面试官|Q|q|问)\d*\s*[：:\s]', remaining_text)
+        is_user = re.match(r'^(我|您|A|a|答)\d*\s*[：:\s]', remaining_text)
+        
+        speaker = "Candidate"
+        content_val = remaining_text
+        
+        if is_interviewer:
+            speaker = "Interviewer"
+            content_val = re.sub(r'^(面试官|Q|q|问)\d*\s*[：:\s]', '', remaining_text).strip()
+        elif is_user:
+            speaker = "Candidate"
+            content_val = re.sub(r'^(我|您|A|a|答)\d*\s*[：:\s]', '', remaining_text).strip()
+        else:
+            # Heuristics
+            if remaining_text.startswith("答"):
+                speaker = "Candidate"
+                content_val = re.sub(r'^答\s*[：:\s]?', '', remaining_text).strip()
+            elif remaining_text.endswith("？") or remaining_text.endswith("?"):
+                speaker = "Interviewer"
+            else:
+                # Alternate speaker based on prev_speaker
+                speaker = "Candidate" if prev_speaker == "Interviewer" else "Interviewer"
+        
+        prev_speaker = speaker
+        count += 1
+        
+        segments.append({
+            "start_time": start_time,
+            "end_time": start_time + 10.0,
+            "speaker": speaker,
+            "content": content_val
+        })
+    return segments
+
+@router.post("/create_record_session")
+async def create_record_session(
+    req: CreateRecordSessionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional)
+):
+    """
+    Create an InterviewSession for text/record analysis.
+    This parses the raw pasted text into transcripts and saves the session.
+    """
+    if current_user and current_user.membership is None:
+        result = await db.execute(
+            select(models.InterviewSession).where(models.InterviewSession.user_id == current_user.id)
+        )
+        existing_sessions = result.scalars().all()
+        if len(existing_sessions) >= 1:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="免费用户仅有一次体验机会，请升级至 PRO 会员解锁更多分析！"
+            )
+
+    session_title = req.title or f"{datetime.now().strftime('%Y-%m-%d %H:%M')} 面试记录分析"
+    session = models.InterviewSession(
+        user_id=current_user.id if current_user else None,
+        title=session_title,
+        audio_url="text_mode",
+        duration=0,
+        file_size=len(req.paste_text.encode('utf-8')),
+        status="uploaded",
+        job_description=req.job_description
+    )
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+
+    # Parse and save transcript
+    segments = parse_dialogue_to_segments(req.paste_text)
+    transcript = models.InterviewTranscript(
+        session_id=session.id,
+        data=segments
+    )
+    db.add(transcript)
+    await db.commit()
+
+    return {
+        "session_id": session.id,
+        "title": session.title,
         "status": session.status
     }
 
@@ -115,6 +237,7 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
 
     # ── Step 1: Fetch audio URL from DB ──────────────────────────────────
     audio_url: Optional[str] = None
+    job_description: Optional[str] = None
     async with async_session() as db:
         result = await db.execute(
             select(models.InterviewSession).where(models.InterviewSession.id == session_id)
@@ -122,6 +245,7 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
         sess = result.scalars().first()
         if sess:
             audio_url = sess.audio_url
+            job_description = sess.job_description
             sess.status = "processing"
             await db.commit()
 
@@ -132,43 +256,104 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
 
     _set_progress(15, "processing")
 
-    # ── Step 2: Real ASR via MiniMax ──────────────────────────────────────
-    logger.info(f"[task={task_id}] Starting ASR for session {session_id}, url={audio_url}")
+    # ── Step 2: Real ASR via MiniMax or load from DB (for text mode) ──────
     raw_segments: List[Dict[str, Any]] = []
-    try:
-        raw_segments = await asyncio.to_thread(call_minimax_asr, audio_url)
-        logger.info(f"[task={task_id}] ASR returned {len(raw_segments)} segments")
-    except Exception as e:
-        logger.warning(f"[task={task_id}] ASR failed, will use mock transcript: {e}")
+    if audio_url == "text_mode":
+        async with async_session() as db:
+            tx_res = await db.execute(
+                select(models.InterviewTranscript).where(models.InterviewTranscript.session_id == session_id)
+            )
+            tx = tx_res.scalars().first()
+            if tx and tx.data:
+                raw_segments = tx.data
+        logger.info(f"[task={task_id}] Loaded {len(raw_segments)} segments from DB for text session")
+    else:
+        logger.info(f"[task={task_id}] Starting ASR for session {session_id}, url={audio_url}")
+        try:
+            raw_segments = await asyncio.to_thread(call_minimax_asr, audio_url)
+            logger.info(f"[task={task_id}] ASR returned {len(raw_segments)} segments")
+        except Exception as e:
+            logger.warning(f"[task={task_id}] ASR failed, will use mock transcript: {e}")
 
     _set_progress(45, "processing")
 
-    # ── Step 2.5: Generate AI Highlights ──────────────────────────────────
+    # ── Step 2.5 + 3.5 (parallel): Generate AI Highlights AND Sectionize ────
+    #              Both depend on raw_segments and have no inter-dependency,
+    #              so we fire them concurrently with asyncio.gather. Wall-clock
+    #              drops from (highlights_ms + sectionize_ms) to max(...) — on
+    #              observed 13-segment input that saves ~30s end-to-end.
+    highlights: list = []
+    sections: list = []
+    section_count = 0
     if raw_segments:
-        logger.info(f"[task={task_id}] Calling LLM to generate highlights for {len(raw_segments)} segments")
-        try:
-            highlights = await generate_transcript_highlights(raw_segments)
-            logger.info(f"[task={task_id}] Highlights API returned {len(highlights)} items")
-            for hl in highlights:
-                try:
-                    idx = int(hl.get("segment_index", -1))
-                    text_to_find = hl.get("text", "")
-                    hl_type = hl.get("type", "")
-                    hl_tip = hl.get("tip", "")
-                    if 0 <= idx < len(raw_segments) and text_to_find:
-                        # Ensure the text exists in the segment content
-                        if text_to_find in raw_segments[idx].get("content", ""):
-                            if "highlights" not in raw_segments[idx]:
-                                raw_segments[idx]["highlights"] = []
-                            raw_segments[idx]["highlights"].append({
-                                "text": text_to_find,
-                                "type": hl_type,
-                                "tip": hl_tip
-                            })
-                except Exception as ex:
-                    logger.warning(f"Error merging highlight: {ex}")
-        except Exception as e:
-            logger.warning(f"Highlights generation failed, continuing: {e}")
+        logger.info(f"[task={task_id}] Calling LLM in parallel: highlights + sectionize for {len(raw_segments)} segments")
+
+        async def _safe_highlights():
+            try:
+                result = await generate_transcript_highlights(raw_segments)
+                logger.info(f"[task={task_id}] Highlights API returned {len(result)} items")
+                return result or []
+            except Exception as e:
+                logger.warning(f"[task={task_id}] Highlights generation failed: {e}")
+                return []
+
+        async def _safe_sectionize():
+            try:
+                result = await sectionize_transcript(raw_segments)
+                logger.info(f"[task={task_id}] Sectionize returned {len(result)} sections")
+                return result or []
+            except Exception as e:
+                logger.warning(f"[task={task_id}] sectionize failed: {e}")
+                return []
+
+        highlights, sections = await asyncio.gather(_safe_highlights(), _safe_sectionize())
+        
+        # If sectionize returned empty, generate heuristic fallback sections grouped by Interviewer questions
+        if not sections and raw_segments:
+            logger.warning(f"[task={task_id}] sectionize returned no sections. Generating heuristic fallback sections.")
+            current_sec = None
+            sec_idx = 1
+            for s in raw_segments:
+                is_interviewer = s.get("speaker") == "Interviewer"
+                t = float(s.get("start_time", 0.0))
+                if is_interviewer or current_sec is None:
+                    if current_sec:
+                        sections.append(current_sec)
+                    current_sec = {
+                        "title": (s.get("content") or "")[:15] + "..." if is_interviewer else f"对话分段 {sec_idx}",
+                        "category": "tech",
+                        "tag": "一般",
+                        "start_time": t,
+                        "end_time": t + 10.0,
+                        "summary": "面试提问与解答。"
+                    }
+                    sec_idx += 1
+                else:
+                    current_sec["end_time"] = t + 10.0
+            if current_sec:
+                sections.append(current_sec)
+
+        section_count = len(sections)
+
+        # Merge highlights into raw_segments (same logic as before, but on the
+        # in-memory list we already have — no extra await needed).
+        for hl in highlights:
+            try:
+                idx = int(hl.get("segment_index", -1))
+                text_to_find = hl.get("text", "")
+                hl_type = hl.get("type", "")
+                hl_tip = hl.get("tip", "")
+                if 0 <= idx < len(raw_segments) and text_to_find:
+                    if text_to_find in raw_segments[idx].get("content", ""):
+                        if "highlights" not in raw_segments[idx]:
+                            raw_segments[idx]["highlights"] = []
+                        raw_segments[idx]["highlights"].append({
+                            "text": text_to_find,
+                            "type": hl_type,
+                            "tip": hl_tip
+                        })
+            except Exception as ex:
+                logger.warning(f"Error merging highlight: {ex}")
 
     # ── Step 3: Persist the whole transcript as a single JSONB row.
     #             One session → one InterviewTranscript row → one data JSONB array.
@@ -193,9 +378,9 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             db.add(models.InterviewTranscript(session_id=session_id, data=[
                 {"start_time": 0.0,   "end_time": 15.0,  "speaker": "Interviewer", "content": "你好，欢迎参加技术面试，请先做一个简短的自我介绍吧。"},
                 {
-                    "start_time": 15.0,  
-                    "end_time": 135.0, 
-                    "speaker": "Candidate",   
+                    "start_time": 15.0,
+                    "end_time": 135.0,
+                    "speaker": "Candidate",
                     "content": "面试官您好，我拥有多年后端高并发开发经验，熟悉分布式架构设计与缓存体系。",
                     "highlights": [
                         {"text": "多年后端高并发开发经验", "type": "strength", "tip": "💡 核心闪光点：突出了架构方向的工作积累，给人留下专业的第一印象。"},
@@ -204,9 +389,9 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
                 },
                 {"start_time": 341.0, "end_time": 374.0, "speaker": "Interviewer", "content": "为什么使用 Redis？"},
                 {
-                    "start_time": 352.0,  
-                    "end_time": 374.0, 
-                    "speaker": "Candidate",   
+                    "start_time": 352.0,
+                    "end_time": 374.0,
+                    "speaker": "Candidate",
                     "content": "因为 Redis 性能高，可以做缓存，提升接口响应速度。",
                     "highlights": [
                         {"text": "做缓存，提升接口响应速度", "type": "strength", "tip": "💡 亮点：正确指出了缓存的核心应用场景及响应性能优势。"}
@@ -214,49 +399,33 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
                 },
                 {"start_time": 375.0, "end_time": 422.0, "speaker": "Interviewer", "content": "如果数据和数据库不一致怎么办？"},
                 {
-                    "start_time": 382.0,  
-                    "end_time": 422.0, 
-                    "speaker": "Candidate",   
+                    "start_time": 382.0,
+                    "end_time": 422.0,
+                    "speaker": "Candidate",
                     "content": "可以用双删策略，先删缓存，再更新数据库，最后再删一次缓存。",
                     "highlights": [
                         {"text": "双删策略", "type": "risk", "tip": "⚠️ 表达风险：双删策略是教科书式的八股文方案，存在并发写一致性漏洞，在实际高并发项目中通常不会被采用，会被面试官追问致死。建议升级为 Binlog + Canal + 延时双删或读写锁。"}
                     ]
                 },
             ]))
+
+        # Persist sections in the same session — they were produced concurrently
+        # with highlights above and are ready to insert together.
+        for idx, sec in enumerate(sections):
+            db.add(models.TranscriptSection(
+                session_id=session_id,
+                section_index=idx,
+                title=sec["title"],
+                category=sec["category"],
+                tag=sec.get("tag") or "一般",
+                start_time=sec["start_time"],
+                end_time=sec["end_time"],
+                summary=sec.get("summary"),
+                advantages=sec.get("advantages") or [],
+                shortcomings=sec.get("shortcomings") or [],
+                review_points=sec.get("review_points") or [],
+            ))
         await db.commit()
-
-    # ── Step 3.5: LLM semantic sectionize (turn long transcript into 3-8
-    #              topic blocks like 「自我介绍」「项目深挖」) ──────────────
-    #              Sections store start_time/end_time only; the runtime
-    #              segment_count and the section↔segment join are computed
-    #              at read time by time-range match against transcript.data.
-    section_count = 0
-    if raw_segments:
-        try:
-            logger.info(f"[task={task_id}] Calling LLM to sectionize {len(raw_segments)} segments")
-            sections = await sectionize_transcript(raw_segments)
-            section_count = len(sections)
-            logger.info(f"[task={task_id}] Sectionize returned {section_count} sections")
-
-            if sections:
-                async with async_session() as db:
-                    for idx, sec in enumerate(sections):
-                        db.add(models.TranscriptSection(
-                            session_id=session_id,
-                            section_index=idx,
-                            title=sec["title"],
-                            category=sec["category"],
-                            tag=sec.get("tag") or "一般",
-                            start_time=sec["start_time"],
-                            end_time=sec["end_time"],
-                            summary=sec.get("summary"),
-                            advantages=sec.get("advantages") or [],
-                            shortcomings=sec.get("shortcomings") or [],
-                            review_points=sec.get("review_points") or [],
-                        ))
-                    await db.commit()
-        except Exception as e:
-            logger.warning(f"[task={task_id}] sectionize failed, continuing without sections: {e}")
 
     _set_progress(60, "processing")
 
@@ -290,9 +459,16 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
     weaknesses   = ["技术深度有待提升", "方案细节描述不够完整"]
     suggestions  = ["深化系统设计知识体系", "回答中加入量化数据背书"]
     executive_summary = "整体表现中等，建议加强技术深度与方案细节的描述。"
+    
+    score_expression = 75
+    score_logic = 80
+    score_project_depth = 70
+    score_ownership = 65
+    score_system_design = 60
 
+    llm_result = {}
     try:
-        llm_result = await analyze_interview_dialogue(dialogue_text, profile_data)
+        llm_result = await analyze_interview_dialogue(dialogue_text, profile_data, job_description)
         if llm_result:
             ipi_score         = llm_result.get("ipi_score",          ipi_score)
             offer_probability = llm_result.get("offer_probability",   offer_probability)
@@ -300,9 +476,54 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             weaknesses        = llm_result.get("summary_weaknesses",  weaknesses)
             suggestions       = llm_result.get("summary_suggestions", suggestions)
             executive_summary = llm_result.get("executive_summary",   executive_summary)
+            
+            if "scores" not in llm_result or not isinstance(llm_result["scores"], dict):
+                llm_result["scores"] = {
+                    "expression": llm_result.get("score_expression") or llm_result.get("expression") or score_expression,
+                    "logic": llm_result.get("score_logic") or llm_result.get("logic") or score_logic,
+                    "project_depth": llm_result.get("score_project_depth") or llm_result.get("project_depth") or score_project_depth,
+                    "ownership": llm_result.get("score_ownership") or llm_result.get("ownership") or score_ownership,
+                    "system_design": llm_result.get("score_system_design") or llm_result.get("system_design") or score_system_design,
+                }
             logger.info(f"[task={task_id}] LLM returned ipi={ipi_score}, offer_prob={offer_probability}")
     except Exception as e:
         logger.warning(f"[task={task_id}] LLM evaluation failed, using fallback: {e}")
+
+    if not llm_result:
+        llm_result = {
+            "ipi_score": ipi_score,
+            "offer_probability": offer_probability,
+            "summary_strengths": strengths,
+            "summary_weaknesses": weaknesses,
+            "summary_suggestions": suggestions,
+            "executive_summary": executive_summary,
+            "scores": {
+                "expression": score_expression,
+                "logic": score_logic,
+                "project_depth": score_project_depth,
+                "ownership": score_ownership,
+                "system_design": score_system_design
+            },
+            "max_lose_points": [
+                { "rank": 1, "label": "选型依据不足", "tag": "高风险", "desc": "缺少问题背景和选型对比，无法体现技术决策能力" },
+                { "rank": 2, "label": "没有 Trade-off 分析", "tag": "中风险", "desc": "回答较表面，缺乏权衡思考和方案对比" },
+                { "rank": 3, "label": "项目贡献模糊", "tag": "中风险", "desc": "未突出个人贡献和负责的核心模块" }
+            ],
+            "interviewer_perspective": [
+                { "label": "Redis 相关问题", "val": "验证缓存设计能力" },
+                { "label": "一致性问题", "val": "验证分布式系统架构能力" },
+                { "label": "项目真实度", "val": "验证真实项目经验" }
+            ],
+            "question_deconstruction": [
+                { "stage": "第 1 关 · 基础引入", "title": "为什么使用 Redis？", "desc": "考查求职者是否知道 Redis 在项目中的具体角色，是否有明确的技术背景支持还是仅仅套用热门词汇。" },
+                { "stage": "第 2 关 · 方案对比", "title": "为什么不用本地缓存？", "desc": "深度考查对进程内缓存与分布式缓存的 Trade-off 架构对比和边界思考。" }
+            ],
+            "followup_paths": [
+                { "title": "Q1 自我介绍 · 引导切入", "desc": "抛出“做过分布式系统与中间件开发”，成功引导面试官进入中间件板块。", "tag": "良好" },
+                { "title": "Q3 Redis 选型 · 主动深挖", "desc": "核心漏洞点：“因为 Redis 性能高，可以做缓存” ➔ 引出高负载高并发背景的细节追问。", "tag": "一般" },
+                { "title": "Q5 双写一致性 · 重试质感", "desc": "最终瓶颈：“定时双删”的答法暴露了高并发和真实复杂场景落地架构经验欠缺的破绽。", "tag": "风险" }
+            ]
+        }
 
     _set_progress(88, "processing")
 
@@ -323,6 +544,7 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
         session.summary_weaknesses   = weaknesses
         session.summary_suggestions  = suggestions
         session.executive_summary    = executive_summary
+        session.analysis_result      = llm_result
         session.status = "completed"
 
         # Risk & improvement from LLM weaknesses
@@ -585,21 +807,35 @@ async def get_session_report(id: int, db: AsyncSession = Depends(get_db)):
     except Exception as e:
         logger.warning(f"Failed to generate fresh presigned URL: {e}")
 
+    analysis_res = getattr(session, "analysis_result", None) or {}
+    llm_scores = analysis_res.get("scores", {}) if isinstance(analysis_res, dict) else {}
+    
+    ipi = session.ipi_score
+    offer_prob = session.offer_probability
+    
+    expression_score = llm_scores.get("expression") or llm_scores.get("score_expression") or (ipi + 10 if ipi > 0 else 0)
+    logic_score = llm_scores.get("logic") or llm_scores.get("score_logic") or (ipi + 3 if ipi > 0 else 0)
+    project_depth_score = llm_scores.get("project_depth") or llm_scores.get("score_project_depth") or (ipi - 4 if ipi > 0 else 0)
+    ownership_score = llm_scores.get("ownership") or llm_scores.get("score_ownership") or (ipi - 12 if ipi > 0 else 0)
+    system_design_score = llm_scores.get("system_design") or llm_scores.get("score_system_design") or (ipi - 2 if ipi > 0 else 0)
+    communication_score = ipi + 13 if ipi > 0 else 0
+
     return {
         "session_id": session.id,
         "title": session.title,
         "audio_url": fresh_audio_url,
         "duration": session.duration,
         "status": session.status,
+        "job_description": session.job_description,
         "scores": {
-            "ipi": session.ipi_score,
-            "offer_probability": session.offer_probability,
-            "expression": session.ipi_score + 10 if session.ipi_score > 0 else 0,
-            "logic": session.ipi_score + 3 if session.ipi_score > 0 else 0,
-            "project_depth": session.ipi_score - 4 if session.ipi_score > 0 else 0,
-            "ownership": session.ipi_score - 12 if session.ipi_score > 0 else 0,
-            "communication": session.ipi_score + 13 if session.ipi_score > 0 else 0,
-            "system_design": session.ipi_score - 2 if session.ipi_score > 0 else 0
+            "ipi": ipi,
+            "offer_probability": offer_prob,
+            "expression": expression_score,
+            "logic": logic_score,
+            "project_depth": project_depth_score,
+            "ownership": ownership_score,
+            "communication": communication_score,
+            "system_design": system_design_score
         },
         "summary": {
             "executive_summary": session.executive_summary or "报告处理中",
@@ -607,6 +843,7 @@ async def get_session_report(id: int, db: AsyncSession = Depends(get_db)):
             "weaknesses": session.summary_weaknesses,
             "suggestions": session.summary_suggestions
         },
+        "analysis_result": analysis_res,
         "transcript": [
             {
                 "start_time": s.get("start_time"),

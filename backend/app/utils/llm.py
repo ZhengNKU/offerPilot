@@ -79,14 +79,19 @@ def _strip_codeblock(text: str) -> str:
     return cleaned
 
 
-async def analyze_interview_dialogue(dialogue_text: str, profile_data: Optional[dict] = None) -> Dict[str, Any]:
+async def analyze_interview_dialogue(
+    dialogue_text: str,
+    profile_data: Optional[dict] = None,
+    job_description: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Calls MiniMax-M3 API to analyze the interview dialogue and return evaluation results in JSON.
     """
     system_prompt = (
         "你是一个专业的 AI 面试教练。你需要根据候选人的面试对话内容进行深度评估。\n"
         "如果提供了候选人的职业画像（工作经验、岗位名称、目标公司、目标职级等），请结合该画像的期望要求进行评估。\n"
-        "你必须以 JSON 格式返回评估结果，无需任何 Markdown 标记或其它多余的前后导言，只返回纯 JSON 对象字符串。\n"
+        "如果提供了目标岗位的岗位详情（JD / Job Description），请着重结合该岗位的技能、职责及期望，深入匹配并评估候选人的技术水平、项目契合度以及表达逻辑。\n"
+        "你必须以 JSON 格式返回评估结果，无需 any Markdown 标记或其它多余的前后导言，只返回纯 JSON 对象字符串。\n"
         "JSON 结构必须严格符合以下属性格式：\n"
         "{\n"
         "  \"ipi_score\": 75, // 综合素质评分（0-100之间的整数）\n"
@@ -94,13 +99,40 @@ async def analyze_interview_dialogue(dialogue_text: str, profile_data: Optional[
         "  \"summary_strengths\": [\"优势1\", \"优势2\"], // 优势列表（2个）\n"
         "  \"summary_weaknesses\": [\"不足1\", \"不足2\"], // 不足列表（2个）\n"
         "  \"summary_suggestions\": [\"改进建议1\", \"改进建议2\"], // 建议列表（2个）\n"
-        "  \"executive_summary\": \"一段简短的综合性总结评价...\"\n"
+        "  \"executive_summary\": \"一段简短的综合性总结评价...\",\n"
+        "  \"scores\": {\n"
+        "    \"expression\": 80, // 细节深度评分（0-100之间的整数）\n"
+        "    \"logic\": 85, // 逻辑自洽评分（0-100之间的整数）\n"
+        "    \"project_depth\": 70, // 业务理解评分（0-100之间的整数）\n"
+        "    \"ownership\": 75, // 数据指标评分（0-100之间的整数）\n"
+        "    \"system_design\": 65 // 技术广度评分（0-100之间的整数）\n"
+        "  },\n"
+        "  \"max_lose_points\": [\n"
+        "    { \"rank\": 1, \"label\": \"失分点标题，如：选型依据不足\", \"tag\": \"高风险\", \"desc\": \"失分具体描述，如：缺少问题背景和选型对比，无法体现技术决策能力\" },\n"
+        "    { \"rank\": 2, \"label\": \"失分点标题，如：没有 Trade-off 分析\", \"tag\": \"中风险\", \"desc\": \"失分具体描述，如：回答较表面，缺乏权衡思考和方案对比\" },\n"
+        "    { \"rank\": 3, \"label\": \"失分点标题，如：项目贡献模糊\", \"tag\": \"中风险\", \"desc\": \"失分具体描述，如：未突出个人贡献和负责的核心模块\" }\n"
+        "  ], // 最大失分点 TOP 3（固定3项，按风险等级从高到低排序，tag只能为'高风险'或'中风险'）\n"
+        "  \"interviewer_perspective\": [\n"
+        "    { \"label\": \"考察技术话题，如：Redis 相关问题\", \"val\": \"验证的核心能力，如：验证缓存设计能力\" },\n"
+        "    { \"label\": \"考察技术话题，如：一致性问题\", \"val\": \"验证的核心能力，如：验证分布式系统架构能力\" },\n"
+        "    { \"label\": \"考察技术话题，如：项目真实度\", \"val\": \"验证的核心能力，如：验证真实项目经验\" }\n"
+        "  ], // 面试官视角：真正验证什么（3-4项，结合对话中的考点提问）\n"
+        "  \"question_deconstruction\": [\n"
+        "    { \"stage\": \"第 1 关 · 基础引入\", \"title\": \"考点技术问题，如：为什么使用 Redis？\", \"desc\": \"考查目的细节描述\" },\n"
+        "    { \"stage\": \"第 2 关 · 方案对比\", \"title\": \"考点技术问题，如：为什么不用本地缓存？\", \"desc\": \"考查目的细节描述\" }\n"
+        "  ], // 问题拆解（3-4项，梳理面试官层层深入的提问关卡）\n"
+        "  \"followup_paths\": [\n"
+        "    { \"title\": \"阶段问题，如：Q1 自我介绍 · 引导切入\", \"desc\": \"具体的引导或追问描述\", \"tag\": \"良好\" },\n"
+        "    { \"title\": \"阶段问题，如：Q3 Redis 选型 · 主动深挖\", \"desc\": \"具体的引导或追问描述\", \"tag\": \"风险\" }\n"
+        "  ] // 追问路径（3-4项，tag只能是'良好'、'一般'或'风险'之一，真实呈现追问轨迹）\n"
         "}"
     )
     
     user_content = f"面试对话内容：\n{dialogue_text}\n"
     if profile_data:
         user_content += f"\n候选人画像：\n{json.dumps(profile_data, ensure_ascii=False)}\n"
+    if job_description:
+        user_content += f"\n岗位详情 (Job Description)：\n{job_description}\n"
         
     payload = {
         "model": "MiniMax-M3",

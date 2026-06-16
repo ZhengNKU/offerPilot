@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { pollTaskUntilDone } from "@/app/utils/pollTask";
 
 // =========================================================================
 // INTERFACES & MOCK DATABASE (ALIGNING 100% TO NEW GPT DESIGN SCREENSHOT)
@@ -855,31 +856,25 @@ export default function InterviewVoiceAnalysisPage() {
 
         // If task_id is still present, wait for it to complete first
         if (taskId) {
-          let ready = false;
-          for (let i = 0; i < 120; i++) {            // max 4 min wait
-            const taskRes = await fetch(
-              `http://localhost:8001/api/audio/task/${taskId}`,
-              { headers }
-            );
-            if (taskRes.ok) {
-              const taskData = await taskRes.json();
-              const pct = taskData.progress ?? 0;
-              setAnalysisProgress(pct);
-              setAnalysisStep(
-                Math.min(Math.floor((pct / 100) * ANALYSIS_STEPS.length), ANALYSIS_STEPS.length - 1)
-              );
-              if (taskData.status === "completed" || taskData.status === "failed") {
-                ready = true;
-                break;
-              }
-            }
-            await new Promise(r => setTimeout(r, 2000));
-          }
-          if (!ready) {
+          try {
+            await pollTaskUntilDone(taskId, {
+              intervalMs: 2000,
+              headers,
+              onProgress: (taskData) => {
+                const pct = taskData.progress ?? 0;
+                setAnalysisProgress(pct);
+                setAnalysisStep(
+                  Math.min(Math.floor((pct / 100) * ANALYSIS_STEPS.length), ANALYSIS_STEPS.length - 1)
+                );
+              },
+            });
+            localStorage.removeItem("interviewVar_task_id");
+          } catch {
+            // pollTaskUntilDone only rejects on hard timeout — surface that as
+            // "no_session" so the user lands back on the entry page.
             setPageStatus("no_session");
             return;
           }
-          localStorage.removeItem("interviewVar_task_id");
         }
 
         // Fetch both report and sections
@@ -941,10 +936,15 @@ export default function InterviewVoiceAnalysisPage() {
             const endSecs = sec.end_time;
             const durSecs = endSecs - startSecs;
             
-            const sectionDialogue = rawTranscript.filter(utt => 
-              (sec.start_time - 0.001 <= (utt.start_time ?? 0)) && 
-              ((utt.start_time ?? 0) <= sec.end_time + 0.001)
-            );
+            const sectionDialogue = rawTranscript.filter(utt => {
+              const t = utt.start_time ?? 0;
+              const isLast = idx === dbSections.length - 1;
+              if (isLast) {
+                return (sec.start_time - 0.001 <= t) && (t <= sec.end_time + 0.001);
+              } else {
+                return (sec.start_time - 0.001 <= t) && (t < sec.end_time - 0.001);
+              }
+            });
 
             const tag = (sec.tag === "良好" || sec.tag === "一般" || sec.tag === "风险") ? sec.tag : "一般";
             const tagColor = tagColorMap[tag] || tagColorCycle[idx % tagColorCycle.length];
@@ -1707,7 +1707,7 @@ export default function InterviewVoiceAnalysisPage() {
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
-        className="flex-1 flex flex-col px-gutter max-w-container-max mx-auto w-full py-6 gap-5.5 text-left relative z-10"
+        className="flex-1 flex flex-col px-gutter max-w-container-max mx-auto w-full py-6 gap-[22px] text-left relative z-10"
       >
         {/* Guest Warning Banner */}
         {isGuest && (
@@ -1723,7 +1723,7 @@ export default function InterviewVoiceAnalysisPage() {
             {/* ========================================================
                 MAIN WORKSPACE GRID LAYOUT (3 COLUMNS)
                ======================================================== */}
-            <div className="grid grid-cols-12 gap-5.5 items-stretch w-full">
+            <div className="grid grid-cols-12 gap-[22px] items-stretch w-full">
               
               {/* ----------------------------------------------------
                   COLUMN 1: Left Sidebar (3 cols)
@@ -1731,7 +1731,7 @@ export default function InterviewVoiceAnalysisPage() {
               <div className="col-span-12 lg:col-span-3 flex flex-col gap-[18px]">
 
                 {/* 1.1 Interview Metadata Card */}
-                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[260px] shrink-0">
+                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[290px] shrink-0">
                   <div className="flex justify-between items-center pb-2 border-b border-white/5">
                     <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-base text-[#00D4FF]">assignment_ind</span>
@@ -1784,7 +1784,7 @@ export default function InterviewVoiceAnalysisPage() {
                 </div>
 
                 {/* 1.2 Interview Vertical Timeline Selector */}
-                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[500px] shrink-0">
+                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[470px] shrink-0">
                   <div className="flex justify-between items-center pb-2 border-b border-white/5">
                     <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-base text-[#00D4FF]">list_alt</span>
@@ -2384,7 +2384,7 @@ export default function InterviewVoiceAnalysisPage() {
             {/* ========================================================
                 BOTTOM ROW: AI Diagnostic summary card (Full Width)
                ======================================================== */}
-            <div className="glass-panel p-5.5 rounded-2xl border-white/5 grid grid-cols-12 gap-5.5 w-full select-none mt-1">
+            <div className="glass-panel p-5.5 rounded-2xl border-white/5 grid grid-cols-12 gap-[22px] w-full select-none mt-1">
               
               {/* Section 1: AI分析总结 (4 cols) */}
               <div className="col-span-12 lg:col-span-4 flex gap-3.5 border-r border-white/5 pr-4">

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { pollTaskUntilDone } from "@/app/utils/pollTask";
 
 interface DialogueItem {
   sender: "interviewer" | "user";
@@ -51,7 +52,8 @@ export default function InterviewRecordAnalysisPage() {
     grade: "P6",
     salary: "35-40K",
     years: "3-5年",
-    isOnJob: "在职"
+    isOnJob: "在职",
+    jobDescription: ""
   });
 
   // Parsed dialogues list
@@ -62,6 +64,19 @@ export default function InterviewRecordAnalysisPage() {
   const [sections, setSections] = useState<any[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<Record<number, boolean>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [optimizingSections, setOptimizingSections] = useState<Record<number, boolean>>({});
+  const [reportData, setReportData] = useState<any>(null);
+  const [taskProgress, setTaskProgress] = useState(0);
+  const [taskStep, setTaskStep] = useState("面试VAR AI 正在分析中...");
+  const [showAllWeaknesses, setShowAllWeaknesses] = useState(false);
+  const [showAllPerspectives, setShowAllPerspectives] = useState(false);
+  const [hoveredPerspective, setHoveredPerspective] = useState<any>(null);
+
+  const scoreLogic = reportData?.analysis_result?.scores?.logic ?? 85;
+  const scoreSystem = reportData?.analysis_result?.scores?.system_design ?? 60;
+  const scoreExpression = reportData?.analysis_result?.scores?.expression ?? 70;
+  const scoreOwnership = reportData?.analysis_result?.scores?.ownership ?? 55;
+  const scoreProject = reportData?.analysis_result?.scores?.project_depth ?? 80;
 
   const fmtTime = (secs: number) => {
     const m = Math.floor(Math.abs(secs) / 60);
@@ -131,7 +146,9 @@ export default function InterviewRecordAnalysisPage() {
         timeRange: `${fmtTime(start_time)} - ${fmtTime(end_time)}`,
         tag,
         tagColor: tagColorMap[tag] || first.tagColor,
-        dialogue
+        dialogue,
+        dbSectionId: first.dbSectionId,
+        optimizationAdvice: first.optimizationAdvice
       });
     }
 
@@ -180,6 +197,88 @@ export default function InterviewRecordAnalysisPage() {
     return mergeRecordSectionsToMax10(grouped);
   };
 
+  const stripHtml = (htmlStr: string) => {
+    if (!htmlStr) return "";
+    return htmlStr.replace(/<[^>]*>/g, "").trim();
+  };
+
+  const handleOptimizeSection = async (sectionId: number) => {
+    const section = sections.find(s => s.id === sectionId);
+    if (!section) return;
+
+    const dbSectionId = section.dbSectionId;
+    setOptimizingSections(prev => ({ ...prev, [sectionId]: true }));
+
+    if (!dbSectionId) {
+      // Fallback: Simulate AI generation with custom mock data matching the section title
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      
+      const title = section.title || "";
+      let mockAdvice = {
+        conclusion: `针对【${title}】环节，表现总体${section.tag || "良好"}。但原话术在专业度、架构选型依据及系统深度上仍有提升空间。`,
+        original: section.dialogue?.filter((d: any) => d.sender === "user").map((d: any) => d.text).join(" ") || "（未检测到用户回答）",
+        optimized: ""
+      };
+
+      if (title.includes("自我介绍")) {
+        mockAdvice.optimized = `“您好，我是候选人。我有 3 年后端开发及高并发中间件设计经验。在过往的项目中，我主要负责核心推荐系统的演进与优化。我重点参与了多级缓存架构的落地，引入了 Redis 哨兵集群与本地 Guava 缓存做配合，并设计了消息队列异步解耦机制，使核心服务的接口 QPS 提升了约 50%，TP99 耗时降低了 40ms，在高负载下表现优异。”`;
+      } else if (title.includes("Redis") || title.includes("redis") || title.includes("使用 Redis")) {
+        mockAdvice.optimized = `“我们的业务存在大量热点数据，直接查数据库 QPS 接近上限。引入 <strong class='text-[#5DECCB] font-black'>Redis 作为缓存层</strong> 后，接口响应时间从 <strong class='text-[#5DECCB] font-black'>120ms 降低到 35ms</strong>，峰值 QPS 提升了 <strong class='text-[#5DECCB] font-black'>3 倍</strong>。”`;
+      } else if (title.includes("本地") || title.includes("缓存")) {
+        mockAdvice.optimized = `“在缓存方案选型上，我们需要进行权衡。本地缓存如 Guava 读写都在进程内存中，性能极高，但受限于单机堆内存大小且存在多节点数据不一致问题；而分布式缓存 Redis 虽有网络开销，但支持集群化扩展、高可用且能共享全局状态，是支撑大规模分布式服务的标准选择。”`;
+      } else if (title.includes("双删") || title.includes("一致性")) {
+        mockAdvice.optimized = `“我们采用 Cache Aside 模式，并采用延迟双删策略来最大程度保证缓存与数据库的一致性。为了解决极高并发下双删仍可能发生的间歇性不一致，我们设计了旁路 Canal 监听 MySQL binlog 的方案，将变更异步推送到 Kafka 消息队列进行自动重试补偿，从而实现了最终一致性。”`;
+      } else {
+        mockAdvice.optimized = `“针对这个问题，我当时的核心设计思路是：首先对流量进行分流与降级控制，其次通过引入多级缓存降低底层 DB 压力，并对关键写入路径进行异步化解耦。该方案上线后，整体系统可用性达到了 99.99%，在多次大促中稳定运行。”`;
+      }
+
+      setSections(prev => prev.map(s => {
+        if (s.id === sectionId) {
+          return { ...s, optimizationAdvice: mockAdvice };
+        }
+        return s;
+      }));
+      setOptimizingSections(prev => ({ ...prev, [sectionId]: false }));
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("interviewVar_token");
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json"
+      };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(`http://localhost:8001/api/audio/section/${dbSectionId}/optimize`, {
+        method: "POST",
+        headers
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to generate optimization advice");
+      }
+
+      const data = await res.json();
+      const advice = {
+        conclusion: data.conclusion,
+        original: data.original,
+        optimized: data.optimized
+      };
+
+      setSections(prev => prev.map(s => {
+        if (s.id === sectionId) {
+          return { ...s, optimizationAdvice: advice };
+        }
+        return s;
+      }));
+    } catch (err) {
+      console.error("Error generating advice:", err);
+      auth.triggerToast("生成优化话术失败，请稍后重试！");
+    } finally {
+      setOptimizingSections(prev => ({ ...prev, [sectionId]: false }));
+    }
+  };
+
   // Default transcript matching preview image
   const DEFAULT_TRANSCRIPT = 
     `面试官 (00:00)：请先做个自我介绍吧。\n` +
@@ -207,6 +306,7 @@ export default function InterviewRecordAnalysisPage() {
     const savedDate = localStorage.getItem("interviewVar_session_date");
     const savedGrade = localStorage.getItem("interviewVar_session_grade");
     const savedSalary = localStorage.getItem("interviewVar_session_salary");
+    const savedJobDescription = localStorage.getItem("interviewVar_session_jobDescription");
     const searchParams = new URLSearchParams(window.location.search);
     let sessionId = searchParams.get("sessionId") || localStorage.getItem("interviewVar_session_id");
     if (sessionId) {
@@ -215,15 +315,16 @@ export default function InterviewRecordAnalysisPage() {
     }
     const token = localStorage.getItem("interviewVar_token");
 
-    if (savedCompany || savedRole || savedRound) {
+    if (savedCompany !== null || savedRole !== null || savedRound !== null || savedJobDescription !== null) {
       setMetadataForm(prev => ({
         ...prev,
-        company: savedCompany || prev.company,
-        role: savedRole || prev.role,
-        round: savedRound || prev.round,
-        date: savedDate || prev.date,
-        grade: savedGrade || prev.grade,
-        salary: savedSalary || prev.salary
+        company: savedCompany !== null ? savedCompany : prev.company,
+        role: savedRole !== null ? savedRole : prev.role,
+        round: savedRound !== null ? savedRound : prev.round,
+        date: savedDate !== null ? savedDate : prev.date,
+        grade: savedGrade !== null ? savedGrade : prev.grade,
+        salary: savedSalary !== null ? savedSalary : prev.salary,
+        jobDescription: savedJobDescription !== null ? savedJobDescription : prev.jobDescription
       }));
     }
 
@@ -239,7 +340,25 @@ export default function InterviewRecordAnalysisPage() {
         if (reportRes.ok && sectionsRes.ok) {
           const report = await reportRes.json();
           const sectionsData = await sectionsRes.json();
+          setReportData(report);
           
+          if (report.job_description) {
+            setMetadataForm(prev => ({
+              ...prev,
+              jobDescription: report.job_description
+            }));
+          }
+          if (report.title) {
+            const parts = report.title.split(" · ");
+            if (parts.length >= 2) {
+              setMetadataForm(prev => ({
+                ...prev,
+                company: parts[0] || prev.company,
+                role: parts[1] || prev.role
+              }));
+            }
+          }
+
           const rawTranscript = report.transcript ?? [];
           const dbSections = sectionsData.sections ?? [];
 
@@ -250,18 +369,25 @@ export default function InterviewRecordAnalysisPage() {
           };
 
           const mappedSections = dbSections.map((sec: any, idx: number) => {
-            const sectionDialogue = rawTranscript.filter((utt: any) => 
-              (sec.start_time - 0.001 <= (utt.start_time ?? 0)) && 
-              ((utt.start_time ?? 0) <= sec.end_time + 0.001)
-            );
+            const sectionDialogue = rawTranscript.filter((utt: any) => {
+              const t = utt.start_time ?? 0;
+              const isLast = idx === dbSections.length - 1;
+              if (isLast) {
+                return (sec.start_time - 0.001 <= t) && (t <= sec.end_time + 0.001);
+              } else {
+                return (sec.start_time - 0.001 <= t) && (t < sec.end_time - 0.001);
+              }
+            });
             return {
               id: sec.id || (idx + 1),
+              dbSectionId: sec.id,
               title: sec.title || `段落 ${idx + 1}`,
               start_time: sec.start_time,
               end_time: sec.end_time,
               timeRange: `${fmtTime(sec.start_time)} - ${fmtTime(sec.end_time)}`,
               tag: sec.tag || "一般",
               tagColor: tagColorMap[sec.tag] || "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+              optimizationAdvice: sec.optimization_advice || undefined,
               dialogue: sectionDialogue.map((utt: any) => ({
                 sender: utt.speaker === "Interviewer" ? "interviewer" as const : "user" as const,
                 name: utt.speaker === "Interviewer" ? "面试官" : "您",
@@ -273,8 +399,8 @@ export default function InterviewRecordAnalysisPage() {
           });
 
           setSections(mergeRecordSectionsToMax10(mappedSections));
-          // Set first dialogue text to pasteText so copy/export still work
-          const fullText = rawTranscript.map((utt: any) => `${utt.speaker === "Interviewer" ? "面试官" : "我"}(${fmtTime(utt.start_time || 0)}): ${utt.content}`).join("\n");
+          // Set first dialogue text to pasteText so copy/export still work without timestamps
+          const fullText = rawTranscript.map((utt: any) => `${utt.speaker === "Interviewer" ? "面试官" : "我"}: ${utt.content}`).join("\n");
           setPasteText(fullText);
         } else {
           // fallback if response failed
@@ -381,6 +507,7 @@ export default function InterviewRecordAnalysisPage() {
     const lines = rawText.split("\n");
     const parsedList: DialogueItem[] = [];
     let count = 0;
+    let prevSpeaker: "interviewer" | "user" = "user";
 
     lines.forEach((line) => {
       const cleanLine = line.trim();
@@ -400,24 +527,45 @@ export default function InterviewRecordAnalysisPage() {
         const secs = totalSecs % 60;
         timeStr = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
       }
-      count++;
 
       let sender: "interviewer" | "user" = "user";
       let name = "您";
       let textVal = remainingText;
 
-      const isInterviewer = /^(面试官|Q|q)\s*[：:]/.test(remainingText);
-      const isUser = /^(我|您|A|a)\s*[：:]/.test(remainingText);
+      const isInterviewer = /^(面试官|Q|q|问)\d*\s*[：:\s]/.test(remainingText);
+      const isUser = /^(我|您|A|a|答)\d*\s*[：:\s]/.test(remainingText);
 
       if (isInterviewer) {
         sender = "interviewer";
         name = "面试官";
-        textVal = remainingText.replace(/^(面试官|Q|q)\s*[：:]/, "").trim();
+        textVal = remainingText.replace(/^(面试官|Q|q|问)\d*\s*[：:\s]/, "").trim();
       } else if (isUser) {
         sender = "user";
         name = "您";
-        textVal = remainingText.replace(/^(我|您|A|a)\s*[：:]/, "").trim();
+        textVal = remainingText.replace(/^(我|您|A|a|答)\d*\s*[：:\s]/, "").trim();
+      } else {
+        // Heuristics
+        if (remainingText.startsWith("答")) {
+          sender = "user";
+          name = "您";
+          textVal = remainingText.replace(/^答\s*[：:\s]?/, "").trim();
+        } else if (remainingText.endsWith("？") || remainingText.endsWith("?")) {
+          sender = "interviewer";
+          name = "面试官";
+        } else {
+          // alternate speaker
+          if (prevSpeaker === "interviewer") {
+            sender = "user";
+            name = "您";
+          } else {
+            sender = "interviewer";
+            name = "面试官";
+          }
+        }
       }
+
+      prevSpeaker = sender;
+      count++;
 
       const hasWarn = sender === "user" && textVal.includes("因为 Redis 性能高");
       parsedList.push({
@@ -487,13 +635,86 @@ export default function InterviewRecordAnalysisPage() {
     localStorage.setItem("interviewVar_session_date", metadataForm.date);
     localStorage.setItem("interviewVar_session_grade", metadataForm.grade);
     localStorage.setItem("interviewVar_session_salary", metadataForm.salary);
+    localStorage.setItem("interviewVar_session_jobDescription", metadataForm.jobDescription || "");
     localStorage.setItem("interviewVar_analyzed_text", "true");
 
-    setTimeout(() => {
+    const token = localStorage.getItem("interviewVar_token");
+    const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+
+    const sessionTitle = `${metadataForm.company || "面试记录"} · ${metadataForm.role || "岗位"} · ${metadataForm.date}`;
+
+    try {
+      // Step 1: Create InterviewSession from the pasted text
+      const sessionRes = await fetch("http://localhost:8001/api/audio/create_record_session", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({
+          paste_text: pasteText,
+          title: sessionTitle,
+          company: metadataForm.company,
+          role: metadataForm.role,
+          round: metadataForm.round,
+          date: metadataForm.date,
+          grade: metadataForm.grade,
+          salary: metadataForm.salary,
+          job_description: metadataForm.jobDescription
+        })
+      });
+      if (!sessionRes.ok) {
+        const err = await sessionRes.json();
+        throw new Error(err.detail || "创建分析会话失败");
+      }
+      const sessionData = await sessionRes.json();
+      const sessionId: number = sessionData.session_id;
+
+      // Step 2: Trigger background analysis task
+      const analyzeRes = await fetch("http://localhost:8001/api/audio/analyze", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      if (!analyzeRes.ok) {
+        const err = await analyzeRes.json();
+        throw new Error(err.detail || "启动分析任务失败");
+      }
+      const analyzeData = await analyzeRes.json();
+      const taskId: string = analyzeData.task_id;
+
+      // Step 3: Poll progress until done — uses shared helper that aborts
+      // the in-flight fetch the moment the server reports a terminal status
+      // (no more trailing polls after success).
+      const token2 = localStorage.getItem("interviewVar_token");
+      const STEPS = [
+        "文本提取——解析输入面试文字...",
+        "语义分段——判定说话人角色...",
+        "LLM 评估——对比用户画像与答题...",
+        "AI 话术重构——生成升级建议...",
+        "分析完成 — 正在生成报告..."
+      ];
+      try {
+        await pollTaskUntilDone(taskId, {
+          intervalMs: 2000,
+          headers: token2 ? { Authorization: `Bearer ${token2}` } : {},
+          onProgress: (pollData) => {
+            const pct = pollData.progress ?? 0;
+            setTaskProgress(pct);
+            const si = Math.min(Math.floor((pct / 100) * STEPS.length), STEPS.length - 1);
+            setTaskStep(STEPS[si]);
+          },
+        });
+      } catch (pollErr: any) {
+        throw new Error(pollErr?.message || "分析任务失败，请重试");
+      }
+
+      // Step 4: Reload page with sessionId to load report from backend
+      localStorage.setItem("interviewVar_session_id", String(sessionId));
+      window.location.reload();
+
+    } catch (e: any) {
+      auth.triggerToast(e.message || "启动分析失败，请重试！");
       setIsAnalyzing(false);
-      setShowInputForm(false);
-      parseDialogueText(pasteText);
-    }, 1200);
+    }
   };
 
   // Helper to load standard preview demo template
@@ -509,7 +730,8 @@ export default function InterviewRecordAnalysisPage() {
         grade: "P6 / L5",
         salary: "25K * 16薪",
         years: "3-5年",
-        isOnJob: "在职"
+        isOnJob: "在职",
+        jobDescription: ""
       });
       setIsTemplateLoading(false);
     }, 1200);
@@ -518,8 +740,12 @@ export default function InterviewRecordAnalysisPage() {
   // Helper to copy text to clipboard
   const handleCopyToClipboard = (text: string, msg: string) => {
     navigator.clipboard.writeText(text);
-    alert(msg);
+    auth.triggerToast(msg);
   };
+
+  const activeSection = sections.find(s => s.id === activeSectionId) || sections[0];
+  const userDialogueTexts = activeSection?.dialogue?.filter((d: any) => d.sender === "user").map((d: any) => d.text).join(" ") || "";
+  const isOptimizing = activeSection ? !!optimizingSections[activeSection.id] : false;
 
   return (
     <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-x-hidden overflow-y-auto pt-20">
@@ -613,18 +839,36 @@ export default function InterviewRecordAnalysisPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-[#050B1A]/90 backdrop-blur-xl flex flex-col justify-center items-center gap-4 px-8"
+            className="fixed inset-0 z-50 bg-[#050B1A]/95 backdrop-blur-xl flex flex-col justify-center items-center gap-6 px-8"
           >
-            <div className="w-16 h-16 rounded-full border-4 border-[#00D4FF]/20 border-t-[#00D4FF] animate-spin mb-2" />
-            <div className="text-center space-y-3">
-              <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">面试VAR 正在分析面试记录...</h3>
-              <p className="text-base md:text-lg text-white/70 font-semibold">剖析答题逻辑、计算风险漏点、输出表达升级策略</p>
+            {/* Dual-ring spinner */}
+            <div className="relative w-16 h-16 mb-2">
+              <div className="absolute inset-0 rounded-full border-4 border-[#00D4FF]/20 border-t-[#00D4FF] animate-spin" />
+              <div className="absolute inset-2 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.1s" }} />
             </div>
+
+            <div className="text-center space-y-3">
+              <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">
+                {taskStep || "面试VAR AI 正在分析中..."}
+              </h3>
+              <p className="text-base md:text-lg text-white/70 font-semibold">
+                文本诊断 + MiniMax-M3 智能评估，分析完成后自动进入报告
+              </p>
+            </div>
+
+            {/* Progress bar */}
+            <div className="w-full max-w-sm bg-white/5 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-[#00D4FF] to-[#5DECCB] transition-all duration-700"
+                style={{ width: `${taskProgress}%` }}
+              />
+            </div>
+            <p className="text-[#5DECCB] text-2xl md:text-3xl font-black font-mono tracking-wider drop-shadow-[0_0_10px_rgba(93,236,203,0.5)] mt-2">{taskProgress}%</p>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <div className="flex-1 flex flex-col px-gutter max-w-container-max mx-auto w-full py-6 gap-5.5 text-left relative z-10">
+      <div className="flex-none flex flex-col px-gutter max-w-container-max mx-auto w-full pt-6 pb-2 gap-5.5 text-left relative z-10">
 
         {showInputForm ? (
           /* ========================================================
@@ -728,6 +972,16 @@ export default function InterviewRecordAnalysisPage() {
                       />
                     </div>
                   </div>
+
+                  <div className="mt-4">
+                    <label className="block mb-1.5 text-xs font-semibold text-white/60">岗位详情 [选填]</label>
+                    <textarea
+                      placeholder="可以将岗位 JD（Job Description）粘贴在此，方便 AI 更好地匹配和分析面试表现..."
+                      value={metadataForm.jobDescription}
+                      onChange={(e) => setMetadataForm({ ...metadataForm, jobDescription: e.target.value })}
+                      className="w-full py-2.5 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 h-28 text-xs md:text-sm resize-none"
+                    />
+                  </div>
                 </div>
 
                 <div className="flex justify-end gap-3 pt-4">
@@ -763,21 +1017,15 @@ export default function InterviewRecordAnalysisPage() {
             {/* ========================================================
                WORKSPACE MAIN CONTAINER (3 COLUMNS DASHBOARD)
                ======================================================== */}
-            <div className="grid grid-cols-12 gap-5.5 items-stretch w-full">
+            <div className="grid grid-cols-12 gap-[22px] items-stretch w-full">
 
             {/* ----------------------------------------------------
                 COLUMN 1: Left Sidebar switcher (3 cols)
                ---------------------------------------------------- */}
-            <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5">
-              
-              {/* Sidebar Header */}
-              <div className="pb-1 select-none text-left">
-                <h3 className="font-black text-white text-base">面试调试器</h3>
-                <p className="text-[10px] text-white/30 font-mono font-bold mt-0.5">Session #8824</p>
-              </div>
+            <div className="col-span-12 lg:col-span-3 flex flex-col gap-[18px]">
 
               {/* 1.2 Interview Info card */}
-              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5">
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[290px] shrink-0">
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
                   <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-base text-[#00D4FF]">assignment_ind</span>
@@ -830,7 +1078,7 @@ export default function InterviewRecordAnalysisPage() {
               </div>
 
               {/* 1.3 Question Catalog */}
-              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[500px] shrink-0">
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[470px] shrink-0">
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
                   <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-base text-[#00D4FF]">list_alt</span>
@@ -883,15 +1131,6 @@ export default function InterviewRecordAnalysisPage() {
                     );
                   })}
                 </div>
-
-                <div className="text-center pt-2 border-t border-white/5">
-                  <span 
-                    onClick={() => alert("问题目录开发中...")}
-                    className="text-sm font-black text-[#AFA7FF] hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
-                  >
-                    查看全部问题 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
-                  </span>
-                </div>
               </div>
 
             </div>
@@ -899,10 +1138,10 @@ export default function InterviewRecordAnalysisPage() {
             {/* ----------------------------------------------------
                 COLUMN 2: Center workspace Dialogue Analysis (6 cols)
                ---------------------------------------------------- */}
-            <div className="col-span-12 lg:col-span-6 flex flex-col gap-4.5 min-w-0">
+            <div className="col-span-12 lg:col-span-6 flex flex-col gap-[18px] min-w-0">
               
               {/* Main Content Board */}
-              <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4 h-[890px] shrink-0">
+              <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4 h-[778px] shrink-0">
                 {/* Main tabs bar with search */}
                 <div className="flex justify-between items-center border-b border-white/5 select-none shrink-0">
                   <div className="flex items-center gap-6 font-black text-base">
@@ -972,17 +1211,11 @@ export default function InterviewRecordAnalysisPage() {
                               }}
                               className="flex justify-between items-center p-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all cursor-pointer select-none"
                             >
-                              <div className="flex items-center gap-2.5 text-xs font-bold text-left">
+                              <div className="flex items-center gap-2.5 text-sm font-bold text-left">
                                 <span className="text-[#AFA7FF] font-mono">#{secIdx + 1}</span>
                                 <span className="text-white font-black">{sec.title}</span>
                                 <span className={`px-2 py-0.5 rounded text-[10px] uppercase border font-semibold ${sec.tagColor || "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20"}`}>
                                   {sec.tag}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2 text-[11px] text-white/40 font-mono">
-                                <span>{sec.timeRange}</span>
-                                <span className="material-symbols-outlined text-sm">
-                                  {isCollapsed ? "keyboard_arrow_down" : "keyboard_arrow_up"}
                                 </span>
                               </div>
                             </div>
@@ -1009,7 +1242,6 @@ export default function InterviewRecordAnalysisPage() {
                                         <span className="text-white/60 flex items-center gap-1.5 text-xs">
                                           <span className={`w-2.5 h-2.5 rounded-full ${isInterviewer ? "bg-[#FF7A95]" : "bg-[#00D4FF]"}`} />
                                           {bubble.name}
-                                          <span className="font-mono text-[10px] text-white/30 ml-1">{bubble.time}</span>
                                         </span>
                                         
                                         <div className="flex items-center gap-2">
@@ -1102,12 +1334,11 @@ export default function InterviewRecordAnalysisPage() {
                             }
                           }
                           if(firstWarnSecId !== null && firstWarnIdx !== null) {
-                            alert("已定位到当前存在表达风险的问答段落！");
+                            auth.triggerToast("已定位到当前存在表达风险的问答段落！");
                             scrollToSection(firstWarnSecId);
                             setActivePopoverIdx(`${firstWarnSecId}-${firstWarnIdx}`);
                           }
                         }}>
-                          <span className="material-symbols-outlined text-xs">arrow_upward</span>定位到当前问题
                         </span>
                       </div>
                     </div>
@@ -1119,62 +1350,156 @@ export default function InterviewRecordAnalysisPage() {
                           <span className="material-symbols-outlined text-sm text-[#00D4FF]">account_tree</span>
                           大厂考察要点对齐
                         </h4>
-                        <p className="text-white/60">通过对日志的拆解，面试官在 Redis 环节共设计了 3 步渐进式提问：考察缓存作用 ➔ 考察缓存与本地内存的区别 ➔ 考察主从双写一致性一致性重试机制。</p>
+                        <p className="text-white/60 text-xs md:text-sm">
+                          {reportData?.analysis_result?.question_deconstruction && reportData.analysis_result.question_deconstruction.length > 0
+                            ? `通过对对话的深度分析，面试官进行了以下话题和阶段的问题设计：`
+                            : sections && sections.length > 0 
+                              ? `通过对日志的拆解，面试官共设计了 ${sections.length} 个主要话题段落进行考察：${sections.map(s => s.title).join(" ➔ ")}。`
+                              : "通过对日志的拆解，面试官在 Redis 环节共设计了 3 步渐进式提问：考察缓存作用 ➔ 考察缓存与本地内存的区别 ➔ 考察主从双写一致性一致性重试机制。"
+                          }
+                        </p>
                       </div>
                       <div className="flex flex-col gap-4">
-                        <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl text-sm flex flex-col gap-2 text-left">
-                          <div>
-                            <span className="inline-block px-2 py-0.5 rounded bg-white/5 text-white/70 font-mono text-xs font-black">
-                              第 1 关 · 基础引入
-                            </span>
-                          </div>
-                          <p className="text-white font-extrabold text-sm md:text-base">为什么使用 Redis？</p>
-                          <p className="text-xs md:text-sm text-white/40 leading-relaxed">
-                            考查求职者是否知道 Redis 在项目中的具体角色，是否有明确的技术背景支持还是仅仅套用热门词汇。
-                          </p>
-                        </div>
-                        <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl text-sm flex flex-col gap-2 text-left">
-                          <div>
-                            <span className="inline-block px-2 py-0.5 rounded bg-[#AFA7FF]/10 text-[#AFA7FF] border border-[#AFA7FF]/20 font-mono text-xs font-black">
-                              第 2 关 · 方案对比
-                            </span>
-                          </div>
-                          <p className="text-white font-extrabold text-sm md:text-base">为什么不用本地缓存？</p>
-                          <p className="text-xs md:text-sm text-white/40 leading-relaxed">
-                            深度考查对进程内缓存 (Guava/Ehcache) 与分布式缓存 (Redis) 的 Trade-off 架构对比和边界思考。
-                          </p>
-                        </div>
+                        {reportData?.analysis_result?.question_deconstruction && reportData.analysis_result.question_deconstruction.length > 0 ? (
+                          reportData.analysis_result.question_deconstruction.map((item: any, idx: number) => (
+                            <div key={idx} className="p-4 bg-white/[0.02] border border-white/5 rounded-xl text-sm flex flex-col gap-2 text-left">
+                              <div>
+                                <span className="inline-block px-2 py-0.5 rounded bg-white/5 text-white/70 font-mono text-xs font-black">
+                                  {item.stage || `第 ${idx + 1} 关`}
+                                </span>
+                              </div>
+                              <p className="text-white font-extrabold text-sm md:text-base">{item.title}</p>
+                              <p className="text-xs md:text-sm text-white/40 leading-relaxed font-normal">
+                                {item.desc}
+                              </p>
+                            </div>
+                          ))
+                        ) : sections && sections.length > 0 ? (
+                          sections.map((sec, idx) => (
+                            <div key={sec.id || idx} className="p-4 bg-white/[0.02] border border-white/5 rounded-xl text-sm flex flex-col gap-2 text-left">
+                              <div>
+                                <span className="inline-block px-2 py-0.5 rounded bg-white/5 text-white/70 font-mono text-xs font-black">
+                                  第 {idx + 1} 关 · {sec.title}
+                                </span>
+                              </div>
+                              <p className="text-white font-extrabold text-sm md:text-base">主考考点：{sec.title}</p>
+                              <p className="text-xs md:text-sm text-white/40 leading-relaxed font-normal">
+                                {sec.summary || "考查候选人在此技术领域的实际运用、理论深度以及在复杂场景下的架构考量与经验细节。"}
+                              </p>
+                              {sec.review_points && sec.review_points.length > 0 && (
+                                <p className="text-[11px] text-[#AFA7FF] font-semibold mt-1">
+                                  重点复习：{sec.review_points.join("、")}
+                                </p>
+                              )}
+                            </div>
+                          ))
+                        ) : (
+                          <>
+                            <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl text-sm flex flex-col gap-2 text-left">
+                              <div>
+                                <span className="inline-block px-2 py-0.5 rounded bg-white/5 text-white/70 font-mono text-xs font-black">
+                                  第 1 关 · 基础引入
+                                </span>
+                              </div>
+                              <p className="text-white font-extrabold text-sm md:text-base">为什么使用 Redis？</p>
+                              <p className="text-xs md:text-sm text-white/40 leading-relaxed font-normal">
+                                考查求职者是否知道 Redis 在项目中的具体角色，是否有明确的技术背景支持还是仅仅套用热门词汇。
+                              </p>
+                            </div>
+                            <div className="p-4 bg-white/[0.02] border border-white/5 rounded-xl text-sm flex flex-col gap-2 text-left">
+                              <div>
+                                <span className="inline-block px-2 py-0.5 rounded bg-[#AFA7FF]/10 text-[#AFA7FF] border border-[#AFA7FF]/20 font-mono text-xs font-black">
+                                  第 2 关 · 方案对比
+                                </span>
+                              </div>
+                              <p className="text-white font-extrabold text-sm md:text-base">为什么不用本地缓存？</p>
+                              <p className="text-xs md:text-sm text-white/40 leading-relaxed font-normal">
+                                深度考查对进程内缓存 (Guava/Ehcache) 与分布式缓存 (Redis) 的 Trade-off 架构对比和边界思考。
+                              </p>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   ) : activeTab === "followup" ? (
                     /* Tab 3: 追问路径 */
                     <div className="space-y-4 py-2">
-                      <div className="relative pl-6 space-y-4">
+                      <div className="relative pl-6 space-y-5">
                         <div className="absolute left-2 top-2.5 bottom-2.5 w-0.5 bg-[#AFA7FF]/20" />
                         
-                        <div className="relative">
-                          <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-[#5DECCB] z-10" />
-                          <div className="text-left text-base space-y-1 font-semibold">
-                            <p className="text-base text-white/40">Q1 自我介绍 · 引导切入</p>
-                            <p className="text-base text-white">抛出“做过分布式系统与中间件开发”，成功引导面试官进入中间件板块。</p>
-                          </div>
-                        </div>
+                        {reportData?.analysis_result?.followup_paths && reportData.analysis_result.followup_paths.length > 0 ? (
+                          reportData.analysis_result.followup_paths.map((item: any, idx: number) => {
+                            const isRisk = item.tag === "风险";
+                            const isGood = item.tag === "良好";
+                            const dotBg = isRisk ? "bg-[#FF7A95]" : isGood ? "bg-[#5DECCB]" : "bg-[#AFA7FF]";
+                            const titleColor = isRisk ? "text-[#FF7A95]" : isGood ? "text-[#5DECCB]" : "text-white/60";
+                            return (
+                              <div key={idx} className="relative">
+                                <span className={`absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] ${dotBg} z-10 ${isRisk ? "animate-pulse" : ""}`} />
+                                <div className="text-left text-sm md:text-base space-y-1 font-semibold">
+                                  <p className={`text-xs md:text-sm font-bold ${titleColor}`}>
+                                    {item.title} · {item.tag || "一般"}
+                                  </p>
+                                  <p className="text-xs md:text-sm text-white/80 leading-relaxed font-normal">
+                                    {item.desc}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : sections && sections.length > 0 ? (
+                          sections.map((sec, idx) => {
+                            const isRisk = sec.tag === "风险";
+                            const isGood = sec.tag === "良好";
+                            const dotBg = isRisk ? "bg-[#FF7A95]" : isGood ? "bg-[#5DECCB]" : "bg-[#AFA7FF]";
+                            const titleColor = isRisk ? "text-[#FF7A95]" : isGood ? "text-[#5DECCB]" : "text-white/60";
+                            
+                            return (
+                              <div key={sec.id || idx} className="relative">
+                                <span className={`absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] ${dotBg} z-10 ${isRisk ? "animate-pulse" : ""}`} />
+                                <div className="text-left text-sm md:text-base space-y-1 font-semibold">
+                                  <p className={`text-xs md:text-sm font-bold ${titleColor}`}>
+                                    Q{idx + 1} {sec.title} · {sec.tag || "一般"}
+                                  </p>
+                                  <p className="text-xs md:text-sm text-white/80 leading-relaxed font-normal">
+                                    {isRisk 
+                                      ? `识别出回答薄弱环节：${sec.shortcomings?.[0] || sec.summary || "回答暴露了一定盲区或表达细节不完善。"}`
+                                      : isGood 
+                                        ? `回答亮点：${sec.advantages?.[0] || sec.summary || "回答准确清晰，体现了较好的专业底子。"}`
+                                        : `${sec.summary || "技术点跟进与正常作答。"}`
+                                    }
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <>
+                            <div className="relative">
+                              <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-[#5DECCB] z-10" />
+                              <div className="text-left text-base space-y-1 font-semibold">
+                                <p className="text-base text-white/40">Q1 自我介绍 · 引导切入</p>
+                                <p className="text-base text-white font-normal">抛出“做过分布式系统与中间件开发”，成功引导面试官进入中间件板块。</p>
+                              </div>
+                            </div>
 
-                        <div className="relative">
-                          <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-[#AFA7FF] z-10 animate-pulse" />
-                          <div className="text-left text-base space-y-1 font-semibold">
-                            <p className="text-base text-[#AFA7FF]">Q3 Redis 选型 · 主动深挖</p>
-                            <p className="text-base text-white/80">核心漏洞点：“因为 Redis 性能高，可以做缓存” ➔ 引出高负载高并发背景的细节追问。</p>
-                          </div>
-                        </div>
+                            <div className="relative">
+                              <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-[#AFA7FF] z-10 animate-pulse" />
+                              <div className="text-left text-base space-y-1 font-semibold">
+                                <p className="text-base text-[#AFA7FF]">Q3 Redis 选型 · 主动深挖</p>
+                                <p className="text-base text-white/80 font-normal">核心漏洞点：“因为 Redis 性能高，可以做缓存” ➔ 引出高负载高并发背景的细节追问。</p>
+                              </div>
+                            </div>
 
-                        <div className="relative">
-                          <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-white/5 z-10" />
-                          <div className="text-left text-base space-y-1 font-semibold">
-                            <p className="text-base text-white/30">Q5 双写一致性 · 重试质感</p>
-                            <p className="text-base text-white/40">最终瓶颈：“定时双删”的答法暴露了高并发和真实复杂场景落地架构经验欠缺的破绽。</p>
-                          </div>
-                        </div>
+                            <div className="relative">
+                              <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-white/5 z-10" />
+                              <div className="text-left text-base space-y-1 font-semibold">
+                                <p className="text-base text-white/30">Q5 双写一致性 · 重试质感</p>
+                                <p className="text-base text-white/40 font-normal">最终瓶颈：“定时双删”的答法暴露了高并发和真实复杂场景落地架构经验欠缺的破绽。</p>
+                              </div>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -1182,37 +1507,40 @@ export default function InterviewRecordAnalysisPage() {
                     <div className="space-y-4 py-2">
                       <div className="grid grid-cols-2 gap-3.5 text-base text-left">
                         <div className="p-3.5 rounded-xl bg-white/[0.01] border border-white/5 space-y-1">
-                          <span className="text-white/40">逻辑自洽度</span>
-                          <p className="text-lg font-black text-white">85%</p>
+                          <span className="text-white/40 text-xs md:text-sm font-semibold">逻辑自洽度</span>
+                          <p className="text-lg font-black text-white">{scoreLogic}%</p>
                           <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-1">
-                            <div className="h-full bg-[#5DECCB]" style={{ width: "85%" }} />
+                            <div className="h-full bg-[#5DECCB]" style={{ width: `${scoreLogic}%` }} />
                           </div>
                         </div>
                         <div className="p-3.5 rounded-xl bg-white/[0.01] border border-white/5 space-y-1">
-                          <span className="text-white/40">技术细节深度</span>
-                          <p className="text-lg font-black text-[#FF7A95]">60%</p>
+                          <span className="text-white/40 text-xs md:text-sm font-semibold">技术细节深度</span>
+                          <p className={`text-lg font-black ${scoreExpression >= 70 ? "text-[#5DECCB]" : scoreExpression >= 60 ? "text-[#AFA7FF]" : "text-[#FF7A95]"}`}>{scoreExpression}%</p>
                           <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-1">
-                            <div className="h-full bg-[#FF7A95]" style={{ width: "60%" }} />
+                            <div className="h-full bg-[#FF7A95]" style={{ width: `${scoreExpression}%` }} />
                           </div>
                         </div>
                         <div className="p-3.5 rounded-xl bg-white/[0.01] border border-white/5 space-y-1">
-                          <span className="text-white/40">选型对比宽度</span>
-                          <p className="text-lg font-black text-[#AFA7FF]">70%</p>
+                          <span className="text-white/40 text-xs md:text-sm font-semibold">选型对比宽度</span>
+                          <p className={`text-lg font-black ${scoreSystem >= 70 ? "text-[#5DECCB]" : "text-[#AFA7FF]"}`}>{scoreSystem}%</p>
                           <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-1">
-                            <div className="h-full bg-[#AFA7FF]" style={{ width: "70%" }} />
+                            <div className="h-full bg-[#AFA7FF]" style={{ width: `${scoreSystem}%` }} />
                           </div>
                         </div>
                         <div className="p-3.5 rounded-xl bg-white/[0.01] border border-white/5 space-y-1">
-                          <span className="text-white/40">业务与数据指标</span>
-                          <p className="text-lg font-black text-[#FF7A95]">55%</p>
+                          <span className="text-white/40 text-xs md:text-sm font-semibold">业务与数据指标</span>
+                          <p className={`text-lg font-black ${scoreOwnership >= 70 ? "text-[#5DECCB]" : "text-[#FF7A95]"}`}>{scoreOwnership}%</p>
                           <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden mt-1">
-                            <div className="h-full bg-[#FF7A95]" style={{ width: "55%" }} />
+                            <div className="h-full bg-[#FF7A95]" style={{ width: `${scoreOwnership}%` }} />
                           </div>
                         </div>
                       </div>
-                      <div className="p-3.5 rounded-xl bg-[#0b1326] border border-white/5 font-semibold text-base leading-relaxed text-left space-y-1">
-                        <span className="text-base font-black text-[#AFA7FF] uppercase tracking-wider block mb-1">AI 提分战略建议</span>
-                        求职者表达有一定条理（逻辑自洽），但缺乏架构师常用的“多方案 Trade-off 选型比对”和“核心量化吞吐指标描述”。建议把 “因为性能高所以用 Redis” 升级为 “解决热点行高并发打挂数据库的架构痛点”。
+                      <div className="p-3.5 rounded-xl bg-[#0b1326] border border-white/5 font-semibold text-xs md:text-sm leading-relaxed text-left space-y-1">
+                        <span className="text-xs md:text-sm font-black text-[#AFA7FF] uppercase tracking-wider block mb-1">AI 提分战略建议</span>
+                        {reportData?.summary?.suggestions && reportData.summary.suggestions.length > 0 
+                          ? reportData.summary.suggestions.join(" ")
+                          : reportData?.summary?.executive_summary || "求职者表达有一定条理（逻辑自洽），但对于大型系统设计的方案Trade-off对比和量化数据支持稍显薄弱。建议参考AI优化话术进行重点模块的重构和背书改进。"
+                        }
                       </div>
                     </div>
                   )}
@@ -1225,10 +1553,10 @@ export default function InterviewRecordAnalysisPage() {
             {/* ----------------------------------------------------
                 COLUMN 3: Right Sidebar (3 cols)
                ---------------------------------------------------- */}
-            <div className="col-span-12 lg:col-span-3 flex flex-col gap-4.5 text-left">
+            <div className="col-span-12 lg:col-span-3 flex flex-col gap-[18px] text-left">
               
               {/* 3.1 Scores widgets */}
-              <div className="grid grid-cols-2 gap-4 select-none">
+              <div className="grid grid-cols-2 gap-4 select-none h-[120px] shrink-0">
                 <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-1.5">
                   <span className="text-base font-bold text-white/40">综合评分</span>
                   <div className="flex items-baseline gap-1.5">
@@ -1252,100 +1580,228 @@ export default function InterviewRecordAnalysisPage() {
               </div>
 
               {/* 3.2 Largest Lose Point TOP 3 */}
-              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 select-none">
-                <div className="flex justify-between items-center pb-2 border-b border-white/5">
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 select-none h-[150px] shrink-0">
+                <div className="flex justify-between items-center pb-2 border-b border-white/5 shrink-0">
                   <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-sm text-[#FF7A95]">report</span>
                     最大失分点 TOP 3
                   </h4>
                   <span 
-                    onClick={() => alert("更多失分点分析开发中...")}
+                    onClick={() => setShowAllWeaknesses(true)}
                     className="text-xs font-black text-[#FF7A95] hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
                   >
                     查看全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                   </span>
                 </div>
 
-                <div className="space-y-3">
-                  {[
-                    { rank: 1, label: "Redis 选型依据不足", tag: "高风险", tagClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black", desc: "缺少问题背景和选型对比，无法体现技术决策能力" },
-                    { rank: 2, label: "没有 Trade-off 分析", tag: "中风险", tagClass: "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black", desc: "回答较表面，缺乏权衡思考和方案对比" },
-                    { rank: 3, label: "项目贡献模糊", tag: "中风险", tagClass: "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black", desc: "未突出个人贡献和负责的核心模块" }
-                  ].map((lose) => (
-                    <div key={lose.rank} className="p-2.5 rounded-xl bg-[#050B1A]/80 border border-white/5 space-y-1.5 text-left text-xs md:text-sm">
-                      <div className="flex justify-between items-center">
-                        <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm">
-                          <span className="w-4 h-4 rounded-full bg-white/5 flex items-center justify-center font-mono text-xs font-black text-white/55">{lose.rank}</span>
-                          {lose.label}
-                        </span>
-                        <span className={`px-1.5 py-0.2 rounded border shrink-0 ${lose.tagClass}`}>
-                          {lose.tag}
-                        </span>
+                <div className="space-y-3 flex-1 overflow-y-auto pr-1">
+                  {(() => {
+                    const maxLosePoints = reportData?.analysis_result?.max_lose_points;
+                    if (maxLosePoints && maxLosePoints.length > 0) {
+                      return maxLosePoints.slice(0, 3).map((lose: any, idx: number) => {
+                        const rank = lose.rank || (idx + 1);
+                        const label = lose.label;
+                        const desc = lose.desc;
+                        const tag = lose.tag || (idx === 0 ? "高风险" : "中风险");
+                        const tagClass = tag === "高风险"
+                          ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black"
+                          : "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
+                        return (
+                          <div key={idx} className="p-2 rounded-xl bg-[#050B1A]/80 border border-white/5 space-y-1.5 text-left text-xs md:text-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
+                                <span className="w-4 h-4 rounded-full bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-white/55">{rank}</span>
+                                <span className="truncate">{label}</span>
+                              </span>
+                              <span className={`px-1.5 py-0.2 rounded border shrink-0 ${tagClass}`}>
+                                {tag}
+                              </span>
+                            </div>
+                            <p className="text-xs text-white/45 leading-snug font-bold">
+                              {desc}
+                            </p>
+                          </div>
+                        );
+                      });
+                    }
+                    const weaknesses = reportData?.summary?.weaknesses || [];
+                    if (weaknesses.length > 0) {
+                      return weaknesses.slice(0, 3).map((w: string, idx: number) => {
+                        const parts = w.split(/[：:]/);
+                        const label = parts[0] || w;
+                        const desc = parts[1] || "候选人在答题时展现出的薄弱环节，建议结合AI优化话术做针对性复习提高。";
+                        const tag = idx === 0 ? "高风险" : "中风险";
+                        const tagClass = idx === 0 
+                          ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black" 
+                          : "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
+                        return (
+                          <div key={idx} className="p-2 rounded-xl bg-[#050B1A]/80 border border-white/5 space-y-1.5 text-left text-xs md:text-sm">
+                            <div className="flex justify-between items-center">
+                              <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
+                                <span className="w-4 h-4 rounded-full bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-white/55">{idx + 1}</span>
+                                <span className="truncate">{label}</span>
+                              </span>
+                              <span className={`px-1.5 py-0.2 rounded border shrink-0 ${tagClass}`}>
+                                {tag}
+                              </span>
+                            </div>
+                            <p className="text-xs text-white/45 leading-snug font-bold">
+                              {desc}
+                            </p>
+                          </div>
+                        );
+                      });
+                    }
+                    return [
+                      { rank: 1, label: "Redis 选型依据不足", tag: "高风险", tagClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black", desc: "缺少问题背景和选型对比，无法体现技术决策能力" },
+                      { rank: 2, label: "没有 Trade-off 分析", tag: "中风险", tagClass: "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black", desc: "回答较表面，缺乏权衡思考和方案对比" },
+                      { rank: 3, label: "项目贡献模糊", tag: "中风险", tagClass: "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black", desc: "未突出个人贡献和负责的核心模块" }
+                    ].map((lose) => (
+                      <div key={lose.rank} className="p-2 rounded-xl bg-[#050B1A]/80 border border-white/5 space-y-1.5 text-left text-xs md:text-sm">
+                        <div className="flex justify-between items-center">
+                          <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm">
+                            <span className="w-4 h-4 rounded-full bg-white/5 flex items-center justify-center font-mono text-xs font-black text-white/55">{lose.rank}</span>
+                            {lose.label}
+                          </span>
+                          <span className={`px-1.5 py-0.2 rounded border shrink-0 ${lose.tagClass}`}>
+                            {lose.tag}
+                          </span>
+                        </div>
+                        <p className="text-xs text-white/45 leading-snug font-bold">
+                          {lose.desc}
+                        </p>
                       </div>
-                      <p className="text-xs text-white/45 leading-snug font-bold">
-                        {lose.desc}
-                      </p>
-                    </div>
-                  ))}
+                    ));
+                  })()}
                 </div>
               </div>
 
               {/* 3.3 Interviewer Perspective */}
-              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 select-none">
-                <div className="flex justify-between items-center pb-2 border-b border-white/5">
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 select-none h-[154px] shrink-0 overflow-visible relative z-10">
+                <div className="flex justify-between items-center pb-2 border-b border-white/5 shrink-0">
                   <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-sm text-[#00D4FF]">psychology</span>
                     面试官视角：真正验证什么
                   </h4>
                   <span 
-                    onClick={() => alert("深度追问解析开发中...")}
+                    onClick={() => setShowAllPerspectives(true)}
                     className="text-xs font-black text-[#00D4FF] hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
                   >
                     展开全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                   </span>
                 </div>
 
-                <div className="space-y-2 font-bold text-xs md:text-sm text-white/60">
-                  {[
-                    { label: "Redis 相关问题", val: "验证缓存设计能力" },
-                    { label: "一致性问题", val: "验证分布式系统架构能力" },
-                    { label: "TCC 与 Saga", val: "验证分布式事务经验" },
-                    { label: "项目深度挖", val: "验证真实项目经验" }
-                  ].map((p, i) => (
-                    <div key={i} className="flex justify-between items-center py-2 px-2.5 rounded bg-white/[0.01] border border-white/5 hover:border-white/10 hover:text-white cursor-pointer transition-all">
-                      <span className="flex items-center gap-1 text-xs md:text-sm">
-                        <span className="material-symbols-outlined text-xs text-white/30">folder_open</span>
-                        {p.label}
-                      </span>
-                      <span className="text-white/40 font-semibold flex items-center gap-0.5 text-xs md:text-sm">
-                        {p.val} <span className="material-symbols-outlined text-xs">chevron_right</span>
-                      </span>
-                    </div>
-                  ))}
+                <div className="space-y-2 font-bold text-xs md:text-sm text-white/60 flex-1 overflow-y-auto custom-scrollbar pr-1">
+                  {(() => {
+                    const perspective = reportData?.analysis_result?.interviewer_perspective;
+                    if (perspective && perspective.length > 0) {
+                      return perspective.map((p: any, i: number) => (
+                        <div 
+                          key={i} 
+                          onMouseEnter={(e) => {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            const cardRect = e.currentTarget.closest('.glass-panel')?.getBoundingClientRect();
+                            if (rect && cardRect) {
+                              setHoveredPerspective({
+                                label: p.label,
+                                val: p.val,
+                                top: rect.top - cardRect.top,
+                                left: rect.left - cardRect.left,
+                                width: rect.width
+                              });
+                            }
+                          }}
+                          onMouseLeave={() => setHoveredPerspective(null)}
+                          className="flex justify-between items-center py-1.5 px-2 rounded bg-white/[0.01] border border-white/5 hover:border-white/10 hover:text-white cursor-pointer transition-all relative group"
+                        >
+                          <span className="flex items-center gap-1 text-xs md:text-sm shrink-0 mr-4">
+                            <span className="material-symbols-outlined text-xs text-white/30 shrink-0">folder_open</span>
+                            <span className="font-extrabold text-white">{p.label}</span>
+                          </span>
+                          <span className="text-white/40 font-semibold flex items-center gap-0.5 text-xs md:text-sm truncate flex-1 justify-end min-w-0">
+                            <span className="truncate">{p.val}</span>
+                            <span className="material-symbols-outlined text-xs shrink-0">chevron_right</span>
+                          </span>
+                        </div>
+                      ));
+                    }
+                    return [
+                      { label: "Redis 相关问题", val: "验证缓存设计能力" },
+                      { label: "一致性问题", val: "验证分布式系统架构能力" },
+                      { label: "TCC 与 Saga", val: "验证分布式事务经验" },
+                      { label: "项目深度挖", val: "验证真实项目经验" }
+                    ].map((p, i) => (
+                      <div 
+                        key={i} 
+                        onMouseEnter={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const cardRect = e.currentTarget.closest('.glass-panel')?.getBoundingClientRect();
+                          if (rect && cardRect) {
+                            setHoveredPerspective({
+                              label: p.label,
+                              val: p.val,
+                              top: rect.top - cardRect.top,
+                              left: rect.left - cardRect.left,
+                              width: rect.width
+                            });
+                          }
+                        }}
+                        onMouseLeave={() => setHoveredPerspective(null)}
+                        className="flex justify-between items-center py-1.5 px-2 rounded bg-white/[0.01] border border-white/5 hover:border-white/10 hover:text-white cursor-pointer transition-all relative group"
+                      >
+                        <span className="flex items-center gap-1 text-xs md:text-sm shrink-0 mr-4">
+                          <span className="material-symbols-outlined text-xs text-white/30 shrink-0">folder_open</span>
+                          <span className="font-extrabold text-white">{p.label}</span>
+                        </span>
+                        <span className="text-white/40 font-semibold flex items-center gap-0.5 text-xs md:text-sm truncate flex-1 justify-end min-w-0">
+                          <span className="truncate">{p.val}</span>
+                          <span className="material-symbols-outlined text-xs shrink-0">chevron_right</span>
+                        </span>
+                      </div>
+                    ));
+                  })()}
                 </div>
+
+                {/* Floating Custom Tooltip rendered at card level, escaping the list scroll container! */}
+                <AnimatePresence>
+                  {hoveredPerspective && (
+                    <motion.div 
+                      initial={{ opacity: 0, x: "-50%", y: "-95%", scale: 0.95 }}
+                      animate={{ opacity: 1, x: "-50%", y: "-100%", scale: 1 }}
+                      exit={{ opacity: 0, x: "-50%", y: "-95%", scale: 0.95 }}
+                      className="absolute w-72 p-3 rounded-xl bg-[#0b1326] border border-white/15 text-xs text-white leading-relaxed shadow-2xl z-30 pointer-events-none"
+                      style={{
+                        left: `${hoveredPerspective.left + hoveredPerspective.width / 2}px`,
+                        top: `${hoveredPerspective.top - 8}px`
+                      }}
+                      transition={{ duration: 0.15, ease: "easeOut" }}
+                    >
+                      <div className="font-extrabold text-[#00D4FF] mb-1.5 flex items-center gap-1">
+                        <span className="material-symbols-outlined text-xs shrink-0">psychology</span>
+                        {hoveredPerspective.label}
+                      </div>
+                      <div className="text-white/70 font-semibold bg-white/[0.02] border border-white/5 p-2 rounded-lg">
+                        <span className="text-white/40 block text-[10px] mb-0.5">验证核心能力：</span>
+                        {hoveredPerspective.val}
+                      </div>
+                      <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-[#0b1326]" />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
 
               {/* 3.4 Project Authenticity Risk Radar */}
-              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3">
-                <div className="flex justify-between items-center pb-2 border-b border-white/5 select-none">
+              <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3 h-[300px] shrink-0">
+                <div className="flex justify-between items-center pb-2 border-b border-white/5 select-none shrink-0">
                   <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-sm text-[#FFB2B7]">radar</span>
                     项目真实性风险 ❓
                   </h4>
                 </div>
 
-                <div className="flex flex-col gap-3">
-                  <div className="flex justify-between items-center select-none">
-                    <div className="flex items-baseline gap-1.5">
-                      <span className="text-3xl font-black font-label-mono text-[#5DECCB]">72%</span>
-                      <span className="px-1.5 py-0.2 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/20 text-[9px] font-black uppercase">
-                        真实度中等
-                      </span>
-                    </div>
-                  </div>
-
+                <div className="flex flex-col gap-2 flex-1 min-h-0 justify-center">
                   {/* Pentagon Radar Chart Resized to 220x220 centered */}
-                  <div className="flex justify-center items-center py-1 select-none">
+                  <div className="flex justify-center items-center py-1 select-none shrink-0">
                     <svg className="w-[220px] h-[220px] overflow-visible" viewBox="0 0 220 220">
                       <defs>
                         <filter id="mesh-glow-record" x="-20%" y="-20%" width="140%" height="140%">
@@ -1395,11 +1851,11 @@ export default function InterviewRecordAnalysisPage() {
 
                       {/* Shaded neon data polygon */}
                       {(() => {
-                        const rDepth = (85 / 100) * 72;
-                        const rSystem = (60 / 100) * 72;
-                        const rExpression = (70 / 100) * 72;
-                        const rSolving = (55 / 100) * 72;
-                        const rImplementation = (80 / 100) * 72;
+                        const rDepth = (scoreLogic / 100) * 72;
+                        const rSystem = (scoreSystem / 100) * 72;
+                        const rExpression = (scoreExpression / 100) * 72;
+                        const rSolving = (scoreOwnership / 100) * 72;
+                        const rImplementation = (scoreProject / 100) * 72;
 
                         const pt0 = { x: 110, y: 110 - rDepth };
                         const pt1 = { x: 110 + rSystem * Math.cos((-18 * Math.PI) / 180), y: 110 + rSystem * Math.sin((-18 * Math.PI) / 180) };
@@ -1430,37 +1886,22 @@ export default function InterviewRecordAnalysisPage() {
 
                       {/* Dimension Labels */}
                       <text x="110" y="20" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="middle">
-                        逻辑自洽 <tspan fill="#AFA7FF">85</tspan>
+                        逻辑自洽 <tspan fill="#AFA7FF">{scoreLogic}</tspan>
                       </text>
                       <text x="195" y="92" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="start">
-                        技术广度 <tspan fill="#AFA7FF">60</tspan>
+                        技术广度 <tspan fill="#AFA7FF">{scoreSystem}</tspan>
                       </text>
                       <text x="172" y="185" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="start">
-                        数据指标 <tspan fill="#AFA7FF">70</tspan>
+                        数据指标 <tspan fill="#AFA7FF">{scoreExpression}</tspan>
                       </text>
                       <text x="48" y="185" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="end">
-                        业务理解 <tspan fill="#AFA7FF">55</tspan>
+                        业务理解 <tspan fill="#AFA7FF">{scoreOwnership}</tspan>
                       </text>
                       <text x="25" y="92" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="end">
-                        细节深度 <tspan fill="#AFA7FF">80</tspan>
+                        细节深度 <tspan fill="#AFA7FF">{scoreProject}</tspan>
                       </text>
                     </svg>
                   </div>
-                </div>
-
-                <div className="space-y-1.5 text-xs text-white/50 font-semibold leading-relaxed border-t border-white/5 pt-2">
-                  <p className="flex items-start gap-1">
-                    <span className="text-[#FF7A95] font-black">•</span>
-                    <span>问答偏概念，缺少具体实践细节</span>
-                  </p>
-                  <p className="flex items-start gap-1">
-                    <span className="text-[#FF7A95] font-black">•</span>
-                    <span>缺少关键数据指标 and 业务影响</span>
-                  </p>
-                  <p className="flex items-start gap-1">
-                    <span className="text-[#FF7A95] font-black">•</span>
-                    <span>部分回答与经验不符的风险</span>
-                  </p>
                 </div>
               </div>
 
@@ -1471,57 +1912,308 @@ export default function InterviewRecordAnalysisPage() {
           {/* ========================================================
               BOTTOM ROW: Expression Upgrade & Diagnostic (Full Width)
              ======================================================== */}
-          <div id="upgrade-expression" className="glass-panel p-5.5 rounded-2xl border-white/5 grid grid-cols-12 gap-5.5 w-full select-none mt-4.5 scroll-mt-24">
+          <div id="upgrade-expression" className="glass-panel p-5.5 rounded-2xl border-white/5 grid grid-cols-12 gap-5.5 w-full select-none mt-3.5 scroll-mt-24 items-stretch">
             
             {/* Section 1: 表达升级 title & your answer (4 cols) */}
-            <div className="col-span-12 lg:col-span-4 flex gap-3.5 border-r border-white/5 pr-4">
+            <div className="col-span-12 lg:col-span-4 flex gap-3.5 border-r border-white/5 pr-4 h-full items-start">
               <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0 text-[#AFA7FF] mt-0.5">
                 <span className="material-symbols-outlined text-lg">auto_awesome</span>
               </div>
-              <div className="space-y-2 flex-1 text-left">
-                <h4 className="text-sm font-black text-white uppercase tracking-wider">表达升级 · 你的回答</h4>
-                <p className="text-xs text-white/40 leading-normal block">示例：为什么使用 Redis</p>
-                <p className="bg-white/[0.01] border border-white/5 p-3 rounded-xl text-white/50 font-mono text-xs md:text-sm leading-relaxed">
-                  “因为 Redis 性能高，可以做缓存，提升接口响应速度。”
-                </p>
+              <div className="flex flex-col flex-1 text-left h-full justify-between">
+                <div>
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider">表达升级 · 你的回答</h4>
+                  <p className="text-xs text-white/40 leading-normal block mt-1 mb-2 truncate">当前片段：{activeSection?.title || "（暂无）"}</p>
+                </div>
+                <div className="bg-white/[0.01] border border-white/5 p-3 rounded-xl text-white/50 font-mono text-xs md:text-sm leading-relaxed flex-1 mt-3 overflow-y-auto max-h-[160px] select-all">
+                  {activeSection?.optimizationAdvice?.original || userDialogueTexts || "（当前片段暂无您的回答记录）"}
+                </div>
               </div>
             </div>
 
             {/* Section 2: 优化后话术 (5 cols) */}
-            <div className="col-span-12 lg:col-span-5 flex gap-3.5 border-r border-white/5 px-2">
+            <div className="col-span-12 lg:col-span-5 flex gap-3.5 border-r border-white/5 px-2 h-full items-start">
               <div className="w-9 h-9 rounded-xl bg-[#5DECCB]/10 border border-[#5DECCB]/20 flex items-center justify-center shrink-0 text-[#5DECCB] mt-0.5">
                 <span className="material-symbols-outlined text-lg">verified</span>
               </div>
-              <div className="space-y-2 flex-1 text-left">
-                <h4 className="text-sm font-black text-[#5DECCB] uppercase tracking-wider flex items-center gap-1">
-                  优化后话术
-                </h4>
-                <p className="bg-slate-950/60 border border-[#5DECCB]/25 p-3.5 rounded-xl text-white font-mono leading-relaxed text-xs md:text-sm">
-                  “我们的业务存在大量热点数据，直接查数据库 QPS 接近上限。引入 <strong className="text-[#5DECCB] font-bold">Redis 作为缓存层</strong> 后，接口响应时间从 <strong className="text-[#5DECCB] font-bold">120ms 降低到 35ms</strong>，峰值 QPS 提升了 <strong className="text-[#5DECCB] font-bold">3 倍</strong>。”
-                </p>
+              <div className="flex flex-col flex-1 text-left h-full justify-between">
+                <div>
+                  <h4 className="text-sm font-black text-[#5DECCB] uppercase tracking-wider flex items-center gap-1">
+                    优化后话术
+                  </h4>
+                  <p className="text-xs text-white/40 leading-normal block mt-1 mb-2">推荐：AI 专家架构师版</p>
+                </div>
+                
+                {isOptimizing ? (
+                  <div className="bg-slate-950/60 border border-white/5 p-3.5 rounded-xl text-white/40 font-mono text-xs md:text-sm flex-1 mt-3 flex flex-col items-center justify-center gap-3 select-none min-h-[120px]">
+                    <div className="w-7 h-7 rounded-full border-2 border-[#5DECCB]/20 border-t-[#5DECCB] animate-spin" />
+                    <span className="text-base text-white/50 font-bold animate-pulse">正在重构优化高分话术...</span>
+                  </div>
+                ) : activeSection?.optimizationAdvice ? (
+                  <div className="bg-slate-950/60 border border-[#5DECCB]/25 p-3.5 rounded-xl font-mono leading-relaxed text-xs md:text-sm flex-1 mt-3 overflow-y-auto max-h-[160px] flex flex-col gap-2.5">
+                    {activeSection?.optimizationAdvice?.conclusion && (
+                      <div className="text-[11px] text-[#FF7A95] bg-[#FF7A95]/5 border border-[#FF7A95]/15 p-2 rounded-lg font-sans font-semibold leading-relaxed">
+                        <span className="font-extrabold block text-xs mb-0.5 text-[#FF7A95]">AI 诊断结论：</span>
+                        {activeSection.optimizationAdvice.conclusion}
+                      </div>
+                    )}
+                    <div 
+                      className="text-white text-xs md:text-sm whitespace-pre-wrap leading-relaxed select-all"
+                      dangerouslySetInnerHTML={{ __html: activeSection.optimizationAdvice.optimized || "" }}
+                    />
+                  </div>
+                ) : (
+                  <div className="bg-slate-950/60 border border-white/5 p-3.5 rounded-xl text-white/40 font-mono text-xs md:text-sm flex-1 mt-3 flex flex-col items-center justify-center gap-3 select-none min-h-[120px]">
+                    <span className="text-xs text-white/30 font-semibold">该片段暂未生成 AI 优化建议</span>
+                    <button
+                      onClick={() => handleOptimizeSection(activeSection.id)}
+                      className="px-5 py-2 bg-[#5DECCB] hover:bg-white text-[#050B1A] font-extrabold text-xs rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-lg shadow-cyan-500/10"
+                    >
+                      <span className="material-symbols-outlined text-sm">bolt</span>
+                      生成优化建议
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Section 3: Action Buttons (3 cols) */}
-            <div className="col-span-12 lg:col-span-3 pl-2 flex flex-col justify-center gap-3">
-              <h4 className="text-sm font-black text-white uppercase tracking-wider text-left">下一步操作</h4>
-              <button 
-                onClick={() => handleCopyToClipboard("我们的业务存在大量热点数据，直接查数据库 QPS 接近上限。引入 Redis 作为缓存层后，接口响应时间从 120ms 降低到 35ms，峰值 QPS 提升了 3 倍。", "优化后话术已复制！")}
-                className="w-full py-2 bg-gradient-to-r from-secondary to-primary text-on-primary rounded-lg font-black text-xs md:text-sm cursor-pointer flex items-center justify-center gap-1 shadow-md shadow-secondary/15"
-              >
-                <span className="material-symbols-outlined text-xs">content_copy</span>复制优化版本
-              </button>
-              <button 
-                onClick={() => alert("已成功加入您的个人精选表达库！")}
-                className="w-full py-2 border border-[#AFA7FF]/35 hover:border-white/40 text-[#AFA7FF] hover:text-white rounded-lg font-black text-xs md:text-sm cursor-pointer transition-all flex items-center justify-center gap-1"
-              >
-                <span className="material-symbols-outlined text-xs">add_box</span>加入我的表达库
-              </button>
+            <div className="col-span-12 lg:col-span-3 pl-2 flex gap-3.5 h-full items-start">
+              <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0 text-[#FFB020] mt-0.5">
+                <span className="material-symbols-outlined text-lg">touch_app</span>
+              </div>
+              <div className="flex flex-col flex-1 text-left justify-start">
+                <div>
+                  <h4 className="text-sm font-black text-white uppercase tracking-wider text-left">下一步操作</h4>
+                  <p className="text-xs text-white/40 leading-normal block mt-1 mb-2">行动建议：复制或保存优化话术</p>
+                </div>
+                <div className="flex flex-col gap-2 mt-3">
+                  {isOptimizing ? (
+                    <>
+                      <button disabled className="w-full py-2 bg-white/5 border border-white/10 text-white/30 rounded-lg font-black text-xs md:text-sm cursor-not-allowed flex items-center justify-center gap-1">
+                        <span className="material-symbols-outlined text-xs">hourglass_empty</span>正在处理...
+                      </button>
+                      {/* <button disabled className="w-full py-2 border border-white/5 text-white/20 rounded-lg font-black text-xs md:text-sm cursor-not-allowed flex items-center justify-center gap-1">
+                        加入我的表达库
+                      </button> */}
+                    </>
+                  ) : activeSection?.optimizationAdvice ? (
+                    <>
+                      <button 
+                        onClick={() => {
+                          const cleanText = stripHtml(activeSection.optimizationAdvice.optimized);
+                          handleCopyToClipboard(cleanText, "已复制优化后高分话术！");
+                        }}
+                        className="w-full py-2 bg-gradient-to-r from-secondary to-primary text-on-primary rounded-lg font-black text-xs md:text-sm cursor-pointer flex items-center justify-center gap-1 shadow-md shadow-secondary/15"
+                      >
+                        <span className="material-symbols-outlined text-xs">content_copy</span>复制优化版本
+                      </button>
+                      {/* <button 
+                        onClick={() => auth.triggerToast("已成功加入您的个人精选表达库！")}
+                        className="w-full py-2 border border-[#AFA7FF]/35 hover:border-white/40 text-[#AFA7FF] hover:text-white rounded-lg font-black text-xs md:text-sm cursor-pointer transition-all flex items-center justify-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-xs">add_box</span>加入我的表达库
+                      </button> */}
+                    </>
+                  ) : (
+                    <>
+                      <button 
+                        onClick={() => handleOptimizeSection(activeSection.id)}
+                        className="w-full py-2 bg-[#AFA7FF] hover:bg-white text-[#050B1A] rounded-lg font-black text-xs md:text-sm cursor-pointer flex items-center justify-center gap-1 shadow-lg shadow-purple-500/10"
+                      >
+                        <span className="material-symbols-outlined text-xs">bolt</span>生成优化建议
+                      </button>
+                      {/* <button 
+                        disabled
+                        className="w-full py-2 border border-white/5 text-white/20 rounded-lg font-black text-xs md:text-sm cursor-not-allowed flex items-center justify-center gap-1"
+                      >
+                        <span className="material-symbols-outlined text-xs">add_box</span>加入我的表达库
+                      </button> */}
+                    </>
+                  )}
+                </div>
+              </div>
             </div>
 
           </div>
           </>
         )}
+
+      {/* Modal: 最大失分点全部内容 */}
+      <AnimatePresence>
+        {showAllWeaknesses && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#050B1A]/80 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-lg glass-panel p-6 rounded-3xl border border-white/10 flex flex-col max-h-[80vh] overflow-hidden"
+            >
+              <div className="flex justify-between items-center pb-3 border-b border-white/5 shrink-0">
+                <h3 className="text-base font-black text-white flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-[#FF7A95]">report</span>
+                  全部失分点分析
+                </h3>
+                <button
+                  onClick={() => setShowAllWeaknesses(false)}
+                  className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-all cursor-pointer flex items-center justify-center"
+                >
+                  <span className="material-symbols-outlined text-sm">close</span>
+                </button>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto py-4 space-y-3.5 pr-1.5 custom-scrollbar max-h-[320px]">
+                {(() => {
+                  const maxLosePoints = reportData?.analysis_result?.max_lose_points;
+                  if (maxLosePoints && maxLosePoints.length > 0) {
+                    return maxLosePoints.map((lose: any, idx: number) => {
+                      const rank = lose.rank || (idx + 1);
+                      const label = lose.label;
+                      const desc = lose.desc;
+                      const tag = lose.tag || (idx === 0 ? "高风险" : "中风险");
+                      const tagClass = tag === "高风险"
+                        ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black"
+                        : "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
+                      return (
+                        <div key={idx} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-2 text-left">
+                          <div className="flex justify-between items-center">
+                            <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
+                              <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-white/55">{rank}</span>
+                              <span className="truncate">{label}</span>
+                            </span>
+                            <span className={`px-1.5 py-0.2 rounded border shrink-0 ${tagClass}`}>
+                              {tag}
+                            </span>
+                          </div>
+                          <p className="text-xs text-white/50 leading-relaxed font-semibold">
+                            {desc}
+                          </p>
+                        </div>
+                      );
+                    });
+                  }
+                  const weaknesses = reportData?.summary?.weaknesses || [];
+                  if (weaknesses.length > 0) {
+                    return weaknesses.map((w: string, idx: number) => {
+                      const parts = w.split(/[：:]/);
+                      const label = parts[0] || w;
+                      const desc = parts[1] || "候选人在答题时展现出的薄弱环节，建议结合AI优化话术做针对性复习提高。";
+                      const tag = idx === 0 ? "高风险" : "中风险";
+                      const tagClass = idx === 0 
+                        ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black" 
+                        : "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
+                      return (
+                        <div key={idx} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-2 text-left">
+                          <div className="flex justify-between items-center">
+                            <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
+                              <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-white/55">{idx + 1}</span>
+                              <span className="truncate">{label}</span>
+                            </span>
+                            <span className={`px-1.5 py-0.2 rounded border shrink-0 ${tagClass}`}>
+                              {tag}
+                            </span>
+                          </div>
+                          <p className="text-xs text-white/50 leading-relaxed font-semibold">
+                            {desc}
+                          </p>
+                        </div>
+                      );
+                    });
+                  }
+                  return [
+                    { rank: 1, label: "Redis 选型依据不足", tag: "高风险", desc: "缺少问题背景和选型对比，无法体现技术决策能力" },
+                    { rank: 2, label: "没有 Trade-off 分析", tag: "中风险", desc: "回答较表面，缺乏权衡思考 and 方案对比" },
+                    { rank: 3, label: "项目贡献模糊", tag: "中风险", desc: "未突出个人贡献 and 负责的核心模块" }
+                  ].map((lose, idx) => {
+                    const tagClass = lose.tag === "高风险"
+                      ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black"
+                      : "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
+                    return (
+                      <div key={idx} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-2 text-left">
+                        <div className="flex justify-between items-center">
+                          <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm">
+                            <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center font-mono text-xs font-black text-white/55">{lose.rank}</span>
+                            {lose.label}
+                          </span>
+                          <span className={`px-1.5 py-0.2 rounded border shrink-0 ${tagClass}`}>
+                            {lose.tag}
+                          </span>
+                        </div>
+                        <p className="text-xs text-white/50 leading-relaxed font-semibold">
+                          {lose.desc}
+                        </p>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modal: 面试官视角全部内容 */}
+      <AnimatePresence>
+        {showAllPerspectives && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#050B1A]/80 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-lg glass-panel p-6 rounded-3xl border border-white/10 flex flex-col max-h-[80vh] overflow-hidden"
+            >
+              <div className="flex justify-between items-center pb-3 border-b border-white/5 shrink-0">
+                <h3 className="text-base font-black text-white flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-[#00D4FF]">psychology</span>
+                  全部面试官视角分析
+                </h3>
+                <button
+                  onClick={() => setShowAllPerspectives(false)}
+                  className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-all cursor-pointer flex items-center justify-center"
+                >
+                  <span className="material-symbols-outlined text-sm">close</span>
+                </button>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto py-4 space-y-2.5 pr-1.5 custom-scrollbar max-h-[320px]">
+                {(() => {
+                  const perspective = reportData?.analysis_result?.interviewer_perspective;
+                  if (perspective && perspective.length > 0) {
+                    return perspective.map((p: any, i: number) => (
+                      <div key={i} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col gap-1.5 text-left">
+                        <span className="flex items-center gap-1.5 text-xs md:text-sm font-extrabold text-white">
+                          <span className="material-symbols-outlined text-xs text-[#00D4FF] shrink-0">folder_open</span>
+                          {p.label}
+                        </span>
+                        <div className="text-xs text-white/50 leading-relaxed font-semibold bg-white/[0.01] border border-white/5 p-2 rounded-lg">
+                          <span className="text-white/40 block text-[10px] mb-0.5">验证核心能力：</span>
+                          {p.val}
+                        </div>
+                      </div>
+                    ));
+                  }
+                  return [
+                    { label: "Redis 相关问题", val: "验证缓存设计能力" },
+                    { label: "一致性问题", val: "验证分布式系统架构能力" },
+                    { label: "TCC 与 Saga", val: "验证分布式事务经验" },
+                    { label: "项目深度挖", val: "验证真实项目经验" }
+                  ].map((p, i) => (
+                    <div key={i} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col gap-1.5 text-left">
+                      <span className="flex items-center gap-1.5 text-xs md:text-sm font-extrabold text-white">
+                        <span className="material-symbols-outlined text-xs text-[#00D4FF] shrink-0">folder_open</span>
+                        {p.label}
+                      </span>
+                      <div className="text-xs text-white/50 leading-relaxed font-semibold bg-white/[0.01] border border-white/5 p-2 rounded-lg">
+                        <span className="text-white/40 block text-[10px] mb-0.5">验证核心能力：</span>
+                        {p.val}
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       </div>
 

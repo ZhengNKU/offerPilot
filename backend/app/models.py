@@ -69,6 +69,7 @@ class InterviewSession(Base):
     duration: Mapped[int] = mapped_column(Integer, default=0)
     file_size: Mapped[int] = mapped_column(BigInteger, default=0)
     status: Mapped[str] = mapped_column(String(50), default="uploaded") # uploaded, processing, completed, failed
+    job_description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     
     # Aggregated report score fields
     ipi_score: Mapped[int] = mapped_column(Integer, default=0)
@@ -77,6 +78,8 @@ class InterviewSession(Base):
     summary_weaknesses: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     summary_suggestions: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     executive_summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
+    analysis_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

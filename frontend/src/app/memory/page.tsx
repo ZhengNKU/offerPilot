@@ -130,7 +130,7 @@ export default function CareerMemoryDashboard() {
           id: String(session.id),
           date: dateStr,
           raw_created_at: session.created_at || "",
-          type: "audio" as const,
+          type: (session.audio_url === "text_mode" ? "text" : "audio") as const,
           title: session.title || "未命名面试分析",
           score: session.ipi_score || 0,
           grade,

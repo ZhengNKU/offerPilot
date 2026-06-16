@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { pollTaskUntilDone } from "@/app/utils/pollTask";
 
 const getTodayString = () => {
   const d = new Date();
@@ -37,7 +38,8 @@ export default function NewAnalysisDebugger() {
     round: "",
     date: "",
     grade: "",
-    salary: ""
+    salary: "",
+    jobDescription: ""
   });
 
   useEffect(() => {
@@ -302,8 +304,9 @@ export default function NewAnalysisDebugger() {
     localStorage.setItem("interviewVar_session_years", "3-5年");
     localStorage.setItem("interviewVar_session_round", audioForm.round || "二面 - 技术面");
     localStorage.setItem("interviewVar_session_date", audioForm.date || getTodayString());
-    localStorage.setItem("interviewVar_session_grade", audioForm.grade || "P6 / L5");
-    localStorage.setItem("interviewVar_session_salary", audioForm.salary || "25K * 16薪");
+    localStorage.setItem("interviewVar_session_grade", audioForm.grade || "");
+    localStorage.setItem("interviewVar_session_salary", audioForm.salary || "");
+    localStorage.setItem("interviewVar_session_jobDescription", audioForm.jobDescription || "");
     localStorage.setItem("interviewVar_viewing_session", "true");
 
     if (activeMode === "audio") {
@@ -324,7 +327,8 @@ export default function NewAnalysisDebugger() {
             file_url: audioUrl,
             title: sessionTitle,
             file_id: uploadedFileId,
-            file_size: selectedFile?.size || 0
+            file_size: selectedFile?.size || 0,
+            job_description: audioForm.jobDescription
           })
         });
         if (!sessionRes.ok) {
@@ -360,35 +364,16 @@ export default function NewAnalysisDebugger() {
           "AI 话术重构——生成升级建议...",
           "分析完成 — 正在生成报告..."
         ];
-        const pollUntilDone = async (): Promise<void> => {
-          return new Promise((resolve, reject) => {
-            const interval = setInterval(async () => {
-              try {
-                const pollRes = await fetch(
-                  `http://localhost:8001/api/audio/task/${taskId}`,
-                  { headers: token ? { Authorization: `Bearer ${token}` } : {} }
-                );
-                if (!pollRes.ok) return;
-                const pollData = await pollRes.json();
-
-                const pct = pollData.progress ?? 0;
-                setTaskProgress(pct);
-                const si = Math.min(Math.floor((pct / 100) * STEPS.length), STEPS.length - 1);
-                setTaskStep(STEPS[si]);
-
-                if (pollData.status === "completed") {
-                  clearInterval(interval);
-                  resolve();
-                } else if (pollData.status === "failed") {
-                  clearInterval(interval);
-                  reject(new Error("分析任务失败，请重试"));
-                }
-              } catch { /* keep polling */ }
-            }, 2000);
-          });
-        };
-
-        await pollUntilDone();
+        await pollTaskUntilDone(taskId, {
+          intervalMs: 2000,
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          onProgress: (pollData) => {
+            const pct = pollData.progress ?? 0;
+            setTaskProgress(pct);
+            const si = Math.min(Math.floor((pct / 100) * STEPS.length), STEPS.length - 1);
+            setTaskStep(STEPS[si]);
+          },
+        });
 
         // Step 4: Navigate to voice analysis report page (data is ready)
         router.push("/debugger/voice");
@@ -399,13 +384,91 @@ export default function NewAnalysisDebugger() {
       }
 
     } else if (activeMode === "text") {
-      // Text mode: store paste text and navigate
-      localStorage.setItem("interviewVar_session_pasteText", pasteText);
-      localStorage.removeItem("interviewVar_task_id");
-      localStorage.removeItem("interviewVar_session_id");
-      localStorage.setItem("interviewVar_analyzed_text", "true");
-      setIsAnalyzing(false);
-      router.push("/debugger/record");
+      // Text mode: create session -> start analysis -> poll -> navigate
+      const token = localStorage.getItem("interviewVar_token");
+      const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) authHeaders["Authorization"] = `Bearer ${token}`;
+
+      const sessionTitle = `${audioForm.company || "面试记录"} · ${audioForm.role || "岗位"} · ${audioForm.date || getTodayString()}`;
+
+      try {
+        setTaskStep("正在创建分析会话...");
+        setTaskProgress(10);
+        // Step 1: Create InterviewSession from the pasted text
+        const sessionRes = await fetch("http://localhost:8001/api/audio/create_record_session", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({
+            paste_text: pasteText,
+            title: sessionTitle,
+            company: audioForm.company,
+            role: audioForm.role,
+            round: audioForm.round,
+            date: audioForm.date,
+            grade: audioForm.grade,
+            salary: audioForm.salary,
+            job_description: audioForm.jobDescription
+          })
+        });
+        if (!sessionRes.ok) {
+          const err = await sessionRes.json();
+          throw new Error(err.detail || "创建分析会话失败");
+        }
+        const sessionData = await sessionRes.json();
+        const sessionId: number = sessionData.session_id;
+        localStorage.setItem("interviewVar_session_id", String(sessionId));
+
+        // Mark as analyzed
+        localStorage.setItem("interviewVar_analyzed_text", "true");
+
+        // Step 2: Trigger background analysis task
+        setTaskStep("正在发起智能评测分析...");
+        setTaskProgress(30);
+        const analyzeRes = await fetch("http://localhost:8001/api/audio/analyze", {
+          method: "POST",
+          headers: authHeaders,
+          body: JSON.stringify({ session_id: sessionId })
+        });
+        if (!analyzeRes.ok) {
+          const err = await analyzeRes.json();
+          throw new Error(err.detail || "启动分析任务失败");
+        }
+        const analyzeData = await analyzeRes.json();
+        const taskId: string = analyzeData.task_id;
+        localStorage.setItem("interviewVar_task_id", taskId);
+
+        const TEXT_STEPS = [
+          "文本解析中——载入对白记录...",
+          "语义分段——分析段落话题...",
+          "LLM 评估——匹配岗位 JD 与对白...",
+          "AI 话术重构——生成升级建议...",
+          "分析完成 — 正在生成报告..."
+        ];
+
+        // Step 3: Poll progress until done — shared helper aborts the in-flight
+        // fetch on terminal status so no extra polls land after success.
+        await pollTaskUntilDone(taskId, {
+          intervalMs: 2000,
+          onProgress: (pollData) => {
+            // map 0-100% database progress to step labels
+            const pct = pollData.progress || 0;
+            setTaskProgress(pct);
+
+            const si = Math.min(Math.floor((pct / 100) * TEXT_STEPS.length), TEXT_STEPS.length - 1);
+            setTaskStep(TEXT_STEPS[si]);
+          },
+        });
+
+        // Step 4: Navigate to record report page — pass sessionId in URL so the
+        // target page reads from URL truth (avoids the localStorage handoff
+        // race that exists when sessionId lives only in storage).
+        setIsAnalyzing(false);
+        router.push(`/debugger/record?sessionId=${sessionId}`);
+
+      } catch (e: any) {
+        auth.triggerToast(e.message || "启动分析失败，请重试！");
+        setIsAnalyzing(false);
+      }
     } else {
       // Resume mode
       if (!uploadedFileId) {
@@ -874,6 +937,16 @@ export default function NewAnalysisDebugger() {
                         className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm"
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="block mb-2 text-xs font-semibold text-on-surface-variant">岗位详情 [选填]</label>
+                    <textarea
+                      placeholder="可以将岗位 JD（Job Description）粘贴在此，方便 AI 更好地匹配和分析面试表现..."
+                      value={audioForm.jobDescription}
+                      onChange={(e) => setAudioForm({ ...audioForm, jobDescription: e.target.value })}
+                      className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-28 text-xs md:text-sm resize-none"
+                    />
                   </div>
                 </div>
               )}
