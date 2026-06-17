@@ -24,7 +24,7 @@ def _retention_days_for(membership: str | None) -> int:
 
 async def find_expired_files(db: AsyncSession) -> list[models.UploadedFile]:
     """查找所有已超过保留期限的文件，按用户当前会员等级判定。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     free_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_FREE)
     pro_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_PRO)
     max_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_MAX)

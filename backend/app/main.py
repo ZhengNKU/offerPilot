@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +11,34 @@ from app.utils.cleanup import run_periodic_cleanup
 from fastapi import Request
 import time
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+import sys
+
+# 日志同时输出到控制台和文件
+log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, "backend.log")
+
+# Windows 控制台 UTF-8 编码修复（解决中文乱码）
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+# 先设置基础配置（控制台输出）
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
+# 再添加文件 handler（避免被 uvicorn 覆盖）
+file_handler = logging.FileHandler(log_file, encoding="utf-8")
+file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+logging.getLogger().addHandler(file_handler)
+
+# 抑制 watchfiles 的 verbose 日志
+logging.getLogger("watchfiles").setLevel(logging.WARNING)
 
 app = FastAPI(
     title="面试VAR - Backend Services",
@@ -71,4 +99,10 @@ def read_root():
     return {"message": "面试VAR Backend Services are running."}
 
 if __name__ == "__main__":
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8001, reload=True)
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=8001,
+        reload=True,
+        reload_includes=["*.env", "*.py"],  # 监听 .env 等非 Python 文件的变更
+    )
