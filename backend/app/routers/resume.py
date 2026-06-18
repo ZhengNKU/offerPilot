@@ -95,6 +95,17 @@ async def analyze_resume(
             detail="未能从简历文件中提取出有效的文本，请检查文件排版或转换方式。"
         )
 
+    # ★ 异步项目记忆提取（fire-and-forget，不阻塞主流程）
+    if current_user:
+        from app.services.project_memory_agent import _run_project_memory_sub_agent
+        asyncio.create_task(
+            _run_project_memory_sub_agent({
+                "user_id": current_user.id,
+                "file_id": db_file.id,
+                "resume_text": resume_text,
+            })
+        )
+
     # 5. Extract profile details to supply target expectations to LLM
     profile_data = None
     if current_user and current_user.profile:

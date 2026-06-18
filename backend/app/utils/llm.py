@@ -79,6 +79,129 @@ def _strip_codeblock(text: str) -> str:
     return cleaned
 
 
+def _repair_llm_json(text: str) -> str:
+    """尝试修复 LLM 返回的常见 JSON 格式错误。
+
+    MiniMax-M3 在输出大型 JSON 时偶发下列问题，本函数按优先级尝试修复：
+      1. 尾逗号（"key": value, }  →  "key": value }）
+      2. 字符串值中含未转义换行符
+      3. 缺失逗号（相邻属性间漏了逗号）
+      4. 单引号替代双引号
+
+    返回值是修复后的文本字符串。如果修复失败，返回原文本。
+    """
+    repaired = text.strip()
+
+    # ── 策略1: 删除尾逗号 ──
+    # "value", } → "value" }   /   "value", ] → "value" ]
+    repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
+
+    # ── 策略2: 修复 JSON 字符串内的未转义换行符（常见于 summary 字段） ──
+    # 只在 JSON 字符串值内部（双引号之间）修复
+    def _escape_newlines_in_strings(match: re.Match) -> str:
+        """JSON 字符串值内的 raw 换行 → \\n"""
+        full = match.group(0)
+        key = match.group(1)
+        # 只处理 "key": "value..." 中的 value 部分
+        # 更简单的方式：正则匹配所有 JSON 字符串值，替换其中的控制字符
+        return full
+
+    # 匹配 "key": "value..." 模式，对 value 中的控制字符做转义
+    def _fix_string_values(s: str) -> str:
+        """在 JSON 字符串值内转义未转义的控制字符（\\n \\r \\t）。"""
+        result = []
+        i = 0
+        in_string = False
+        escape_next = False
+        while i < len(s):
+            ch = s[i]
+            if escape_next:
+                result.append(ch)
+                escape_next = False
+                i += 1
+                continue
+            if ch == '\\':
+                result.append(ch)
+                escape_next = True
+                i += 1
+                continue
+            if ch == '"':
+                in_string = not in_string
+                result.append(ch)
+                i += 1
+                continue
+            if in_string:
+                # 在 JSON 字符串值内的裸控制字符需要转义
+                if ch == '\n':
+                    result.append('\\n')
+                elif ch == '\r':
+                    result.append('\\r')
+                elif ch == '\t':
+                    result.append('\\t')
+                elif ord(ch) < 0x20:
+                    result.append(f'\\u{ord(ch):04x}')
+                else:
+                    result.append(ch)
+            else:
+                result.append(ch)
+            i += 1
+        return ''.join(result)
+
+    repaired = _fix_string_values(repaired)
+
+    # ── 策略3: 尝试用 json.loads 的错误位置信息修复缺失逗号 ──
+    # 如果仍有 "Expecting ',' delimiter" 错误，在错误位置尝试插入逗号
+    try:
+        json.loads(repaired)
+        return repaired
+    except json.JSONDecodeError as e:
+        # 如果错误是 "Expecting ',' delimiter"，尝试在出错位置插入逗号
+        if "Expecting ','" in str(e) and e.pos > 0:
+            # 在 pos 之前找合适位置插入逗号
+            before = repaired[:e.pos]
+            after = repaired[e.pos:]
+            # 在错误位置之前插入逗号（但不要插在空白中间）
+            insert_pos = e.pos
+            # 向前找到最近的换行或非空白字符末尾
+            while insert_pos > 0 and repaired[insert_pos - 1] in ' \t':
+                insert_pos -= 1
+            repaired = repaired[:insert_pos] + ',' + repaired[insert_pos:]
+            # 清理可能的双逗号
+            repaired = repaired.replace(',,', ',')
+
+    return repaired
+
+
+def _safe_json_parse(text: str, log_label: str = "") -> dict | list | None:
+    """安全解析 LLM 返回的 JSON 文本，带修复和日志。
+
+    返回值：
+        解析成功的 dict/list；所有修复均失败时返回 None
+    """
+    # 尝试1: 直接解析
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e1:
+        logger.warning(
+            f"[{log_label}] 直接 JSON 解析失败: {e1}。尝试修复..."
+        )
+
+    # 尝试2: 修复后解析
+    try:
+        repaired = _repair_llm_json(text)
+        result = json.loads(repaired)
+        logger.info(f"[{log_label}] JSON 修复成功")
+        return result
+    except json.JSONDecodeError as e2:
+        logger.error(
+            f"[{log_label}] JSON 修复后仍解析失败: {e2}\n"
+            f"  原始内容(前500字符): {text[:500]!r}\n"
+            f"  原始内容(后200字符): {text[-200:]!r}"
+        )
+
+    return None
+
+
 async def analyze_interview_dialogue(
     dialogue_text: str,
     profile_data: Optional[dict] = None,
@@ -687,3 +810,158 @@ async def analyze_resume_text(
     except Exception as e:
         logger.error(f"Failed to analyze resume via MiniMax: {e}")
         return {}
+
+
+async def extract_project_experiences(
+    resume_text: str,
+    parsed_structure: dict,
+    existing_projects: list[dict],
+) -> list[dict]:
+    """
+    从简历原文中提取项目经历的结构化信息。
+
+    Args:
+        resume_text: 简历纯文本全文
+        parsed_structure: 服务端正则解析的结构化简历 {profile, work_experiences}
+        existing_projects: 用户已有的项目记忆 [{"id": int, "project_name": str, "category": str}, ...]
+            LLM 会对照此列表标注 is_duplicate 和 matched_existing_id
+
+    Returns:
+        提取出的项目列表；LLM 调用失败时返回空列表 []
+    """
+    system_prompt = (
+        "你是一个专业的 AI 简历解析与项目分析助手。你的任务是从候选人的简历原文中，提取出所有项目经历的结构化信息。\n"
+        "\n"
+        "## 核心要求\n"
+        "1. **逐项目提取**：从简历中识别出每一个独立的项目经历，不要遗漏、不要合并不同项目\n"
+        "2. **精准命名**：project_name 使用简历中实际出现的项目名称，最多 30 个汉字\n"
+        "3. **深度提炼**：summary 基于简历原文提炼，突出项目的核心价值、技术亮点和业务成果，控制在 150-300 字\n"
+        "4. **准确分类**：根据项目的核心业务属性，从下面的标签体系中选择最匹配的主分类\n"
+        "5. **技术栈提取**：列出项目中明确使用或重点涉及的核心技术栈\n"
+        "6. **量化指标**：提取项目中提到的所有可量化数据（QPS、用户量、延迟、成本节省等）\n"
+        "\n"
+        "## 标签体系说明\n"
+        "| 分类标签 | 适用场景 |\n"
+        "|----------|---------|\n"
+        "| AI工程 | 推荐系统、模型推理、NLP/CV、特征平台、向量检索、大模型应用 |\n"
+        "| 数据工程 | 数仓建设、ETL管道、数据治理、实时/离线计算、OLAP分析 |\n"
+        "| 交易骨干 | 订单系统、支付结算、交易链路、对账系统、资金安全 |\n"
+        "| 基础平台 | 中间件、API网关、Service Mesh、配置中心、可观测性、消息队列 |\n"
+        "| 增长工程 | 营销系统、AB实验、推送通知、广告系统、增长策略 |\n"
+        "| 安全合规 | 风控系统、反欺诈、内容安全、合规审计、权限管理 |\n"
+        "| 公共组件 | SDK开发、通用库、脚手架、开发工具链、代码生成 |\n"
+        "| 运维效能 | CI/CD、容器化、发布系统、容量规划、成本优化 |\n"
+        "\n"
+        "## 辅助标签（可多选）\n"
+        "从以下标签中为该打的项目打上合适的标签（sub_tags），没有合适的可以不打：\n"
+        "- 核心项目：简历中最重要/最核心的项目\n"
+        "- 大流量：涉及高并发/大流量场景\n"
+        "- 从0到1：从零搭建\n"
+        "- 跨团队：跨部门/跨团队协作\n"
+        "- 业务增长：带来显著业务增长\n"
+        "- 成本优化：大幅降低成本\n"
+        "- 技术重构：大型技术重构/迁移\n"
+        "\n"
+        "## 角色推断\n"
+        "根据简历描述推断候选人在项目中担任的角色（role），选项：核心开发 / 技术负责人 / 架构师 / 项目负责人 / 参与开发\n"
+        "\n"
+        "## 评分要求\n"
+        "- mastery_level（0-100）：根据简历中对项目的描述深度、指标数据完善度、技术细节丰富度、候选人在项目中的主导程度综合评估\n"
+        "- importance（0-100）：根据项目规模、业务价值、技术复杂度、与主流大厂技术栈匹配度综合评估\n"
+        "\n"
+        "## 已有的项目记忆\n"
+        "下面列出了用户已有的项目记忆。如果你提取出的某个项目与已有项目实质上是同一个（项目名可能略有不同但描述的是同一实际项目），"
+        "请在输出中标注 is_duplicate: true，并填写 matched_existing_id（对应的已有项目ID）。\n"
+        "已有项目列表：\n"
+        f"{json.dumps(existing_projects, ensure_ascii=False)}\n"
+        "\n"
+        "## 输出格式\n"
+        "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其他前后导言）：\n"
+        "{\n"
+        '  "projects": [\n'
+        "    {\n"
+        '      "project_name": "项目名称（最多30字）",\n'
+        '      "summary": "项目简介：基于简历原文提炼的核心描述，突出技术价值与业务成果（150-300字）",\n'
+        '      "category": "AI工程/数据工程/交易骨干/基础平台/增长工程/安全合规/公共组件/运维效能",\n'
+        '      "sub_tags": ["核心项目", "大流量"],\n'
+        '      "tech_stack": ["Redis", "Kafka", "Spring Boot", "MySQL"],\n'
+        '      "metrics": {"qps": "10W+", "latency_p99": "50ms", "users": "3000万DAU"},\n'
+        '      "role": "技术负责人",\n'
+        '      "duration": "2022.07 - 至今",\n'
+        '      "mastery_level": 85,\n'
+        '      "importance": 90,\n'
+        '      "is_duplicate": false,\n'
+        '      "matched_existing_id": null\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+        "\n"
+        "## 重要约束\n"
+        "- project_name 必须来自简历原文，禁止自己编造\n"
+        "- summary 必须基于简历原文提炼，禁止虚构不存在的业务场景和技术\n"
+        "- category 必须从标签体系中选择，如果无法准确判断选 '基础平台'\n"
+        "- mastery_level 和 importance 必须是 0-100 的整数\n"
+        "- metrics 只提取简历中明确存在的量化数据，不要编造\n"
+        "- tech_stack 只列简历中明确提到的技术名词\n"
+        "- 如果简历中某段工作经历主要是日常工作维护而非独立项目，可以不提取为项目\n"
+    )
+
+    user_content = (
+        f"## 简历原文\n{resume_text}\n\n"
+        f"## 服务端解析的结构化数据\n{json.dumps(parsed_structure, ensure_ascii=False)}\n"
+    )
+
+    payload = {
+        "model": "MiniMax-M3",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.3,
+        "max_tokens": 8192,
+    }
+
+    try:
+        logger.info(
+            f"[project_extract] extracting projects from resume len={len(resume_text)} "
+            f"existing_projects={len(existing_projects)}"
+        )
+        res_data = await asyncio.to_thread(call_minimax_stream, payload, 120.0)
+        content = res_data["choices"][0]["message"]["content"]
+        logger.info(f"[project_extract] received content len={len(content)} chars")
+        content_clean = _strip_codeblock(content)
+
+        # 使用安全解析（自带修复 + 原始内容日志 dump）
+        parsed = _safe_json_parse(content_clean, log_label="project_extract")
+        if parsed is None:
+            # JSON 修复失败，用更严格约束的 prompt 重试一次
+            logger.warning("[project_extract] JSON 修复失败，使用严格约束重试一次...")
+            retry_payload = dict(payload)
+            # 追加更严格的 JSON 格式指令
+            retry_payload["messages"] = list(payload["messages"]) + [
+                {"role": "user", "content": (
+                    "重要提醒：你上一次返回的 JSON 格式有语法错误（缺少逗号或存在非法字符），"
+                    "无法被解析器读取。请严格检查并确保本次输出是合法的 JSON。记住：\n"
+                    "1. 对象属性之间必须有逗号分隔\n"
+                    "2. 字符串值中的换行、Tab、反斜杠必须转义（\\n \\t \\\\）\n"
+                    "3. 不要在最后一个属性后面加逗号\n"
+                    "4. summary 字段如果包含引号，请用中文引号「」替代，避免 JSON 转义失败\n"
+                    "请重新输出完整结果。"
+                )}
+            ]
+            retry_data = await asyncio.to_thread(call_minimax_stream, retry_payload, 120.0)
+            retry_content = retry_data["choices"][0]["message"]["content"]
+            logger.info(f"[project_extract] 重试返回 content len={len(retry_content)} chars")
+            retry_clean = _strip_codeblock(retry_content)
+            parsed = _safe_json_parse(retry_clean, log_label="project_extract_retry")
+            if parsed is None:
+                logger.error("[project_extract] 重试后 JSON 仍无法解析，放弃本次提取")
+                return []
+
+        projects = parsed.get("projects") or []
+        logger.info(f"[project_extract] extracted {len(projects)} projects")
+        return projects
+    except Exception as e:
+        logger.error(f"[project_extract] failed: {e}")
+        return []

@@ -108,3 +108,34 @@ class ProfileUpdateReq(BaseModel):
     target_grade: Optional[str] = None
     target_salary_min: Optional[int] = None
     target_salary_max: Optional[int] = None
+
+
+# ── 项目记忆库 ──
+
+class ProjectMemoryCreate(BaseModel):
+    """手动新增项目记忆的请求体。AI 自动提取的走 services/project_memory_agent。"""
+    project_name: str = Field(..., description="项目名称（最多128字）")
+    summary: str = Field(..., description="项目简介（150-300字）")
+    category: str = Field(..., description="主分类标签，如: AI工程 / 交易骨干")
+    sub_tags: List[str] = Field(default_factory=list, description="辅助标签列表")
+    tech_stack: List[str] = Field(default_factory=list, description="技术栈列表")
+    metrics: dict = Field(default_factory=dict, description="量化指标，自由格式")
+    role: Optional[str] = Field(None, description="担任角色")
+    team_size: Optional[int] = Field(None, description="团队规模")
+    duration: Optional[str] = Field(None, description="项目周期")
+
+
+class ProjectMemoryUpdate(BaseModel):
+    """手动编辑项目记忆的请求体。所有字段可选（只传要改的）。"""
+    project_name: Optional[str] = Field(None, description="项目名称")
+    summary: Optional[str] = Field(None, description="项目简介")
+    description: Optional[str] = Field(None, description="详细描述")
+    category: Optional[str] = Field(None, description="主分类标签")
+    sub_tags: Optional[List[str]] = Field(None, description="辅助标签列表")
+    tech_stack: Optional[List[str]] = Field(None, description="技术栈列表")
+    metrics: Optional[dict] = Field(None, description="量化指标")
+    role: Optional[str] = Field(None, description="担任角色")
+    team_size: Optional[int] = Field(None, description="团队规模")
+    duration: Optional[str] = Field(None, description="项目周期")
+    mastery_level: Optional[int] = Field(None, ge=0, le=100, description="掌握度 0-100")
+    importance: Optional[int] = Field(None, ge=0, le=100, description="重要度 0-100")

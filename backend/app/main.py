@@ -6,6 +6,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from app.routers import auth, audio, file, resume
+
+try:
+    import app.routers.memory as _memory_router
+    _MEMORY_LOADED = True
+except Exception as _e:
+    logging.error(f"[main] Failed to import memory router: {_e}")
+    _MEMORY_LOADED = False
+    _memory_router = None
 from app.utils.cleanup import run_periodic_cleanup
 
 from fastapi import Request
@@ -77,6 +85,11 @@ app.include_router(auth.router)
 app.include_router(audio.router)
 app.include_router(file.router)
 app.include_router(resume.router)
+if _MEMORY_LOADED and _memory_router is not None:
+    app.include_router(_memory_router.router)
+    logging.info("[main] Memory router registered successfully")
+else:
+    logging.warning("[main] Memory router NOT registered (import failed)")
 
 
 @app.on_event("startup")
@@ -87,6 +100,8 @@ async def startup_event():
         
     # 启动后台定期清理任务
     asyncio.create_task(run_periodic_cleanup())
+    # 启动标签字典种子数据初始化
+    asyncio.create_task(_seed_project_tags())
 
 
 @app.on_event("shutdown")
@@ -97,6 +112,60 @@ async def shutdown_event():
 @app.get("/")
 def read_root():
     return {"message": "面试VAR Backend Services are running."}
+
+
+async def _seed_project_tags():
+    """确保 project_tags 字典表已填充。
+
+    检查表是否为空 → 批量插入 8 个主分类标签 + 10 个辅助标签。
+    幂等：已有数据时跳过（不重复插入）。
+    """
+    from app.database import async_session
+    from app.models import ProjectTag
+    from sqlalchemy import select as sa_select
+
+    category_tags = [
+        ("AI工程",     "ai_engineering",   "text-primary bg-primary/10 border-primary/20",           1),
+        ("数据工程",   "data_engineering",  "text-tertiary bg-tertiary/10 border-tertiary/20",        2),
+        ("交易骨干",   "trading_backbone",  "text-secondary bg-secondary/10 border-secondary/20",     3),
+        ("基础平台",   "infra_platform",    "text-amber-500 bg-amber-500/10 border-amber-500/20",    4),
+        ("增长工程",   "growth_eng",        "text-sky-500 bg-sky-500/10 border-sky-500/20",          5),
+        ("安全合规",   "safety_gov",        "text-red-500 bg-red-500/10 border-red-500/20",          6),
+        ("公共组件",   "common_components", "text-slate-500 bg-slate-500/10 border-slate-500/20",    7),
+        ("运维效能",   "devops_sre",        "text-green-500 bg-green-500/10 border-green-500/20",    8),
+    ]
+    sub_tags = [
+        ("核心项目", "core",         1),
+        ("高频提问", "frequent",     2),
+        ("大流量",   "high_traffic", 3),
+        ("从0到1",   "from_scratch", 4),
+        ("开源",     "opensource",   5),
+        ("获奖",     "awarded",      6),
+        ("跨团队",   "cross_team",   7),
+        ("业务增长", "growth",       8),
+        ("成本优化", "cost_opt",     9),
+        ("技术重构", "refactor",     10),
+    ]
+
+    async with async_session() as db:
+        # 幂等检查
+        result = await db.execute(sa_select(ProjectTag).limit(1))
+        if result.scalars().first() is not None:
+            return  # 已有数据，跳过
+
+        for tag_name, tag_key, color_class, sort_order in category_tags:
+            db.add(ProjectTag(
+                tag_name=tag_name, tag_key=tag_key, tag_type="category",
+                color_class=color_class, sort_order=sort_order,
+            ))
+        for tag_name, tag_key, sort_order in sub_tags:
+            db.add(ProjectTag(
+                tag_name=tag_name, tag_key=tag_key, tag_type="sub",
+                sort_order=sort_order,
+            ))
+        await db.commit()
+    logging.info("[seed] 项目标签字典初始化完成: 8 categories + 10 sub-tags")
+
 
 if __name__ == "__main__":
     uvicorn.run(

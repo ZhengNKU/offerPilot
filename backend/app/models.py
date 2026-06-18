@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import ForeignKey, String, Integer, Boolean, DateTime, func, ARRAY, Float, BigInteger
+from sqlalchemy import ForeignKey, String, Integer, Boolean, DateTime, func, ARRAY, Float, BigInteger, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -249,3 +249,62 @@ class ResumeAnalysis(Base):
 
     user: Mapped[Optional["User"]] = relationship("User")
     file: Mapped["UploadedFile"] = relationship("UploadedFile", back_populates="resume_analyses")
+
+
+class ProjectMemory(Base):
+    """
+    项目记忆库：从简历中由 AI 提取并持久化的项目经历。
+    同一用户下项目名唯一（唯一约束）；重复上传简历时触发 version 累进更新。
+    source_type: 'resume_analysis' | 'manual' | 'interview_extract'
+    """
+    __tablename__ = "project_memories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    project_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    summary: Mapped[str] = mapped_column(String, nullable=False)  # TEXT column
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    category: Mapped[str] = mapped_column(String(32), nullable=False)
+    sub_tags: Mapped[list] = mapped_column(JSONB, default=list)
+    tech_stack: Mapped[list] = mapped_column(JSONB, default=list)
+    metrics: Mapped[dict] = mapped_column(JSONB, default=dict)
+    role: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    team_size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    duration: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    mastery_level: Mapped[int] = mapped_column(Integer, default=50)
+    mention_count: Mapped[int] = mapped_column(Integer, default=0)
+    importance: Mapped[int] = mapped_column(Integer, default=50)
+    source_type: Mapped[str] = mapped_column(String(20), default="resume_analysis")
+    source_resume_analysis_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("resume_analyses.id", ondelete="SET NULL"), nullable=True
+    )
+    source_file_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True
+    )
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    last_updated_by: Mapped[str] = mapped_column(String(20), default="ai")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "project_name", name="uq_user_project"),
+    )
+
+
+class ProjectTag(Base):
+    """
+    项目标签字典表：预置主分类标签（AI工程/数据工程/...）和辅助标签（核心项目/大流量/...）。
+    前端标签选择器和一致性管理的数据源。
+    """
+    __tablename__ = "project_tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tag_name: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    tag_key: Mapped[str] = mapped_column(String(32), unique=True, nullable=False)
+    tag_type: Mapped[str] = mapped_column(String(16), default="category")  # 'category' | 'sub' | 'domain'
+    color_class: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

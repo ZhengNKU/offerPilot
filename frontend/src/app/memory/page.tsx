@@ -18,6 +18,28 @@ interface SessionHistoryItem {
   details: string;
 }
 
+interface ProjectMemoryItem {
+  id: number;
+  project_name: string;
+  summary: string;
+  description: string | null;
+  category: string;
+  sub_tags: string[];
+  tech_stack: string[];
+  metrics: Record<string, any>;
+  role: string | null;
+  team_size: number | null;
+  duration: string | null;
+  mastery_level: number;
+  mention_count: number;
+  importance: number;
+  source_type: string;
+  version: number;
+  last_updated_by: string;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
 export default function CareerMemoryDashboard() {
   const router = useRouter();
   const auth = useAuth();
@@ -66,18 +88,12 @@ export default function CareerMemoryDashboard() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | "batch" | null>(null);
 
-  const [projects, setProjects] = useState([
-    { title: "高并发订单系统", desc: "采用双写缓冲与延迟刷盘逻辑解决写放大，性能吞吐相比前代架构上浮45%，是高并发场景的核心支撑。", count: 28, mastery: 85, badge: "高频核心" },
-    { title: "支付系统重构", desc: "重构基于双向状态机幂等与Saga分布式事务的最终一致性架构，成功支撑历次电商大促流量，零坏账。", count: 22, mastery: 90, badge: "交易骨干" },
-    { title: "推荐系统平台", desc: "构建高维混合召回与流式模型重排底座，AI智能标签动态纠偏，支撑实时画像秒级量化演练。", count: 18, mastery: 72, badge: "AI工程" },
-    { title: "用户配置引擎", desc: "基于分布式哈希环的分片与渐进式同步引擎，数据多点容灾，热点负载转移耗时压降75%。", count: 12, mastery: 80, badge: "公共组件" },
-    { title: "开放API网关", desc: "基于Token桶算法限流与轻量级JWT认证的低延迟流量边检枢纽，防护拦截全天候自动化运维。", count: 9, mastery: 88, badge: "网络中枢" },
-    { title: "离线数仓建设", desc: "大数据分析底座，构建ODS-DWD-DWS三层分级度量指标，提供数据流向链路的拓扑追踪支持。", count: 5, mastery: 65, badge: "数据工程" }
-  ]);
-
-  const handleDeleteProject = (index: number) => {
-    handleDeleteClick(`project-${index}`);
-  };
+  // Project memory state
+  const [projects, setProjects] = useState<ProjectMemoryItem[]>([]);
+  const [projectTotal, setProjectTotal] = useState(0);
+  const [projectCategories, setProjectCategories] = useState<{ tag_name: string; tag_key: string; color_class?: string }[][]>([[], []]);
+  const [isLoadingProjects, setIsLoadingProjects] = useState(false);
+  const [projectsError, setProjectsError] = useState<string | null>(null);
 
   const fetchSessions = async () => {
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
@@ -200,15 +216,75 @@ export default function CareerMemoryDashboard() {
     }
   };
 
+  const fetchProjects = async () => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+    if (!auth.isLoggedIn || !token) {
+      setProjects([]);
+      setProjectTotal(0);
+      return;
+    }
+    setIsLoadingProjects(true);
+    setProjectsError(null);
+    try {
+      const headers: Record<string, string> = {
+        "Authorization": `Bearer ${token}`
+      };
+
+      // Fetch projects list (sorted by importance, up to 100)
+      const res = await fetch(
+        "http://localhost:8001/api/memory/projects?sort=importance&limit=100&offset=0",
+        { headers }
+      );
+      if (res.status === 401) {
+        localStorage.removeItem("interviewVar_token");
+        auth.logout();
+        return;
+      }
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "获取项目记忆失败");
+      }
+      const data = await res.json();
+      setProjects(data.projects || []);
+      setProjectTotal(data.total || 0);
+
+      // Fetch tags (no auth required per backend)
+      try {
+        const tagsRes = await fetch("http://localhost:8001/api/memory/projects/tags");
+        if (tagsRes.ok) {
+          const tagsData = await tagsRes.json();
+          setProjectCategories([tagsData.categories || [], tagsData.sub_tags || []]);
+        }
+      } catch (tagErr) {
+        console.error("Failed to fetch project tags:", tagErr);
+      }
+    } catch (err: any) {
+      console.error("Failed to fetch project memory:", err);
+      setProjectsError(err.message || "加载项目记忆失败");
+      auth.triggerToast("项目记忆加载失败，请刷新重试");
+    } finally {
+      setIsLoadingProjects(false);
+    }
+  };
+
   useEffect(() => {
     fetchSessions();
+    fetchProjects();
 
     const handleStorageChange = () => {
       fetchSessions();
+      fetchProjects();
     };
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [auth.isLoggedIn]);
+
+  // 切换到项目记忆库 Tab 时刷新数据
+  useEffect(() => {
+    if (activeTab === "projects") {
+      fetchProjects();
+    }
+  }, [activeTab]);
 
   const handleInterceptAction = () => {
     setShowLoginModal(true);
@@ -262,14 +338,6 @@ export default function CareerMemoryDashboard() {
 
   const handleDeleteConfirm = async () => {
     setShowConfirmModal(false);
-    
-    if (deleteTarget && typeof deleteTarget === "string" && deleteTarget.startsWith("project-")) {
-      const idx = parseInt(deleteTarget.replace("project-", ""), 10);
-      setProjects(prev => prev.filter((_, i) => i !== idx));
-      setDeleteTarget(null);
-      return;
-    }
-    
     setIsDeleting(true);
     
     try {
@@ -332,14 +400,14 @@ export default function CareerMemoryDashboard() {
           method: "DELETE",
           headers
         });
-        
+
         if (res.ok) {
-          setSelectedIds(prev => prev.filter(x => x !== deleteTarget));
-          await fetchSessions();
-        } else {
-          const errData = await res.json();
-          auth.triggerToast(errData.detail || "删除失败");
-        }
+            setSelectedIds(prev => prev.filter(x => x !== deleteTarget));
+            await fetchSessions();
+          } else {
+            const errData = await res.json();
+            auth.triggerToast(errData.detail || "删除失败");
+          }
       }
     } catch (err) {
       console.error("Deletion failed:", err);
@@ -955,54 +1023,63 @@ export default function CareerMemoryDashboard() {
 
                         {/* Project list widgets */}
                         <div className="space-y-3">
-                          {[
-                            {
-                              title: "高并发订单系统",
-                              date: "最近更新: 2025-05-20",
-                              tags: ["核心项目", "高频提问"],
-                              color: "text-primary bg-primary/10 border-primary/20",
-                              char: "B"
-                            },
-                            {
-                              title: "支付系统重构",
-                              date: "最近更新: 2025-05-15",
-                              tags: ["高频提问"],
-                              color: "text-tertiary bg-tertiary/10 border-tertiary/20",
-                              char: "B"
-                            },
-                            {
-                              title: "推荐系统平台",
-                              date: "最近更新: 2025-05-10",
-                              tags: [],
-                              color: "text-secondary bg-secondary/10 border-secondary/20",
-                              char: "D"
-                            }
-                          ].map((item, idx) => (
-                            <div
-                              key={idx}
-                              className="p-3.5 rounded-2xl bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 flex items-center justify-between gap-3 group transition-all"
-                            >
-                              <div className="flex items-center gap-3">
-                                <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs ${item.color}`}>
-                                  {item.char}
-                                </div>
-                                <div className="space-y-0.5">
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <h5 className="text-sm font-black text-white group-hover:text-primary transition-colors">{item.title}</h5>
-                                    {item.tags.map((t, i) => (
-                                      <span key={i} className="px-1.5 py-0.5 rounded text-[10px] font-black border bg-white/5 text-on-surface-variant/50 border-white/5">
-                                        {t}
-                                      </span>
-                                    ))}
-                                  </div>
-                                  <p className="text-xs text-on-surface-variant/40 font-semibold">{item.date}</p>
+                          {isLoadingProjects ? (
+                            Array.from({ length: 3 }).map((_, idx) => (
+                              <div key={idx} className="p-3.5 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center gap-3 animate-pulse">
+                                <div className="w-8 h-8 rounded-xl bg-white/5" />
+                                <div className="space-y-1.5 flex-1">
+                                  <div className="h-3.5 bg-white/5 rounded w-24" />
+                                  <div className="h-2.5 bg-white/5 rounded w-32" />
                                 </div>
                               </div>
-                              <span className="material-symbols-outlined text-sm text-on-surface-variant/30 group-hover:text-white transition-all group-hover:translate-x-0.5">
-                                arrow_forward
-                              </span>
+                            ))
+                          ) : projects.length === 0 ? (
+                            <div className="py-6 text-center">
+                              <span className="material-symbols-outlined text-3xl text-on-surface-variant/30 mb-1 block">folder_off</span>
+                              <p className="text-xs text-on-surface-variant/40 font-semibold">暂无项目记忆</p>
                             </div>
-                          ))}
+                          ) : (
+                            projects.slice(0, 3).map((proj) => {
+                              const colorMap: Record<string, string> = {
+                                "AI工程": "text-secondary bg-secondary/10 border-secondary/20",
+                                "交易骨干": "text-tertiary bg-tertiary/10 border-tertiary/20",
+                                "数据工程": "text-primary bg-primary/10 border-primary/20",
+                              };
+                              const colorClass = colorMap[proj.category] || "text-primary bg-primary/10 border-primary/20";
+                              const initial = (proj.project_name || "?")[0].toUpperCase();
+                              let dateStr = "最近更新: --";
+                              if (proj.updated_at) {
+                                const d = new Date(proj.updated_at);
+                                dateStr = `最近更新: ${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+                              }
+                              return (
+                                <div
+                                  key={proj.id}
+                                  className="p-3.5 rounded-2xl bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 flex items-center justify-between gap-3 group transition-all"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs ${colorClass}`}>
+                                      {initial}
+                                    </div>
+                                    <div className="space-y-0.5">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <h5 className="text-sm font-black text-white group-hover:text-primary transition-colors">{proj.project_name}</h5>
+                                        {proj.sub_tags.slice(0, 2).map((t, i) => (
+                                          <span key={i} className="px-1.5 py-0.5 rounded text-[10px] font-black border bg-white/5 text-on-surface-variant/50 border-white/5">
+                                            {t}
+                                          </span>
+                                        ))}
+                                      </div>
+                                      <p className="text-xs text-on-surface-variant/40 font-semibold">{dateStr}</p>
+                                    </div>
+                                  </div>
+                                  <span className="material-symbols-outlined text-sm text-on-surface-variant/30 group-hover:text-white transition-all group-hover:translate-x-0.5">
+                                    arrow_forward
+                                  </span>
+                                </div>
+                              );
+                            })
+                          )}
                         </div>
                       </div>
 
@@ -1010,7 +1087,7 @@ export default function CareerMemoryDashboard() {
                         onClick={() => handleTabChange("projects")}
                         className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
                       >
-                        查看全部项目 (12) <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
+                        查看全部项目 ({projectTotal}) <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                       </button>
                     </div>
                   </div>
@@ -1431,62 +1508,85 @@ export default function CareerMemoryDashboard() {
                   TAB PANEL 3: PROJECTS MEMORY BANK (项目记忆库详情)
                  ======================================================== */}
               {activeTab === "projects" && (
-                <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col gap-5 w-full text-left">
-                  {/* Header of the large card wrapper */}
-                  <div className="flex justify-between items-center border-b border-white/5 pb-4">
-                    <div>
-                      <h4 className="text-lg font-black text-white flex items-center gap-2">
-                        <span className="material-symbols-outlined text-primary text-[22px]">folder_shared</span>
-                        项目记忆库列表
-                      </h4>
-                      <p className="text-xs text-on-surface-variant/60 font-semibold mt-1">记录并管理您在面试中提及过的核心项目及掌握程度</p>
-                    </div>
-                    <span className="text-xs font-mono text-on-surface-variant/50">共 {projects.length} 个项目</span>
-                  </div>
-
-                  {/* Scrollable grid container */}
-                  <div className="max-h-[500px] overflow-y-auto pr-1.5 space-y-6 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
-                    {projects.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-20 text-center gap-3">
-                        <span className="material-symbols-outlined text-5xl text-on-surface-variant/30">folder_open</span>
-                        <p className="text-sm font-bold text-on-surface-variant/50">暂无项目记忆记录</p>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-1">
-                        {projects.map((proj, idx) => (
-                          <div key={idx} className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-between gap-5 hover:border-primary/20 hover:scale-[1.01] transition-all group relative">
-                            {/* Close button with circular background */}
-                            <button
-                              onClick={() => handleDeleteProject(idx)}
-                              className="absolute top-3 right-3 w-6 h-6 rounded-full bg-white/5 hover:bg-red-500/20 text-on-surface-variant/40 hover:text-red-400 flex items-center justify-center border border-white/10 hover:border-red-500/30 transition-all cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 z-10"
-                              title="删除项目"
-                            >
-                              <span className="material-symbols-outlined text-[14px] font-bold">close</span>
-                            </button>
-
-                            <div className="space-y-3.5">
-                              <div className="flex justify-between items-start pr-6">
-                                <h4 className="text-base font-black text-white group-hover:text-primary transition-colors pr-2 truncate">{proj.title}</h4>
-                                <span className="px-2.5 py-1 rounded bg-primary/10 text-primary text-[11px] font-black border border-primary/20 shrink-0">{proj.badge}</span>
-                              </div>
-                              <p className="text-xs md:text-[13px] text-on-surface-variant/75 leading-relaxed font-semibold h-12 overflow-hidden text-ellipsis line-clamp-3">{proj.desc}</p>
+                <>
+                  {isLoadingProjects ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full text-left">
+                      {Array.from({ length: 6 }).map((_, idx) => (
+                        <div key={idx} className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-between gap-5 animate-pulse">
+                          <div className="space-y-3.5">
+                            <div className="flex justify-between items-start">
+                              <div className="h-5 bg-white/5 rounded w-32" />
+                              <div className="h-5 bg-white/5 rounded w-16" />
                             </div>
-
-                            <div className="space-y-2.5 border-t border-white/5 pt-3.5">
-                              <div className="flex justify-between items-center text-xs text-on-surface-variant/60 font-extrabold font-label-mono">
-                                <span>面试提及: {proj.count}次</span>
-                                <span>核心掌握: {proj.mastery}%</span>
-                              </div>
-                              <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                                <div className="h-full bg-gradient-to-r from-primary to-secondary rounded-full" style={{ width: `${proj.mastery}%` }}></div>
-                              </div>
+                            <div className="space-y-2">
+                              <div className="h-3 bg-white/5 rounded w-full" />
+                              <div className="h-3 bg-white/5 rounded w-3/4" />
                             </div>
                           </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                          <div className="space-y-2.5 border-t border-white/5 pt-3.5">
+                            <div className="flex justify-between">
+                              <div className="h-3 bg-white/5 rounded w-20" />
+                              <div className="h-3 bg-white/5 rounded w-16" />
+                            </div>
+                            <div className="w-full h-1.5 bg-white/5 rounded-full" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : projects.length === 0 ? (
+                    <div className="py-16 text-center w-full">
+                      <span className="material-symbols-outlined text-5xl text-on-surface-variant/25 mb-3 block">folder_off</span>
+                      <p className="text-lg font-black text-on-surface-variant/40">暂无项目记忆</p>
+                      <p className="text-sm text-on-surface-variant/30 font-semibold mt-1">上传简历或进行面试后，AI 将自动提取项目经历</p>
+                      <button
+                        onClick={() => router.push("/debugger")}
+                        className="mt-4 px-5 py-2.5 bg-primary/10 hover:bg-primary/20 text-primary text-sm font-black rounded-xl border border-primary/20 transition-all cursor-pointer inline-flex items-center gap-2"
+                      >
+                        <span className="material-symbols-outlined text-base">add</span>新建分析
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full text-left">
+                      {projects.map((proj) => (
+                        <div key={proj.id} className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-between gap-5 hover:border-primary/20 hover:scale-[1.01] transition-all group">
+
+                          <div className="space-y-3.5">
+                            <div className="flex justify-between items-start">
+                              <h4 className="text-base font-black text-white group-hover:text-primary transition-colors">{proj.project_name}</h4>
+                              <span className="px-2.5 py-1 rounded bg-primary/10 text-primary text-[11px] font-black border border-primary/20 shrink-0">{proj.category}</span>
+                            </div>
+                            <p className="text-xs md:text-[13px] text-on-surface-variant/75 leading-relaxed font-semibold line-clamp-3">{proj.summary}</p>
+                          </div>
+
+                          <div className="space-y-2.5 border-t border-white/5 pt-3.5">
+                            <div className="flex justify-between items-center text-xs text-on-surface-variant/60 font-extrabold font-label-mono">
+                              <span>面试提及: {proj.mention_count}次</span>
+                              <span>核心掌握: {proj.mastery_level}%</span>
+                            </div>
+                            <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                              <div className="h-full bg-gradient-to-r from-primary to-secondary rounded-full" style={{ width: `${proj.mastery_level}%` }}></div>
+                            </div>
+                          </div>
+
+                          {proj.tech_stack.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 border-t border-white/5 pt-3">
+                              {proj.tech_stack.slice(0, 4).map((tech, i) => (
+                                <span key={i} className="px-2 py-0.5 rounded bg-white/5 text-on-surface-variant/60 text-[10px] font-bold border border-white/5">
+                                  {tech}
+                                </span>
+                              ))}
+                              {proj.tech_stack.length > 4 && (
+                                <span className="px-2 py-0.5 rounded bg-white/5 text-on-surface-variant/40 text-[10px] font-bold">
+                                  +{proj.tech_stack.length - 4}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
 
               {/* ========================================================
@@ -2027,11 +2127,9 @@ export default function CareerMemoryDashboard() {
               </div>
               <h3 className="font-extrabold text-white text-2xl">确认要删除吗？</h3>
               <p className="text-on-surface-variant text-sm leading-relaxed max-w-xs mx-auto font-semibold">
-                {deleteTarget === "batch" 
-                  ? `您已选择批量删除 ${selectedIds.length} 条面试分析记录，此操作将永久删除关联的对象存储音频文件 and 数据库分析报告，且不可撤销。`
-                  : deleteTarget && typeof deleteTarget === "string" && deleteTarget.startsWith("project-")
-                    ? "此操作将永久删除该项目记忆记录，且不可撤销。"
-                    : "此操作将永久删除此面试分析记录，以及关联的对象存储音频文件和数据库分析报告，且不可撤销。"}
+                {deleteTarget === "batch"
+                  ? `您已选择批量删除 ${selectedIds.length} 条面试分析记录，此操作将永久删除关联的对象存储音频文件和数据库分析报告，且不可撤销。`
+                  : "此操作将永久删除此面试分析记录，以及关联的对象存储音频文件和数据库分析报告，且不可撤销。"}
               </p>
             </div>
 
