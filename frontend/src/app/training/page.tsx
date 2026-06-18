@@ -15,6 +15,7 @@ export default function InterviewTrainingPage() {
   const [interviewType, setInterviewType] = useState('技术面试 - 系统设计');
   const [companyStyle, setCompanyStyle] = useState('字节跳动');
   const [difficulty, setDifficulty] = useState('Lv3 困难');
+  const [jobDescription, setJobDescription] = useState('');
 
   const [isTrainingStarted, setIsTrainingStarted] = useState(false);
   const [isCountingDown, setIsCountingDown] = useState(false);
@@ -135,7 +136,8 @@ export default function InterviewTrainingPage() {
       localStorage.setItem("interviewVar_session_company", companyStyle);
       localStorage.setItem("interviewVar_session_role", targetRole);
       localStorage.setItem("interviewVar_session_round", interviewType);
-      localStorage.setItem("interviewVar_session_grade", "P6 / L5");
+      localStorage.setItem("interviewVar_session_grade", jobLevel || "");
+      localStorage.setItem("interviewVar_session_jobDescription", jobDescription || "");
       localStorage.setItem("interviewVar_session_salary", "25K * 16薪");
       localStorage.setItem("interviewVar_session_date", "2026-05-31");
       router.push("/debugger/report");
@@ -321,6 +323,20 @@ export default function InterviewTrainingPage() {
                       onChange={(e) => setJobLevel(e.target.value)}
                       placeholder="请输入职位级别"
                       className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black focus:outline-none transition-all placeholder:text-white/20"
+                    />
+                  </div>
+                </div>
+
+                {/* Field 2.5: Job Description */}
+                <div className="space-y-1.5">
+                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">岗位详情 [选填]</label>
+                  <div className="relative">
+                    <textarea 
+                      disabled={isTrainingStarted}
+                      value={jobDescription}
+                      onChange={(e) => setJobDescription(e.target.value)}
+                      placeholder="可以将岗位 JD（Job Description）粘贴在此，方便 AI 更好地匹配和提问..."
+                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none transition-all placeholder:text-white/20 h-28 resize-none scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
                     />
                   </div>
                 </div>
@@ -523,7 +539,8 @@ export default function InterviewTrainingPage() {
                             localStorage.setItem("interviewVar_session_company", companyStyle);
                             localStorage.setItem("interviewVar_session_role", targetRole);
                             localStorage.setItem("interviewVar_session_round", interviewType);
-                            localStorage.setItem("interviewVar_session_grade", "P6 / L5");
+                            localStorage.setItem("interviewVar_session_grade", jobLevel || "");
+                            localStorage.setItem("interviewVar_session_jobDescription", jobDescription || "");
                             localStorage.setItem("interviewVar_session_salary", "25K * 16薪");
                             localStorage.setItem("interviewVar_session_date", "2026-05-31");
                             router.push("/debugger/report");

@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useRef, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
@@ -14,13 +14,19 @@ const getTodayString = () => {
   return `${year}-${month}-${day}`;
 };
 
-export default function NewAnalysisDebugger() {
+function NewAnalysisDebuggerContent() {
   const router = useRouter();
   const auth = useAuth();
+  const searchParams = useSearchParams();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [activeMode, setActiveMode] = useState<"audio" | "text" | "resume">("audio");
+  // 支持 ?mode=audio|text|resume 预设默认 tab（项目记忆库空状态会传 ?mode=resume）
+  const initialMode = (() => {
+    const m = searchParams.get("mode");
+    return m === "text" || m === "resume" ? m : "audio";
+  })();
+  const [activeMode, setActiveMode] = useState<"audio" | "text" | "resume">(initialMode);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [taskProgress, setTaskProgress] = useState(0);
   const [taskStep, setTaskStep] = useState("");
@@ -1027,5 +1033,17 @@ export default function NewAnalysisDebugger() {
       </footer>
 
     </main>
+  );
+}
+
+export default function NewAnalysisDebugger() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#050B1A] text-white flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary"></div>
+      </div>
+    }>
+      <NewAnalysisDebuggerContent />
+    </Suspense>
   );
 }

@@ -94,6 +94,11 @@ export default function CareerMemoryDashboard() {
   const [projectCategories, setProjectCategories] = useState<{ tag_name: string; tag_key: string; color_class?: string }[][]>([[], []]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
   const [projectsError, setProjectsError] = useState<string | null>(null);
+  const [selectedProject, setSelectedProject] = useState<any | null>(null);
+
+  const handleDeleteProject = (projectId: number) => {
+    handleDeleteClick(`project-${projectId}`);
+  };
 
   const fetchSessions = async () => {
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
@@ -347,7 +352,20 @@ export default function CareerMemoryDashboard() {
       };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      if (deleteTarget === "batch") {
+      if (deleteTarget && typeof deleteTarget === "string" && deleteTarget.startsWith("project-")) {
+        const projId = parseInt(deleteTarget.replace("project-", ""), 10);
+        const res = await fetch(`http://localhost:8001/api/memory/projects/${projId}`, {
+          method: "DELETE",
+          headers
+        });
+        if (res.ok) {
+          auth.triggerToast("项目记忆删除成功");
+          await fetchProjects();
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          auth.triggerToast(errData.detail || "删除失败");
+        }
+      } else if (deleteTarget === "batch") {
         // Find which selected IDs are audio and which are resume
         const audioSessionIds: number[] = [];
         const resumeAnalysisIds: number[] = [];
@@ -1537,53 +1555,85 @@ export default function CareerMemoryDashboard() {
                     <div className="py-16 text-center w-full">
                       <span className="material-symbols-outlined text-5xl text-on-surface-variant/25 mb-3 block">folder_off</span>
                       <p className="text-lg font-black text-on-surface-variant/40">暂无项目记忆</p>
-                      <p className="text-sm text-on-surface-variant/30 font-semibold mt-1">上传简历或进行面试后，AI 将自动提取项目经历</p>
+                      <p className="text-sm text-on-surface-variant/30 font-semibold mt-1">上传简历进行分析后，AI 将自动提取项目经历</p>
                       <button
-                        onClick={() => router.push("/debugger")}
+                        onClick={() => router.push("/debugger?mode=resume")}
                         className="mt-4 px-5 py-2.5 bg-primary/10 hover:bg-primary/20 text-primary text-sm font-black rounded-xl border border-primary/20 transition-all cursor-pointer inline-flex items-center gap-2"
                       >
                         <span className="material-symbols-outlined text-base">add</span>新建分析
                       </button>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full text-left">
-                      {projects.map((proj) => (
-                        <div key={proj.id} className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-between gap-5 hover:border-primary/20 hover:scale-[1.01] transition-all group">
+                    <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col gap-5 w-full text-left">
+                      {/* Header of the large card wrapper */}
+                      <div className="flex justify-between items-center border-b border-white/5 pb-4">
+                        <div>
+                          <h4 className="text-lg font-black text-white flex items-center gap-2">
+                            <span className="material-symbols-outlined text-primary text-[22px]">folder_shared</span>
+                            项目记忆库列表
+                          </h4>
+                          <p className="text-xs text-on-surface-variant/60 font-semibold mt-1">记录并管理您在面试中提及过的核心项目及掌握程度</p>
+                        </div>
+                        <span className="text-xs font-mono text-on-surface-variant/50">共 {projects.length} 个项目</span>
+                      </div>
 
-                          <div className="space-y-3.5">
-                            <div className="flex justify-between items-start">
-                              <h4 className="text-base font-black text-white group-hover:text-primary transition-colors">{proj.project_name}</h4>
-                              <span className="px-2.5 py-1 rounded bg-primary/10 text-primary text-[11px] font-black border border-primary/20 shrink-0">{proj.category}</span>
-                            </div>
-                            <p className="text-xs md:text-[13px] text-on-surface-variant/75 leading-relaxed font-semibold line-clamp-3">{proj.summary}</p>
-                          </div>
+                      {/* Scrollable grid container */}
+                      <div className="max-h-[520px] overflow-y-auto pr-1.5 scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pt-1">
+                          {projects.map((proj) => (
+                            <div 
+                              key={proj.id} 
+                              onClick={() => setSelectedProject(proj)}
+                              className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-between gap-5 hover:border-primary/20 hover:scale-[1.01] transition-all group relative cursor-pointer"
+                            >
+                              {/* Close button with circular background */}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation(); // Prevent opening the detail modal!
+                                  handleDeleteProject(proj.id);
+                                }}
+                                className="absolute top-3.5 right-3.5 w-6 h-6 rounded-full bg-red-500 text-white hover:bg-red-600 flex items-center justify-center transition-all cursor-pointer opacity-0 group-hover:opacity-100 focus:opacity-100 z-10 shadow-lg"
+                                title="删除项目"
+                              >
+                                <span className="material-symbols-outlined text-[13px] font-black">close</span>
+                              </button>
 
-                          <div className="space-y-2.5 border-t border-white/5 pt-3.5">
-                            <div className="flex justify-between items-center text-xs text-on-surface-variant/60 font-extrabold font-label-mono">
-                              <span>面试提及: {proj.mention_count}次</span>
-                              <span>核心掌握: {proj.mastery_level}%</span>
-                            </div>
-                            <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                              <div className="h-full bg-gradient-to-r from-primary to-secondary rounded-full" style={{ width: `${proj.mastery_level}%` }}></div>
-                            </div>
-                          </div>
+                              <div className="space-y-3.5">
+                                <div className="flex justify-between items-start pr-6">
+                                  <h4 className="text-base font-black text-white group-hover:text-primary transition-colors pr-2 truncate">{proj.project_name}</h4>
+                                  <span className="px-2.5 py-1 rounded bg-primary/10 text-primary text-[11px] font-black border border-primary/20 shrink-0">{proj.category}</span>
+                                </div>
+                                <p className="text-xs md:text-[13px] text-on-surface-variant/75 leading-relaxed font-semibold line-clamp-3">{proj.summary}</p>
+                              </div>
 
-                          {proj.tech_stack.length > 0 && (
-                            <div className="flex flex-wrap gap-1.5 border-t border-white/5 pt-3">
-                              {proj.tech_stack.slice(0, 4).map((tech, i) => (
-                                <span key={i} className="px-2 py-0.5 rounded bg-white/5 text-on-surface-variant/60 text-[10px] font-bold border border-white/5">
-                                  {tech}
-                                </span>
-                              ))}
-                              {proj.tech_stack.length > 4 && (
-                                <span className="px-2 py-0.5 rounded bg-white/5 text-on-surface-variant/40 text-[10px] font-bold">
-                                  +{proj.tech_stack.length - 4}
-                                </span>
+                              <div className="space-y-2.5 border-t border-white/5 pt-3.5">
+                                <div className="flex justify-between items-center text-xs text-on-surface-variant/60 font-extrabold font-label-mono">
+                                  <span>面试提及: {proj.mention_count}次</span>
+                                  <span>核心掌握: {proj.mastery_level}%</span>
+                                </div>
+                                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                  <div className="h-full bg-gradient-to-r from-primary to-secondary rounded-full" style={{ width: `${proj.mastery_level}%` }}></div>
+                                </div>
+                              </div>
+
+                              {proj.tech_stack && proj.tech_stack.length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 border-t border-white/5 pt-3">
+                                  {proj.tech_stack.slice(0, 4).map((tech, i) => (
+                                    <span key={i} className="px-2 py-0.5 rounded bg-white/5 text-on-surface-variant/60 text-[10px] font-bold border border-white/5">
+                                      {tech}
+                                    </span>
+                                  ))}
+                                  {proj.tech_stack.length > 4 && (
+                                    <span className="px-2 py-0.5 rounded bg-white/5 text-on-surface-variant/40 text-[10px] font-bold">
+                                      +{proj.tech_stack.length - 4}
+                                    </span>
+                                  )}
+                                </div>
                               )}
                             </div>
-                          )}
+                          ))}
                         </div>
-                      ))}
+                      </div>
                     </div>
                   )}
                 </>
@@ -2129,7 +2179,9 @@ export default function CareerMemoryDashboard() {
               <p className="text-on-surface-variant text-sm leading-relaxed max-w-xs mx-auto font-semibold">
                 {deleteTarget === "batch"
                   ? `您已选择批量删除 ${selectedIds.length} 条面试分析记录，此操作将永久删除关联的对象存储音频文件和数据库分析报告，且不可撤销。`
-                  : "此操作将永久删除此面试分析记录，以及关联的对象存储音频文件和数据库分析报告，且不可撤销。"}
+                  : deleteTarget && typeof deleteTarget === "string" && deleteTarget.startsWith("project-")
+                    ? "此操作将永久删除该项目记忆记录，且不可撤销。"
+                    : "此操作将永久删除此面试分析记录，以及关联的对象存储音频文件和数据库分析报告，且不可撤销。"}
               </p>
             </div>
 
@@ -2148,6 +2200,116 @@ export default function CareerMemoryDashboard() {
                 className="flex-1 py-3 rounded-xl bg-red-500 text-white text-base font-bold hover:bg-red-600 transition-all cursor-pointer shadow-lg shadow-red-500/15"
               >
                 确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PROJECT DETAILS MODAL */}
+      {selectedProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 select-none">
+          {/* Backdrop blur */}
+          <div
+            onClick={() => setSelectedProject(null)}
+            className="absolute inset-0 bg-[#050B1A]/80 backdrop-blur-md transition-opacity duration-300"
+          />
+
+          {/* Modal Container */}
+          <div className="bg-[#0b1326] border border-white/10 rounded-3xl p-6 md:p-8 max-w-2xl w-full relative z-10 space-y-6 shadow-2xl transition-all scale-100 animate-fade-in animate-duration-200 text-left max-h-[85vh] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent select-text">
+            {/* Header */}
+            <div className="flex justify-between items-start border-b border-white/5 pb-4">
+              <div className="space-y-1 pr-6">
+                <span className="px-2.5 py-1 rounded bg-primary/10 text-primary text-[11px] font-black border border-primary/20">
+                  {selectedProject.category}
+                </span>
+                <h3 className="font-black text-white text-xl md:text-2xl mt-2 leading-tight">
+                  {selectedProject.project_name}
+                </h3>
+              </div>
+              <button
+                onClick={() => setSelectedProject(null)}
+                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-on-surface-variant/40 hover:text-white flex items-center justify-center border border-white/5 transition-all cursor-pointer shrink-0"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            {/* Content Body */}
+            <div className="space-y-5">
+              {/* Info Grid */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4.5 rounded-2xl bg-white/[0.01] border border-white/5 text-xs">
+                <div className="space-y-1">
+                  <span className="text-on-surface-variant/40 font-bold block">担任角色</span>
+                  <span className="text-white font-extrabold">{selectedProject.role || "核心开发者"}</span>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-on-surface-variant/40 font-bold block">项目周期</span>
+                  <span className="text-white font-extrabold">{selectedProject.duration || "暂无信息"}</span>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-on-surface-variant/40 font-bold block">团队规模</span>
+                  <span className="text-white font-extrabold">{selectedProject.team_size ? `${selectedProject.team_size} 人` : "暂无信息"}</span>
+                </div>
+                <div className="space-y-1">
+                  <span className="text-on-surface-variant/40 font-bold block">面试提及</span>
+                  <span className="text-primary font-black font-label-mono">{selectedProject.mention_count} 次</span>
+                </div>
+              </div>
+
+              {/* Mastery progress */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs text-on-surface-variant/60 font-extrabold font-label-mono">
+                  <span>核心掌握度</span>
+                  <span className="text-white">{selectedProject.mastery_level}%</span>
+                </div>
+                <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
+                  <div className="h-full bg-gradient-to-r from-primary to-secondary rounded-full" style={{ width: `${selectedProject.mastery_level}%` }}></div>
+                </div>
+              </div>
+
+              {/* Summary */}
+              {selectedProject.summary && (
+                <div className="space-y-2">
+                  <span className="text-xs font-label-mono text-primary font-bold uppercase tracking-wider block">项目摘要</span>
+                  <p className="text-sm text-on-surface-variant/80 leading-relaxed font-medium bg-white/[0.01] border border-white/5 rounded-2xl p-4 max-h-[150px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent pr-1.5">
+                    {selectedProject.summary}
+                  </p>
+                </div>
+              )}
+
+              {/* Full Description */}
+              {selectedProject.description && (
+                <div className="space-y-2">
+                  <span className="text-xs font-label-mono text-primary font-bold uppercase tracking-wider block">详细描述</span>
+                  <p className="text-sm text-on-surface-variant/80 leading-relaxed font-medium bg-white/[0.01] border border-white/5 rounded-2xl p-4 whitespace-pre-wrap max-h-[150px] overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent pr-1.5">
+                    {selectedProject.description}
+                  </p>
+                </div>
+              )}
+
+              {/* Tech Stack */}
+              {selectedProject.tech_stack && selectedProject.tech_stack.length > 0 && (
+                <div className="space-y-2">
+                  <span className="text-xs font-label-mono text-primary font-bold uppercase tracking-wider block">技术栈</span>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedProject.tech_stack.map((tech: string, i: number) => (
+                      <span key={i} className="px-3 py-1 rounded-full bg-white/5 text-on-surface-variant/70 text-xs font-bold border border-white/5">
+                        {tech}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Action */}
+            <div className="flex justify-end pt-4 border-t border-white/5">
+              <button
+                onClick={() => setSelectedProject(null)}
+                className="px-6 py-2.5 bg-primary text-on-primary rounded-xl text-sm font-black cursor-pointer hover:scale-[1.01] active:scale-98 transition-all shadow-lg shadow-primary/20"
+              >
+                关闭
               </button>
             </div>
           </div>
