@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import ForeignKey, String, Integer, Boolean, DateTime, func, ARRAY, Float, BigInteger, UniqueConstraint
+from sqlalchemy import ForeignKey, String, Integer, Boolean, DateTime, func, ARRAY, Float, BigInteger, UniqueConstraint, Index, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
@@ -308,3 +308,136 @@ class ProjectTag(Base):
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class InterviewLiveSession(Base):
+    """
+    实时语音面试会话（v1.2 设计）。
+    与 InterviewSession 是 1:1 关系（PR4 创建归档 session 后回填 session_id）。
+    interview_type + difficulty 决定 16 套人格/音色组合。
+    status 状态机：created → ws_connecting → live → ending → ended → analyzing → completed | failed
+    限流：partial unique index on user_id WHERE status IN active states。
+    """
+    __tablename__ = "interview_live_sessions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # PR4 创建 InterviewSession 后回填；PR1 阶段为 NULL
+    session_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("interview_sessions.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    # 4 选 1 面试类型
+    interview_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # 4 选 1 难度（Lv1..Lv4；语义为「压力面占比」）
+    difficulty: Mapped[str] = mapped_column(String(8), nullable=False)
+    # 10 / 15 / 20 分钟
+    duration_min: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 1..3 追问轮数
+    followup_rounds: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 状态机字符串
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="created")
+    # 实时统计（边讲边更新，PR2 起由 bridge 写入）
+    duration_sec: Mapped[int] = mapped_column(Integer, default=0)
+    # 候选人基础信息（便于报告页展示）
+    target_role: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    job_level: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    company_style: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    job_description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # 选中的 voice_id 与 persona（PR3 写入）
+    voice_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    persona_cn: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    
+    # 评测报告数据
+    ipi_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    offer_probability: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    summary_strengths: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
+    summary_weaknesses: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
+    summary_suggestions: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
+    executive_summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    analysis_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    transcript: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
+    
+    # 时间戳
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        # 限流：同用户同时只能有 1 个 active live session
+        Index(
+            "uq_live_active",
+            "user_id",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('created','ws_connecting','live','ending') AND user_id IS NOT NULL"
+            ),
+        ),
+    )
+
+    # 关联：归档的 InterviewSession（PR4 回填后可用）
+    session: Mapped[Optional["InterviewSession"]] = relationship("InterviewSession")
+    messages: Mapped[List["InterviewLiveMessage"]] = relationship(
+        "InterviewLiveMessage", back_populates="live_session", cascade="all, delete-orphan",
+        order_by="InterviewLiveMessage.seq",
+    )
+
+
+class InterviewLiveMessage(Base):
+    """
+    实时面试的结构化消息流水（PR2 起由 bridge 写入）。
+
+    每条对应一句完整的发言（不是流式 chunk）。
+    火山 sentence streaming 在 live_bridge._handle_tts_text_stream 里攒齐后
+    才写一条；content 是 JSONB，自带 speaker / seq / text / ts / reply_id。
+    """
+    __tablename__ = "interview_live_messages"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    live_session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("interview_live_sessions.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # 会话内序号（PR2 起单调递增）
+    seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    # content JSONB：{"speaker":"interviewer","seq":1,"text":"...","started_at":...,"ended_at":...,"reply_id":...,"chunk_count":N}
+    # 注意：所有结构化字段都在 content 里，列上没有冗余字段
+    content: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_live_msg_session_seq", "live_session_id", "seq"),
+    )
+
+    live_session: Mapped["InterviewLiveSession"] = relationship(
+        "InterviewLiveSession", back_populates="messages"
+    )
+
+
+class UserLiveMinutes(Base):
+    """
+    PR6 定价：用实时面试总时长（按周/月聚合）做限额。
+    - period_type: 'week' (ISO 周，如 '2026-W25') 或 'month' (如 '2026-06')
+    - (user_id, period_type, period_key) 唯一约束
+    - 每次 end 端点归档后 upsert 一行
+    - Free 用户：0 分钟 / PRO：60 分钟 /月 / MAX：不限
+    """
+    __tablename__ = "user_live_minutes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    period_type: Mapped[str] = mapped_column(String(8), nullable=False)  # 'week' | 'month'
+    period_key: Mapped[str] = mapped_column(String(16), nullable=False)  # '2026-W25' | '2026-06'
+    total_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sessions_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "period_type", "period_key", name="uq_user_live_minutes"),
+    )

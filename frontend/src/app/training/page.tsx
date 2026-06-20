@@ -1,218 +1,528 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { useRealtimeSession } from "@/app/utils/useRealtimeSession";
+import { useRealtimeAudio } from "./hooks/useRealtimeAudio";
 
-export default function InterviewTrainingPage() {
+// ============================================================
+// 实时语音面试（PR5）
+// 后端：POST /api/live/sessions 创建；WS /api/live/ws/{id} 双向语音
+// 结束：POST /api/live/sessions/{id}/end → 跳 /debugger/voice?sessionId=N
+// PR5：用 useRealtimeSession Hook 管理 WS 状态机 + 重连
+//      用 useRealtimeAudio Hook 采集麦克风 + AudioWorklet 下采样
+// ============================================================
+
+type InterviewType = "tech_8gu" | "tech_project" | "tech_scenario" | "hr_comprehensive";
+type Difficulty = "Lv1" | "Lv2" | "Lv3" | "Lv4";
+type DurationMin = 10 | 15 | 20;
+type FollowupRounds = 1 | 2 | 3;
+
+interface LiveSession {
+  live_session_id: number;
+  status: string;
+  voice_id: string | null;
+  persona_cn: string | null;
+  session_id: number | null;
+  ws_url: string | null;
+}
+
+interface TranscriptLine {
+  role: "interviewer" | "candidate";
+  text: string;
+  partial: boolean;
+  t0: number;
+  t1: number;
+}
+
+const INTERVIEW_TYPES: Array<{ value: InterviewType; label: string; persona: string }> = [
+  { value: "tech_8gu", label: "技术面·八股为主", persona: "书本型面试官" },
+  { value: "tech_project", label: "技术面·深挖项目", persona: "刨根问底型" },
+  { value: "tech_scenario", label: "技术面·场景题", persona: "架构师型" },
+  { value: "hr_comprehensive", label: "HR面·综合能力", persona: "老 HR 型" },
+];
+
+const DIFFICULTIES: Array<{ value: Difficulty; label: string; speed: string }> = [
+  { value: "Lv1", label: "友善", speed: "语速慢" },
+  { value: "Lv2", label: "偏友好", speed: "语速中" },
+  { value: "Lv3", label: "有压力", speed: "语速偏快" },
+  { value: "Lv4", label: "严苟", speed: "语速快" },
+];
+
+const DURATIONS: Array<{ value: DurationMin; label: string; qRange: string }> = [
+  { value: 10, label: "10 分钟", qRange: "3~5" },
+  { value: 15, label: "15 分钟", qRange: "5~7" },
+  { value: 20, label: "20 分钟", qRange: "7~9" },
+];
+
+const FOLLOWUP_RANGES: Record<FollowupRounds, string> = {
+  1: "1 轮",
+  2: "2 轮",
+  3: "3 轮",
+};
+
+function InterviewTrainingPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const auth = useAuth();
 
-  // --- INTERACTIVE SYSTEM STATES ---
-  const [targetRole, setTargetRole] = useState('后端开发工程师');
-  const [jobLevel, setJobLevel] = useState('高级 (P6-P7)');
-  const [interviewType, setInterviewType] = useState('技术面试 - 系统设计');
-  const [companyStyle, setCompanyStyle] = useState('字节跳动');
-  const [difficulty, setDifficulty] = useState('Lv3 困难');
-  const [jobDescription, setJobDescription] = useState('');
+  // ---------- 配置状态 ----------
+  // targetRole 默认从 auth.user.targetRole 拿（如"高级后端专家"），缺省"后端开发工程师"
+  const [targetRole, setTargetRole] = useState<string>(auth.user?.targetRole || "后端开发工程师");
+  const [jobDescription, setJobDescription] = useState<string>("");
+  const [interviewType, setInterviewType] = useState<InterviewType>("tech_project");
+  const [difficulty, setDifficulty] = useState<Difficulty>("Lv3");
+  const [durationMin, setDurationMin] = useState<DurationMin>(15);
+  const [followupRounds, setFollowupRounds] = useState<FollowupRounds>(2);
+  // JD 字符上限：与面试调试器统一为 600 字（避免过长 JD 引发表单性能问题）
+  const JD_MAX_LENGTH = 600;
 
-  const [isTrainingStarted, setIsTrainingStarted] = useState(false);
+  // ---------- Live 状态 ----------
+  const [liveSession, setLiveSession] = useState<LiveSession | null>(null);
+  const [bootState, setBootState] = useState<"idle" | "loading" | "live" | "ending" | "analyzing" | "error" | "report">("idle");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // PR5: WS 状态、transcript、AI 状态机、计时都由 useRealtimeSession Hook 管理
+  const live = useRealtimeSession();
+  const audio = useRealtimeAudio();
+  const transcript = live.transcript;
+  const aiState = live.aiState;
+  const durationSec = live.metrics.durationSec;
+  const micMuted = live.micMuted;
+  const speakerMuted = live.speakerMuted;
+
+  // ---------- UI 状态 ----------
   const [isCountingDown, setIsCountingDown] = useState(false);
   const [countdownNum, setCountdownNum] = useState(3);
-
-  // Device Toggles
-  const [isCameraOn, setIsCameraOn] = useState(false);
-  const [isMicOn, setIsMicOn] = useState(true);
-  
-  // Real Webcam Streams
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-
-  // Interview state simulator
-  const [currentTime, setCurrentTime] = useState(765); // 12:45 in seconds
-  const [thinkingTimeLeft, setThinkingTimeLeft] = useState(0);
-  const [activeQuestionIndex, setActiveQuestionIndex] = useState(1); // 0-indexed items, 1 represents "进行中"
-  const [isInterviewerSpeaking, setIsInterviewerSpeaking] = useState(false);
-  const [speechText, setSpeechText] = useState('语音识别中... ||||||||');
-
-  // Floating notifications
-  const [showHandBadge, setShowHandBadge] = useState(false);
-  const [isThinkingPaused, setIsThinkingPaused] = useState(false);
+  const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [feedbackText, setFeedbackText] = useState('');
-  
-  // Dynamic metrics simulator
-  const [metrics, setMetrics] = useState({
-    clarity: 82,
-    logic: 75,
-    speed: 68,
-    eyeContact: 88,
-    confidence: 76,
-    keyword: 65,
-  });
+  const [showNormsModal, setShowNormsModal] = useState(false);
+  const [feedbackText, setFeedbackText] = useState("");
+  // PR6 配额：会员等级 + 当月已用 + 限额
+  const [quota, setQuota] = useState<{ membership: string | null; limit_min: number; used_min: number; remaining_min: number } | null>(null);
+  const [showHandBadge, setShowHandBadge] = useState(false);
+  const [thinkingTimeLeft, setThinkingTimeLeft] = useState(0);
+  const [isThinkingPaused, setIsThinkingPaused] = useState(false);
 
-  // Active dialogue logs
-  const [dialogue, setDialogue] = useState([
-    { role: 'interviewer', name: 'AI 面试官', time: '12:45', text: '你好，我是你的 AI 面试官。请你介绍一下你最近负责的一个核心项目。' },
-    { role: 'user', name: '你', time: '12:52', text: '我最近负责的项目是一个高并发的订单系统，主要用于支持电商平台的秒杀活动。这个项目的核心挑战是如何在短时间内处理大量的并发请求，保证系统的稳定性和一致性。' },
-    { role: 'interviewer', name: 'AI 面试官', time: '12:58', text: '好的，能详细说说你是如何设计系统架构来应对高并发的吗？' }
-  ]);
+  const [cameraOn, setCameraOn] = useState(false);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [reportData, setReportData] = useState<any>(null);
+  const [reportTranscript, setReportTranscript] = useState<any[]>([]);
 
-  // Handle camera toggles (Webcam API)
+  // ---------- 模拟分析进度条 ----------
+  const [analysisProgress, setAnalysisProgress] = useState(0);
   useEffect(() => {
-    if (isCameraOn) {
-      navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 } })
-        .then((mediaStream) => {
-          setStream(mediaStream);
-          if (videoRef.current) {
-            videoRef.current.srcObject = mediaStream;
-          }
-        })
-        .catch((err) => {
-          console.error("Camera access denied or unavailable: ", err);
-          setIsCameraOn(false);
-        });
-    } else {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        setStream(null);
-      }
+    const isAnalyzingNow = bootState === "analyzing" || bootState === "ending";
+    if (!isAnalyzingNow) {
+      setAnalysisProgress(0);
+      return;
     }
+    setAnalysisProgress(5);
+    const interval = setInterval(() => {
+      setAnalysisProgress((prev) => {
+        if (prev >= 98) return 98;
+        const diff = 100 - prev;
+        const step = Math.max(0.5, Math.min(3, diff * 0.05));
+        return Math.min(98, Math.floor(prev + step));
+      });
+    }, 400);
+
+    return () => clearInterval(interval);
+  }, [bootState]);
+
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const bootStateRef = useRef(bootState);
+  useEffect(() => { bootStateRef.current = bootState; }, [bootState]);
+
+  const apiBase = "http://localhost:8001";
+  const authHeaders = useCallback((): HeadersInit => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }, []);
+
+  // ---------- HR 面互斥：自动限制 durationMin <= 15 ----------
+  useEffect(() => {
+    if (interviewType === "hr_comprehensive" && durationMin === 20) {
+      setDurationMin(15);
+    }
+  }, [interviewType, durationMin]);
+
+  // ---------- 启动时：URL?liveId= 或 localStorage 恢复 ----------
+  // URL 规则：
+  //   - 新建页（/training）→ URL 干净，不带 liveId
+  //   - 报告页（已完成） → URL 带 ?liveId=N（可分享/可刷新回到报告）
+  //   - 进行中刷新/返回  → 靠 localStorage 静默恢复，URL 保持干净
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const urlLiveId = params.get("liveId");
+    const lsLiveId = typeof window !== "undefined" ? localStorage.getItem("interviewVar_live_id") : null;
+    const liveId = urlLiveId || lsLiveId;
+
+    // PR6: 拉配额信息
+    fetch(`${apiBase}/api/live/quota`, { headers: authHeaders() })
+      .then((r) => r.ok ? r.json() : null)
+      .then((q) => { if (q) setQuota(q); })
+      .catch(() => { /* 匿名/网络错误时静默 */ });
+
+    if (!liveId) {
+      setBootState("idle");
+      const savedConfig = typeof window !== "undefined" ? localStorage.getItem("interviewVar_live_config") : null;
+      if (savedConfig) {
+        try {
+          const cfg = JSON.parse(savedConfig);
+          if (cfg.targetRole) setTargetRole(cfg.targetRole);
+          if (cfg.jobDescription) setJobDescription(cfg.jobDescription);
+          if (cfg.interviewType) setInterviewType(cfg.interviewType);
+          if (cfg.difficulty) setDifficulty(cfg.difficulty);
+          if (cfg.durationMin) setDurationMin(cfg.durationMin);
+          if (cfg.followupRounds) setFollowupRounds(cfg.followupRounds);
+        } catch (e) {
+          console.error("Failed to restore live config:", e);
+        }
+      }
+      return;
+    }
+    // 注意：不要把 localStorage 的 liveId 回写到 URL —— 新建页应保持 URL 干净
+    // 只有 showReport 进入报告态时才把 liveId 写进 URL
+    setBootState("loading");
+    void restoreSession(Number(liveId));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ---------- Transcript 自动滚动 ----------
+  useEffect(() => {
+    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [transcript]);
+
+  // ---------- 同步 hook 错误到 bootState ----------
+  useEffect(() => {
+    if (live.status === "error" && live.error) {
+      setErrorMsg(live.error.message);
+      setBootState("error");
+    }
+  }, [live.status, live.error]);
+
+  // ---------- 同步 hook status 到 bootState ----------
+  useEffect(() => {
+    if (live.status === "live") setBootState("live");
+    else if (live.status === "connecting") setBootState("loading");
+    else if (live.status === "ended" || live.status === "ending") setBootState("ending");
+  }, [live.status]);
+
+  // ---------- 页面销毁时清理摄像头 ----------
+  useEffect(() => {
     return () => {
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [isCameraOn]);
+  }, []);
 
-  // Main Timer ticks
-  useEffect(() => {
-    let interval: any = null;
-    if (isTrainingStarted && !isThinkingPaused) {
-      interval = setInterval(() => {
-        setCurrentTime((prev) => prev + 1);
-        
-        // Randomly jitter scoring metrics to simulate AI real-time analysis
-        setMetrics((prev) => ({
-          clarity: Math.min(100, Math.max(50, prev.clarity + (Math.random() > 0.5 ? 1 : -1))),
-          logic: Math.min(100, Math.max(50, prev.logic + (Math.random() > 0.5 ? 1 : -1))),
-          speed: Math.min(100, Math.max(50, prev.speed + (Math.random() > 0.5 ? 1 : -1))),
-          eyeContact: Math.min(100, Math.max(50, prev.eyeContact + (Math.random() > 0.5 ? 1 : -1))),
-          confidence: Math.min(100, Math.max(50, prev.confidence + (Math.random() > 0.5 ? 1 : -1))),
-          keyword: Math.min(100, Math.max(50, prev.keyword + (Math.random() > 0.5 ? 1 : -1))),
-        }));
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isTrainingStarted, isThinkingPaused]);
+  // ============================================================
+  // 核心流程
+  // ============================================================
 
-  // Countdown handler before interview starts
-  const handleStartTraining = () => {
-    setIsCountingDown(true);
-    setCountdownNum(3);
-    
-    const countInterval = setInterval(() => {
-      setCountdownNum((prev) => {
-        if (prev <= 1) {
-          clearInterval(countInterval);
-          setIsCountingDown(false);
-          setIsTrainingStarted(true);
-          setIsCameraOn(true); // Automatically request camera for high immersion
-          return 3;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+  const connectWs = (wsUrl: string, liveId: number) => {
+    const token = localStorage.getItem("interviewVar_token") || "";
+    void live.start({ liveId, wsPath: wsUrl, token });
+    void audio.start((pcm16) => {
+      live.sendBinary(pcm16);
+    });
   };
 
-  // Skip / Move to next question simulator
-  const handleSkipQuestion = () => {
-    if (activeQuestionIndex >= 5) {
-      auth.triggerToast("模拟面试已完成所有环节！正在生成AI面试报告...");
-      setIsTrainingStarted(false);
-      localStorage.setItem("interviewVar_viewing_session", "true");
-      localStorage.setItem("interviewVar_report_mode", "audio");
-      localStorage.setItem("interviewVar_session_company", companyStyle);
-      localStorage.setItem("interviewVar_session_role", targetRole);
-      localStorage.setItem("interviewVar_session_round", interviewType);
-      localStorage.setItem("interviewVar_session_grade", jobLevel || "");
-      localStorage.setItem("interviewVar_session_jobDescription", jobDescription || "");
-      localStorage.setItem("interviewVar_session_salary", "25K * 16薪");
-      localStorage.setItem("interviewVar_session_date", "2026-05-31");
-      router.push("/debugger/report");
+  const showReport = async (liveId: number) => {
+    try {
+      const res = await fetch(`${apiBase}/api/live/sessions/${liveId}/report`, { headers: authHeaders() });
+      if (res.ok) {
+        const report = await res.json();
+        setReportData(report);
+        setReportTranscript(report.transcript || []);
+        setBootState("report");
+        // 进入报告态：把 liveId 写进 URL（可分享、可刷新回到报告页）
+        window.history.replaceState(null, "", `/training?liveId=${liveId}`);
+      } else {
+        setErrorMsg("获取面试报告失败");
+        setBootState("error");
+      }
+    } catch (e) {
+      console.error("Failed to load report:", e);
+      setErrorMsg("加载面试报告出错");
+      setBootState("error");
+    }
+  };
+
+  const restoreSession = async (liveId: number) => {
+    try {
+      const res = await fetch(`${apiBase}/api/live/sessions/${liveId}`, { headers: authHeaders() });
+      if (!res.ok) {
+        setBootState("idle");
+        localStorage.removeItem("interviewVar_live_id");
+        return;
+      }
+      const sess: LiveSession = await res.json();
+      setLiveSession(sess);
+      switch (sess.status) {
+        case "completed":
+          void showReport(liveId);
+          return;
+        case "analyzing":
+        case "ending":
+        case "ended":
+        case "failed":
+          setBootState("idle");
+          localStorage.removeItem("interviewVar_live_id");
+          window.history.replaceState(null, "", "/training");
+          return;
+        case "live":
+        case "ws_connecting":
+        case "created":
+          // 重新连 WS
+          setBootState("live");
+          if (sess.ws_url) connectWs(sess.ws_url, liveId);
+          return;
+        default:
+          setBootState("idle");
+      }
+    } catch (e) {
+      setBootState("idle");
+      setErrorMsg("无法恢复会话状态");
+    }
+  };
+
+  const pollUntilCompleted = async (liveId: number) => {
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      try {
+        const res = await fetch(`${apiBase}/api/live/sessions/${liveId}`, { headers: authHeaders() });
+        if (!res.ok) continue;
+        const sess: LiveSession = await res.json();
+        if (sess.status === "completed") {
+          void showReport(liveId);
+          return;
+        }
+        if (sess.status === "failed") {
+          setErrorMsg("报告生成失败，请重新开始");
+          setBootState("error");
+          return;
+        }
+      } catch { /* 网络抖动继续 */ }
+    }
+    setErrorMsg("报告生成超时");
+    setBootState("error");
+  };
+
+  const handleStartTraining = async () => {
+    if (!targetRole.trim()) {
+      auth.triggerToast("请填写目标岗位！");
       return;
     }
 
-    const nextIndex = activeQuestionIndex + 1;
-    setActiveQuestionIndex(nextIndex);
+    setIsCountingDown(true);
+    setCountdownNum(3);
+    for (let i = 3; i >= 1; i--) {
+      setCountdownNum(i);
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    setIsCountingDown(false);
 
-    // Simulate AI interviewer speaking next question
-    setIsInterviewerSpeaking(true);
-    const nextQuestions = [
-      { text: "在自我介绍中你提到了分布式锁，能分享一下 Redis 分布式锁的实现细节与防死锁设计吗？" },
-      { text: "在高并发写场景下，你是如何应用消息队列（MQ）进行流量削峰的？如何保证消息不丢失和幂等消费？" },
-      { text: "从系统架构设计的角度来看，当数据库主从延迟增大时，你会采取哪些具体的架构优化方案？" },
-      { text: "感谢你今天精彩的回答。我们会基于你在系统设计、表达逻辑、抗压能力和高并发架构的全面表现生成 AI 面试报告，你有什么想问我的吗？" }
-    ];
-
-    const targetText = nextQuestions[nextIndex - 2]?.text || "请继续说明你的架构方案细节。";
-
-    // Add user placeholder message
-    const formattedTime = formatTime(currentTime);
-    const userMsg = { role: 'user', name: '你', time: formattedTime, text: '我认为面对这个场景，架构设计应该优先考虑读写分离与缓存异步双删策略...' };
-    
-    setDialogue(prev => [...prev, userMsg]);
-
-    setTimeout(() => {
-      setIsInterviewerSpeaking(false);
-      const aiTime = formatTime(currentTime + 5);
-      const aiMsg = { role: 'interviewer', name: 'AI 面试官', time: aiTime, text: targetText };
-      setDialogue(prev => [...prev, aiMsg]);
-    }, 3000);
+    // POST /api/live/sessions
+    try {
+      const config = { targetRole, jobDescription, interviewType, difficulty, durationMin, followupRounds };
+      localStorage.setItem("interviewVar_live_config", JSON.stringify(config));
+      const res = await fetch(`${apiBase}/api/live/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({
+          interview_type: interviewType,
+          difficulty,
+          duration_min: durationMin,
+          followup_rounds: followupRounds,
+          target_role: targetRole,
+          // job_level 从 auth.user.targetGrade 拿（如 "P7"），缺省 "P6"
+          job_level: auth.user?.targetGrade || "P6",
+          // company_style 从 auth.user.targetCompany 拿（如 "腾讯/美团"），缺省 "通用"
+          company_style: auth.user?.targetCompany || "通用",
+          job_description: jobDescription || null,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        if (res.status === 409) {
+          auth.triggerToast("已有进行中的实时面试，请先结束或等待");
+        } else {
+          auth.triggerToast(err.detail || "创建面试失败");
+        }
+        return;
+      }
+      const sess: LiveSession = await res.json();
+      setLiveSession(sess);
+      localStorage.setItem("interviewVar_live_id", String(sess.live_session_id));
+      // URL 保持干净（不写 ?liveId=）：新建面试态不应污染 URL
+      // 中途刷新靠 localStorage 静默恢复；URL 仅在报告态（showReport）才写
+      setBootState("live");
+      // PR5: 用 hook 启动 WS（已含自动重连）
+      if (sess.ws_url) {
+        const token = localStorage.getItem("interviewVar_token") || "";
+        // 收到服务端 tts_audio 帧 → 喂给 audio 队列播放
+        void live.start({
+          liveId: sess.live_session_id,
+          wsPath: sess.ws_url,
+          token,
+          onAudioFrame: (pcm16) => audio.play(pcm16),
+        });
+        // PR5: 启动麦克风采集（捕获失败不阻塞 WS）
+        // 用 hook 暴露的 sendBinary（不直接访问内部 wsRef）
+        void audio.start((pcm16) => {
+          live.sendBinary(pcm16);
+        });
+      }
+    } catch (e) {
+      auth.triggerToast("无法连接到后端服务");
+    }
   };
 
-  // Thinking Time simulator (+60 seconds)
-  const handleThinkingTime = () => {
+  const handleEnd = async () => {
+    if (!liveSession) return;
+    setShowEndConfirm(false);
+    setBootState("ending");
+    void live.end();
+    audio.stop();
+    stopCamera();
+    try {
+      const res = await fetch(`${apiBase}/api/live/sessions/${liveSession.live_session_id}/end`, {
+        method: "POST",
+        headers: authHeaders(),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        auth.triggerToast(err.detail || "结束失败");
+        setBootState("error");
+        return;
+      }
+      const sess: LiveSession = await res.json();
+      setLiveSession(sess);
+      if (sess.status === "completed") {
+        void showReport(sess.live_session_id);
+        return;
+      }
+      setBootState("analyzing");
+      // PR6: 刷新 quota（已用时长）
+      fetch(`${apiBase}/api/live/quota`, { headers: authHeaders() })
+        .then((r) => r.ok ? r.json() : null)
+        .then((q) => { if (q) setQuota(q); })
+        .catch(() => {});
+      void pollUntilCompleted(sess.live_session_id);
+    } catch (e) {
+      auth.triggerToast("无法结束面试");
+      setBootState("error");
+    }
+  };
+
+  const handleReset = () => {
+    localStorage.removeItem("interviewVar_live_id");
+    localStorage.removeItem("interviewVar_live_config");
+    window.history.replaceState(null, "", "/training");
+    setLiveSession(null);
+    setBootState("idle");
+    setReportData(null);
+    setReportTranscript([]);
+    live.reset();
+    audio.stop();
+    stopCamera();
+    setErrorMsg(null);
+  };
+
+  const stopCamera = useCallback(() => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+    }
+    setCameraOn(false);
+  }, []);
+
+  const toggleCamera = async () => {
+    if (cameraOn) {
+      stopCamera();
+    } else {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 360 },
+          audio: false,
+        });
+        streamRef.current = stream;
+        setCameraOn(true);
+      } catch (err) {
+        console.error("Failed to access camera:", err);
+        auth.triggerToast("无法访问摄像头，请检查权限/连接设备");
+      }
+    }
+  };
+
+  const videoRefCallback = useCallback((node: HTMLVideoElement | null) => {
+    if (node) {
+      if (streamRef.current) {
+        node.srcObject = streamRef.current;
+      }
+    }
+  }, []);
+
+  // ============================================================
+  // 快捷操作
+  // ============================================================
+
+  const handleHandRaise = () => {
+    if (live.status !== "live") return;
+    live.sendEvent("hand_raise", {});
+    setShowHandBadge(true);
+    setTimeout(() => setShowHandBadge(false), 3000);
+  };
+
+  const handleThinking = () => {
     setIsThinkingPaused(true);
     setThinkingTimeLeft(60);
-    const thinkingInterval = setInterval(() => {
-      setThinkingTimeLeft((prev) => {
-        if (prev <= 1) {
-          clearInterval(thinkingInterval);
+    const t = setInterval(() => {
+      setThinkingTimeLeft((s) => {
+        if (s <= 1) {
+          clearInterval(t);
           setIsThinkingPaused(false);
           return 0;
         }
-        return prev - 1;
+        return s - 1;
       });
     }, 1000);
+    live.sendEvent("thinking", {});
   };
 
-  // Convert raw seconds to MM:SS format
-  const formatTime = (secs: number) => {
-    const mins = Math.floor(secs / 60);
-    const remainingSecs = secs % 60;
-    return `${mins.toString().padStart(2, '0')}:${remainingSecs.toString().padStart(2, '0')}`;
+  const handleSkip = () => {
+    live.sendText("请继续下一题");
   };
+
+  // ============================================================
+  // 渲染
+  // ============================================================
+
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const questionRange = durationMin === 10 ? "3~5" : durationMin === 20 ? "7~9" : "5~7";
+  const isLive = bootState === "live";
+  const isAnalyzing = bootState === "analyzing" || bootState === "ending";
 
   return (
     <div className="min-h-screen bg-background flex flex-col font-body-md text-on-surface antialiased overflow-x-hidden relative selection:bg-primary/30 selection:text-white pb-0 pt-20">
-      
-      {/* Background Gradients & Matrix Scifi Grid */}
+      {/* Background Gradients */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px),linear-gradient(to_bottom,#ffffff03_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0" />
       <div className="absolute top-[10%] left-[-15%] w-[50%] h-[50%] bg-primary/10 rounded-full blur-[160px] pointer-events-none z-0 animate-pulse" />
       <div className="absolute bottom-[15%] right-[-15%] w-[45%] h-[45%] bg-secondary/80 rounded-full blur-[200px] pointer-events-none z-0 opacity-10" />
 
-      {/* ========================================================
-          TOP NAVIGATION BAR (Pixel Perfect Alignment)
-         ======================================================== */}
+      {/* TOP NAV */}
       <nav className="fixed top-0 w-full z-40 bg-surface/80 backdrop-blur-xl border-b border-white/10">
         <div className="px-gutter h-20 max-w-container-max mx-auto flex justify-between items-center relative">
-          
-          <div
-            onClick={() => router.push("/")}
-            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2 cursor-pointer"
-          >
+          <div onClick={() => router.push("/")} className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2 cursor-pointer">
             <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
               <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo)" />
               <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#0b1326" />
@@ -225,825 +535,807 @@ export default function InterviewTrainingPage() {
             </svg>
             面试VAR
           </div>
-
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
-            <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
-              面试调试器
-            </a>
-            <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
-              职业记忆看板
-            </a>
-            <a onClick={() => router.push("/training")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
-              面试训练场
-            </a>
-            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
-              职业驾驶舱
-            </a>
-            <a onClick={() => router.push("/")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
-              案例
-            </a>
+            <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">面试调试器</a>
+            <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">职业记忆看板</a>
+            <a onClick={() => router.push("/training")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">面试训练场</a>
+            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">职业驾驶舱</a>
+            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">面试副驾</a>
+            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">案例</a>
           </div>
-
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push("/memory?tab=timeline")}
-              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
+            <button onClick={() => router.push("/memory?tab=timeline")} className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer">
               <span className="material-symbols-outlined text-base">history</span>历史面试
             </button>
-            <button onClick={() => router.push("/home")} className="px-3.5 py-2 hover:bg-white/5 text-on-surface-variant hover:text-white rounded-full transition-colors flex items-center gap-1 cursor-pointer">
-              <span className="material-symbols-outlined text-lg">settings</span>设置
-            </button>
-            {auth.isLoggedIn ? (
-              <UserMenu />
-            ) : (
+            {auth.isLoggedIn ? <UserMenu /> : (
               <>
-                <button
-                  onClick={() => auth.setShowLogin(true)}
-                  className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer"
-                >
-                  登录
-                </button>
-                <button
-                  onClick={() => router.push("/register")}
-                  className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] cursor-pointer"
-                >
-                  免费开始
-                </button>
+                <button onClick={() => auth.setShowLogin(true)} className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer">登录</button>
+                <button onClick={() => router.push("/register")} className="px-6 py-2 bg-primary text-on-primary font-bold rounded-full scale-95 hover:scale-100 active:scale-95 transition-all shadow-[0_0_20px_rgba(192,193,255,0.3)] cursor-pointer">免费开始</button>
               </>
             )}
           </div>
         </div>
       </nav>
 
-      {/* ========================================================
-          MAIN WORKSPACE LAYOUT container (Full Width)
-         ======================================================== */}
+      {/* MAIN */}
       <div className="flex-1 max-w-container-max mx-auto w-full px-gutter py-8 flex flex-col gap-6 relative z-10">
-        
-        <div className="grid grid-cols-12 gap-6 items-stretch w-full">
-          
-          {/* ========================================================
-              LEFT COLUMN: Configuration Console (开始模拟面试)
-             ======================================================== */}
-          <div className="col-span-12 lg:col-span-3 flex flex-col justify-between gap-6 h-full">
-            <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col h-full gap-5.5 text-left">
-              
-              <div className="pb-3 border-b border-white/5 shrink-0">
-                <h3 className="text-lg font-black text-white">开始模拟面试</h3>
-                <p className="text-[11px] text-on-surface-variant/40 font-bold mt-1 uppercase tracking-wider">Configure your training</p>
+        {bootState === "report" && reportData ? (
+          <div className="flex flex-col gap-8 w-full">
+            {/* Header Card */}
+            <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div className="space-y-1 text-left">
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full bg-primary/10 border border-primary/20 text-xs text-primary font-black">AI 模拟面试</span>
+                  <span className="text-on-surface-variant/40 text-xs font-mono font-bold">
+                    {reportData.created_at ? new Date(reportData.created_at).toLocaleString() : new Date().toLocaleString()}
+                  </span>
+                </div>
+                <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary">assessment</span>
+                  AI 模拟面试分析报告
+                </h2>
+                <p className="text-xs text-on-surface-variant/60 font-semibold">
+                  目标岗位：<strong className="text-white">{targetRole}</strong> · 难度：<strong className="text-white">{DIFFICULTIES.find(d => d.value === difficulty)?.label}</strong> · 时长：<strong className="text-white">{durationMin} 分钟</strong>
+                </p>
               </div>
-
-              {/* Configurations Fields */}
-              <div className="space-y-4 flex-1 overflow-y-auto pr-1">
-                
-                {/* Field 1: Target Role */}
-                <div className="space-y-1.5">
-                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">目标岗位</label>
-                  <div className="relative">
-                    <input 
-                      type="text"
-                      disabled={isTrainingStarted}
-                      value={targetRole}
-                      onChange={(e) => setTargetRole(e.target.value)}
-                      placeholder="请输入目标岗位"
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black focus:outline-none transition-all placeholder:text-white/20"
-                    />
-                  </div>
-                </div>
-
-                {/* Field 2: Job Level */}
-                <div className="space-y-1.5">
-                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">职位级别</label>
-                  <div className="relative">
-                    <input 
-                      type="text"
-                      disabled={isTrainingStarted}
-                      value={jobLevel}
-                      onChange={(e) => setJobLevel(e.target.value)}
-                      placeholder="请输入职位级别"
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black focus:outline-none transition-all placeholder:text-white/20"
-                    />
-                  </div>
-                </div>
-
-                {/* Field 2.5: Job Description */}
-                <div className="space-y-1.5">
-                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">岗位详情 [选填]</label>
-                  <div className="relative">
-                    <textarea 
-                      disabled={isTrainingStarted}
-                      value={jobDescription}
-                      onChange={(e) => setJobDescription(e.target.value)}
-                      placeholder="可以将岗位 JD（Job Description）粘贴在此，方便 AI 更好地匹配和提问..."
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-xs font-medium focus:outline-none transition-all placeholder:text-white/20 h-28 resize-none scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent"
-                    />
-                  </div>
-                </div>
-
-                {/* Field 3: Interview Type */}
-                <div className="space-y-1.5">
-                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">面试类型</label>
-                  <div className="relative">
-                    <select 
-                      disabled={isTrainingStarted}
-                      value={interviewType}
-                      onChange={(e) => setInterviewType(e.target.value)}
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black appearance-none cursor-pointer focus:outline-none transition-all"
-                    >
-                      <option value="技术面试 - 系统设计" className="bg-[#0b1326] text-white">技术面试 - 系统设计</option>
-                      <option value="技术面试 - 算法架构" className="bg-[#0b1326] text-white">技术面试 - 算法架构</option>
-                      <option value="行为面试 - 综合能力" className="bg-[#0b1326] text-white">行为面试 - 综合能力</option>
-                      <option value="项目深挖面试" className="bg-[#0b1326] text-white">项目深挖面试</option>
-                    </select>
-                    <span className="material-symbols-outlined absolute right-3.5 top-3.5 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
-                  </div>
-                </div>
-
-                {/* Field 4: Company Style */}
-                <div className="space-y-1.5">
-                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">公司风格</label>
-                  <div className="relative">
-                    <select 
-                      disabled={isTrainingStarted}
-                      value={companyStyle}
-                      onChange={(e) => setCompanyStyle(e.target.value)}
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black appearance-none cursor-pointer focus:outline-none transition-all"
-                    >
-                      <option value="字节跳动" className="bg-[#0b1326] text-white">字节跳动</option>
-                      <option value="腾讯" className="bg-[#0b1326] text-white">腾讯</option>
-                      <option value="阿里巴巴" className="bg-[#0b1326] text-white">阿里巴巴</option>
-                      <option value="美团" className="bg-[#0b1326] text-white">美团</option>
-                    </select>
-                    <span className="material-symbols-outlined absolute right-3.5 top-3.5 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
-                  </div>
-                </div>
-
-                {/* Field 5: Difficulty Level */}
-                <div className="space-y-1.5">
-                  <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">难度等级</label>
-                  <div className="relative">
-                    <select 
-                      disabled={isTrainingStarted}
-                      value={difficulty}
-                      onChange={(e) => setDifficulty(e.target.value)}
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black appearance-none cursor-pointer focus:outline-none transition-all"
-                    >
-                      <option value="Lv3 困难" className="bg-[#0b1326] text-white">Lv3 困难</option>
-                      <option value="Lv1 简单" className="bg-[#0b1326] text-white">Lv1 简单</option>
-                      <option value="Lv2 一般" className="bg-[#0b1326] text-white">Lv2 一般</option>
-                      <option value="Lv4 地狱" className="bg-[#0b1326] text-white">Lv4 地狱</option>
-                    </select>
-                    <span className="material-symbols-outlined absolute right-3.5 top-3.5 text-on-surface-variant/40 text-base pointer-events-none select-none">expand_more</span>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Bottom Metadata Summary Panel */}
-              <div className="p-4 rounded-2xl bg-white/[0.01] border border-white/5 space-y-2 shrink-0">
-                <span className="text-[10px] text-on-surface-variant/40 font-label-mono tracking-widest uppercase block font-extrabold">本次训练信息</span>
-                <div className="space-y-1.5 text-xs text-on-surface-variant/80 font-bold">
-                  <p className="flex justify-between"><span>预计时长:</span> <span className="text-white font-black font-label-mono">30 分钟</span></p>
-                  <p className="flex justify-between"><span>问题数量:</span> <span className="text-white font-black font-label-mono">12-15 道</span></p>
-                  <p className="flex justify-between"><span>包含追问:</span> <span className="text-white font-black font-label-mono">3 轮追问</span></p>
-                  <p className="flex justify-between"><span>AI 面试官:</span> <span className="text-tertiary font-black">技术专家 (系统设计)</span></p>
-                </div>
-              </div>
-
-              {/* Start Training Gradient Trigger */}
-              <div className="space-y-3 shrink-0">
-                <button
-                  disabled={isTrainingStarted || isCountingDown}
-                  onClick={handleStartTraining}
-                  className="w-full py-3.5 bg-gradient-to-r from-secondary to-primary text-on-primary text-sm font-black rounded-xl hover:scale-[1.01] active:scale-98 disabled:opacity-50 disabled:scale-100 transition-all shadow-lg shadow-secondary/20 cursor-pointer flex items-center justify-center gap-2 group"
-                >
-                  <span className="material-symbols-outlined text-base animate-pulse">play_arrow</span>
-                  {isTrainingStarted ? "正在进行模拟面试" : "开始模拟面试"}
-                </button>
-                <span 
-                  onClick={() => auth.triggerToast("模拟面试将调用摄像头与麦克风，录音本地加密处理，面试VAR 深度保护您的隐私权益。")}
-                  className="text-[10px] font-bold text-on-surface-variant/30 hover:text-white transition-colors cursor-pointer text-center block"
-                >
-                  开始即表示同意 <span className="text-primary hover:underline">训练规范与用户权益 →</span>
-                </span>
-              </div>
-
+              <button
+                onClick={handleReset}
+                className="px-5 py-2.5 bg-gradient-to-r from-secondary to-primary hover:scale-[1.02] active:scale-98 text-on-primary text-xs font-black rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer shrink-0"
+              >
+                <span className="material-symbols-outlined text-sm">replay</span>
+                重新开始面试
+              </button>
             </div>
-          </div>
 
-          {/* ========================================================
-              CENTER COLUMN: The Live Interactive Simulator Panel
-             ======================================================== */}
-          <div className="col-span-12 lg:col-span-6 flex flex-col justify-between gap-6 h-full min-w-0">
-            <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col h-full gap-5 relative overflow-hidden">
-              
-              {/* COUNTDOWN SCREEN overlay before starting */}
-              <AnimatePresence>
-                {isCountingDown && (
-                  <motion.div 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    className="absolute inset-0 bg-[#0b1326]/95 z-30 flex flex-col items-center justify-center gap-6"
-                  >
-                    <div className="w-32 h-32 rounded-full border-4 border-dashed border-primary flex items-center justify-center relative animate-[spin_10s_linear_infinite]">
-                      <div className="absolute inset-4 rounded-full border border-double border-white/15" />
-                    </div>
-                    <div className="absolute flex flex-col items-center justify-center text-center">
-                      <motion.span 
-                        key={countdownNum}
-                        initial={{ scale: 0.5, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 1.5, opacity: 0 }}
-                        transition={{ duration: 0.5 }}
-                        className="text-6xl font-black font-label-mono text-white"
-                      >
-                        {countdownNum}
-                      </motion.span>
-                      <span className="text-xs text-on-surface-variant/45 font-bold uppercase tracking-widest mt-2">
-                        AI 面试官准备中...
-                      </span>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* OFFLINE ONBOARDING PREVIEW (When Simulator has NOT started) */}
-              {!isTrainingStarted && !isCountingDown && (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-6 z-10 select-none">
-                  <div className="w-24 h-24 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center shadow-lg relative group overflow-hidden transition-transform duration-300">
-                    <div className="absolute inset-0 bg-gradient-to-tr from-primary/15 to-transparent" />
-                    <span className="material-symbols-outlined text-primary animate-pulse relative z-10" style={{ fontSize: "56px" }}>support_agent</span>
-                  </div>
-                  
-                  <div className="space-y-2 max-w-md">
-                    <h3 className="text-xl font-black text-white flex items-center justify-center gap-1.5">
-                      配置完成，准备就绪
-                    </h3>
-                    <p className="text-xs text-on-surface-variant/50 leading-relaxed font-semibold">
-                      点击左下角 <span className="font-black text-white">“开始模拟面试”</span> 按钮即可唤醒您的 AI 资深面试官。系统将模拟 3D 真人面试情境，支持全真音画调试、实时答题逻辑剖析与分段评分。
-                    </p>
-                  </div>
-                  
-                  {/* Scifi indicator lines */}
-                  <div className="flex items-center gap-4 w-full max-w-xs text-[10px] text-on-surface-variant/30 font-label-mono font-bold">
-                    <div className="h-px bg-white/5 flex-1" />
-                    <span>OFFLINE SIMULATION</span>
-                    <div className="h-px bg-white/5 flex-1" />
+            {/* Grid: Scores & Summary */}
+            <div className="grid grid-cols-12 gap-6 items-stretch w-full text-left">
+              {/* Score Panel */}
+              <div className="col-span-12 lg:col-span-4 glass-panel p-6 rounded-3xl border-white/10 flex flex-col justify-between items-center text-center gap-6">
+                <div className="w-full pb-3 border-b border-white/5 text-left">
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider">评测得分</h3>
+                </div>
+                
+                {/* Radial Progress Score */}
+                <div className="relative w-40 h-40 flex items-center justify-center">
+                  <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="40" stroke="rgba(255,255,255,0.03)" strokeWidth="8" fill="transparent" />
+                    <circle
+                      cx="50"
+                      cy="50"
+                      r="40"
+                      stroke="url(#score-gradient)"
+                      strokeWidth="8"
+                      fill="transparent"
+                      strokeDasharray={251.2}
+                      strokeDashoffset={251.2 - (251.2 * (reportData.scores?.ipi ?? 70)) / 100}
+                      strokeLinecap="round"
+                      className="transition-all duration-1000 ease-out"
+                    />
+                    <defs>
+                      <linearGradient id="score-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#c0c1ff" />
+                        <stop offset="100%" stopColor="#ffb2b7" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                  <div className="absolute flex flex-col items-center justify-center">
+                    <span className="text-4xl font-black text-white font-label-mono tracking-tighter">
+                      {reportData.scores?.ipi ?? 70}
+                    </span>
+                    <span className="text-[10px] text-on-surface-variant/40 font-bold uppercase tracking-wider mt-1">IPI 综合得分</span>
                   </div>
                 </div>
-              )}
 
-              {/* SIMULATOR CORE SCREEN (When Simulator IS Active) */}
-              {isTrainingStarted && (
-                <>
-                  {/* Simulator Header */}
-                  <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
-                    <div className="flex items-center gap-3">
-                      <span className="w-2.5 h-2.5 rounded-full bg-tertiary animate-ping" />
-                      <span className="text-sm font-black text-white flex items-center gap-2.5">
-                        面试进行中
-                        <span className="px-2.5 py-0.5 bg-white/5 rounded border border-white/5 text-xs text-on-surface-variant/60 font-bold font-label-mono">
-                          {formatTime(currentTime)}
-                        </span>
-                      </span>
-                    </div>
-
-                    {/* Quick controls bar */}
-                    <div className="flex items-center gap-2">
-                      <button 
-                        onClick={() => setIsCameraOn(!isCameraOn)}
-                        className={`px-3 py-1.5 rounded-xl border text-[11px] font-black flex items-center gap-1 cursor-pointer transition-all ${
-                          isCameraOn ? "bg-primary/10 border-primary text-primary" : "bg-white/5 border-white/5 text-on-surface-variant/50"
-                        }`}
-                      >
-                        <span className="material-symbols-outlined text-sm">{isCameraOn ? "videocam" : "videocam_off"}</span>
-                        摄像头
-                      </button>
-                      <button 
-                        onClick={() => setIsMicOn(!isMicOn)}
-                        className={`px-3 py-1.5 rounded-xl border text-[11px] font-black flex items-center gap-1 cursor-pointer transition-all ${
-                          isMicOn ? "bg-tertiary/10 border-tertiary text-tertiary" : "bg-white/5 border-white/5 text-on-surface-variant/50"
-                        }`}
-                      >
-                        <span className="material-symbols-outlined text-sm">{isMicOn ? "mic" : "mic_off"}</span>
-                        麦克风
-                      </button>
-                      <button 
-                        onClick={() => {
-                          if(confirm("确定要提前结束本次模拟面试并导出分析报告吗？")) {
-                            setIsTrainingStarted(false);
-                            localStorage.setItem("interviewVar_viewing_session", "true");
-                            localStorage.setItem("interviewVar_report_mode", "audio");
-                            localStorage.setItem("interviewVar_session_company", companyStyle);
-                            localStorage.setItem("interviewVar_session_role", targetRole);
-                            localStorage.setItem("interviewVar_session_round", interviewType);
-                            localStorage.setItem("interviewVar_session_grade", jobLevel || "");
-                            localStorage.setItem("interviewVar_session_jobDescription", jobDescription || "");
-                            localStorage.setItem("interviewVar_session_salary", "25K * 16薪");
-                            localStorage.setItem("interviewVar_session_date", "2026-05-31");
-                            router.push("/debugger/report");
-                          }
-                        }}
-                        className="px-3.5 py-1.5 bg-secondary/15 border border-secondary/25 hover:bg-secondary/25 hover:border-secondary/40 text-secondary rounded-xl text-[11px] font-black cursor-pointer transition-all flex items-center gap-1"
-                      >
-                        <span className="material-symbols-outlined text-sm">cancel</span>
-                        结束面试
-                      </button>
-                    </div>
+                {/* Offer Probability Badge */}
+                <div className="w-full p-4 rounded-2xl bg-white/[0.01] border border-white/5 space-y-1.5 text-left">
+                  <div className="flex justify-between items-center text-xs font-bold text-on-surface-variant/70">
+                    <span>Offer 获得概率</span>
+                    <span className="text-tertiary font-label-mono font-black">{reportData.scores?.offer_probability ?? 0}%</span>
                   </div>
+                  <div className="h-2 bg-white/5 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-secondary to-primary transition-all duration-1000"
+                      style={{ width: `${reportData.scores?.offer_probability ?? 0}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
 
-                  {/* VIDEO SPLIT CONTAINERS (AI and You) */}
-                  <div className="grid grid-cols-2 gap-4 flex-1 items-stretch py-1 min-h-[220px]">
-                    
-                    {/* Left Frame: AI Interviewer */}
-                    <div className="relative rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl flex-1 group">
-                      <img 
-                        src="/debugger-1.jpg" 
-                        alt="AI Interviewer" 
-                        className="w-full h-full object-cover select-none pointer-events-none group-hover:scale-102 transition-transform duration-700" 
-                      />
-                      
-                      {/* Interviewer Active speaking state overlay */}
-                      {isInterviewerSpeaking && (
-                        <div className="absolute inset-0 bg-primary/5 pointer-events-none border border-primary/20 animate-pulse" />
-                      )}
+              {/* Executive Summary */}
+              <div className="col-span-12 lg:col-span-8 glass-panel p-6 rounded-3xl border-white/10 flex flex-col justify-start gap-4">
+                <div className="pb-3 border-b border-white/5">
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider">总评摘要</h3>
+                </div>
+                <p className="text-sm leading-relaxed text-on-surface-variant/80 font-medium">
+                  {reportData.summary?.executive_summary || "暂无总评摘要"}
+                </p>
+                
+                {/* Strengths & Weaknesses Quick View */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                  <div className="space-y-2">
+                    <span className="text-xs text-primary font-black flex items-center gap-1">
+                      <span className="material-symbols-outlined text-sm">check_circle</span>
+                      核心优势
+                    </span>
+                    <ul className="space-y-1.5 text-xs text-on-surface-variant/60 font-semibold pl-1.5 list-disc list-inside">
+                      {(reportData.summary?.strengths || []).map((s: string, i: number) => (
+                        <li key={i}>{s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                  <div className="space-y-2">
+                    <span className="text-xs text-secondary font-black flex items-center gap-1">
+                      <span className="material-symbols-outlined text-sm">warning</span>
+                      薄弱环节
+                    </span>
+                    <ul className="space-y-1.5 text-xs text-on-surface-variant/60 font-semibold pl-1.5 list-disc list-inside">
+                      {(reportData.summary?.weaknesses || []).map((w: string, i: number) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-                      {/* Header Badge */}
-                      <span className="absolute left-3.5 top-3 px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md text-[10px] text-white/90 font-bold border border-white/5 select-none z-10 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-primary rounded-full animate-ping" />
-                        AI 面试官 · 技术专家
-                      </span>
+            {/* Grid: Capability Dimensions & Suggestions */}
+            <div className="grid grid-cols-12 gap-6 items-stretch w-full text-left">
+              {/* Dimension Scores */}
+              <div className="col-span-12 lg:col-span-6 glass-panel p-6 rounded-3xl border-white/10 flex flex-col gap-5">
+                <div className="pb-3 border-b border-white/5">
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-base text-primary">analytics</span>
+                    维度细分表现
+                  </h3>
+                </div>
+                
+                <div className="space-y-4">
+                  {[
+                    { label: "技术深度", key: "project_depth", icon: "terminal", color: "from-[#c0c1ff] to-[#a8aaff]" },
+                    { label: "逻辑表达", key: "logic", icon: "forum", color: "from-[#ffb2b7] to-[#ff99a0]" },
+                    { label: "场景架构", key: "system_design", icon: "schema", color: "from-[#5DECCB] to-[#3cd9b7]" },
+                    { label: "项目真实度", key: "expression", icon: "verified", color: "from-[#AFA7FF] to-[#8d82ff]" },
+                    { label: "沟通主动性", key: "ownership", icon: "psychology", color: "from-[#FF7A95] to-[#ff5274]" }
+                  ].map((dim) => {
+                    const scoreVal = reportData.scores?.[dim.key] ?? 70;
+                    return (
+                      <div key={dim.key} className="space-y-1.5">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-white/80 font-bold flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-sm text-on-surface-variant/50">{dim.icon}</span>
+                            {dim.label}
+                          </span>
+                          <span className="font-label-mono font-black text-white">{scoreVal} 分</span>
+                        </div>
+                        <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full bg-gradient-to-r ${dim.color} transition-all duration-1000`}
+                            style={{ width: `${scoreVal}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
 
-                      {/* Video Subtitle Subtext bubble overlay */}
-                      <div className="absolute inset-x-3.5 bottom-3.5 p-3 rounded-xl bg-black/85 backdrop-blur-md border border-white/10 text-left space-y-1 z-10 max-h-[85px] overflow-y-auto">
-                        <span className="text-[9px] text-primary font-black font-label-mono uppercase block tracking-wider">REALTIME DIALOGUE</span>
-                        <p className="text-[11px] leading-relaxed text-white font-extrabold">
-                          你好，我是你的 AI 面试官。请你介绍一下你最近负责的一个核心项目。
+              {/* Suggestions & Action Plan */}
+              <div className="col-span-12 lg:col-span-6 glass-panel p-6 rounded-3xl border-white/10 flex flex-col gap-4">
+                <div className="pb-3 border-b border-white/5">
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-base text-tertiary">lightbulb</span>
+                    针对性改进建议
+                  </h3>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 max-h-[300px] scrollbar-thin">
+                  {(reportData.summary?.suggestions || []).map((s: string, idx: number) => (
+                    <div key={idx} className="flex gap-3 p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:bg-white/[0.02] transition-colors">
+                      <div className="w-6 h-6 rounded-full bg-tertiary/10 border border-tertiary/20 shrink-0 flex items-center justify-center font-bold text-xs text-tertiary">
+                        {idx + 1}
+                      </div>
+                      <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
+                        {s}
+                      </p>
+                    </div>
+                  ))}
+                  {(reportData.summary?.suggestions || []).length === 0 && (
+                    <p className="text-xs text-on-surface-variant/40 text-center py-6">暂无推荐改进方案</p>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Dialogue Review Section */}
+            <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col gap-5 w-full text-left">
+              <div className="pb-3 border-b border-white/5">
+                <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-base text-primary">chat</span>
+                  面试对话复盘回顾
+                </h3>
+              </div>
+              
+              <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
+                {reportTranscript.length === 0 ? (
+                  <p className="text-xs text-on-surface-variant/40 text-center py-6">未记录到对话转文字内容。</p>
+                ) : (
+                  reportTranscript.map((line, idx) => (
+                    <div key={idx} className={`flex items-start gap-4 p-4 rounded-2xl border transition-all ${
+                      line.speaker === "Interviewer" || line.role === "interviewer"
+                        ? "bg-primary/5 border-primary/10 text-left"
+                        : "bg-[#060e20] border-white/5 text-left ml-4 md:ml-12"
+                    }`}>
+                      <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center font-bold text-xs select-none ${
+                        line.speaker === "Interviewer" || line.role === "interviewer"
+                          ? "bg-primary/20 text-primary border border-primary/30"
+                          : "bg-tertiary/20 text-tertiary border border-tertiary/30"
+                      }`}>
+                        {line.speaker === "Interviewer" || line.role === "interviewer" ? "AI" : "你"}
+                      </div>
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] text-on-surface-variant/30 font-bold font-label-mono">
+                            {line.speaker === "Interviewer" || line.role === "interviewer" ? "AI 面试官" : "候选人"}
+                          </span>
+                        </div>
+                        <p className="text-xs md:text-sm font-semibold leading-relaxed text-white/90">
+                          {line.content || line.text || ""}
                         </p>
                       </div>
-
-                      {/* Speech pulsing waveform overlay */}
-                      <div className="absolute right-3.5 top-3 flex items-center gap-0.5 h-3 select-none">
-                        {[1, 2, 3, 4, 5].map((bar) => (
-                          <div 
-                            key={bar} 
-                            style={{ animationDelay: `${bar * 0.15}s` }}
-                            className={`w-0.5 bg-primary rounded-full animate-[pulse_0.75s_infinite_alternate] ${isInterviewerSpeaking ? 'h-3.5' : 'h-1.5'}`} 
-                          />
-                        ))}
-                      </div>
                     </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-12 gap-6 items-stretch w-full">
 
-                    {/* Right Frame: You (Real Webcam Stream or Placeholder) */}
-                    <div className="relative rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl flex-1 group">
-                      
-                      {/* Real Webcam rendering element */}
-                      <video 
-                        ref={videoRef} 
-                        autoPlay 
-                        playsInline 
-                        muted 
-                        className={`w-full h-full object-cover transform -scale-x-100 ${isCameraOn ? 'block' : 'hidden'}`}
-                      />
-
-                      {/* Camera Placeholder Avatar */}
-                      {!isCameraOn && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-b from-[#141b2e] to-slate-950 gap-3 select-none">
-                          <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center bg-white/[0.01]">
-                            <span className="material-symbols-outlined text-2xl text-on-surface-variant/40 animate-pulse">videocam_off</span>
-                          </div>
-                          <p className="text-[10px] text-on-surface-variant/30 font-bold leading-normal max-w-[150px]">
-                            摄像头已禁用。请开启顶部“摄像头”按钮以体验全真视频面试调试。
-                          </p>
-                        </div>
-                      )}
-
-                      {/* Header Badge */}
-                      <span className="absolute left-3.5 top-3 px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md text-[10px] text-white/90 font-bold border border-white/5 select-none z-10 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-tertiary rounded-full animate-ping" />
-                        你
-                      </span>
-
-                      {/* Audio Level Waveform visualizer */}
-                      <div className="absolute right-3.5 top-3 flex items-center gap-0.5 h-3 select-none">
-                        {[1, 2, 3, 4, 5].map((bar) => (
-                          <div 
-                            key={bar} 
-                            style={{ animationDelay: `${bar * 0.1}s` }}
-                            className="w-0.5 bg-tertiary rounded-full h-2.5 animate-[pulse_0.6s_infinite_alternate]" 
-                          />
-                        ))}
+            {/* ============ 左：ConfigPanel ============ */}
+            <div className="col-span-12 lg:col-span-3 flex flex-col justify-between gap-6 h-full">
+              <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col h-full gap-5.5 text-left">
+                <div className="pb-3 border-b border-white/5 shrink-0">
+                  <div className="flex justify-between items-start gap-2">
+                    <div>
+                      <h3 className="text-lg font-black text-white">开始模拟面试</h3>
+                      <p className="text-[11px] text-on-surface-variant/40 font-bold mt-1 uppercase tracking-wider">Configure your training</p>
+                    </div>
+                    {/* PR6: 配额 chip */}
+                    {quota && auth.isLoggedIn && (
+                      <div className={`shrink-0 px-2.5 py-1 rounded-full border text-[10px] font-black flex items-center gap-1 ${
+                        (quota.membership === "pro" || quota.membership === "max")
+                          ? "bg-tertiary/10 border-tertiary/30 text-tertiary"
+                          : "bg-secondary/10 border-secondary/30 text-secondary"
+                      }`}>
+                        <span className="material-symbols-outlined text-xs">
+                          {quota.membership === "max" ? "diamond" : quota.membership === "pro" ? "workspace_premium" : "schedule"}
+                        </span>
+                        {quota.used_min}/{quota.limit_min} 分
                       </div>
+                    )}
+                  </div>
+                </div>
 
+                <div className="space-y-4 flex-1 overflow-y-auto pr-1">
+                  {/* 1. 目标岗位（必填） */}
+                  <div className="space-y-1.5">
+                    <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">
+                      目标岗位 <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      disabled={isLive}
+                      value={targetRole}
+                      onChange={(e) => setTargetRole(e.target.value)}
+                      placeholder="如 后端开发工程师"
+                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black focus:outline-none transition-all placeholder:text-white/20"
+                    />
+                  </div>
+
+                  {/* 1.5 岗位详情（选填） */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold">
+                        岗位详情 [选填]
+                      </label>
+                      <span className={`text-[10px] font-mono ${
+                        jobDescription.length > JD_MAX_LENGTH * 0.9
+                          ? jobDescription.length >= JD_MAX_LENGTH ? "text-secondary font-black" : "text-amber-400"
+                          : "text-on-surface-variant/30"
+                      }`}>
+                        {jobDescription.length}/{JD_MAX_LENGTH}
+                      </span>
+                    </div>
+                    <textarea
+                      disabled={isLive}
+                      value={jobDescription}
+                      maxLength={JD_MAX_LENGTH}
+                      onChange={(e) => setJobDescription(e.target.value.slice(0, JD_MAX_LENGTH))}
+                      placeholder="粘贴岗位 JD（最多 600 字），AI 面试官会基于真实岗位画像出题..."
+                      className="w-full py-3 px-4 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl text-xs md:text-sm font-semibold focus:outline-none transition-all placeholder:text-white/20 h-28 resize-none scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent overflow-y-auto"
+                    />
+                  </div>
+
+                  {/* 2. 面试类型（下拉框） */}
+                  <div className="space-y-1.5">
+                    <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">
+                      面试类型
+                    </label>
+                    <select
+                      disabled={isLive}
+                      value={interviewType}
+                      onChange={(e) => setInterviewType(e.target.value as InterviewType)}
+                      className="w-full px-4 py-3 bg-[#060e20] border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-xs md:text-sm text-white font-black"
+                    >
+                      {INTERVIEW_TYPES.map((t) => (
+                        <option key={t.value} className="bg-[#0e1626]" value={t.value}>
+                          {t.label} · {t.persona}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 3. 难度等级（PR4 §8.4.1 4 选 1） */}
+                  <div className="space-y-1.5">
+                    <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">难度等级</label>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {DIFFICULTIES.map((d) => (
+                        <button
+                          key={d.value}
+                          disabled={isLive}
+                          onClick={() => setDifficulty(d.value)}
+                          className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                            difficulty === d.value
+                              ? "bg-secondary/15 border-secondary/50 text-white"
+                              : "bg-white/[0.02] border-white/5 text-on-surface-variant hover:bg-white/[0.05]"
+                          }`}
+                        >
+                          <div className="text-sm font-black">{d.label}</div>
+                          <div className="text-sm text-on-surface-variant/50 font-bold mt-0.5">{d.speed}</div>
+                        </button>
+                      ))}
                     </div>
                   </div>
 
-                  {/* REALTIME SCORE METRICS EVALUATION SECTION */}
-                  <div className="space-y-2.5 shrink-0 text-left">
-                    
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm text-white font-black flex items-center gap-1.5 select-none">
-                        <span className="material-symbols-outlined text-base text-secondary animate-pulse" style={{ fontVariationSettings: "'wght' 700" }}>insights</span>
-                        实时表现反馈
-                      </span>
-                      <span className="text-xs font-label-mono font-bold text-on-surface-variant/40 select-none">
-                        AI ENGINE VERSION 4.2
-                      </span>
-                    </div>
-
-                    {/* Grid of 6 metrics cells */}
-                    <div className="grid grid-cols-3 gap-3.5">
-                      {[
-                        { label: "表达清晰度", score: metrics.clarity, tag: "良好", color: "text-[#4edea3] bg-[#4edea3]/10 border-[#4edea3]/20" },
-                        { label: "逻辑结构", score: metrics.logic, tag: "一般", color: "text-[#60a5fa] bg-[#60a5fa]/10 border-[#60a5fa]/20" },
-                        { label: "语速语调", score: metrics.speed, tag: "偏慢", color: "text-amber-400 bg-amber-400/10 border-amber-400/20" },
-                        { label: "眼神接触", score: metrics.eyeContact, tag: "良好", color: "text-[#4edea3] bg-[#4edea3]/10 border-[#4edea3]/20" },
-                        { label: "自信程度", score: metrics.confidence, tag: "良好", color: "text-[#4edea3] bg-[#4edea3]/10 border-[#4edea3]/20" },
-                        { label: "关键词覆盖", score: metrics.keyword, tag: "一般", color: "text-[#60a5fa] bg-[#60a5fa]/10 border-[#60a5fa]/20" }
-                      ].map((cell, idx) => (
-                        <div key={idx} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 flex flex-col gap-2 relative overflow-hidden group">
-                          
-                          {/* Inner glowing hover effect */}
-                          <div className="absolute inset-0 bg-white/[0.01] opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none" />
-
-                          <div className="flex justify-between items-center text-xs text-on-surface-variant/40 font-bold select-none">
-                            <span>{cell.label}</span>
-                            <span className="material-symbols-outlined text-xs scale-90">zoom_out_map</span>
-                          </div>
-
-                          <div className="flex items-baseline gap-2 shrink-0">
-                            <span className="text-xl font-black font-label-mono text-white">{cell.score}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase ${cell.color}`}>
-                              {cell.tag}
-                            </span>
-                          </div>
-                        </div>
+                  {/* 4. 面试时长（PR4 §8.4.1 3 选 1） */}
+                  <div className="space-y-1.5">
+                    <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">面试时长</label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {DURATIONS.map((d) => (
+                        <button
+                          key={d.value}
+                          disabled={isLive || (interviewType === "hr_comprehensive" && d.value === 20)}
+                          onClick={() => setDurationMin(d.value)}
+                          className={`p-2 rounded-xl border text-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+                            durationMin === d.value
+                              ? "bg-tertiary/15 border-tertiary/50 text-white"
+                              : "bg-white/[0.02] border-white/5 text-on-surface-variant hover:bg-white/[0.05]"
+                          }`}
+                        >
+                          <div className="text-sm font-black">{d.value} 分</div>
+                          <div className="text-sm text-on-surface-variant/50 font-bold mt-0.5">{d.qRange}题</div>
+                        </button>
                       ))}
                     </div>
+                  </div>
 
-                    {/* Alerts / Tips footer block */}
-                    <div className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center justify-between gap-4 text-xs font-semibold text-on-surface-variant/60 relative overflow-hidden select-none">
-                      <span className="flex items-center gap-1.5 text-xs">
+                  {/* 5. 追问轮数（PR4 §8.4.1 slider 1-3） */}
+                  <div className="space-y-1.5">
+                    <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">追问轮数</label>
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range" min={1} max={3} step={1}
+                        disabled={isLive}
+                        value={followupRounds}
+                        onChange={(e) => setFollowupRounds(Number(e.target.value) as FollowupRounds)}
+                        className="flex-1 accent-primary cursor-pointer disabled:opacity-50"
+                      />
+                      <span className="text-sm font-black text-white w-8 text-right font-label-mono">{FOLLOWUP_RANGES[followupRounds]}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 本次训练信息预览 */}
+                <div className="p-4 rounded-2xl bg-white/[0.01] border border-white/5 space-y-2 shrink-0">
+                  <span className="text-sm text-on-surface-variant/40 font-label-mono tracking-widest uppercase block font-extrabold">本次训练信息</span>
+                  <div className="space-y-1.5 text-xs text-on-surface-variant/80 font-bold">
+                    <p className="flex justify-between"><span>预计时长:</span><span className="text-white font-black font-label-mono">{durationMin} 分钟</span></p>
+                    <p className="flex justify-between"><span>问题数量:</span><span className="text-white font-black font-label-mono">{questionRange} 道</span></p>
+                    <p className="flex justify-between"><span>包含追问:</span><span className="text-white font-black font-label-mono">{FOLLOWUP_RANGES[followupRounds]}追问</span></p>
+                    <p className="flex justify-between"><span>AI 面试官:</span><span className="text-tertiary font-black">{INTERVIEW_TYPES.find(t => t.value === interviewType)?.persona}</span></p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 shrink-0">
+                  <button
+                    disabled={bootState !== "idle" || isCountingDown}
+                    onClick={handleStartTraining}
+                    className="w-full py-3.5 bg-gradient-to-r from-secondary to-primary text-on-primary text-sm font-black rounded-xl hover:scale-[1.01] active:scale-98 disabled:opacity-50 disabled:scale-100 transition-all shadow-lg shadow-secondary/20 cursor-pointer flex items-center justify-center gap-2 group"
+                  >
+                    <span className="material-symbols-outlined text-base animate-pulse">play_arrow</span>
+                    {isLive ? "正在进行模拟面试" : "开始模拟面试"}
+                  </button>
+                  {bootState === "error" && (
+                    <button onClick={handleReset} className="w-full py-2 bg-white/5 border border-white/10 text-on-surface text-xs font-bold rounded-xl hover:bg-white/10 transition-all cursor-pointer">
+                      重新开始
+                    </button>
+                  )}
+                  <span onClick={() => setShowNormsModal(true)} className="text-xs font-bold text-on-surface-variant/30 hover:text-white transition-colors cursor-pointer text-center block">
+                    开始即表示同意 <span className="text-primary hover:underline">训练规范与用户权益 →</span>
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* ============ 中：LiveStage ============ */}
+            <div className="col-span-12 lg:col-span-6 flex flex-col justify-between gap-6 h-full min-w-0">
+              <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col h-full gap-5 relative overflow-hidden">
+
+                {/* Countdown */}
+                <AnimatePresence>
+                  {isCountingDown && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-[#0b1326]/95 z-30 flex flex-col items-center justify-center gap-6">
+                      <div className="w-32 h-32 rounded-full border-4 border-dashed border-primary flex items-center justify-center relative animate-[spin_10s_linear_infinite]">
+                        <div className="absolute inset-4 rounded-full border border-double border-white/15" />
+                      </div>
+                      <div className="absolute flex flex-col items-center justify-center text-center">
+                        <motion.span key={countdownNum} initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 1.5, opacity: 0 }} transition={{ duration: 0.5 }} className="text-6xl font-black font-label-mono text-white">
+                          {countdownNum}
+                        </motion.span>
+                        <span className="text-xs text-on-surface-variant/45 font-bold uppercase tracking-widest mt-2">AI 面试官准备中...</span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* 错误态 */}
+                {bootState === "error" && (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-4">
+                    <span className="material-symbols-outlined text-6xl text-secondary">error</span>
+                    <h3 className="text-xl font-black text-white">连接异常</h3>
+                    <p className="text-sm text-on-surface-variant/60">{errorMsg || "未知错误"}</p>
+                    <button onClick={handleReset} className="px-6 py-2.5 bg-primary text-on-primary text-sm font-black rounded-xl">重新开始</button>
+                  </div>
+                )}
+
+                {/* 分析中 */}
+                {isAnalyzing && (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-6">
+                    {/* Dual-ring spinner */}
+                    <div className="relative w-16 h-16">
+                      <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                      <div className="absolute inset-2 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.1s" }} />
+                    </div>
+
+                    <div className="text-center space-y-3">
+                      <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">
+                        正在生成 AI 面试报告
+                      </h3>
+                      <p className="text-base md:text-lg text-white/70 font-semibold">
+                        基于你的回答由 MiniMax-M3 生成深度分析...
+                      </p>
+                    </div>
+
+                    {/* Progress bar */}
+                    <div className="w-full max-w-sm bg-white/5 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-primary to-[#5DECCB] transition-all duration-700"
+                        style={{ width: `${analysisProgress}%` }}
+                      />
+                    </div>
+                    <p className="text-[#5DECCB] text-2xl md:text-3xl font-black font-mono tracking-wider drop-shadow-[0_0_10px_rgba(93,236,203,0.5)] mt-2">
+                      {analysisProgress}%
+                    </p>
+                  </div>
+                )}
+
+                {/* OFFLINE 预览 */}
+                {bootState === "idle" && !isCountingDown && (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-6 z-10 select-none">
+                    <div className="w-24 h-24 rounded-3xl bg-primary/10 border border-primary/20 flex items-center justify-center shadow-lg relative group overflow-hidden transition-transform duration-300">
+                      <div className="absolute inset-0 bg-gradient-to-tr from-primary/15 to-transparent" />
+                      <span className="material-symbols-outlined text-primary animate-pulse relative z-10" style={{ fontSize: "56px" }}>support_agent</span>
+                    </div>
+                    <div className="space-y-2 max-w-md">
+                      <h3 className="text-xl font-black text-white">配置完成，准备就绪</h3>
+                      <p className="text-xs text-on-surface-variant/50 leading-relaxed font-semibold">
+                        点击左下角 <span className="font-black text-white">"开始模拟面试"</span> 按钮即可唤醒你的 AI 资深面试官。系统将基于你选择的「{INTERVIEW_TYPES.find(t => t.value === interviewType)?.label}」+「{DIFFICULTIES.find(d => d.value === difficulty)?.label}」配置进行实时对话。
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* LIVE 状态 */}
+                {isLive && (
+                  <>
+                    <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
+                      <div className="flex items-center gap-3">
+                        <span className="w-2.5 h-2.5 rounded-full bg-tertiary animate-ping" />
+                        <span className="text-sm font-black text-white flex items-center gap-2.5">
+                          面试进行中
+                          <span className="px-2.5 py-0.5 bg-white/5 rounded border border-white/5 text-xs text-on-surface-variant/60 font-bold font-label-mono">
+                            {formatTime(durationSec)}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button onClick={toggleCamera} className={`px-3 py-1.5 rounded-xl border text-[11px] font-black flex items-center gap-1 cursor-pointer transition-all ${
+                          cameraOn ? "bg-primary/10 border-primary text-primary" : "bg-white/5 border-white/5 text-on-surface-variant/50"
+                        }`}>
+                          <span className="material-symbols-outlined text-sm">{cameraOn ? "videocam" : "videocam_off"}</span>摄像头
+                        </button>
+                        <button onClick={() => { live.toggleMic(); audio.mute(!micMuted); }} className={`px-3 py-1.5 rounded-xl border text-[11px] font-black flex items-center gap-1 cursor-pointer transition-all ${
+                          micMuted ? "bg-white/5 border-white/5 text-on-surface-variant/50" : "bg-tertiary/10 border-tertiary text-tertiary"
+                        }`}>
+                          <span className="material-symbols-outlined text-sm">{micMuted ? "mic_off" : "mic"}</span>麦克风
+                        </button>
+                        <button onClick={() => setShowEndConfirm(true)} className="px-3.5 py-1.5 bg-secondary/15 border border-secondary/25 hover:bg-secondary/25 text-secondary rounded-xl text-[11px] font-black cursor-pointer transition-all flex items-center gap-1">
+                          <span className="material-symbols-outlined text-sm">cancel</span>结束面试
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 shrink-0 py-1">
+                      {/* AI 面试官画面 */}
+                      <div className="relative aspect-video w-full rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl group">
+                        <img src="/debugger-1.jpg" alt="AI Interviewer" className="w-full h-full object-cover select-none pointer-events-none" />
+                        {aiState === "speaking" && <div className="absolute inset-0 bg-primary/5 pointer-events-none border border-primary/20 animate-pulse" />}
+                        <span className="absolute left-3.5 top-3 px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md text-[10px] text-white/90 font-bold border border-white/5 z-10 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 bg-primary rounded-full animate-ping" />
+                          AI 面试官 · {INTERVIEW_TYPES.find(t => t.value === interviewType)?.persona}
+                        </span>
+                        <div className="absolute right-3.5 top-3 flex items-center gap-0.5 h-3 select-none">
+                          {[1, 2, 3, 4, 5].map((b) => (
+                            <div key={b} style={{ animationDelay: `${b * 0.15}s` }} className={`w-0.5 bg-primary rounded-full animate-[pulse_0.75s_infinite_alternate] ${aiState === "speaking" ? "h-3.5" : "h-1.5"}`} />
+                          ))}
+                        </div>
+                        <div className="absolute inset-x-3.5 bottom-3.5 p-3 rounded-xl bg-black/85 backdrop-blur-md border border-white/10 text-left z-10">
+                          <span className="text-[9px] text-primary font-black font-label-mono uppercase block tracking-wider mb-1">AI 状态</span>
+                          <p className="text-[11px] leading-relaxed text-white font-extrabold">
+                            {aiState === "idle" && "等候中..."}
+                            {aiState === "listening" && "正在聆听你说话"}
+                            {aiState === "thinking" && "正在思考下一步"}
+                            {aiState === "speaking" && "正在回答..."}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* 候选人画面 */}
+                      {cameraOn ? (
+                        <div className="relative aspect-video w-full rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl group">
+                          <video
+                            ref={videoRefCallback}
+                            autoPlay
+                            playsInline
+                            muted
+                            className="w-full h-full object-cover scale-x-[-1]"
+                          />
+                          <span className="absolute left-3.5 top-3 px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md text-[10px] text-white/90 font-bold border border-white/5 z-10 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 bg-tertiary rounded-full animate-ping" />
+                            你
+                          </span>
+                        </div>
+                      ) : (
+                        <div
+                          onClick={toggleCamera}
+                          className="relative aspect-video w-full rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl group cursor-pointer hover:border-primary/40 transition-colors"
+                        >
+                          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-b from-[#141b2e] to-slate-950 gap-3 select-none">
+                            <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center bg-white/[0.01] group-hover:scale-105 transition-transform">
+                              <span className="material-symbols-outlined text-2xl text-on-surface-variant/40 animate-pulse">videocam_off</span>
+                            </div>
+                            <p className="text-[10px] text-on-surface-variant/45 font-bold leading-normal max-w-[180px]">
+                              候选人画面已关闭，点击开启摄像头。
+                            </p>
+                          </div>
+                          <span className="absolute left-3.5 top-3 px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md text-[10px] text-white/90 font-bold border border-white/5 z-10 flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 bg-white/30 rounded-full" />
+                            你 (未开启)
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* AI 状态小提示 */}
+                    <div className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center justify-between gap-4 text-xs font-semibold text-on-surface-variant/60">
+                      <span className="flex items-center gap-1.5">
                         <span className="material-symbols-outlined text-base text-[#c0c1ff]">lightbulb</span>
-                        小贴士: 尝试使用 PREP 框架 (Point-Reason-Example-Point) 来组织回答，会让你的表达更有条理。
+                        提示：回答时尽量使用 PREP 框架（Point-Reason-Example-Point），表达更有条理。
                       </span>
                       <span className="text-xs text-[#ffb2b7] font-bold font-label-mono shrink-0 flex items-center gap-1">
-                        AI 实时分析中...
+                        {aiState === "listening" ? "聆听中" : aiState === "thinking" ? "思考中" : aiState === "speaking" ? "回答中" : "等待中"}
                         <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping" />
                       </span>
                     </div>
+                  </>
+                )}
 
-                  </div>
-                </>
-              )}
-
-              {/* TABS INTERACTIVE DIALOGUE SYSTEM */}
-              <div className="border-t border-white/5 pt-5 space-y-4 shrink-0 text-left">
-                
-                {/* Custom Dialogue Tab Headers */}
-                <div className="flex items-center gap-5 border-b border-white/5 pb-2 font-black text-xs md:text-[13px] select-none">
-                  <span className="text-white border-b-2 border-primary pb-2 cursor-pointer relative z-10">实时对话</span>
-                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => auth.triggerToast("AI 面试官已自动为您记录面试笔记。")}>面试笔记</span>
-                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => auth.triggerToast("答题结束后，面试VAR 会基于您的整体表现生成全维度 AI 诊断意见。")}>AI 建议</span>
-                  <span className="text-on-surface-variant/45 hover:text-white transition-colors cursor-pointer" onClick={() => auth.triggerToast("本环节的参考答案：深入剖析秒杀高并发一致性读写流程，推荐使用分布式削峰缓冲。")}>参考答案</span>
-                </div>
-
-                {/* Dialog Content Stream Area */}
-                <div className="space-y-4 max-h-[175px] overflow-y-auto pr-1">
-                  
-                  {/* Map dialogue array */}
-                  {dialogue.map((item, idx) => (
-                    <div key={idx} className="flex items-start gap-3">
-                      {/* Avatar */}
-                      <div className={`w-7.5 h-7.5 rounded-full shrink-0 flex items-center justify-center font-bold text-xs select-none ${
-                        item.role === 'interviewer' ? 'bg-primary/20 text-primary border border-primary/30' : 'bg-tertiary/20 text-tertiary border border-tertiary/30'
-                      }`}>
-                        {item.role === 'interviewer' ? 'AI' : '你'}
-                      </div>
-                      
-                      <div className="space-y-1 flex-1 min-w-0">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-xs font-black text-white">{item.name}</span>
-                          <span className="text-[10px] text-on-surface-variant/40 font-label-mono">{item.time}</span>
+                {/* TABS + 对话流 */}
+                {isLive && (
+                  <div className="border-t border-white/5 pt-5 space-y-4 flex-1 flex flex-col min-h-0 text-left">
+                    <div className="flex items-center gap-5 border-b border-white/5 pb-2 font-black text-xs md:text-[13px] select-none shrink-0">
+                      <span className="text-white border-b-2 border-primary pb-2 cursor-pointer relative z-10">实时对话</span>
+                      <span className="text-on-surface-variant/45 cursor-not-allowed" title="PR5 接入">面试笔记</span>
+                      <span className="text-on-surface-variant/45 cursor-not-allowed" title="PR5 接入">AI 建议</span>
+                    </div>
+                    <div className="space-y-3 flex-1 overflow-y-auto pr-1 min-h-0">
+                      {transcript.length === 0 && (
+                        <p className="text-xs text-on-surface-variant/40 text-center py-6">等待 AI 面试官的开场白...</p>
+                      )}
+                      {transcript.map((line, idx) => (
+                        <div key={idx} className="flex items-start gap-3">
+                          <div className={`w-7.5 h-7.5 rounded-full shrink-0 flex items-center justify-center font-bold text-xs select-none ${
+                            line.role === "interviewer" ? "bg-primary/20 text-primary border border-primary/30" : "bg-tertiary/20 text-tertiary border border-tertiary/30"
+                          }`}>
+                            {line.role === "interviewer" ? "AI" : "你"}
+                          </div>
+                          <div className="space-y-1 flex-1 min-w-0">
+                            <p className={`text-[12px] font-bold leading-relaxed pr-6 ${line.partial ? "text-on-surface-variant/50 italic" : "text-on-surface-variant/80"}`}>
+                              {line.text || "..."}
+                            </p>
+                          </div>
                         </div>
-                        <p className="text-[12px] text-on-surface-variant/80 font-bold leading-relaxed pr-6">
-                          {item.text}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-
-                </div>
-
-                {/* Bottom speech recognition simulator */}
-                {isTrainingStarted && (
-                  <div className="flex justify-between items-center py-2.5 px-4.5 rounded-2xl bg-white/[0.01] border border-white/5 relative overflow-hidden select-none">
-                    <span className="text-xs text-on-surface-variant/40 font-semibold flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 bg-tertiary rounded-full animate-ping" />
-                      当前识别模式: 麦克风录音中
-                    </span>
-                    
-                    <div className="flex items-center gap-2 text-xs font-black text-primary font-label-mono">
-                      <span>{speechText}</span>
+                      ))}
+                      <div ref={transcriptEndRef} />
                     </div>
                   </div>
                 )}
-
               </div>
-
             </div>
-          </div>
 
-          {/* ========================================================
-              RIGHT COLUMN: Timeline & Current HUD Progress
-             ======================================================== */}
-          <div className="col-span-12 lg:col-span-3 flex flex-col justify-between gap-6 h-full text-left">
-            
-            {/* WIDGET 1: INTERVIEW TIMELINE PROGRESS */}
-            <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-start gap-4">
-              <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
-                <h4 className="text-base font-black text-white flex items-center gap-2">
-                  <span className="material-symbols-outlined text-lg text-primary">schedule</span>
-                  面试进度
-                </h4>
-                <span className="text-xs text-primary font-black font-label-mono flex items-center gap-0.5">
-                  <span className="material-symbols-outlined text-xs">hourglass_empty</span>
-                  12:45 / 30:00
-                </span>
+            {/* ============ 右：TimelinePanel ============ */}
+            <div className="col-span-12 lg:col-span-3 flex flex-col justify-between gap-6 h-full text-left">
+              {/* 进度 */}
+              <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-start gap-4">
+                <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
+                  <h4 className="text-base font-black text-white flex items-center gap-2">
+                    <span className="material-symbols-outlined text-lg text-primary">schedule</span>
+                    面试进度
+                  </h4>
+                  <span className="text-xs text-primary font-black font-label-mono flex items-center gap-0.5">
+                    <span className="material-symbols-outlined text-xs">hourglass_empty</span>
+                    {formatTime(durationSec)} / {durationMin.toString().padStart(2, "0")}:00
+                  </span>
+                </div>
+                <div className="space-y-3 py-1 mt-[-2px]">
+                  <div className="flex justify-between text-sm font-bold text-on-surface-variant/70">
+                    <span>已进行</span>
+                    <span className="text-white font-label-mono">{Math.round((durationSec / (durationMin * 60)) * 100)}%</span>
+                  </div>
+                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-primary to-secondary transition-all duration-300" style={{ width: `${Math.min(100, (durationSec / (durationMin * 60)) * 100)}%` }} />
+                  </div>
+                  <div className="text-sm text-on-surface-variant/50 font-bold pt-1">
+                    预计问题数 {questionRange} 道
+                  </div>
+                </div>
               </div>
 
-              {/* Vertical checklist items */}
-              <div className="space-y-4 py-1 mt-[-2px] relative pl-5.5">
-                <div className="absolute left-1.5 top-2.5 bottom-2.5 w-0.5 bg-white/5" />
-
-                {[
-                  { id: 1, label: "自我介绍", duration: "02:30", status: "completed", color: "bg-tertiary" },
-                  { id: 2, label: "项目介绍", duration: "进行中 10:15", status: "active", color: "bg-primary" },
-                  { id: 3, label: "技术深挖", duration: "等候中", status: "pending", color: "bg-white/5" },
-                  { id: 4, label: "系统设计", duration: "等候中", status: "pending", color: "bg-white/5" },
-                  { id: 5, label: "追问环节", duration: "等候中", status: "pending", color: "bg-white/5" },
-                  { id: 6, label: "总结评价", duration: "等候中", status: "pending", color: "bg-white/5" }
-                ].map((stepItem) => {
-                  const isCompleted = stepItem.id < activeQuestionIndex;
-                  const isActive = stepItem.id === activeQuestionIndex;
-                  return (
-                    <div key={stepItem.id} className="relative flex justify-between items-center text-sm font-black">
-                      <div className={`absolute -left-5.5 top-1.5 w-2.5 h-2.5 rounded-full ring-4 ring-background z-10 ${
-                        isCompleted ? "bg-[#4edea3]" : isActive ? "bg-[#c0c1ff] animate-pulse" : "bg-white/5"
-                      }`} />
-                      <span className={isCompleted ? "text-on-surface-variant/40 font-bold" : isActive ? "text-white" : "text-on-surface-variant/30"}>
-                        {stepItem.label}
-                      </span>
-                      <span className={`px-2 py-0.5 rounded font-label-mono text-[11px] font-bold ${
-                        isCompleted ? "bg-tertiary/10 text-tertiary border border-tertiary/15" : isActive ? "bg-primary/25 text-primary border border-primary/30" : "bg-white/5 text-on-surface-variant/30"
-                      }`}>
-                        {stepItem.duration}
-                      </span>
+              {/* 当前 AI 状态 */}
+              <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-start gap-4">
+                <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0 select-none">
+                  <h4 className="text-base font-black text-white flex items-center gap-2">
+                    <span className="material-symbols-outlined text-lg text-secondary">graphic_eq</span>
+                    AI 状态
+                  </h4>
+                  <span className="text-[13px] md:text-base font-bold text-on-surface-variant/50">
+                    {aiState === "idle" ? "等候" : aiState === "listening" ? "聆听" : aiState === "thinking" ? "思考" : aiState === "speaking" ? "回答" : aiState}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {[
+                    { label: "等候", state: "idle", color: "bg-white/5" },
+                    { label: "聆听", state: "listening", color: "bg-tertiary" },
+                    { label: "思考", state: "thinking", color: "bg-amber-400" },
+                    { label: "回答", state: "speaking", color: "bg-primary" },
+                  ].map((s) => (
+                    <div key={s.state} className="flex items-center gap-2 text-base">
+                      <span className={`w-2 h-2 rounded-full ${s.color} ${aiState === s.state ? "animate-pulse" : "opacity-40"}`} />
+                      <span className={aiState === s.state ? "text-white font-black" : "text-on-surface-variant/40 font-bold"}>{s.label}</span>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* WIDGET 2: CURRENT ROUND QUESTION METRIC */}
-            <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-start gap-4 shrink-0">
-              <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0 select-none">
-                <h4 className="text-base font-black text-white flex items-center gap-2">
-                  <span className="material-symbols-outlined text-lg text-secondary">question_answer</span>
-                  本轮问题
-                </h4>
-                <span className="text-[13px] md:text-[14px] font-label-mono font-bold text-on-surface-variant/50">{activeQuestionIndex} / 3</span>
-              </div>
-
-              {/* Speech pulsing waveform indicator in right panel */}
-              <div className="py-2.5 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center justify-center relative overflow-hidden min-h-[50px]">
-                <div className="flex items-center gap-1.5 h-6">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((waveBar) => (
-                    <div 
-                      key={waveBar}
-                      style={{ animationDelay: `${waveBar * 0.05}s` }}
-                      className={`w-0.5 bg-gradient-to-t from-primary to-secondary rounded-full animate-[pulse_0.6s_infinite_alternate] ${
-                        isTrainingStarted ? 'h-6' : 'h-1.5'
-                      }`} 
-                    />
                   ))}
                 </div>
               </div>
 
-              {/* Text description of current problem */}
-              <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/5 text-xs font-black text-white leading-relaxed">
-                能详细说说你是如何设计系统架构来应对高并发的吗？
-              </div>
-
-              <div className="flex justify-between items-center text-[13px] md:text-[14px] text-on-surface-variant/50 font-bold select-none">
-                <span>追问次数: 1 / 2</span>
-                <span className="text-secondary font-black cursor-pointer hover:text-white transition-colors" onClick={() => auth.triggerToast("追问环节将由 AI 根据您前面的回答深度逻辑深挖！")}>关于追问机制 →</span>
-              </div>
-            </div>
-
-            {/* WIDGET 3: AI INTERVIEWER PROFILE DETAILS */}
-            <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-start gap-4">
-              <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
-                <h4 className="text-base font-black text-white flex items-center gap-2">
-                  <span className="material-symbols-outlined text-lg text-tertiary">assignment_ind</span>
-                  AI 面试官信息
-                </h4>
-              </div>
-
-              {/* Interviewer detailed profile block */}
-              <div className="flex items-center gap-3.5 mt-[-2px]">
-                <div className="w-13 h-13 rounded-full border border-tertiary/20 overflow-hidden bg-slate-900 flex items-center justify-center shrink-0">
-                  <img src="/debugger-1.jpg" alt="Technical Expert" className="w-full h-full object-cover" />
+              {/* AI 面试官信息 */}
+              <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-start gap-4">
+                <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
+                  <h4 className="text-base font-black text-white flex items-center gap-2">
+                    <span className="material-symbols-outlined text-lg text-tertiary">assignment_ind</span>
+                    AI 面试官
+                  </h4>
                 </div>
-                
-                <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-black text-white">技术专家</span>
-                    <span className="px-2.5 py-1 rounded bg-tertiary/10 text-tertiary border border-tertiary/20 text-[11px] md:text-[12px] font-black uppercase">
-                      系统设计专家
-                    </span>
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-full border border-tertiary/20 overflow-hidden bg-slate-900 shrink-0">
+                    <img src="/debugger-1.jpg" className="w-full h-full object-cover" />
                   </div>
-                  <p className="text-[10px] text-on-surface-variant/40 font-bold truncate">
-                    {auth.user.name} 的专属定制 AI
-                  </p>
+                  <div className="space-y-0.5 min-w-0">
+                    <div className="text-base font-black text-white">{INTERVIEW_TYPES.find(t => t.value === interviewType)?.persona}</div>
+                    <div className="text-sm text-on-surface-variant/50 font-bold">{DIFFICULTIES.find(d => d.value === difficulty)?.label} · 语速 {DIFFICULTIES.find(d => d.value === difficulty)?.speed}</div>
+                  </div>
                 </div>
               </div>
 
-              <p className="text-xs text-on-surface-variant/60 font-semibold leading-relaxed">
-                前字节跳动资深架构师，8年面试官经验，擅长系统设计与分布式高并发场景调试。
-              </p>
+              {/* 快捷操作 */}
+              <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-start gap-4 shrink-0 relative">
+                <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0 select-none">
+                  <h4 className="text-base font-black text-white flex items-center gap-2">
+                    <span className="material-symbols-outlined text-lg text-primary">touch_app</span>
+                    快捷操作
+                  </h4>
+                </div>
 
-              <span 
-                onClick={() => auth.triggerToast("本位面试官偏好：结构清晰，逻辑紧密，重视容灾防御设计。")}
-                className="text-[13px] md:text-[14px] text-tertiary font-bold hover:text-white transition-colors cursor-pointer"
-              >
-                查看面试官性格偏好 →
-              </span>
-            </div>
+                <AnimatePresence>
+                  {showHandBadge && (
+                    <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }} className="absolute inset-x-5.5 top-15 p-2 rounded-xl bg-primary/20 text-primary border border-primary/30 text-center text-xs font-black z-20 flex items-center justify-center gap-1.5">
+                      <span className="material-symbols-outlined text-sm animate-bounce">pan_tool</span>
+                      已发送举手信号...
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
-            {/* WIDGET 4: CORE QUICK ACTIONS BUTTON BAR */}
-            <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col justify-start gap-4 shrink-0 relative">
-              <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0 select-none">
-                <h4 className="text-base font-black text-white flex items-center gap-2">
-                  <span className="material-symbols-outlined text-lg text-primary">touch_app</span>
-                  快捷操作
-                </h4>
-              </div>
-
-              {/* Hand Raise active banner */}
-              <AnimatePresence>
-                {showHandBadge && (
-                  <motion.div 
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.8, opacity: 0 }}
-                    className="absolute inset-x-5.5 top-15 p-2 rounded-xl bg-primary/20 text-primary border border-primary/30 text-center text-xs font-black z-20 flex items-center justify-center gap-1.5 shadow-lg shadow-primary/20 select-none"
-                  >
-                    <span className="material-symbols-outlined text-sm animate-bounce">pan_tool</span>
-                    已向 AI 面试官举手示意...
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* 4 Quick Actions buttons */}
-              <div className="grid grid-cols-4 gap-2.5 mt-[-2px]">
-                
-                <button
-                  disabled={!isTrainingStarted}
-                  onClick={() => {
-                    setShowHandBadge(true);
-                    setTimeout(() => setShowHandBadge(false), 3000);
-                  }}
-                  className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none"
-                >
-                  <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary group-hover:scale-110 transition-all select-none">pan_tool</span>
-                  <span className="text-[9px] font-black text-on-surface-variant/60 block select-none">举手</span>
-                </button>
-
-                <button
-                  disabled={!isTrainingStarted || isThinkingPaused}
-                  onClick={handleThinkingTime}
-                  className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none"
-                >
-                  <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary group-hover:scale-110 transition-all select-none">hourglass_empty</span>
-                  <span className="text-[9px] font-black text-on-surface-variant/60 block select-none">思考</span>
-                </button>
-
-                <button
-                  disabled={!isTrainingStarted}
-                  onClick={handleSkipQuestion}
-                  className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none"
-                >
-                  <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary group-hover:scale-110 transition-all select-none">skip_next</span>
-                  <span className="text-[9px] font-black text-on-surface-variant/60 block select-none">跳过</span>
-                </button>
-
-                <button
-                  disabled={!isTrainingStarted}
-                  onClick={() => setShowFeedbackModal(true)}
-                  className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none"
-                >
-                  <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary group-hover:scale-110 transition-all select-none">flag</span>
-                  <span className="text-[9px] font-black text-on-surface-variant/60 block select-none">反馈</span>
-                </button>
-
+                <div className="grid grid-cols-4 gap-2 mt-[-2px]">
+                  <button disabled={!isLive} onClick={handleHandRaise} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none">
+                    <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary">pan_tool</span>
+                    <span className="text-sm font-black text-on-surface-variant/60">举手</span>
+                  </button>
+                  <button disabled={!isLive || isThinkingPaused} onClick={handleThinking} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none">
+                    <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary">{isThinkingPaused ? `pause_circle ${thinkingTimeLeft}s` : "hourglass_empty"}</span>
+                    <span className="text-sm font-black text-on-surface-variant/60">{isThinkingPaused ? `${thinkingTimeLeft}s` : "思考"}</span>
+                  </button>
+                  <button disabled={!isLive} onClick={handleSkip} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none">
+                    <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary">skip_next</span>
+                    <span className="text-sm font-black text-on-surface-variant/60">跳过</span>
+                  </button>
+                  <button disabled={!isLive} onClick={() => setShowFeedbackModal(true)} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none">
+                    <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary">flag</span>
+                    <span className="text-sm font-black text-on-surface-variant/60">反馈</span>
+                  </button>
+                </div>
               </div>
             </div>
-
           </div>
-
-        </div>
-
+        )}
       </div>
 
-      {/* Footer */}
+      {/* FOOTER */}
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
             © 2026 面试VAR AI. All rights reserved.
           </span>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">
-              服务条款
-            </span>
-            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">
-              隐私政策
-            </span>
-            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">
-              联系方式
-            </span>
+            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">服务条款</span>
+            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">隐私政策</span>
+            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">联系方式</span>
           </div>
         </div>
       </footer>
 
-      {/* ========================================================
-          MODALS & FEEDBACK POPUPS DRAWER
-         ======================================================== */}
+      {/* 结束确认 Modal */}
       <AnimatePresence>
-        {showFeedbackModal && (
+        {showEndConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowFeedbackModal(false)}
-              className="absolute inset-0 bg-surface/60 backdrop-blur-md"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface-container-high border border-white/10 rounded-3xl p-6.5 max-w-md w-full text-left relative z-10 space-y-5 shadow-2xl"
-            >
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowEndConfirm(false)} className="absolute inset-0 bg-surface/60 backdrop-blur-md" />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-surface-container-high border border-white/10 rounded-3xl p-6.5 max-w-md w-full text-left relative z-10 space-y-5 shadow-2xl">
               <div className="flex justify-between items-center pb-3.5 border-b border-white/5">
                 <h3 className="font-extrabold text-white text-base flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary">flag</span>
-                  提交面试反馈
+                  <span className="material-symbols-outlined text-secondary">cancel</span>
+                  提前结束面试？
                 </h3>
-                <button
-                  onClick={() => setShowFeedbackModal(false)}
-                  className="text-on-surface-variant hover:text-white transition-colors cursor-pointer flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/5"
-                >
+                <button onClick={() => setShowEndConfirm(false)} className="text-on-surface-variant hover:text-white transition-colors cursor-pointer flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/5">
                   <span className="material-symbols-outlined text-base">close</span>
                 </button>
               </div>
-
-              <div className="space-y-4 text-xs font-semibold text-white">
-                <div className="space-y-3.5 text-left">
-                  <label className="text-on-surface-variant font-bold">请详细描述您遇到的问题或建议：</label>
-                  <textarea
-                    rows={4}
-                    value={feedbackText}
-                    onChange={(e) => setFeedbackText(e.target.value)}
-                    placeholder="例如：AI 面试官问题声音异常，语速过快，或者建议增加某一类场景考查..."
-                    className="w-full bg-white/[0.02] border border-white/10 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-xs font-semibold focus:outline-none transition-all placeholder:text-on-surface-variant/30"
-                  />
-                </div>
-              </div>
-
+              <p className="text-xs text-on-surface-variant font-semibold leading-relaxed">
+                结束后系统会自动生成 AI 面试报告（约 30-90 秒）。确定要结束吗？
+              </p>
               <div className="flex justify-end gap-3 pt-2">
-                <button
-                  onClick={() => setShowFeedbackModal(false)}
-                  className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white text-xs font-black rounded-lg border border-white/10 transition-all cursor-pointer"
-                >
-                  取消
+                <button onClick={() => setShowEndConfirm(false)} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white text-xs font-black rounded-lg border border-white/10 transition-all cursor-pointer">
+                  继续面试
                 </button>
-                <button
-                  onClick={() => {
-                    if (feedbackText.trim()) {
-                      auth.triggerToast("感谢您的反馈！面试VAR 的 AI 技术团队将尽快诊断并优化。");
-                      setFeedbackText('');
-                      setShowFeedbackModal(false);
-                    } else {
-                      auth.triggerToast("请输入反馈内容。");
-                    }
-                  }}
-                  className="px-4.5 py-2 bg-primary text-on-primary text-xs font-black rounded-lg transition-all shadow-md shadow-primary/20 cursor-pointer"
-                >
-                  提交反馈
+                <button onClick={handleEnd} className="px-4.5 py-2 bg-secondary text-on-primary text-xs font-black rounded-lg transition-all shadow-md cursor-pointer">
+                  确定结束
                 </button>
               </div>
             </motion.div>
@@ -1051,6 +1343,239 @@ export default function InterviewTrainingPage() {
         )}
       </AnimatePresence>
 
+      {/* 训练规范与用户权益 Modal */}
+      <AnimatePresence>
+        {showNormsModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowNormsModal(false)} className="absolute inset-0 bg-[#050B1A]/80 backdrop-blur-md" />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-[#0e1626]/95 border border-white/10 rounded-3xl max-w-2xl w-full text-left relative z-10 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
+              {/* 固定 header（不参与滚动） */}
+              <div className="shrink-0 flex justify-between items-center px-6 pt-5 pb-3 border-b border-white/5 bg-[#0e1626]">
+                <h3 className="font-extrabold text-white text-lg flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary">policy</span>
+                  训练规范与用户权益
+                </h3>
+                <button onClick={() => setShowNormsModal(false)} className="text-white/40 hover:text-white transition-colors cursor-pointer flex items-center justify-center w-8 h-8 rounded-lg hover:bg-white/5">
+                  <span className="material-symbols-outlined text-lg">close</span>
+                </button>
+              </div>
+
+              {/* 滚动内容区（flex-1 + overflow-y-auto） */}
+              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5 text-sm text-on-surface-variant leading-relaxed font-medium scrollbar-thin scrollbar-thumb-white/10">
+                {/* 1. 服务说明 */}
+                <section>
+                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary text-base">info</span>
+                    1. 服务说明
+                  </h4>
+                  <p>
+                    「面试训练场」是基于豆包实时语音大模型（火山引擎）提供的 AI 模拟面试服务。
+                    候选人可在浏览器中与 AI 面试官进行实时语音对话，AI 基于岗位画像提问、追问并给出反馈。
+                  </p>
+                </section>
+
+                {/* 2. 数据采集与隐私 */}
+                <section>
+                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-tertiary text-base">verified_user</span>
+                    2. 数据采集与隐私保护
+                  </h4>
+                  <ul className="list-disc pl-5 space-y-1.5">
+                    <li>面试中浏览器采集的<strong className="text-white">麦克风音频仅在本地加密传输到火山引擎</strong>用于实时识别，<strong className="text-white">不会上传到 OfferPilot 服务器</strong>。</li>
+                    <li>面试结束<strong className="text-white">仅在分析完成后</strong>，识别出的<strong className="text-white">文字</strong>会被持久化到数据库，用于生成报告。</li>
+                    <li>原始音频 PCM 流<strong className="text-white">不会被录制</strong>、不会被保存。</li>
+                    <li>所有数据按会员等级对应的<strong className="text-white">保留期</strong>自动清理（免费 7 天 / PRO 30 天 / MAX 120 天）。</li>
+                  </ul>
+                </section>
+
+                {/* 3. AI 回复免责 */}
+                <section>
+                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-secondary text-base">warning</span>
+                    3. AI 回复免责声明
+                  </h4>
+                  <p>
+                    AI 面试官的回答由大模型实时生成，<strong className="text-white">可能存在事实性错误、逻辑偏差或不恰当表达</strong>。
+                    面试VAR 不保证 AI 反馈的绝对准确性，所有报告<strong className="text-white">仅供求职者练习参考</strong>，
+                    不构成任何职业建议或录用承诺。
+                  </p>
+                </section>
+
+                {/* 4. 时长统计与计费 */}
+                <section>
+                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-amber-400 text-base">schedule</span>
+                    4. 时长统计与计费规则
+                  </h4>
+                  <ul className="list-disc pl-5 space-y-1.5">
+                    <li>系统按<strong className="text-white">自然周和自然月</strong>统计实时面试总时长，单位为分钟。</li>
+                    <li><strong className="text-white">用户提前结束面试也会正常计入时长和归档分析</strong>，不退款。</li>
+                    <li>免费会员：<strong className="text-white">0 分钟</strong>（不可使用实时模拟面试）。</li>
+                    <li>PRO 会员：每月 <strong className="text-white">60 分钟</strong> 上限。</li>
+                    <li>MAX 会员：每月 <strong className="text-white">120 分钟</strong> 上限。</li>
+                    <li>超出上限的实时面试请求将被拒绝，但已开始的会话不受影响。</li>
+                  </ul>
+                </section>
+
+                {/* 5. 用户行为规范 */}
+                <section>
+                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-secondary text-base">gavel</span>
+                    5. 用户行为规范
+                  </h4>
+                  <p>禁止以下行为，违者将被永久封禁且不予退款：</p>
+                  <ul className="list-disc pl-5 space-y-1.5">
+                    <li>用脚本、机器人、伪造身份等手段滥用服务。</li>
+                    <li>对 AI 面试官进行恶意诱导、Prompt 注入或试图越权获取系统信息。</li>
+                    <li>录制、转售、公开分享本服务的输出内容用于商业用途。</li>
+                    <li>利用本服务生成违法违规、歧视性或骚扰性内容。</li>
+                  </ul>
+                </section>
+
+                {/* 6. 退款与售后 */}
+                <section>
+                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-primary text-base">support_agent</span>
+                    6. 退款与售后
+                  </h4>
+                  <p>
+                    付费会员开通后<strong className="text-white">7 天内未使用实时模拟面试</strong>（用量为 0 分钟）可申请全额退款；
+                    已使用部分按 PRO 0.5 元/分钟、MAX 0.3 元/分钟扣除。技术问题请联系
+                    <a className="text-primary hover:underline ml-1" href="mailto:support@interviewvar.com">interviewVar@163.com</a>。
+                  </p>
+                </section>
+
+                {/* 7. 协议变更 */}
+                <section>
+                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-on-surface-variant text-base">edit_note</span>
+                    7. 协议变更
+                  </h4>
+                  <p>
+                    面试VAR 保留根据法律法规变化或业务调整需要修订本规范的权利。
+                    重大变更将通过站内信、邮件或登录页弹窗提前 7 天通知。
+                    继续使用即视为接受修订后的规范。
+                  </p>
+                </section>
+              </div>
+
+              {/* 固定 footer（不参与滚动） */}
+              <div className="shrink-0 flex justify-between items-center px-6 py-3 border-t border-white/5 bg-[#0e1626]">
+                <span className="text-[10px] text-on-surface-variant/40 font-mono">
+                  最后更新：2026-06-19 · v1.0
+                </span>
+                <button onClick={() => setShowNormsModal(false)} className="px-5 py-2 bg-primary text-on-primary text-sm font-black rounded-xl hover:scale-[1.02] active:scale-98 transition-all cursor-pointer">
+                  我已阅读并同意
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 反馈 Modal */}
+      <AnimatePresence>
+        {showFeedbackModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowFeedbackModal(false)} className="absolute inset-0 bg-surface/60 backdrop-blur-md" />
+            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-surface-container-high border border-white/10 rounded-3xl p-6.5 max-w-md w-full text-left relative z-10 space-y-5 shadow-2xl">
+              <div className="flex justify-between items-center pb-3.5 border-b border-white/5">
+                <h3 className="font-extrabold text-white text-base flex items-center gap-2">
+                  <span className="material-symbols-outlined text-primary">flag</span>
+                  提交面试反馈
+                </h3>
+                <button onClick={() => setShowFeedbackModal(false)} className="text-on-surface-variant hover:text-white transition-colors cursor-pointer flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/5">
+                  <span className="material-symbols-outlined text-base">close</span>
+                </button>
+              </div>
+              <div className="space-y-4 text-xs font-semibold text-white">
+                <div className="space-y-3.5 text-left">
+                  <label className="text-on-surface-variant font-bold">请详细描述你遇到的问题或建议：</label>
+                  <textarea
+                    rows={4}
+                    value={feedbackText}
+                    onChange={(e) => setFeedbackText(e.target.value)}
+                    placeholder="例如：AI 面试官声音异常，语速过快，或者建议增加某一类场景考查..."
+                    className="w-full bg-white/[0.02] border border-white/10 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-xs font-semibold focus:outline-none transition-all placeholder:text-on-surface-variant/30"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-2">
+                <button onClick={() => setShowFeedbackModal(false)} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white text-xs font-black rounded-lg border border-white/10 transition-all cursor-pointer">取消</button>
+                <button onClick={() => {
+                  if (feedbackText.trim()) {
+                    auth.triggerToast("感谢你的反馈！面试VAR AI 团队会尽快诊断。");
+                    setFeedbackText("");
+                    setShowFeedbackModal(false);
+                  } else {
+                    auth.triggerToast("请输入反馈内容。");
+                  }
+                }} className="px-4.5 py-2 bg-primary text-on-primary text-xs font-black rounded-lg shadow-md cursor-pointer">提交反馈</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* UNAUTHENTICATED OVERLAY */}
+      {!auth.isLoggedIn && (
+        <div className="fixed inset-0 z-30 bg-background/55 backdrop-blur-md flex items-center justify-center px-4">
+          <div className="glass-panel relative rounded-3xl border border-white/10 p-8 sm:p-10 max-w-md w-full text-center space-y-6 shadow-[0_20px_60px_rgba(0,0,0,0.4)] overflow-hidden">
+            <div className="absolute -top-16 -right-16 w-40 h-40 bg-primary/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-secondary/15 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative space-y-5">
+              <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/15 border border-primary/30 flex items-center justify-center shadow-[0_0_30px_rgba(192,193,255,0.2)]">
+                <span className="material-symbols-outlined text-3xl text-primary">lock</span>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-[10px] font-label-mono tracking-widest text-primary font-bold uppercase block">
+                  Mock Interview
+                </span>
+                <h3 className="text-2xl font-black text-white leading-tight">登录解锁你的面试训练场</h3>
+                <p className="text-sm text-on-surface-variant/70 font-semibold leading-relaxed">
+                  提供真实的企业级实时语音模拟面试，还原面试真实场景，根据表现评估出具针对性的多维分析报告与改善计划。
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="flex-1 py-3 bg-primary text-on-primary font-black rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_24px_rgba(192,193,255,0.35)] cursor-pointer"
+                >
+                  立即登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="flex-1 py-3 bg-white/5 border border-white/10 text-white font-black rounded-xl hover:bg-white/10 transition-all cursor-pointer"
+                >
+                  免费注册
+                </button>
+              </div>
+
+              <button
+                onClick={() => router.push("/")}
+                className="text-base font-bold text-on-surface-variant/50 hover:text-on-surface-variant transition-colors cursor-pointer"
+              >
+                返回首页
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+export default function InterviewTrainingPage() {
+  return (
+    <React.Suspense fallback={
+      <div className="min-h-screen bg-[#050B1A] text-white flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary"></div>
+      </div>
+    }>
+      <InterviewTrainingPageContent />
+    </React.Suspense>
   );
 }

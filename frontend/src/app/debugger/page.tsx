@@ -586,7 +586,10 @@ function NewAnalysisDebuggerContent() {
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
             </a>
-            <a onClick={() => router.push("/")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试副驾
+            </a>
+            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               案例
             </a>
           </div>
@@ -946,11 +949,21 @@ function NewAnalysisDebuggerContent() {
                   </div>
 
                   <div>
-                    <label className="block mb-2 text-xs font-semibold text-on-surface-variant">岗位详情 [选填]</label>
+                    <div className="flex justify-between items-center mb-2">
+                      <label className="text-xs font-semibold text-on-surface-variant">岗位详情 [选填]</label>
+                      <span className={`text-[10px] font-mono ${
+                        audioForm.jobDescription.length > 540
+                          ? audioForm.jobDescription.length >= 600 ? "text-secondary font-black" : "text-amber-400"
+                          : "text-on-surface-variant/30"
+                      }`}>
+                        {audioForm.jobDescription.length}/600
+                      </span>
+                    </div>
                     <textarea
-                      placeholder="可以将岗位 JD（Job Description）粘贴在此，方便 AI 更好地匹配和分析面试表现..."
+                      placeholder="粘贴岗位 JD（最多 600 字），AI 会基于真实岗位画像分析..."
                       value={audioForm.jobDescription}
-                      onChange={(e) => setAudioForm({ ...audioForm, jobDescription: e.target.value })}
+                      maxLength={600}
+                      onChange={(e) => setAudioForm({ ...audioForm, jobDescription: e.target.value.slice(0, 600) })}
                       className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-28 text-xs md:text-sm resize-none"
                     />
                   </div>

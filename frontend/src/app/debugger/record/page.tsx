@@ -794,7 +794,10 @@ export default function InterviewRecordAnalysisPage() {
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
             </a>
-            <a onClick={() => router.push("/")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试副驾
+            </a>
+            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               案例
             </a>
           </div>
@@ -977,11 +980,21 @@ export default function InterviewRecordAnalysisPage() {
                   </div>
 
                   <div className="mt-4">
-                    <label className="block mb-1.5 text-xs font-semibold text-white/60">岗位详情 [选填]</label>
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="text-xs font-semibold text-white/60">岗位详情 [选填]</label>
+                      <span className={`text-[10px] font-mono ${
+                        metadataForm.jobDescription.length > 540
+                          ? metadataForm.jobDescription.length >= 600 ? "text-[#FF7A95] font-black" : "text-amber-400"
+                          : "text-white/30"
+                      }`}>
+                        {metadataForm.jobDescription.length}/600
+                      </span>
+                    </div>
                     <textarea
-                      placeholder="可以将岗位 JD（Job Description）粘贴在此，方便 AI 更好地匹配和分析面试表现..."
+                      placeholder="粘贴岗位 JD（最多 600 字），AI 会基于真实岗位画像分析..."
                       value={metadataForm.jobDescription}
-                      onChange={(e) => setMetadataForm({ ...metadataForm, jobDescription: e.target.value })}
+                      maxLength={600}
+                      onChange={(e) => setMetadataForm({ ...metadataForm, jobDescription: e.target.value.slice(0, 600) })}
                       className="w-full py-2.5 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 h-28 text-xs md:text-sm resize-none"
                     />
                   </div>

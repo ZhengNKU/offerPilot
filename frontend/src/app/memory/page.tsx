@@ -8,7 +8,8 @@ import { useAuth, UserMenu } from "@/components/AuthProvider";
 interface SessionHistoryItem {
   id: string;
   date: string;
-  type: "audio" | "text" | "resume";
+  type: "audio" | "text" | "resume" | "live";
+  liveId?: number;       // PR6: 模拟面试的 live_id，用于详情页跳转
   title: string;
   score: number;
   grade: string;
@@ -72,6 +73,9 @@ export default function CareerMemoryDashboard() {
   const [activeOfferMonth, setActiveOfferMonth] = useState<number | null>(null);
   const [searchSidebarQuery, setSearchSidebarQuery] = useState("");
   const [activeTimelineFilter, setActiveTimelineFilter] = useState("all");
+  // 时间轴分页：每页 10 条，filter/search 变更时自动回到第 1 页
+  const TIMELINE_PAGE_SIZE = 10;
+  const [timelinePage, setTimelinePage] = useState(1);
 
   const [historyItems, setHistoryItems] = useState<SessionHistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -130,6 +134,13 @@ export default function CareerMemoryDashboard() {
       if (resumeRes.ok) {
         const resumeData = await resumeRes.json();
         resumeRawItems = resumeData.items || [];
+      }
+
+      // 2.5 PR6: Fetch live sessions（模拟面试）
+      const liveRes = await fetch("http://localhost:8001/api/live/sessions-list/history", { headers });
+      let liveRawItems: any[] = [];
+      if (liveRes.ok) {
+        liveRawItems = await liveRes.json();
       }
 
       // 3. Map audio sessions
@@ -206,8 +217,60 @@ export default function CareerMemoryDashboard() {
         };
       });
 
+      // 4.5 PR6: Map live sessions（模拟面试）
+      const mappedLive = liveRawItems.map((l: any) => {
+        let dateStr = "06-01 14:32";
+        if (l.created_at) {
+          const d = new Date(l.created_at);
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          const hh = String(d.getHours()).padStart(2, '0');
+          const min = String(d.getMinutes()).padStart(2, '0');
+          dateStr = `${mm}-${dd} ${hh}:${min}`;
+        }
+
+        const interviewTypeLabel: Record<string, string> = {
+          tech_8gu: "技术面·八股",
+          tech_project: "技术面·项目",
+          tech_scenario: "技术面·场景",
+          hr_comprehensive: "HR面",
+        };
+        const difficultyLabel: Record<string, string> = {
+          Lv1: "友善", Lv2: "偏友好", Lv3: "有压力", Lv4: "严苟",
+        };
+        const role = interviewTypeLabel[l.interview_type] || "实时模拟";
+        const round = difficultyLabel[l.difficulty] || l.difficulty || "—";
+        const durMin = Math.round((l.duration_sec || 0) / 60);
+
+        return {
+          id: String(l.session_id || l.id),  // 用 session_id 优先（报告页用），fallback 到 live_id
+          liveId: l.id,                       // PR6: 保留 liveId 用于详情页 URL
+          date: dateStr,
+          raw_created_at: l.created_at || "",
+          type: "live" as const,
+          title: `实时模拟面试 · ${l.target_role || '面试'}`,
+          score: 0,                            // 报告生成后会被 report 页填充；这里先给 0
+          grade: (
+            {
+              created: "等待开始",
+              ws_connecting: "连接中",
+              live: "进行中",
+              ending: "正在结束",
+              ended: "已结束",
+              analyzing: "分析中",
+              completed: "已完成",
+              failed: "评估失败"
+            } as Record<string, string>
+          )[l.status] || l.status,
+          company: l.company_style || "—",
+          role,
+          round: `${durMin > 0 ? durMin + "分钟 · " : ""}${round}`,
+          details: `${role} · ${round}${durMin > 0 ? " · 实际时长 " + durMin + " 分钟" : ""}${l.persona_cn ? " · " + l.persona_cn : ""}`,
+        };
+      });
+
       // 5. Merge and sort by raw_created_at descending
-      const combined = [...mappedAudio, ...mappedResume].sort((a, b) => {
+      const combined = [...mappedAudio, ...mappedLive, ...mappedResume].sort((a, b) => {
         const dateA = a.raw_created_at ? new Date(a.raw_created_at).getTime() : 0;
         const dateB = b.raw_created_at ? new Date(b.raw_created_at).getTime() : 0;
         return dateB - dateA;
@@ -314,6 +377,8 @@ export default function CareerMemoryDashboard() {
       router.push("/debugger/record");
     } else if (item.type === "resume") {
       router.push(`/debugger/resume?id=${item.id}`);
+    } else if (item.type === "live") {
+      router.push(`/training?liveId=${item.liveId}`);
     } else {
       router.push("/debugger/report");
     }
@@ -366,15 +431,19 @@ export default function CareerMemoryDashboard() {
           auth.triggerToast(errData.detail || "删除失败");
         }
       } else if (deleteTarget === "batch") {
-        // Find which selected IDs are audio and which are resume
+        // Find which selected IDs are audio, resume, and live
         const audioSessionIds: number[] = [];
         const resumeAnalysisIds: number[] = [];
+        const liveIds: number[] = [];
 
         selectedIds.forEach(id => {
           const item = historyItems.find(x => x.id === id);
           if (item) {
             if (item.type === "resume") {
               resumeAnalysisIds.push(Number(id));
+            } else if (item.type === "live") {
+              // PR6: 实时面试用 liveId 删（item.id 是 session_id，未归档时为 undefined）
+              if (item.liveId) liveIds.push(item.liveId);
             } else {
               audioSessionIds.push(Number(id));
             }
@@ -405,14 +474,43 @@ export default function CareerMemoryDashboard() {
           await Promise.all(deletePromises);
         }
 
+        // Delete live sessions in batch
+        if (liveIds.length > 0) {
+          const res = await fetch("http://localhost:8001/api/live/sessions/batch-delete", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ live_ids: liveIds })
+          });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            auth.triggerToast(errData.detail || "实时面试批量删除失败");
+          } else {
+            const data = await res.json().catch(() => ({}));
+            if (data.skipped_count > 0) {
+              auth.triggerToast(`已删除 ${data.deleted_count} 条，跳过 ${data.skipped_count} 条无权限记录`);
+            }
+          }
+        }
+
         setSelectedIds([]);
         await fetchSessions();
       } else if (deleteTarget) {
         const item = historyItems.find(x => x.id === deleteTarget);
-        const isResume = item?.type === "resume";
-        const deleteUrl = isResume
-          ? `http://localhost:8001/api/resume/analyses/${deleteTarget}`
-          : `http://localhost:8001/api/audio/session/${deleteTarget}`;
+        let deleteUrl: string;
+        if (item?.type === "resume") {
+          deleteUrl = `http://localhost:8001/api/resume/analyses/${deleteTarget}`;
+        } else if (item?.type === "live") {
+          // PR6: 实时面试用 liveId 删（item.id 是 session_id，可能为空）
+          if (!item.liveId) {
+            auth.triggerToast("该实时面试缺少 liveId，无法删除");
+            setIsDeleting(false);
+            setDeleteTarget(null);
+            return;
+          }
+          deleteUrl = `http://localhost:8001/api/live/sessions/${item.liveId}`;
+        } else {
+          deleteUrl = `http://localhost:8001/api/audio/session/${deleteTarget}`;
+        }
 
         const res = await fetch(deleteUrl, {
           method: "DELETE",
@@ -447,8 +545,16 @@ export default function CareerMemoryDashboard() {
   const visibleItems = filteredHistory.filter(
     item => activeTimelineFilter === "all" || item.type === activeTimelineFilter
   );
-  
-  const visibleIds = visibleItems.map(item => item.id);
+
+  // 分页：按 TIMELINE_PAGE_SIZE 切片，filter/search 变化时由 setTimelinePage(1) 回到首页
+  const timelineTotalPages = Math.max(1, Math.ceil(visibleItems.length / TIMELINE_PAGE_SIZE));
+  // 防止当前页超出总页数（如删完最后一条后）
+  const safeTimelinePage = Math.min(timelinePage, timelineTotalPages);
+  const pageItems = visibleItems.slice(
+    (safeTimelinePage - 1) * TIMELINE_PAGE_SIZE,
+    safeTimelinePage * TIMELINE_PAGE_SIZE
+  );
+  const visibleIds = pageItems.map(item => item.id);
   const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
 
   return (
@@ -489,7 +595,10 @@ export default function CareerMemoryDashboard() {
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
             </a>
-            <a onClick={() => router.push("/")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试副驾
+            </a>
+            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               案例
             </a>
           </div>
@@ -1331,11 +1440,15 @@ export default function CareerMemoryDashboard() {
                               { id: "all", label: "全部" },
                               { id: "audio", label: "录音" },
                               { id: "text", label: "文字" },
+                              { id: "live", label: "实时" },
                               { id: "resume", label: "简历" }
                             ].map((btn) => (
                               <button
                                 key={btn.id}
-                                onClick={() => setActiveTimelineFilter(btn.id)}
+                                onClick={() => {
+                                  setActiveTimelineFilter(btn.id);
+                                  setTimelinePage(1);
+                                }}
                                 className={`px-5 py-2 rounded-xl text-xs md:text-sm font-black transition-all cursor-pointer ${
                                   activeTimelineFilter === btn.id
                                     ? "bg-primary text-on-primary shadow-md shadow-primary/10"
@@ -1355,7 +1468,10 @@ export default function CareerMemoryDashboard() {
                               type="text"
                               placeholder="搜索面试标题、公司或岗位"
                               value={searchQuery}
-                              onChange={(e) => setSearchQuery(e.target.value)}
+                              onChange={(e) => {
+                                setSearchQuery(e.target.value);
+                                setTimelinePage(1);
+                              }}
                               className="pl-9 pr-4 py-2 bg-white/5 border border-white/10 rounded-xl text-xs text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-10 w-full md:w-64"
                             />
                           </div>
@@ -1399,8 +1515,8 @@ export default function CareerMemoryDashboard() {
                         {/* Vertical Connecting Line */}
                         <div className="absolute left-2.5 top-0 bottom-0 w-0.5 bg-white/5"></div>
 
-                        {visibleItems.length > 0 ? (
-                          visibleItems.map((item, index) => {
+                        {pageItems.length > 0 ? (
+                          pageItems.map((item, index) => {
                             return (
                               <div
                                 key={index}
@@ -1411,6 +1527,8 @@ export default function CareerMemoryDashboard() {
                                   className={`absolute -left-6 top-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded-full border-2 border-background z-10 ${
                                     item.type === "resume"
                                       ? "bg-tertiary"
+                                      : item.type === "live"
+                                      ? "bg-amber-400"
                                       : item.type === "audio"
                                       ? "bg-primary"
                                       : "bg-secondary"
@@ -1432,13 +1550,21 @@ export default function CareerMemoryDashboard() {
                                     className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
                                       item.type === "resume"
                                         ? "bg-tertiary/10 text-tertiary"
+                                        : item.type === "live"
+                                        ? "bg-amber-400/10 text-amber-400"
                                         : item.type === "audio"
                                         ? "bg-primary/10 text-primary"
                                         : "bg-secondary/10 text-secondary"
                                     }`}
                                   >
                                     <span className="material-symbols-outlined text-lg">
-                                      {item.type === "resume" ? "description" : item.type === "audio" ? "graphic_eq" : "edit_document"}
+                                      {item.type === "resume"
+                                        ? "description"
+                                        : item.type === "live"
+                                        ? "graphic_eq"
+                                        : item.type === "audio"
+                                        ? "graphic_eq"
+                                        : "edit_document"}
                                     </span>
                                   </div>
 
@@ -1458,14 +1584,20 @@ export default function CareerMemoryDashboard() {
                                 <div className="flex items-center gap-3.5 self-end md:self-auto shrink-0">
                                   <div className="text-right">
                                     <span className="text-[9px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">
-                                      综合得分
+                                      {item.type === "live" ? "状态" : "综合得分"}
                                     </span>
                                     <span
                                       className={`text-sm font-black font-label-mono ${
-                                        item.score >= 80 ? "text-tertiary" : "text-primary"
+                                        item.type === "live"
+                                          ? "text-amber-400"
+                                          : item.score >= 80
+                                          ? "text-tertiary"
+                                          : "text-primary"
                                       }`}
                                     >
-                                      {item.score}分 ({item.grade})
+                                      {item.type === "live"
+                                        ? item.grade
+                                        : `${item.score}分 (${item.grade})`}
                                     </span>
                                   </div>
 
@@ -1498,25 +1630,68 @@ export default function CareerMemoryDashboard() {
                       </div>
                     </div>
 
-                    {/* Pagination */}
-                    <div className="mt-8 pt-6 border-t border-white/5 flex items-center justify-between font-label-mono text-xs text-on-surface-variant/50 w-full select-none">
-                      <span>共 {filteredHistory.filter(item => activeTimelineFilter === "all" || item.type === activeTimelineFilter).length} 条记录</span>
-                      <div className="flex gap-2">
-                        <button className="px-2.5 py-1 rounded bg-white/5 text-white/50 border border-white/5 hover:bg-white/10 cursor-not-allowed">
-                          &lt;
-                        </button>
-                        <button className="px-2.5 py-1 rounded bg-primary text-on-primary font-bold">1</button>
-                        <button className="px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/5 cursor-pointer">
-                          2
-                        </button>
-                        <button className="px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/5 cursor-pointer">
-                          3
-                        </button>
-                        <button className="px-2.5 py-1 rounded bg-white/5 hover:bg-white/10 border border-white/5 cursor-pointer">
-                          &gt;
-                        </button>
-                      </div>
-                    </div>
+                    {/* Pagination — 每页 TIMELINE_PAGE_SIZE 条；filter/search 变化会回到第 1 页 */}
+                    {visibleItems.length > 0 && (() => {
+                      // 生成带省略号的页码数组：始终显示首尾，中间最多 5 个 + 省略
+                      const buildPageList = (cur: number, total: number): (number | "…")[] => {
+                        if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+                        const pages: (number | "…")[] = [1];
+                        const start = Math.max(2, cur - 2);
+                        const end = Math.min(total - 1, cur + 2);
+                        if (start > 2) pages.push("…");
+                        for (let i = start; i <= end; i++) pages.push(i);
+                        if (end < total - 1) pages.push("…");
+                        pages.push(total);
+                        return pages;
+                      };
+                      const pageList = buildPageList(safeTimelinePage, timelineTotalPages);
+                      return (
+                        <div className="mt-8 pt-6 border-t border-white/5 flex items-center justify-between font-label-mono text-xs text-on-surface-variant/50 w-full select-none">
+                          <span>共 {visibleItems.length} 条记录</span>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => setTimelinePage(p => Math.max(1, p - 1))}
+                              disabled={safeTimelinePage <= 1}
+                              className={`px-2.5 py-1 rounded border border-white/5 ${
+                                safeTimelinePage <= 1
+                                  ? "bg-white/5 text-white/50 hover:bg-white/10 cursor-not-allowed"
+                                  : "bg-white/5 hover:bg-white/10 cursor-pointer"
+                              }`}
+                            >
+                              &lt;
+                            </button>
+                            {pageList.map((p, idx) =>
+                              p === "…" ? (
+                                <span key={`e-${idx}`} className="px-2.5 py-1 text-on-surface-variant/40">…</span>
+                              ) : (
+                                <button
+                                  key={p}
+                                  onClick={() => setTimelinePage(p)}
+                                  className={`px-2.5 py-1 rounded cursor-pointer ${
+                                    safeTimelinePage === p
+                                      ? "bg-primary text-on-primary font-bold"
+                                      : "bg-white/5 hover:bg-white/10 border border-white/5"
+                                  }`}
+                                >
+                                  {p}
+                                </button>
+                              )
+                            )}
+                            <button
+                              onClick={() => setTimelinePage(p => Math.min(timelineTotalPages, p + 1))}
+                              disabled={safeTimelinePage >= timelineTotalPages}
+                              className={`px-2.5 py-1 rounded border border-white/5 ${
+                                safeTimelinePage >= timelineTotalPages
+                                  ? "bg-white/5 text-white/50 hover:bg-white/10 cursor-not-allowed"
+                                  : "bg-white/5 hover:bg-white/10 cursor-pointer"
+                              }`}
+                            >
+                              &gt;
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                   </div>
                 </div>
@@ -1643,36 +1818,48 @@ export default function CareerMemoryDashboard() {
                   TAB PANEL 4: KNOWLEDGE BASE (知识库题谱详情)
                  ======================================================== */}
               {activeTab === "knowledge" && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full text-left">
-                  {[
-                    { cat: "缓存中间件", items: [{ n: "Redis 缓存穿透与击穿", c: 14, m: 85 }, { n: "Redis 分布式锁原理", c: 12, m: 80 }, { n: "AOF 与 RDB 混合持久化", c: 8, m: 92 }] },
-                    { cat: "系统架构与微服务", items: [{ n: "分布式事务 (Saga, TCC)", c: 17, m: 65 }, { n: "CAP 定理与 Base 理论", c: 10, m: 88 }, { n: "服务熔断与哨兵机制", c: 7, m: 75 }] },
-                    { cat: "高并发并发编程", items: [{ n: "线程池调优与阻塞队列", c: 11, m: 90 }, { n: "AQS 框架与重入锁原理", c: 8, m: 82 }, { n: "CAS 无锁自旋与 ABA 问题", c: 6, m: 78 }] },
-                    { cat: "数据库与索引工程", items: [{ n: "MySQL MVCC 多版本并发", c: 15, m: 72 }, { n: "B+ 树索引分裂与回表", c: 9, m: 85 }, { n: "慢查询解析与执行计划优化", c: 6, m: 80 }] }
-                  ].map((section, idx) => (
-                    <div key={idx} className="glass-panel p-5.5 rounded-3xl border-white/10 space-y-4 text-left">
-                      <span className="text-xs md:text-[13px] font-label-mono text-primary font-bold uppercase tracking-wider block">
-                        {section.cat}
-                      </span>
-                      <div className="space-y-3.5">
-                        {section.items.map((item, i) => (
-                          <div key={i} className="p-3.5 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 transition-all space-y-2.5">
-                            <div className="flex justify-between items-start gap-3">
-                              <h5 className="text-xs md:text-sm font-black text-white leading-relaxed">{item.n}</h5>
-                              <span className="text-[11px] font-semibold font-label-mono text-on-surface-variant/50 shrink-0">问 {item.c}次</span>
-                            </div>
-                            <div className="flex items-center justify-between text-[11px] font-semibold text-on-surface-variant/70">
-                              <span>掌握度</span>
-                              <span className="font-black text-white font-label-mono">{item.m}%</span>
-                            </div>
-                            <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                              <div className="h-full bg-primary rounded-full" style={{ width: `${item.m}%` }}></div>
-                            </div>
+                <div className="glass-panel p-6 sm:p-8 rounded-3xl border-white/10 w-full flex flex-col gap-6 text-left">
+                  <div className="pb-3 border-b border-white/5 shrink-0 flex items-center justify-between">
+                    <h3 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-base text-primary">menu_book</span>
+                      职业知识库及专业题谱
+                    </h3>
+                    <span className="text-xs text-on-surface-variant/40 font-mono font-bold">4 个核心板块</span>
+                  </div>
+
+                  <div className="max-h-[580px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
+                      {[
+                        { cat: "缓存中间件", items: [{ n: "Redis 缓存穿透与击穿", c: 14, m: 85 }, { n: "Redis 分布式锁原理", c: 12, m: 80 }, { n: "AOF 与 RDB 混合持久化", c: 8, m: 92 }] },
+                        { cat: "系统架构与微服务", items: [{ n: "分布式事务 (Saga, TCC)", c: 17, m: 65 }, { n: "CAP 定理与 Base 理论", c: 10, m: 88 }, { n: "服务熔断与哨兵机制", c: 7, m: 75 }] },
+                        { cat: "高并发并发编程", items: [{ n: "线程池调优与阻塞队列", c: 11, m: 90 }, { n: "AQS 框架与重入锁原理", c: 8, m: 82 }, { n: "CAS 无锁自旋与 ABA 问题", c: 6, m: 78 }] },
+                        { cat: "数据库与索引工程", items: [{ n: "MySQL MVCC 多版本并发", c: 15, m: 72 }, { n: "B+ 树索引分裂与回表", c: 9, m: 85 }, { n: "慢查询解析与执行计划优化", c: 6, m: 80 }] }
+                      ].map((section, idx) => (
+                        <div key={idx} className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl space-y-4 text-left">
+                          <span className="text-xs md:text-[13px] font-label-mono text-primary font-bold uppercase tracking-wider block">
+                            {section.cat}
+                          </span>
+                          <div className="space-y-3.5">
+                            {section.items.map((item, i) => (
+                              <div key={i} className="p-3.5 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 transition-all space-y-2.5">
+                                <div className="flex justify-between items-start gap-3">
+                                  <h5 className="text-xs md:text-sm font-black text-white leading-relaxed">{item.n}</h5>
+                                  <span className="text-[11px] font-semibold font-label-mono text-on-surface-variant/50 shrink-0">问 {item.c}次</span>
+                                </div>
+                                <div className="flex items-center justify-between text-[11px] font-semibold text-on-surface-variant/70">
+                                  <span>掌握度</span>
+                                  <span className="font-black text-white font-label-mono">{item.m}%</span>
+                                </div>
+                                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                                  <div className="h-full bg-primary rounded-full" style={{ width: `${item.m}%` }}></div>
+                                </div>
+                              </div>
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  </div>
                 </div>
               )}
 

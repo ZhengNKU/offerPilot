@@ -17,3 +17,6 @@ python-docx>=1.0
 # PDF -> DOCX conversion (PyMuPDF backend, no LibreOffice needed)
 pdf2docx>=0.5
 
+# 实时语音面试（Volcano Doubao Realtime WSS client）
+websockets>=12.0
+

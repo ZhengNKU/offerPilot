@@ -310,9 +310,11 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
 
     _set_progress(15, "processing")
 
-    # ── Step 2: Real ASR via MiniMax or load from DB (for text mode) ──────
+    # ── Step 2: Real ASR via MiniMax or load from DB (for text/live mode) ─
+    # PR4: 'live' 走与 text_mode 相同分支 —— 实时模式 ASR 在火山端完成，
+    #      bridge 已把 transcript 写入 InterviewTranscript.data，直接读出。
     raw_segments: List[Dict[str, Any]] = []
-    if audio_url == "text_mode":
+    if audio_url in ("text_mode", "live"):
         async with async_session() as db:
             tx_res = await db.execute(
                 select(models.InterviewTranscript).where(models.InterviewTranscript.session_id == session_id)
@@ -320,7 +322,9 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             tx = tx_res.scalars().first()
             if tx and tx.data:
                 raw_segments = tx.data
-        logger.info(f"[task={task_id}] Loaded {len(raw_segments)} segments from DB for text session")
+        logger.info(
+            f"[task={task_id}] Loaded {len(raw_segments)} segments from DB for {audio_url} session"
+        )
     else:
         logger.info(f"[task={task_id}] Starting ASR for session {session_id}, url={audio_url}")
         try:
@@ -725,18 +729,7 @@ async def analyze_audio(
     }
     
     # Profile payload preparation - NULL/Empty if guest user (not logged in)
-    profile_data = None
-    if current_user and current_user.profile:
-        p = current_user.profile
-        profile_data = {
-            "gender": p.gender,
-            "age": p.age,
-            "experience_years": p.experience_years,
-            "role_name": p.role_name,
-            "target_company": p.target_company,
-            "target_grade": p.target_grade,
-            "target_role": p.target_role
-        }
+    profile_data = await _extract_profile_data(db, current_user.id if current_user else None)
 
     # Dispatch real analysis workflow to background task thread
     background_tasks.add_task(run_real_analysis, session_id, task_id, profile_data)
@@ -749,6 +742,35 @@ async def analyze_audio(
         "task_id": task_id,
         "session_id": session_id,
         "status": "pending"
+    }
+
+
+async def _extract_profile_data(db: AsyncSession, user_id: Optional[int]) -> Optional[dict]:
+    """
+    PR4 helper: 从 user_id 取 UserProfile，抽 7 个字段供 run_real_analysis 用。
+    暴露在模块级供 live.py 的 end 端点复用。
+    """
+    if not user_id:
+        return None
+    from sqlalchemy.future import select
+    from sqlalchemy.orm import selectinload
+    result = await db.execute(
+        select(models.User)
+        .options(selectinload(models.User.profile))
+        .where(models.User.id == user_id)
+    )
+    user = result.scalars().first()
+    if not user or not user.profile:
+        return None
+    p = user.profile
+    return {
+        "gender": p.gender,
+        "age": p.age,
+        "experience_years": p.experience_years,
+        "role_name": p.role_name,
+        "target_company": p.target_company,
+        "target_grade": p.target_grade,
+        "target_role": p.target_role,
     }
 
 

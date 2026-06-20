@@ -29,6 +29,26 @@ class Settings(BaseSettings):
     VOLC_ASR_API_KEY: str = "91b64a7e-bd24-41ba-95e7-b1dbca5cb6b3"
     VOLC_ASR_RESOURCE_ID: str = "volc.seedasr.auc"
 
+    # Volcano Engine Doubao Realtime (实时语音大模型，HTTP/WS 快捷 API 接入)
+    # 申请地址：https://www.volcengine.com/product/voice-realtime
+    # 仅在后端使用，禁止下发到浏览器
+    # 鉴权头（5 件套，来自官方 Python SDK config.py）：
+    #   X-Api-App-ID:     <用户 App ID>            ← 来自 .env
+    #   X-Api-Access-Key: <用户 Access Key>        ← 来自 .env
+    #   X-Api-App-Key:     PlgvMymc7f3tQnJ6         ← 官方固定常量
+    #   X-Api-Resource-Id: volc.speech.dialog       ← 官方固定
+    #   X-Api-Connect-Id: <UUID 每次连接随机>      ← bridge 内自动生成
+    VOLC_REALTIME_APP_ID: str = ""            # → X-Api-App-ID
+    VOLC_REALTIME_API_KEY: str = ""           # → X-Api-Access-Key
+    VOLC_REALTIME_APP_KEY: str = "PlgvMymc7f3tQnJ6"  # 火山官方固定常量，禁止修改
+    VOLC_REALTIME_RESOURCE_ID: str = "volc.speech.dialog"  # 官方固定
+    VOLC_REALTIME_WSS_URL: str = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
+
+    # 实时面试限制
+    LIVE_MAX_DURATION_MIN: int = 30
+    LIVE_HEARTBEAT_INTERVAL_S: int = 15
+    LIVE_WS_TOKEN_EXPIRE_MIN: int = 60
+
     # 文件保留策略（按会员等级），单位：天。免费用户与未登录访客共用免费档。
     FILE_RETENTION_DAYS_FREE: int = 7
     FILE_RETENTION_DAYS_PRO: int = 30
