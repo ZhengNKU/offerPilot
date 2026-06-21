@@ -44,6 +44,16 @@ class Settings(BaseSettings):
     VOLC_REALTIME_RESOURCE_ID: str = "volc.speech.dialog"  # 官方固定
     VOLC_REALTIME_WSS_URL: str = "wss://openspeech.bytedance.com/api/v3/realtime/dialogue"
 
+    # Volcano Engine Doubao 流式短语音识别（WSS，实时上屏候选人文字）
+    # 浏览器 mic PCM（24kHz → 在 bridge 里降采样到 16kHz）同步喂这个连接，
+    # 拿到 partial/final 文本后 broadcast 为 live.transcript(role=candidate)
+    # 文档：https://www.volcengine.com/docs/6561/1594356
+    #   endpoint:        wss://openspeech.bytedance.com/api/v3/sauc/bigmodel
+    #   resource_id:      volc.seedasr.sauc.duration / volc.bigasr.sauc.duration
+    #                     (按控制台开通的模型+计费方式决定：模型1.0/2.0 × 小时版/并发版)
+    VOLC_STREAMING_ASR_WSS_URL: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
+    VOLC_STREAMING_ASR_RESOURCE_ID: str = "volc.bigasr.sauc.duration"
+
     # 实时面试限制
     LIVE_MAX_DURATION_MIN: int = 30
     LIVE_HEARTBEAT_INTERVAL_S: int = 15

@@ -69,6 +69,12 @@ export interface UseRealtimeSessionApi extends RealtimeState {
   toggleSpeaker: () => void;
   sendEvent: (name: string, payload?: unknown) => void;
   sendText: (content: string) => void;
+  /**
+   * 浏览器 Web Speech API 识别的候选人语音上行（partial / final 合并接口）。
+   * 后端收到后会广播 live.transcript(role=candidate) 给所有客户端，
+   * 并在 final 时落库到 InterviewLiveMessage。
+   */
+  sendStt: (text: string, isFinal: boolean) => void;
   /** 发送二进制音频帧（麦克风采集后下行到服务端）。不暴露 wsRef 以保持封装。 */
   sendBinary: (data: ArrayBuffer | Blob) => boolean;
   interrupt: () => void;
@@ -109,12 +115,14 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
 
   const appendTranscript = useCallback((line: TranscriptLine) => {
     setTranscript((prev) => {
-      // 合并 partial：相同 role + partial → 覆盖
-      if (line.partial) {
-        const last = prev[prev.length - 1];
-        if (last && last.partial && last.role === line.role) {
-          return [...prev.slice(0, -1), line];
-        }
+      // 合并策略：
+      // - partial 进来 → 若最后一条同 role partial，覆盖（打字机效果）
+      // - final 进来 → 若最后一条同 role partial，覆盖（覆盖"还在打的最后一个字"，
+      //   避免 550 最后一段 partial（含完整句）和 351 final 两条记录都进 transcript 区造成重复）
+      // - 否则 append
+      const last = prev[prev.length - 1];
+      if (last && last.partial && last.role === line.role) {
+        return [...prev.slice(0, -1), line];
       }
       return [...prev, line];
     });
@@ -314,6 +322,23 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
     }
   }, []);
 
+  /**
+   * 浏览器 Web Speech API 识别出的候选人语音上行。
+   * 火山 realtime 不回推 ASR 文本，所以前端 STT 走这条路上行，
+   * 后端会转成 live.transcript (role=candidate) 广播给所有客户端。
+   * - isFinal=false 走 partial（后端不入库，仅实时显示）
+   * - isFinal=true  走 final（后端落 transcript + pending_messages）
+   */
+  const sendStt = useCallback((text: string, isFinal: boolean) => {
+    if (!text || !text.trim()) return;
+    if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({
+      type: "client.stt",
+      text,
+      partial: !isFinal,
+    }));
+  }, []);
+
   const sendBinary = useCallback((data: ArrayBuffer | Blob): boolean => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -369,7 +394,7 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
     // state
     status, aiState, micMuted, speakerMuted, transcript, metrics, error, wsUrl,
     // actions
-    start, end, toggleMic, toggleSpeaker, sendEvent, sendText, sendBinary, interrupt, reset,
+    start, end, toggleMic, toggleSpeaker, sendEvent, sendText, sendStt, sendBinary, interrupt, reset,
   };
 }
 
