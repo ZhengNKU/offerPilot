@@ -486,42 +486,27 @@ async def _run_analysis_for_live(
             except Exception as e:
                 logger.warning(f"[live] 取 profile_data 失败: {e}")
 
-        # 2. 读取所有的 live messages
+        # 2. 读取整场面试的大 JSON transcript（live_bridge._on_close 已一次性写入）
         async with async_session() as db:
             live_sess = await db.get(models.InterviewLiveSession, live_id)
             if not live_sess:
                 logger.error(f"[live] live session {live_id} not found for analysis")
                 return
-            
+
             job_description = live_sess.job_description
-            
-            msg_result = await db.execute(
-                select(models.InterviewLiveMessage)
-                .where(models.InterviewLiveMessage.live_session_id == live_id)
-                .order_by(models.InterviewLiveMessage.seq)
-            )
-            msgs = msg_result.scalars().all()
-            
-        # 3. 构造 transcript data & dialogue_text
-        transcript_data = []
+            # transcript_data 已经是报告页要的 shape：
+            #   [{start_time, end_time, speaker: "Interviewer|Candidate", content: {...}}, ...]
+            transcript_data = list(live_sess.transcript or [])
+
+        # 3. 仅用 transcript_data 构造 dialogue_text（不再二次重写 transcript）
         dialogue_parts = []
-        cur_time = 0.0
-        for m in msgs:
-            # speaker 在 content JSON 里（content['speaker']）
-            speaker_in_content = (m.content or {}).get("speaker", "interviewer")
-            duration = max(1.0, len((m.content or {}).get("text", "")) * 0.05)
-            speaker_label = "Interviewer" if speaker_in_content == "interviewer" else "Candidate"
-            transcript_data.append({
-                "start_time": cur_time,
-                "end_time": cur_time + duration,
-                "speaker": speaker_label,
-                "content": m.content,
-            })
-            cur_time += duration
-            
+        for line in transcript_data:
+            content = line.get("content") or {}
+            speaker_in_content = content.get("speaker", "interviewer")
+            text = content.get("text", "")
             prefix = "面试官" if speaker_in_content == "interviewer" else "候选人"
-            dialogue_parts.append(f"{prefix}：{m.content}")
-            
+            dialogue_parts.append(f"{prefix}：{text}")
+
         dialogue_text = "\n".join(dialogue_parts)
         
         # 4. 调用 LLM 评估 (MiniMax-M3)
@@ -601,6 +586,8 @@ async def _run_analysis_for_live(
             }
             
         # 5. 保存结果到 InterviewLiveSession 并完成
+        # transcript 字段不再此处更新：live_bridge._on_close 已在面试结束时一次性写入大 JSON，
+        # 这里只需追加分析结果（ipi / summary / analysis_result）即可
         async with async_session() as db:
             await db.execute(
                 update(models.InterviewLiveSession)
@@ -614,7 +601,6 @@ async def _run_analysis_for_live(
                     summary_suggestions=suggestions,
                     executive_summary=executive_summary,
                     analysis_result=llm_result,
-                    transcript=transcript_data
                 )
             )
             
@@ -792,8 +778,9 @@ async def _delete_live_session_cascade(
     db: AsyncSession, live_row: models.InterviewLiveSession
 ) -> dict:
     """
-    删除一个 live session，连带清理：
-    - interview_live_messages（通过 ORM cascade='all, delete-orphan' 自动）
+    删除一个 live session。
+    关联的 interview_transcripts（PR4 归档用）由 InterviewSession 的 cascade 自动清理；
+    实时对话记录存在 interview_live_sessions.transcript JSONB 里，随 session 一起删。
 
     返回被删行的关键 id 供日志/回包用。
     """
@@ -1032,6 +1019,64 @@ async def ws_live(websocket: WebSocket, live_id: int):
                     await volc_bridge.say_hello()
                 except Exception as e:
                     logger.warning(f"[ws] live_id={live_id} SayHello 失败（不影响连接）: {e}")
+
+                # PR-N: 并行接一条火山流式短语音识别通道，独立于 realtime dialog，
+                # 用于把候选人 mic 文本实时上屏（realtime dialog 不回推 ASR 文本）。
+                # api_key 用 .env 里 VOLC_ASR_API_KEY（短语音识别产品的独立 key），
+                # app_key 与 realtime dialog 共用 PlgvMymc7f3tQnJ6（火山通用 App Key）。
+                # 由于控制台开通的模型/计费方式不确定，自动 fallback 试 4 种 resource_id，
+                # 第一个握手成功的就用。
+                asr_bridge = None
+                try:
+                    from app.services.volc_streaming_asr import VolcStreamingAsrBridge
+                    # fallback 顺序：火山官方 demo 默认是 volc.bigasr.sauc.duration，
+                    # 把它放第一。其他按开通可能顺序排列。
+                    resource_id_candidates = [
+                        "volc.bigasr.sauc.duration",
+                        "volc.bigasr.sauc.concurrent",
+                        "volc.seedasr.sauc.duration",
+                        "volc.seedasr.sauc.concurrent",
+                        settings.VOLC_STREAMING_ASR_RESOURCE_ID,
+                    ]
+                    # 去重保持顺序
+                    seen = set()
+                    ordered = []
+                    for r in resource_id_candidates:
+                        if r and r not in seen:
+                            seen.add(r)
+                            ordered.append(r)
+                    last_err = None
+                    for rid in ordered:
+                        try:
+                            cand = VolcStreamingAsrBridge(
+                                api_key=settings.VOLC_ASR_API_KEY,
+                                app_key=settings.VOLC_REALTIME_APP_KEY,
+                                resource_id=rid,
+                                wss_url=settings.VOLC_STREAMING_ASR_WSS_URL,
+                                language="zh-CN",
+                                model_name="bigmodel",
+                            )
+                            await cand.connect()
+                            asr_bridge = cand
+                            logger.info(
+                                f"[ws] live_id={live_id} 流式 ASR 已接入 (resource_id={rid})"
+                            )
+                            break
+                        except Exception as e:
+                            last_err = e
+                            logger.warning(
+                                f"[ws] live_id={live_id} 流式 ASR resource_id={rid} 失败: {e}"
+                            )
+                            continue
+                    if asr_bridge is None:
+                        logger.warning(
+                            f"[ws] live_id={live_id} 流式 ASR 所有 resource_id 都失败（候选人文本将无法上屏）: {last_err}"
+                        )
+                except Exception as e:
+                    logger.warning(
+                        f"[ws] live_id={live_id} 流式 ASR 接入异常: {e}"
+                    )
+                    asr_bridge = None
                 # 回填 voice_id 和 persona 到 row 便于后续展示
                 await db.execute(
                     update(models.InterviewLiveSession)
@@ -1078,7 +1123,7 @@ async def ws_live(websocket: WebSocket, live_id: int):
             logger.info(f"[ws] live_id={live_id} 火山 key 未配置，echo 模式（仅供本地调试）")
 
         from app.services.live_bridge import LiveSessionBridge
-        bridge = LiveSessionBridge(ws=websocket, row=row, db=db, volc=volc_bridge)
+        bridge = LiveSessionBridge(ws=websocket, row=row, db=db, volc=volc_bridge, asr_bridge=asr_bridge)
         await bridge.run()
     except WebSocketDisconnect:
         logger.info(f"[ws] live_id={live_id} 浏览器中途 disconnect")

@@ -379,41 +379,6 @@ class InterviewLiveSession(Base):
 
     # 关联：归档的 InterviewSession（PR4 回填后可用）
     session: Mapped[Optional["InterviewSession"]] = relationship("InterviewSession")
-    messages: Mapped[List["InterviewLiveMessage"]] = relationship(
-        "InterviewLiveMessage", back_populates="live_session", cascade="all, delete-orphan",
-        order_by="InterviewLiveMessage.seq",
-    )
-
-
-class InterviewLiveMessage(Base):
-    """
-    实时面试的结构化消息流水（PR2 起由 bridge 写入）。
-
-    每条对应一句完整的发言（不是流式 chunk）。
-    火山 sentence streaming 在 live_bridge._handle_tts_text_stream 里攒齐后
-    才写一条；content 是 JSONB，自带 speaker / seq / text / ts / reply_id。
-    """
-    __tablename__ = "interview_live_messages"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    live_session_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("interview_live_sessions.id", ondelete="CASCADE"),
-        nullable=False, index=True,
-    )
-    # 会话内序号（PR2 起单调递增）
-    seq: Mapped[int] = mapped_column(Integer, nullable=False)
-    # content JSONB：{"speaker":"interviewer","seq":1,"text":"...","started_at":...,"ended_at":...,"reply_id":...,"chunk_count":N}
-    # 注意：所有结构化字段都在 content 里，列上没有冗余字段
-    content: Mapped[dict] = mapped_column(JSONB, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-
-    __table_args__ = (
-        Index("idx_live_msg_session_seq", "live_session_id", "seq"),
-    )
-
-    live_session: Mapped["InterviewLiveSession"] = relationship(
-        "InterviewLiveSession", back_populates="messages"
-    )
 
 
 class UserLiveMinutes(Base):

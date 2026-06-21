@@ -132,6 +132,7 @@ function InterviewTrainingPageContent() {
   }, [bootState]);
 
   const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const transcriptContainerRef = useRef<HTMLDivElement>(null);
   const bootStateRef = useRef(bootState);
   useEffect(() => { bootStateRef.current = bootState; }, [bootState]);
 
@@ -190,9 +191,16 @@ function InterviewTrainingPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---------- Transcript 自动滚动 ----------
+  // ---------- Transcript 智能滚动 ----------
+  // 只在用户已经靠近底部（< 60px）时才把容器内 scrollTop 拉到最底；
+  // 用户若往上翻看历史消息，则不滚动（避免整个页面 jump 抢焦点）。
   useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = transcriptContainerRef.current;
+    if (!container) return;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    if (distanceFromBottom < 60) {
+      container.scrollTop = container.scrollHeight;
+    }
   }, [transcript]);
 
   // ---------- 同步 hook 错误到 bootState ----------
@@ -225,10 +233,23 @@ function InterviewTrainingPageContent() {
 
   const connectWs = (wsUrl: string, liveId: number) => {
     const token = localStorage.getItem("interviewVar_token") || "";
-    void live.start({ liveId, wsPath: wsUrl, token });
-    void audio.start((pcm16) => {
-      live.sendBinary(pcm16);
+    void live.start({
+      liveId,
+      wsPath: wsUrl,
+      token,
+      onAudioFrame: (pcm16) => audio.play(pcm16),
     });
+    // 候选人字幕优先走火山流式 ASR（后端 asr_bridge），
+    // 但火山 resource_id 在某些账号下会 fallback 全部失败导致候选人字幕完全不显示，
+    // 因此同时启用浏览器 Web Speech API 作兜底：
+    //   - 后端 client.stt 处理路径会把识别结果广播为 live.transcript(role=candidate)
+    //   - getUserMedia 已开启 echoCancellation/noiseSuppression，AI 扬声器回声被压制
+    //   - 后端 _asr_event_loop 与 client.stt 都会 append 到 transcript，
+    //     前端 appendTranscript 合并策略（partial 同 role 覆盖）能去掉大部分重复
+    void audio.start(
+      (pcm16) => { live.sendBinary(pcm16); },
+      (text, isFinal) => { live.sendStt(text, isFinal); },
+    );
   };
 
   const showReport = async (liveId: number) => {
@@ -262,9 +283,20 @@ function InterviewTrainingPageContent() {
       }
       const sess: LiveSession = await res.json();
       setLiveSession(sess);
+      // 修复：仅当 URL 明确带 ?liveId=（用户主动进入报告页 / 刷新报告）时才展示报告。
+      // 若 URL 干净但 session 已 completed，说明是从其他页面点击"面试训练场"导航而来，
+      // localStorage 中残留的 liveId 已属 stale，应当清理并展示新表单，
+      // 而非自动弹回已完成的报告（避免 /training?liveId=N 误触）。
+      const fromExplicitUrl = searchParams.get("liveId") !== null;
       switch (sess.status) {
         case "completed":
-          void showReport(liveId);
+          if (fromExplicitUrl) {
+            void showReport(liveId);
+          } else {
+            localStorage.removeItem("interviewVar_live_id");
+            window.history.replaceState(null, "", "/training");
+            setBootState("idle");
+          }
           return;
         case "analyzing":
         case "ending":
@@ -373,9 +405,13 @@ function InterviewTrainingPageContent() {
         });
         // PR5: 启动麦克风采集（捕获失败不阻塞 WS）
         // 用 hook 暴露的 sendBinary（不直接访问内部 wsRef）
-        void audio.start((pcm16) => {
-          live.sendBinary(pcm16);
-        });
+        // 候选人字幕双路：火山 asr_bridge（后端）+ 浏览器 Web Speech（前端兜底）
+        // 后端 _asr_event_loop / client.stt 都广播 role=candidate，
+        // 前端 appendTranscript 合并 partial 去重，避免双路重复展示
+        void audio.start(
+          (pcm16) => { live.sendBinary(pcm16); },
+          (text, isFinal) => { live.sendStt(text, isFinal); },
+        );
       }
     } catch (e) {
       auth.triggerToast("无法连接到后端服务");
@@ -759,31 +795,40 @@ function InterviewTrainingPageContent() {
                 {reportTranscript.length === 0 ? (
                   <p className="text-xs text-on-surface-variant/40 text-center py-6">未记录到对话转文字内容。</p>
                 ) : (
-                  reportTranscript.map((line, idx) => (
-                    <div key={idx} className={`flex items-start gap-4 p-4 rounded-2xl border transition-all ${
-                      line.speaker === "Interviewer" || line.role === "interviewer"
-                        ? "bg-primary/5 border-primary/10 text-left"
-                        : "bg-[#060e20] border-white/5 text-left ml-4 md:ml-12"
-                    }`}>
-                      <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center font-bold text-xs select-none ${
+                  reportTranscript.map((line, idx) => {
+                    // 后端 content 可能是对象 {text, speaker, seq, ...} 也可能是字符串；做兼容
+                    const contentObj = line.content && typeof line.content === "object" ? line.content : null;
+                    const textStr: string =
+                      (contentObj?.text as string | undefined) ??
+                      (typeof line.content === "string" ? line.content : "") ??
+                      (line.text as string | undefined) ??
+                      "";
+                    return (
+                      <div key={idx} className={`flex items-start gap-4 p-4 rounded-2xl border transition-all ${
                         line.speaker === "Interviewer" || line.role === "interviewer"
-                          ? "bg-primary/20 text-primary border border-primary/30"
-                          : "bg-tertiary/20 text-tertiary border border-tertiary/30"
+                          ? "bg-primary/5 border-primary/10 text-left"
+                          : "bg-[#060e20] border-white/5 text-left ml-4 md:ml-12"
                       }`}>
-                        {line.speaker === "Interviewer" || line.role === "interviewer" ? "AI" : "你"}
-                      </div>
-                      <div className="space-y-1.5 flex-1 min-w-0">
-                        <div className="flex justify-between items-center">
-                          <span className="text-[10px] text-on-surface-variant/30 font-bold font-label-mono">
-                            {line.speaker === "Interviewer" || line.role === "interviewer" ? "AI 面试官" : "候选人"}
-                          </span>
+                        <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center font-bold text-xs select-none ${
+                          line.speaker === "Interviewer" || line.role === "interviewer"
+                            ? "bg-primary/20 text-primary border border-primary/30"
+                            : "bg-tertiary/20 text-tertiary border border-tertiary/30"
+                        }`}>
+                          {line.speaker === "Interviewer" || line.role === "interviewer" ? "面" : "你"}
                         </div>
-                        <p className="text-xs md:text-sm font-semibold leading-relaxed text-white/90">
-                          {line.content || line.text || ""}
-                        </p>
+                        <div className="space-y-1.5 flex-1 min-w-0">
+                          <div className="flex justify-between items-center">
+                            <span className="text-[10px] text-on-surface-variant/30 font-bold font-label-mono">
+                              {line.speaker === "Interviewer" || line.role === "interviewer" ? "面试官" : "候选人"}
+                            </span>
+                          </div>
+                          <p className="text-xs md:text-sm font-semibold leading-relaxed text-white/90">
+                            {textStr}
+                          </p>
+                        </div>
                       </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -810,7 +855,7 @@ function InterviewTrainingPageContent() {
                         <span className="material-symbols-outlined text-xs">
                           {quota.membership === "max" ? "diamond" : quota.membership === "pro" ? "workspace_premium" : "schedule"}
                         </span>
-                        {quota.used_min}/{quota.limit_min} 分
+                        {quota.used_min}/{quota.limit_min} 分钟
                       </div>
                     )}
                   </div>
@@ -1158,16 +1203,16 @@ function InterviewTrainingPageContent() {
                       <span className="text-on-surface-variant/45 cursor-not-allowed" title="PR5 接入">面试笔记</span>
                       <span className="text-on-surface-variant/45 cursor-not-allowed" title="PR5 接入">AI 建议</span>
                     </div>
-                    <div className="space-y-3 flex-1 overflow-y-auto pr-1 min-h-0">
+                    <div ref={transcriptContainerRef} className="space-y-3 flex-1 overflow-y-auto pr-1 min-h-0 max-h-[560px] scrollbar-thin scrollbar-thumb-white/10">
                       {transcript.length === 0 && (
-                        <p className="text-xs text-on-surface-variant/40 text-center py-6">等待 AI 面试官的开场白...</p>
+                        <p className="text-xs text-on-surface-variant/40 text-center py-6">等待面试官的开场白...</p>
                       )}
                       {transcript.map((line, idx) => (
                         <div key={idx} className="flex items-start gap-3">
                           <div className={`w-7.5 h-7.5 rounded-full shrink-0 flex items-center justify-center font-bold text-xs select-none ${
                             line.role === "interviewer" ? "bg-primary/20 text-primary border border-primary/30" : "bg-tertiary/20 text-tertiary border border-tertiary/30"
                           }`}>
-                            {line.role === "interviewer" ? "AI" : "你"}
+                            {line.role === "interviewer" ? "面" : "你"}
                           </div>
                           <div className="space-y-1 flex-1 min-w-0">
                             <p className={`text-[12px] font-bold leading-relaxed pr-6 ${line.partial ? "text-on-surface-variant/50 italic" : "text-on-surface-variant/80"}`}>

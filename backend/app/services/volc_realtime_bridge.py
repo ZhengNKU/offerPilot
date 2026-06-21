@@ -29,6 +29,7 @@
      350 = chat tts text response
      359 = say hello ended
      450 = user started speaking（清音频缓存）
+     451 = user partial/final ASR（extra.origin_text + extra.endpoint 判定是否 final）
      459 = turn complete（用户说完了，AI 该回应了）
 6. 音频格式：
      输入：pcm_s16le, 16kHz, mono（浏览器 24kHz 需重采样）
@@ -100,6 +101,7 @@ EVT_CHAT_RAG_TEXT = 502
 # Server → Client events
 EVT_SRV_SAY_HELLO_ENDED = 359   # 开场白播完
 EVT_SRV_USER_STARTED = 450      # 用户开始说话
+EVT_SRV_USER_TRANSCRIPTION = 451  # 用户 ASR partial/final（extra.origin_text 文本，extra.endpoint 判定 final）
 EVT_SRV_TURN_COMPLETE = 459     # 用户说完了
 EVT_SRV_TTS_TEXT = 350          # chat tts 文本
 EVT_SRV_SESSION_END_1 = 152
@@ -547,6 +549,20 @@ class VolcRealtimeBridge:
                 return RealtimeEvent(type="tts_end", raw=parsed, event_id=event_id)
             if event_id == EVT_SRV_USER_STARTED:
                 return RealtimeEvent(type="speech_started", raw=parsed, event_id=event_id)
+            if event_id == EVT_SRV_USER_TRANSCRIPTION:
+                # 用户 ASR 文本：partial 是连续打字机效果，final（endpoint=True）是整句定稿
+                # payload 结构: {extra: {origin_text, endpoint?, soft_finish_paralinguistic?...}, results: [...]}
+                if isinstance(payload, dict):
+                    extra = payload.get("extra") or {}
+                    origin_text = (extra.get("origin_text") or "").strip()
+                    is_final = bool(extra.get("endpoint"))
+                    if origin_text:
+                        return RealtimeEvent(
+                            type="asr_final" if is_final else "asr_partial",
+                            text=origin_text, is_final=is_final,
+                            raw=parsed, event_id=event_id,
+                        )
+                return None
             if event_id == EVT_SRV_TURN_COMPLETE:
                 return RealtimeEvent(type="speech_stopped", raw=parsed, event_id=event_id)
             if event_id in (EVT_SRV_SESSION_END_1, EVT_SRV_SESSION_END_2):

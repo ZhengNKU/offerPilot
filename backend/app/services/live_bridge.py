@@ -14,6 +14,7 @@ import asyncio
 import base64
 import json
 import logging
+import struct
 import time
 from datetime import datetime
 from typing import Optional
@@ -26,6 +27,38 @@ from app import models
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _downsample_pcm16_24k_to_16k(pcm24k: bytes) -> bytes:
+    """
+    浏览器上行的 PCM16/24kHz/mono → 火山流式 ASR 要求的 PCM16/16kHz/mono。
+
+    用线性插值做 3:2 降采样（24k → 16k）。整帧丢失 1 个采样点（首部），对 STT 识别无感。
+    实现简单，避免引 numpy/scipy/scipy.signal 等额外依赖。
+    """
+    n_in = len(pcm24k) // 2  # 采样点数
+    if n_in == 0:
+        return b""
+    samples = list(struct.unpack(f"<{n_in}h", pcm24k[:n_in * 2]))
+    n_out = (n_in * 2) // 3  # 24k→16k = 2:3 ratio，输出点数 ≈ 输入 * 2/3
+    if n_out <= 0:
+        return b""
+    out = []
+    # 每个输出 i 对应输入位置 i * 1.5
+    for i in range(n_out):
+        pos = i * 3 / 2  # 24k 采样位置
+        idx = int(pos)
+        frac = pos - idx
+        if idx >= n_in - 1:
+            out.append(samples[-1])
+        else:
+            # 线性插值
+            v = int(samples[idx] * (1 - frac) + samples[idx + 1] * frac)
+            # 限幅（防止溢出）
+            if v > 32767: v = 32767
+            elif v < -32768: v = -32768
+            out.append(v)
+    return struct.pack(f"<{len(out)}h", *out)
 
 
 class LiveSessionBridge:
@@ -48,11 +81,13 @@ class LiveSessionBridge:
         row: models.InterviewLiveSession,
         db: AsyncSession,
         volc: Optional["object"] = None,  # PR3 类型 VolcRealtimeBridge, PR2 为 None
+        asr_bridge: Optional["object"] = None,  # PR-N 流式短语音识别 VolcStreamingAsrBridge
     ):
         self.ws = ws
         self.row = row
         self.db = db
         self.volc = volc
+        self.asr_bridge = asr_bridge
         self._closed = False
         # 候选人累积 transcript（PR2 echo 模式也写，给 PR4 归档备用）
         self._transcript: list[dict] = []
@@ -65,6 +100,10 @@ class LiveSessionBridge:
         self._ai_is_speaking: bool = False  # 用于打断判断
         # PR3: volc 事件监听协程
         self._volc_listener_task: Optional[asyncio.Task] = None
+        # PR-N: 流式 ASR 事件监听协程 + 候选人 text 缓冲（按 session 内 utterance 累加）
+        self._asr_listener_task: Optional[asyncio.Task] = None
+        self._candidate_text_buf: str = ""  # 累积最新一段 partial，final 到来后清空
+        self._candidate_last_final_ts: float = 0.0
         # 流式 tts_text 缓冲：reply_id → {chunks, amount, ...}
         import time as _time
         self._tts_text_buf: dict = {}
@@ -102,6 +141,16 @@ class LiveSessionBridge:
         # 3. 启动 volc 事件监听（PR3，volc 不为 None 时）
         if self.volc is not None:
             self._volc_listener_task = asyncio.create_task(self._volc_event_loop())
+
+        # 3b. 启动流式 ASR 监听（PR-N，火山 seedasr.sauc，独立于 realtime dialog）
+        #     浏览器 mic PCM 通过 _on_binary → asr_bridge.send_pcm（24k→16k 降采样），
+        #     ASR 吐 partial/final → broadcast 为 live.transcript(role=candidate)
+        if self.asr_bridge is not None:
+            try:
+                self._asr_listener_task = asyncio.create_task(self._asr_event_loop())
+                logger.info(f"[bridge] live_id={self.row.id} 流式 ASR listener 启动")
+            except Exception as e:
+                logger.warning(f"[bridge] live_id={self.row.id} ASR listener 启动失败: {e}")
 
         try:
             while not self._closed:
@@ -242,6 +291,48 @@ class LiveSessionBridge:
                     "ai_state": self._ai_state,
                 })
             return
+        if mtype == "client.stt":
+            # 浏览器 Web Speech API 旁路识别的候选人语音
+            # 火山 realtime 不回推 ASR 文本，所以前端 STT 走这条路上行
+            text = (data.get("text") or "").strip()
+            is_final = bool(data.get("partial") is False)
+            if not text:
+                return
+            # 广播给所有客户端（自己也会收到 → UI 实时显示）
+            await self._send_text_event({
+                "type": "live.transcript",
+                "role": "candidate",
+                "text": text,
+                "partial": not is_final,
+                "t0": 0, "t1": 0,
+            })
+            if not is_final:
+                # partial 不入库，避免产生海量半成品 seq
+                return
+            # final：写入 _transcript + pending（参考 asr_final 的同款处理）
+            import time as _time
+            self._seq += 1
+            end_ts = _time.time()
+            self._transcript.append({
+                "seq": self._seq, "speaker": "candidate",
+                "start_time": 0, "end_time": 0, "content": text,
+            })
+            self._pending_messages.append({
+                "seq": self._seq,
+                "content": {
+                    "speaker": "candidate",
+                    "seq": self._seq,
+                    "text": text,
+                    "started_at": end_ts,
+                    "ended_at": end_ts,
+                    "reply_id": "browser-stt",
+                    "chunk_count": 1,
+                },
+            })
+            logger.info(
+                f"[bridge] candidate stt final seq={self._seq} text={text[:50]!r}"
+            )
+            return
         logger.debug(f"[bridge] 未处理 text type={mtype}")
 
     # ---------- volc 事件循环（PR3） ----------
@@ -361,10 +452,75 @@ class LiveSessionBridge:
         # 其他事件忽略
         logger.debug(f"[bridge] 未映射 volc event: {ev.type}")
 
+    # ---------- 流式 ASR 事件监听（PR-N） ----------
+
+    async def _asr_event_loop(self) -> None:
+        """
+        消费 VolcStreamingAsrBridge 的 partial/final 事件，
+        broadcast 为 live.transcript(role=candidate) 给前端，并落到 _pending_messages 归档。
+        """
+        try:
+            async for ev in self.asr_bridge.recv_events():
+                if self._closed:
+                    break
+                if ev.type == "closed":
+                    logger.info(f"[bridge] live_id={self.row.id} ASR listener 收到 closed")
+                    break
+                if ev.type == "error":
+                    logger.error(f"[bridge] live_id={self.row.id} ASR error: {ev.detail}")
+                    continue
+                if ev.type not in ("partial", "final"):
+                    continue
+
+                text = (ev.text or "").strip()
+                if not text:
+                    continue
+
+                # 实时推浏览器：partial/final 都发，partial 让前端做打字机，final 让前端定稿
+                await self._send_text_event({
+                    "type": "live.transcript",
+                    "role": "candidate",
+                    "text": text,
+                    "partial": ev.type != "final",
+                    "t0": 0, "t1": 0,
+                })
+
+                if ev.type == "final":
+                    # 落库（PR5 pending 缓冲，结束统一写 JSONB）
+                    import time as _time
+                    self._seq += 1
+                    end_ts = _time.time()
+                    self._candidate_last_final_ts = end_ts
+                    self._transcript.append({
+                        "seq": self._seq, "speaker": "candidate",
+                        "start_time": 0, "end_time": 0, "content": text,
+                    })
+                    self._pending_messages.append({
+                        "seq": self._seq,
+                        "content": {
+                            "speaker": "candidate",
+                            "seq": self._seq,
+                            "text": text,
+                            "started_at": end_ts,
+                            "ended_at": end_ts,
+                            "reply_id": "streaming-asr",
+                            "chunk_count": 1,
+                        },
+                    })
+                    # final 到位：让 AI 切回 thinking（后端通常会被 volc event 459 / 我们的 aai_state 接管，
+                    # 但为了保险在这里也刷一次）
+                    self._ai_state = "listening"
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.exception(f"[bridge] live_id={self.row.id} ASR event loop 异常: {e}")
+        finally:
+            logger.info(f"[bridge] live_id={self.row.id} ASR event loop stopped")
+
     async def _on_binary(self, data: bytes) -> None:
         """处理浏览器二进制音频帧（PCM16/24kHz/单声道/20ms）。"""
         if self.volc is not None:
-            # PR3: 转发给火山
+            # PR3: 转发给火山 realtime dialog（24kHz，volc dialog 内部会处理）
             try:
                 await self.volc.send_audio(data)
             except Exception as e:
@@ -375,6 +531,16 @@ class LiveSessionBridge:
                 await self.ws.send_bytes(data)
             except Exception as e:
                 logger.warning(f"[bridge] echo 音频失败: {e}")
+
+        # PR-N: 同步推一份到流式 ASR 通道（24kHz → 16kHz 降采样）
+        if self.asr_bridge is not None:
+            try:
+                pcm16k = _downsample_pcm16_24k_to_16k(data)
+                await self.asr_bridge.send_pcm(pcm16k)
+            except Exception as e:
+                # 不刷屏，仅头几次警告
+                if self._audio_frame_count < 200:
+                    logger.warning(f"[bridge] asr.send_pcm 失败: {e}")
         # PR6 调试：每 50 帧打一次（避免日志刷屏），确认浏览器 → 后端上行链路
         self._audio_frame_count += 1
         if self._audio_frame_count % 50 == 1:
@@ -384,17 +550,6 @@ class LiveSessionBridge:
             )
 
     # ---------- 推消息给浏览器 ----------
-
-    async def _persist_message(self, speaker: str, content: str) -> None:
-        """PR4: 写一条 InterviewLiveMessage（content 走 JSONB dict）。"""
-        import time as _time
-        content_dict = {
-            "speaker": speaker,
-            "text": content,
-            "started_at": _time.time(),
-            "ended_at": _time.time(),
-        }
-        await self._persist_message_raw(speaker, content_dict)
 
     async def _send_text_event(self, payload: dict) -> None:
         if self._closed:
@@ -408,7 +563,14 @@ class LiveSessionBridge:
     # ---------- 关闭 / 归档 ----------
 
     async def _on_close(self) -> None:
-        """WS 关闭时清理：批量写消息到 DB、更新 session 状态、关闭火山连接。"""
+        """
+        WS 关闭时清理：把整场面试的全部对话打成一个大 JSON 一次 UPDATE 到
+        interview_live_sessions.transcript（JSONB 字段），同时更新 session 状态、
+        关闭火山连接。
+
+        设计原则：避免一行一记录导致 interview_live_messages 表爆炸，
+        整场面试一条记录，所有对话存在 transcript JSONB 字段里。
+        """
         if self._closed and self._transcript:  # 避免重复触发
             pass
         self._closed = True
@@ -423,28 +585,27 @@ class LiveSessionBridge:
             except (asyncio.CancelledError, Exception):
                 pass
 
-        # 批量 INSERT 累积的消息（顺序由 _pending_messages push 顺序保证）
-        if self._pending_messages:
+        # PR-N: 取消 ASR listener + 关 ASR 连接
+        if self._asr_listener_task and not self._asr_listener_task.done():
+            self._asr_listener_task.cancel()
             try:
-                objs = [
-                    models.InterviewLiveMessage(
-                        live_session_id=self.row.id,
-                        seq=m["seq"],
-                        content=m["content"],
-                    )
-                    for m in self._pending_messages
-                ]
-                self.db.add_all(objs)
-                await self.db.commit()
-                logger.info(
-                    f"[bridge] 批量落库 {len(objs)} 条消息到 interview_live_messages"
-                )
+                await self._asr_listener_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if self.asr_bridge is not None:
+            try:
+                await self.asr_bridge.close()
             except Exception as e:
-                logger.exception(f"[bridge] 批量写消息失败: {e}")
-                await self.db.rollback()
+                logger.warning(f"[bridge] asr_bridge.close 异常: {e}")
+
+        # 把内存累积的 _pending_messages 构造成报告页要的 shape：
+        #   [{ start_time, end_time, speaker: "Interviewer|Candidate", content: {...} }, ...]
+        # seq 升序排列；duration 按文本长度估算（与 _run_analysis_for_live 旧实现保持一致）
+        transcript_data = self._build_session_transcript()
 
         try:
-            # 更新 session 状态
+            # 一次 UPDATE：把整场对话写进 interview_live_sessions.transcript
+            # 同时更新 status / duration / ended_at
             await self.db.execute(
                 update(models.InterviewLiveSession)
                 .where(models.InterviewLiveSession.id == self.row.id)
@@ -452,15 +613,18 @@ class LiveSessionBridge:
                     status="ended",
                     duration_sec=self._duration_sec,
                     ended_at=datetime.utcnow(),
+                    transcript=transcript_data,
                 )
             )
             await self.db.commit()
             logger.info(
                 f"[bridge] live_id={self.row.id} closed, "
-                f"duration={self._duration_sec}s, transcript_msgs={len(self._transcript)}"
+                f"duration={self._duration_sec}s, "
+                f"transcript_msgs={len(transcript_data)} (单条 JSON 写入 transcript JSONB)"
             )
         except Exception as e:
             logger.exception(f"[bridge] close 时更新 DB 失败: {e}")
+            await self.db.rollback()
 
         # 关闭火山连接（PR3）
         if self.volc is not None:
@@ -481,6 +645,13 @@ class LiveSessionBridge:
         - event 350 = 段起始占位（text=''），由 _convert_event 归一化为 tts_segment_start
 
         按 reply_id 缓冲，550 partial=true 推浏览器做打字机效果，351 final=true 合并落 pending。
+
+        注意：火山 SDK 不同版本 550 的 content 字段语义不同：
+        - 增量型：每 chunk 是新增字符（delta），join 才是全句
+        - 累计型：每 chunk 是"从段起到现在"的全句 prefix-extended（更常见）
+        如果直接 join 累计型 chunks，会把同一句话重复 N 次。
+        → partial 阶段仍用 join（打字机效果两种模式都对），
+          final 阶段用 _merge_stream_chunks 智能合并。
         """
         text = ev.text or ""
         if not text:
@@ -504,17 +675,30 @@ class LiveSessionBridge:
         # 缓冲按 reply_id 区分
         buf = self._tts_text_buf.setdefault(reply_id, {
             "chunks": [],
+            "final_text": None,  # 修复：351 事件携带完整句，记到这里，final 时优先采用
             "amount": amount,
             "speaker": "interviewer",
             "started_at": time.time(),
         })
         buf["chunks"].append(text)
-        # 实时推浏览器 partial（拼接当前已收的 chunk 让用户看到"打字机"效果）
-        combined = "".join(buf["chunks"])
+        # 修复：351 事件携带的就是整句完整 text（delta SDK 不会重复发同一句），
+        # 单独记到 final_text，final 时优先用它，避免 _merge_stream_chunks
+        # 在 delta 模式下把 550 delta 串 + 351 完整句拼出重复输出。
+        if ev.is_final:
+            buf["final_text"] = text
+        # 实时推浏览器 partial：智能合并，避免累计型 SDK 下 join 出 "好的，好的，了解。" 这种重复
+        # 累计型：取当前 chunks[-1]（已经是最长全句前缀），前端 transcript 区就只显示一次
+        # 增量型：join 出全句
+        # final：优先 351 完整句（buf["final_text"]），否则回退到 merge 兜底
+        display_text = (
+            buf["final_text"]
+            if (is_final and buf["final_text"])
+            else self._merge_stream_chunks(buf["chunks"])
+        )
         await self._send_text_event({
             "type": "live.transcript",
             "role": "interviewer",
-            "text": combined,
+            "text": display_text,
             "partial": not is_final,
             "t0": 0, "t1": 0,
         })
@@ -523,7 +707,13 @@ class LiveSessionBridge:
             return
 
         # final：合并成一段落库
-        final_text = combined
+        # 优先采用 final_text（351 完整句），避免 delta SDK 下 merge 把重复内容写进 pending
+        final_text = buf["final_text"] or self._merge_stream_chunks(buf["chunks"])
+        if not final_text:
+            del self._tts_text_buf[reply_id]
+            return
+        # 浏览器 final 推送已合并在上面（display_text），这里只需落库
+        # 不再重复 send_text_event，避免前端 transcript 区出现两条相同 final
         # 防抖：跳过触发器自问自答（SayHello 后的"你好..."短句）
         if (amount is not None and amount < 10
                 and "你好" in final_text and "面试" in final_text
@@ -548,7 +738,8 @@ class LiveSessionBridge:
             "reply_id": reply_id,
             "chunk_count": len(buf["chunks"]),
         }
-        # 不写库，面试结束 _on_close 时批量 INSERT
+        # 不立即写库；面试结束 _on_close 时一次性把全部 _pending_messages
+        # 打成大 JSON UPDATE 到 interview_live_sessions.transcript JSONB
         self._pending_messages.append({
             "seq": self._seq,
             "content": content_dict,
@@ -559,20 +750,75 @@ class LiveSessionBridge:
             f"chunks={len(buf['chunks'])} text={final_text[:50]!r}"
         )
 
-    async def _persist_message_raw(self, speaker: str, content_dict: dict) -> None:
-        """PR4: 写一条 InterviewLiveMessage，content 是 dict（DB 列是 JSONB）。"""
-        try:
-            msg = models.InterviewLiveMessage(
-                live_session_id=self.row.id,
-                seq=self._seq,
-                speaker=speaker,
-                content=content_dict,
-            )
-            self.db.add(msg)
-            await self.db.commit()
-        except Exception as e:
-            logger.warning(f"[bridge] 写 InterviewLiveMessage 失败: {e}")
-            await self.db.rollback()
+    @staticmethod
+    def _merge_stream_chunks(chunks: list) -> str:
+        """
+        合并火山流式 TTS 文本 chunk，自动适配两种 SDK 行为：
+
+        1. 增量型（delta）：每 chunk 是新增字符 → 直接 join
+           例: ['好的，', '了解。', '那你'] → '好的，了解。那你'
+
+        2. 累计型（accumulated）：每 chunk 是"从段起到现在"的全句
+                                  prefix-extended 关系（更常见）
+           例: ['好的，', '好的，了解。', '好的，了解。那你最近...', '好的，了解。...全句'] → 取最长
+
+        判定：所有相邻 chunk 满足"长度非递减 + 后者以前者为前缀" → 累计型，
+              取 chunks[-1]（最长）作为全句；
+              否则视为增量型，join 全部。
+
+        实际工程上火山 SDK 主要走累计型（550 content 字段是 prefix-extended），
+        偶尔会重发整段作为收尾。直接 join 会把同一句话重复 N 次。
+        """
+        if not chunks:
+            return ""
+        if len(chunks) == 1:
+            return chunks[0]
+        # 累计型判定：每个 chunk 都以"前面所有 chunk 的最长串"为前缀（长度非递减）
+        is_accumulated = all(
+            isinstance(c, str) and isinstance(prev, str)
+            and len(c) >= len(prev) and c.startswith(prev)
+            for prev, c in zip(chunks, chunks[1:])
+        )
+        if is_accumulated:
+            return chunks[-1]
+        return "".join(chunks)
+
+    def _build_session_transcript(self) -> list[dict]:
+        """
+        把内存累积的 _pending_messages 构造成报告页消费的 shape：
+          [
+            {
+              "start_time": float,        # 累计偏移（按文本长度估算）
+              "end_time":   float,
+              "speaker":    "Interviewer" | "Candidate",  # 大写首字母，报告页条件渲染用
+              "content":    {...}         # 原始 content_dict（含 seq/text/ts/reply_id/chunk_count）
+            },
+            ...
+          ]
+
+        按 seq 升序；duration 用 len(text)*0.05 估算（与原 _run_analysis_for_live 同款公式，
+        保持报告时间轴一致）。
+        """
+        if not self._pending_messages:
+            return []
+        # 按 seq 排序（虽然 push 顺序基本就是 seq 升序，但显式排一次更稳）
+        ordered = sorted(self._pending_messages, key=lambda m: m.get("seq", 0))
+        out: list[dict] = []
+        cur_time = 0.0
+        for m in ordered:
+            content = m.get("content") or {}
+            text = content.get("text") or ""
+            duration = max(1.0, len(text) * 0.05)
+            speaker_raw = content.get("speaker", "interviewer")
+            speaker_label = "Interviewer" if speaker_raw == "interviewer" else "Candidate"
+            out.append({
+                "start_time": cur_time,
+                "end_time": cur_time + duration,
+                "speaker": speaker_label,
+                "content": content,
+            })
+            cur_time += duration
+        return out
 
     # ---------- 暴露给 WS handler 调用 ----------
 
