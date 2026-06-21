@@ -33,6 +33,9 @@ interface ProjectMemoryItem {
   duration: string | null;
   mastery_level: number;
   mention_count: number;
+  last_mentioned_at: string | null;
+  last_mentioned_session_id: number | null;
+  last_mentioned_summary: string | null;
   importance: number;
   source_type: string;
   version: number;
@@ -1781,13 +1784,18 @@ export default function CareerMemoryDashboard() {
                                 <p className="text-xs md:text-[13px] text-on-surface-variant/75 leading-relaxed font-semibold line-clamp-3">{proj.summary}</p>
                               </div>
 
-                              <div className="space-y-2.5 border-t border-white/5 pt-3.5">
-                                <div className="flex justify-between items-center text-xs text-on-surface-variant/60 font-extrabold font-label-mono">
-                                  <span>面试提及: {proj.mention_count}次</span>
-                                  <span>核心掌握: {proj.mastery_level}%</span>
+                              <div className="space-y-2 border-t border-white/5 pt-3.5">
+                                <div className="flex items-center gap-1.5 text-xs text-on-surface-variant/60 font-extrabold">
+                                  <span className="material-symbols-outlined text-[13px] text-primary/70">forum</span>
+                                  <span>面试提及: <span className="text-primary font-black font-label-mono">{proj.mention_count}</span> 次</span>
                                 </div>
-                                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                                  <div className="h-full bg-gradient-to-r from-primary to-secondary rounded-full" style={{ width: `${proj.mastery_level}%` }}></div>
+                                <div className="flex items-center gap-1.5 text-[11px] text-on-surface-variant/50 font-semibold">
+                                  <span className="material-symbols-outlined text-[12px] text-primary/50 shrink-0">schedule</span>
+                                  <span className="truncate">
+                                    {proj.last_mentioned_summary
+                                      ? `最近提及: ${proj.last_mentioned_summary}`
+                                      : "尚未在面试中被提及"}
+                                  </span>
                                 </div>
                               </div>
 
@@ -2435,23 +2443,14 @@ export default function CareerMemoryDashboard() {
                   <span className="text-white font-extrabold">{selectedProject.duration || "暂无信息"}</span>
                 </div>
                 <div className="space-y-1">
-                  <span className="text-on-surface-variant/40 font-bold block">团队规模</span>
-                  <span className="text-white font-extrabold">{selectedProject.team_size ? `${selectedProject.team_size} 人` : "暂无信息"}</span>
-                </div>
-                <div className="space-y-1">
                   <span className="text-on-surface-variant/40 font-bold block">面试提及</span>
                   <span className="text-primary font-black font-label-mono">{selectedProject.mention_count} 次</span>
                 </div>
-              </div>
-
-              {/* Mastery progress */}
-              <div className="space-y-2">
-                <div className="flex justify-between items-center text-xs text-on-surface-variant/60 font-extrabold font-label-mono">
-                  <span>核心掌握度</span>
-                  <span className="text-white">{selectedProject.mastery_level}%</span>
-                </div>
-                <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden">
-                  <div className="h-full bg-gradient-to-r from-primary to-secondary rounded-full" style={{ width: `${selectedProject.mastery_level}%` }}></div>
+                <div className="space-y-1">
+                  <span className="text-on-surface-variant/40 font-bold block">最近提及</span>
+                  <span className="text-white font-extrabold text-xs leading-tight">
+                    {selectedProject.last_mentioned_summary || "尚未提及"}
+                  </span>
                 </div>
               </div>
 

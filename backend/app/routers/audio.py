@@ -540,9 +540,29 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
     score_ownership = 65
     score_system_design = 60
 
+    # ── 获取用户已有项目记忆（供 LLM 做项目提及匹配） ──
+    existing_projects: list[dict] = []
+    async with async_session() as db:
+        sess_proj_result = await db.execute(
+            select(models.InterviewSession).where(models.InterviewSession.id == session_id)
+        )
+        sess_proj = sess_proj_result.scalars().first()
+        if sess_proj and sess_proj.user_id:
+            pm_result = await db.execute(
+                select(models.ProjectMemory).where(
+                    models.ProjectMemory.user_id == sess_proj.user_id
+                )
+            )
+            existing_projects = [
+                {"id": pm.id, "project_name": pm.project_name}
+                for pm in pm_result.scalars().all()
+            ]
+
     llm_result = {}
     try:
-        llm_result = await analyze_interview_dialogue(dialogue_text, profile_data, job_description)
+        llm_result = await analyze_interview_dialogue(
+            dialogue_text, profile_data, job_description, existing_projects
+        )
         if llm_result:
             ipi_score         = llm_result.get("ipi_score",          ipi_score)
             offer_probability = llm_result.get("offer_probability",   offer_probability)
@@ -600,6 +620,34 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
         }
 
     _set_progress(88, "processing")
+
+    # ── Step 4.5: 同步项目提及次数 ─────────────────────────────────────
+    async with async_session() as db:
+        sess_mention_result = await db.execute(
+            select(models.InterviewSession).where(models.InterviewSession.id == session_id)
+        )
+        sess_mention = sess_mention_result.scalars().first()
+        user_id_for_mention = sess_mention.user_id if sess_mention else None
+
+    if user_id_for_mention is not None:
+        mentioned_projects = llm_result.get("mentioned_projects") or []
+        if mentioned_projects:
+            try:
+                from app.services.project_mention_service import sync_project_mentions
+                mention_stats = await sync_project_mentions(
+                    user_id=user_id_for_mention,
+                    mentioned_projects=mentioned_projects,
+                    session_id=session_id,
+                )
+                logger.info(
+                    f"[task={task_id}] 项目提及同步完成: "
+                    f"matched={mention_stats['matched']} "
+                    f"unmatched={mention_stats['unmatched']}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"[task={task_id}] 项目提及同步失败（不影响主流程）: {e}"
+                )
 
     # ── Step 5: Persist scores + risk to DB ──────────────────────────────
     async with async_session() as db:
