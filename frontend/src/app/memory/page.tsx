@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import GrowthCurveChart, { type GrowthPoint } from "@/components/GrowthCurveChart";
 
 interface SessionHistoryItem {
   id: string;
@@ -72,7 +73,6 @@ export default function CareerMemoryDashboard() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [activeCurveMonth, setActiveCurveMonth] = useState<number | null>(null);
   const [activeOfferMonth, setActiveOfferMonth] = useState<number | null>(null);
   const [searchSidebarQuery, setSearchSidebarQuery] = useState("");
   const [activeTimelineFilter, setActiveTimelineFilter] = useState("all");
@@ -82,6 +82,12 @@ export default function CareerMemoryDashboard() {
 
   const [historyItems, setHistoryItems] = useState<SessionHistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  // 能力成长曲线
+  const [growthPoints, setGrowthPoints] = useState<GrowthPoint[]>([]);
+  const [growthAxisLabels, setGrowthAxisLabels] = useState<(number | null)[]>([]);
+  const [growthTotal, setGrowthTotal] = useState(0);
+  const [isLoadingGrowth, setIsLoadingGrowth] = useState(false);
 
   const [avatarError, setAvatarError] = useState(false);
 
@@ -178,7 +184,7 @@ export default function CareerMemoryDashboard() {
           id: String(session.id),
           date: dateStr,
           raw_created_at: session.created_at || "",
-          type: (session.audio_url === "text_mode" ? "text" : "audio") as const,
+          type: (session.audio_url === "text_mode" ? "text" : "audio") as "audio" | "text",
           title: session.title || "未命名面试分析",
           score: session.ipi_score || 0,
           grade,
@@ -287,6 +293,36 @@ export default function CareerMemoryDashboard() {
     }
   };
 
+  const fetchGrowthCurve = async () => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+    if (!auth.isLoggedIn || !token) {
+      setGrowthPoints([]);
+      setGrowthAxisLabels([]);
+      setGrowthTotal(0);
+      return;
+    }
+    setIsLoadingGrowth(true);
+    try {
+      const res = await fetch("http://localhost:8001/api/memory/growth-curve", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setGrowthPoints(data.points || []);
+        setGrowthAxisLabels(data.axis_labels || []);
+        setGrowthTotal(data.total_analyses || 0);
+      }
+    } catch (err) {
+      console.error("Failed to fetch growth curve:", err);
+    } finally {
+      setIsLoadingGrowth(false);
+    }
+  };
+
+  const handleGrowthPointClick = useCallback((sessionId: number) => {
+    router.push(`/debugger/report?sessionId=${sessionId}`);
+  }, [router]);
+
   const fetchProjects = async () => {
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
     if (!auth.isLoggedIn || !token) {
@@ -341,10 +377,12 @@ export default function CareerMemoryDashboard() {
   useEffect(() => {
     fetchSessions();
     fetchProjects();
+    fetchGrowthCurve();
 
     const handleStorageChange = () => {
       fetchSessions();
       fetchProjects();
+      fetchGrowthCurve();
     };
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
@@ -972,15 +1010,14 @@ export default function CareerMemoryDashboard() {
                           </div>
                         </div>
 
-                        {/* Chart Legend indicators */}
+                        {/* Chart Legend indicators — 五个维度 */}
                         <div className="flex flex-wrap gap-x-3 gap-y-1.5 text-xs font-extrabold text-on-surface-variant/60">
                           {[
-                            { name: "技术深度", color: "bg-tertiary" },
-                            { name: "系统设计", color: "bg-blue-500" },
-                            { name: "表达能力", color: "bg-purple-500" },
-                            { name: "项目影响力", color: "bg-amber-500" },
-                            { name: "业务理解", color: "bg-indigo-500" },
-                            { name: "领导力", color: "bg-pink-500" }
+                            { name: "细节深度", color: "bg-purple-500" },
+                            { name: "逻辑自洽", color: "bg-pink-500" },
+                            { name: "业务理解", color: "bg-tertiary" },
+                            { name: "数据指标", color: "bg-amber-500" },
+                            { name: "技术广度", color: "bg-sky-500" },
                           ].map((legend, idx) => (
                             <span key={idx} className="flex items-center gap-1">
                               <span className={`w-1.5 h-1.5 rounded-full ${legend.color}`}></span>
@@ -989,93 +1026,20 @@ export default function CareerMemoryDashboard() {
                           ))}
                         </div>
 
-                        {/* Premium SVG Line Chart */}
-                        <div className="relative w-full h-[150px] mt-2 select-none group/chart">
-                          <svg className="w-full h-full" viewBox="0 0 100 60" preserveAspectRatio="none">
-                            {/* Grid Lines */}
-                            <line x1="0" y1="15" x2="100" y2="15" stroke="rgba(255,255,255,0.03)" strokeWidth="0.5" strokeDasharray="2,2" />
-                            <line x1="0" y1="30" x2="100" y2="30" stroke="rgba(255,255,255,0.03)" strokeWidth="0.5" strokeDasharray="2,2" />
-                            <line x1="0" y1="45" x2="100" y2="45" stroke="rgba(255,255,255,0.03)" strokeWidth="0.5" strokeDasharray="2,2" />
-
-                            {/* Line 1: 技术深度 (Green) - values: 45, 52, 58, 65, 75, 82 */}
-                            <path d="M 5,33 L 23,28 L 41,25 L 59,20 L 77,15 L 95,10" fill="none" stroke="#10b981" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-                            {/* Line 2: 系统设计 (Blue) - values: 38, 45, 50, 58, 64, 72 */}
-                            <path d="M 5,37 L 23,32 L 41,29 L 59,25 L 77,21 L 95,15" fill="none" stroke="#3b82f6" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-                            {/* Line 3: 表达能力 (Purple) - values: 25, 28, 35, 41, 40, 48 */}
-                            <path d="M 5,45 L 23,43 L 41,39 L 59,35 L 77,36 L 95,31" fill="none" stroke="#a855f7" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-                            {/* Line 4: 项目影响力 (Amber) - values: 30, 32, 40, 48, 55, 60 */}
-                            <path d="M 5,42 L 23,41 L 41,36 L 59,31 L 77,27 L 95,24" fill="none" stroke="#f59e0b" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-                            {/* Line 5: 业务理解 (Indigo) - values: 48, 55, 62, 68, 78, 86 */}
-                            <path d="M 5,31 L 23,27 L 41,23 L 59,19 L 77,13 L 95,8" fill="none" stroke="#6366f1" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-                            {/* Line 6: 领导力 (Pink) - values: 20, 22, 28, 30, 38, 42 */}
-                            <path d="M 5,48 L 23,47 L 41,43 L 59,42 L 77,37 L 95,35" fill="none" stroke="#ec4899" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-
-                            {/* Active month vertical selector overlay */}
-                            {activeCurveMonth !== null && (
-                              <line
-                                x1={5 + activeCurveMonth * 18}
-                                y1="0"
-                                x2={5 + activeCurveMonth * 18}
-                                y2="50"
-                                stroke="rgba(192, 193, 255, 0.25)"
-                                strokeWidth="1"
-                                strokeDasharray="1,1"
-                              />
-                            )}
-
-                            {/* Interactivity Overlay Hotspots */}
-                            {[0, 1, 2, 3, 4, 5].map((monthIdx) => (
-                              <rect
-                                key={monthIdx}
-                                x={monthIdx * 18}
-                                y="0"
-                                width="18"
-                                height="50"
-                                fill="transparent"
-                                className="cursor-pointer"
-                                onMouseEnter={() => setActiveCurveMonth(monthIdx)}
-                                onMouseLeave={() => setActiveCurveMonth(null)}
-                              />
-                            ))}
-                          </svg>
-
-                          {/* Chart Tooltips */}
-                          {activeCurveMonth !== null && (
-                            <div
-                              className="absolute bg-surface-container-high border border-white/10 rounded-lg p-2 text-[9px] text-white font-label-mono space-y-0.5 shadow-xl pointer-events-none z-30"
-                              style={{
-                                left: `${10 + activeCurveMonth * 15}%`,
-                                top: "10%"
-                              }}
-                            >
-                              <p className="font-extrabold text-primary border-b border-white/5 pb-0.5 mb-1">
-                                {["12月", "1月", "2月", "3月", "4月", "5月", "6月"][activeCurveMonth + 1]} 评估数据
-                              </p>
-                              <p className="flex justify-between items-center gap-3">
-                                <span>技术深度:</span>
-                                <span className="text-tertiary font-bold">{[45, 52, 58, 65, 75, 82][activeCurveMonth]}分</span>
-                              </p>
-                              <p className="flex justify-between items-center gap-3">
-                                <span>系统设计:</span>
-                                <span className="text-blue-400 font-bold">{[38, 45, 50, 58, 64, 72][activeCurveMonth]}分</span>
-                              </p>
-                              <p className="flex justify-between items-center gap-3">
-                                <span>表达能力:</span>
-                                <span className="text-purple-400 font-bold">{[25, 28, 35, 41, 40, 48][activeCurveMonth]}分</span>
-                              </p>
+                        {/* 能力成长曲线图 (真实数据) */}
+                        <div className="relative w-full h-[150px] mt-2">
+                          {isLoadingGrowth ? (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                             </div>
+                          ) : (
+                            <GrowthCurveChart
+                              points={growthPoints}
+                              axisLabels={growthAxisLabels}
+                              compact
+                              onPointClick={handleGrowthPointClick}
+                            />
                           )}
-                        </div>
-
-                        {/* Chart X Axis Labels */}
-                        <div className="flex justify-between text-[11px] font-label-mono text-on-surface-variant/40 px-2 font-bold select-none">
-                          <span>12月</span>
-                          <span>1月</span>
-                          <span>2月</span>
-                          <span>3月</span>
-                          <span>4月</span>
-                          <span>5月</span>
-                          <span>6月</span>
                         </div>
                       </div>
                     </div>
@@ -1971,53 +1935,54 @@ export default function CareerMemoryDashboard() {
                   <div>
                     <h3 className="text-lg font-black text-white flex items-center gap-2">
                       <span className="material-symbols-outlined text-base text-primary">trending_up</span>
-                      求职轨迹全景追踪
+                      能力成长曲线
                     </h3>
-                    <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">记录自开始调试以来的全局指标演进历程</p>
+                    <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">基于 {growthTotal} 次面试分析的五个能力维度演变趋势</p>
                   </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 pb-6 border-b border-white/5">
-                    {[
-                      { label: "平均综合得分", value: "79.4", diff: "+12.5%", isUp: true },
-                      { label: "累积问答次数", value: "142", diff: "+48", isUp: true },
-                      { label: "项目亮点提炼", value: "12个", diff: "+3", isUp: true },
-                      { label: "弱点覆盖突破", value: "65%", diff: "+18%", isUp: true }
-                    ].map((card, i) => (
-                      <div key={i} className="p-4.5 rounded-2xl bg-white/[0.01] border border-white/5 space-y-2">
-                        <span className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-extrabold uppercase">{card.label}</span>
-                        <div className="flex justify-between items-baseline">
+                  {/* 统计卡片 —— 动态计算 */}
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4 pb-6 border-b border-white/5">
+                    {(() => {
+                      const avg = (key: string) => {
+                        if (growthPoints.length === 0) return "—";
+                        const sum = growthPoints.reduce((s, p) => s + (p.scores[key as keyof typeof p.scores] ?? 0), 0);
+                        return Math.round(sum / growthPoints.length).toString();
+                      };
+                      return [
+                        { label: "分析总次数", value: growthTotal.toString() },
+                        { label: "细节深度均分", value: avg("expression") },
+                        { label: "逻辑自洽均分", value: avg("logic") },
+                        { label: "业务理解均分", value: avg("project_depth") },
+                        { label: "技术广度均分", value: avg("system_design") },
+                      ].map((card, i) => (
+                        <div key={i} className="p-4 rounded-2xl bg-white/[0.01] border border-white/5 space-y-1.5">
+                          <span className="text-[12px] text-on-surface-variant/50 font-extrabold uppercase">{card.label}</span>
                           <h4 className="text-2xl font-black text-white font-label-mono">{card.value}</h4>
-                          <span className={`text-[13px] md:text-[14px] font-black font-label-mono ${card.isUp ? "text-tertiary" : "text-primary"}`}>
-                            {card.diff}
-                          </span>
                         </div>
-                      </div>
-                    ))}
+                      ));
+                    })()}
                   </div>
 
-                  <div className="space-y-4">
-                    <h4 className="text-xs font-black text-white font-label-mono uppercase tracking-widest text-primary">月度重大里程碑</h4>
-                    <div className="relative pl-6 space-y-6 py-2">
-                      <div className="absolute left-2.5 top-2 bottom-2 w-0.5 bg-white/5"></div>
-                      
-                      {[
-                        { month: "6月 · 中期飞跃", desc: "在腾讯科技与字节跳动的一二面中，技术深度指标评测上浮至85分，架构设计底座思维得到AI的高星级认可。", ok: true },
-                        { month: "5月 · 方案攻克", desc: "结合Saga分布式事务和Redis缓存的对比练习，系统消除了此前在‘双写一致性’分析阶段经常出现的断层问题。", ok: true },
-                        { month: "4月 · 指标建立", desc: "完成首批4个项目的重构指标量化分析，提炼并锁定了‘双写缓冲’等核心话术的QPS度量指标。", ok: true },
-                        { month: "3月 · 初入看板", desc: "正式激活AI长期记忆看板，首次记录下职业记忆评估数据并开启弱点追踪演习。", ok: true }
-                      ].map((mile, i) => (
-                        <div key={i} className="relative flex justify-between items-start gap-4">
-                          <div className={`absolute -left-6 top-1 w-3.5 h-3.5 rounded-full border border-background z-10 ${
-                            mile.ok ? "bg-primary" : "bg-white/5"
-                          }`} />
-                          <div className="space-y-1">
-                            <h5 className="text-xs font-black text-white">{mile.month}</h5>
-                            <p className="text-[11px] text-on-surface-variant/65 leading-relaxed font-semibold max-w-2xl">{mile.desc}</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                  {/* 全尺寸能力成长曲线图 */}
+                  <div className="w-full h-[300px]">
+                    {isLoadingGrowth ? (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                      </div>
+                    ) : (
+                      <GrowthCurveChart
+                        points={growthPoints}
+                        axisLabels={growthAxisLabels}
+                        onPointClick={handleGrowthPointClick}
+                      />
+                    )}
                   </div>
+
+                  {growthTotal > 0 && (
+                    <p className="text-[11px] text-on-surface-variant/30 font-semibold text-center">
+                      共 {growthTotal} 次面试分析 · X 轴按分析次数排列 · 鼠标悬停查看详情 · 点击跳转报告
+                    </p>
+                  )}
                 </div>
               )}
 
