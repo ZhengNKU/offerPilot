@@ -429,3 +429,102 @@ async def refresh_project(
         "message": "刷新任务已启动，请稍后查看结果",
         "project_id": project_id,
     }
+
+
+# ============================================================================
+# 能力成长曲线
+# ============================================================================
+
+FIVE_DIMENSION_KEYS = ("expression", "logic", "project_depth", "ownership", "system_design")
+
+
+def _extract_five_scores(analysis_result: Optional[dict]) -> Optional[dict[str, int]]:
+    """从 analysis_result JSONB 中安全提取五个维度评分。
+
+    返回 None 表示无效（无 scores 或任一维度缺失/非数字）。
+    """
+    if not isinstance(analysis_result, dict):
+        return None
+    scores_raw = analysis_result.get("scores")
+    if not isinstance(scores_raw, dict):
+        return None
+    out = {}
+    for k in FIVE_DIMENSION_KEYS:
+        v = scores_raw.get(k)
+        if not isinstance(v, (int, float)):
+            return None
+        out[k] = int(v)
+    return out
+
+
+def _compute_axis_labels(total: int) -> list:
+    """X 轴 6 个刻度对应的 analysis_index 列表。
+
+    - total ≤ 6: labels = [1, 2, 3, 4, 5, 6]（固定展示 1-6 次）
+    - total > 6: 均匀采样 6 个整数，首尾固定 1 和 total
+    """
+    if total <= 0:
+        return [1, 2, 3, 4, 5, 6]
+    if total <= 6:
+        return [1, 2, 3, 4, 5, 6]
+    # 均匀采样 6 个点
+    labels = []
+    for i in range(6):
+        idx = round(1 + i * (total - 1) / 5)
+        labels.append(idx)
+    return labels
+
+
+@router.get("/growth-curve")
+async def get_growth_curve(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
+    """返回当前用户所有已完成面试分析的五个维度评分时间序列。
+
+    仅取 interview_sessions（音频上传 + 文本记录），不包含实时模拟面试与简历分析。
+    """
+    if not current_user:
+        return {"points": [], "total_analyses": 0, "axis_labels": [1, 2, 3, 4, 5, 6]}
+
+    stmt = (
+        select(models.InterviewSession)
+        .where(
+            models.InterviewSession.user_id == current_user.id,
+            models.InterviewSession.status == "completed",
+        )
+        .order_by(models.InterviewSession.created_at.asc())
+    )
+    result = await db.execute(stmt)
+    sessions = result.scalars().all()
+
+    points = []
+    for s in sessions:
+        scores = _extract_five_scores(s.analysis_result)
+        if scores is None:
+            continue
+        # 判断类型：audio_url == "text_mode" 为文本记录模式
+        session_type = "text" if s.audio_url == "text_mode" else "audio"
+        points.append({
+            "session_id": s.id,
+            "session_title": s.title or "",
+            "type": session_type,
+            "analysis_time": s.created_at.isoformat() if s.created_at else None,
+            "scores": scores,
+        })
+
+    # 按 analysis_time 升序（已由 SQL 保证），分配 analysis_index
+    for i, pt in enumerate(points):
+        pt["analysis_index"] = i + 1
+
+    total = len(points)
+    axis_labels = _compute_axis_labels(total)
+
+    logger.info(
+        f"[memory] growth-curve user_id={current_user.id} total={total}"
+    )
+    return {
+        "points": points,
+        "total_analyses": total,
+        "axis_labels": axis_labels,
+    }
