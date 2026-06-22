@@ -275,6 +275,18 @@ class ProjectMemory(Base):
     duration: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     mastery_level: Mapped[int] = mapped_column(Integer, default=50)
     mention_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_mentioned_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, comment="最近一次在面试中被提及的时间"
+    )
+    last_mentioned_session_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("interview_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="最近一次提及来源的面试会话ID",
+    )
+    last_mentioned_summary: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True, comment="最近提及摘要，格式: 2026/06/21·中兴通讯后端开发工程师面试"
+    )
     importance: Mapped[int] = mapped_column(Integer, default=50)
     source_type: Mapped[str] = mapped_column(String(20), default="resume_analysis")
     source_resume_analysis_id: Mapped[Optional[int]] = mapped_column(

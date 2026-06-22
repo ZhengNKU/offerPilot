@@ -205,10 +205,14 @@ def _safe_json_parse(text: str, log_label: str = "") -> dict | list | None:
 async def analyze_interview_dialogue(
     dialogue_text: str,
     profile_data: Optional[dict] = None,
-    job_description: Optional[str] = None
+    job_description: Optional[str] = None,
+    existing_projects: Optional[list[dict]] = None,
 ) -> Dict[str, Any]:
     """
     Calls MiniMax-M3 API to analyze the interview dialogue and return evaluation results in JSON.
+
+    existing_projects: 用户已有的项目记忆列表 [{"id": int, "project_name": str}, ...]
+        LLM 在提取 mentioned_projects 时会直接填 matched_existing_id。
     """
     system_prompt = (
         "你是一个专业的 AI 面试教练。你需要根据候选人的面试对话内容进行深度评估。\n"
@@ -216,6 +220,18 @@ async def analyze_interview_dialogue(
         "如果提供了目标岗位的岗位详情（JD / Job Description），请着重结合该岗位的技能、职责及期望，深入匹配并评估候选人的技术水平、项目契合度以及表达逻辑。\n"
         "你必须以 JSON 格式返回评估结果，无需 any Markdown 标记或其它多余的前后导言，只返回纯 JSON 对象字符串。\n"
         "JSON 结构必须严格符合以下属性格式：\n"
+        "\n"
+        "除了上述评估维度外，你还需要识别面试对话中候选人具体讨论过的项目经历。\n"
+        "识别标准：\n"
+        "  - 候选人主动介绍自己做过/负责过的具体项目\n"
+        "  - 面试官针对某个项目进行追问（技术细节、架构选型、指标等）\n"
+        "  - 候选人在回答技术问题时引用具体项目案例\n"
+        "以下情况不算项目提及：\n"
+        "  - 泛泛而谈的技术讨论未关联具体项目（如「我们一般用 Redis 做缓存」）\n"
+        "  - 假设性的场景题回答（如「如果让我设计...」）\n"
+        "  - 纯理论/八股文回答未涉及具体项目\n"
+        "每个识别到的项目输出：project_name（使用对话中实际提到的名称，最多30字）、discussion_depth（0-100，评估讨论深度）、matched_existing_id（整数或null，见下方已有项目列表）。\n"
+        "如果完全没有讨论任何具体项目，返回空数组 []。\n"
         "{\n"
         "  \"ipi_score\": 75, // 综合素质评分（0-100之间的整数）\n"
         "  \"offer_probability\": 60, // 拿到Offer的概率百分比（0-100之间的整数）\n"
@@ -247,7 +263,10 @@ async def analyze_interview_dialogue(
         "  \"followup_paths\": [\n"
         "    { \"title\": \"阶段问题，如：Q1 自我介绍 · 引导切入\", \"desc\": \"具体的引导或追问描述\", \"tag\": \"良好\" },\n"
         "    { \"title\": \"阶段问题，如：Q3 Redis 选型 · 主动深挖\", \"desc\": \"具体的引导或追问描述\", \"tag\": \"风险\" }\n"
-        "  ] // 追问路径（3-4项，tag只能是'良好'、'一般'或'风险'之一，真实呈现追问轨迹）\n"
+        "  ], // 追问路径（3-4项，tag只能是'良好'、'一般'或'风险'之一，真实呈现追问轨迹）\n"
+        "  \"mentioned_projects\": [\n"
+        "    { \"project_name\": \"项目名称（使用对话中实际提到的名称，最多30字）\", \"discussion_depth\": 75, \"matched_existing_id\": 3 }\n"
+        "  ] // 面试中讨论到的项目经历（0-5项，未讨论任何项目时为空数组 []）。matched_existing_id 填已有项目列表中的 id，无匹配填 null\n"
         "}"
     )
     
@@ -256,6 +275,11 @@ async def analyze_interview_dialogue(
         user_content += f"\n候选人画像：\n{json.dumps(profile_data, ensure_ascii=False)}\n"
     if job_description:
         user_content += f"\n岗位详情 (Job Description)：\n{job_description}\n"
+    if existing_projects:
+        user_content += (
+            f"\n候选人已有的项目记忆（你在 mentioned_projects 中请直接填 matched_existing_id）：\n"
+            f"{json.dumps(existing_projects, ensure_ascii=False)}\n"
+        )
         
     payload = {
         "model": "MiniMax-M3",
