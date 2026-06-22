@@ -2232,7 +2232,6 @@ export default function InterviewRecordAnalysisPage() {
       </AnimatePresence>
 
       </div>
-
     </div>
   );
 }
