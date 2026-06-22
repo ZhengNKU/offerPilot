@@ -281,7 +281,7 @@ export default function RegisterPage() {
   const [expMonths, setExpMonths] = useState("6个月");
   const [companyName, setCompanyName] = useState("字节跳动");
   const [roleName, setRoleName] = useState("后端开发工程师");
-  const [salaryMin, setSalaryMin] = useState(25);
+  const [salaryMin, setSalaryMin] = useState(2);
   const [salaryMax, setSalaryMax] = useState(35);
   const [school, setSchool] = useState("清华大学");
   const [degree, setDegree] = useState("本科");
@@ -370,7 +370,7 @@ export default function RegisterPage() {
   const [targetCompany, setTargetCompany] = useState("");
   const [targetRole, setTargetRole] = useState("");
   const [targetGrade, setTargetGrade] = useState("高级");
-  const [targetSalaryMin, setTargetSalaryMin] = useState(25);
+  const [targetSalaryMin, setTargetSalaryMin] = useState(2);
   const [targetSalaryMax, setTargetSalaryMax] = useState(35);
   
   // Other Preferences
@@ -1259,7 +1259,7 @@ export default function RegisterPage() {
                             <div className="flex items-center gap-3.5 py-1">
                               <input
                                 type="range"
-                                min="5"
+                                min="1"
                                 max="50"
                                 value={salaryMin}
                                 onChange={(e) => setSalaryMin(Math.min(salaryMax - 2, parseInt(e.target.value)))}
@@ -1267,7 +1267,7 @@ export default function RegisterPage() {
                               />
                               <input
                                 type="range"
-                                min="5"
+                                min="1"
                                 max="50"
                                 value={salaryMax}
                                 onChange={(e) => setSalaryMax(Math.max(salaryMin + 2, parseInt(e.target.value)))}
@@ -1540,7 +1540,7 @@ export default function RegisterPage() {
                             <div className="flex items-center gap-3.5 py-1.5">
                               <input
                                 type="range"
-                                min="5"
+                                min="1"
                                 max="50"
                                 value={targetSalaryMin}
                                 onChange={(e) => setTargetSalaryMin(Math.min(targetSalaryMax - 2, parseInt(e.target.value)))}
@@ -1548,7 +1548,7 @@ export default function RegisterPage() {
                               />
                               <input
                                 type="range"
-                                min="5"
+                                min="1"
                                 max="50"
                                 value={targetSalaryMax}
                                 onChange={(e) => setTargetSalaryMax(Math.max(targetSalaryMin + 2, parseInt(e.target.value)))}
