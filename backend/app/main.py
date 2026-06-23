@@ -1,7 +1,13 @@
 import asyncio
 import logging
 import os
+import sys
 import uvicorn
+
+# asyncpg 在 Windows 上需要 SelectorEventLoop
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base

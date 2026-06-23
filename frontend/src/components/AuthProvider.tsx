@@ -25,6 +25,8 @@ export interface UserProfile {
   membership?: string;
   phone?: string;
   email?: string;
+  targetCity?: string;
+  createdAt?: string;
 }
 
 interface AuthContextType {
@@ -238,6 +240,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.targetCompany !== undefined) body.target_company = data.targetCompany;
         if (data.targetRole !== undefined) body.target_role = data.targetRole;
         if (data.targetGrade !== undefined) body.target_grade = data.targetGrade;
+        if (data.targetCity !== undefined) body.target_cities = [data.targetCity];
         if (data.targetSalary !== undefined) {
           const salMatch = data.targetSalary.match(/(\d+)K\s*-\s*(\d+)K/i);
           if (salMatch) {

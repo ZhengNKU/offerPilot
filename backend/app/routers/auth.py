@@ -46,7 +46,9 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
         is_online=user.is_online,
         membership=user.membership,
         phone=user.phone,
-        email=user.email
+        email=user.email,
+        targetCity=p.target_cities[0] if p.target_cities else None,
+        createdAt=user.created_at.isoformat() if user.created_at else None
     )
 
 # FastAPI dependency to fetch logged-in user details

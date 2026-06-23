@@ -139,14 +139,18 @@ export default function CareerDashboard() {
         age: auth.user.age || prev.age,
         school: auth.user.school || prev.school,
         degree: auth.user.degree || prev.degree,
-        gradYear: auth.user.gradYear || prev.gradYear
+        gradYear: auth.user.gradYear || prev.gradYear,
+        joinDays: auth.user.createdAt
+          ? Math.floor((Date.now() - new Date(auth.user.createdAt).getTime()) / 86400000)
+          : prev.joinDays
       }));
       setCareerGoal(prev => ({
         ...prev,
         role: auth.user.targetRole || prev.role,
         level: auth.user.targetGrade || prev.level,
         salary: auth.user.targetSalary || prev.salary,
-        company: auth.user.targetCompany || prev.company
+        company: auth.user.targetCompany || prev.company,
+        city: auth.user.targetCity || prev.city
       }));
       setAccountSecurity(prev => ({
         ...prev,
@@ -196,7 +200,8 @@ export default function CareerDashboard() {
       targetRole: goalForm.role,
       targetGrade: goalForm.level,
       targetSalary: goalForm.salary,
-      targetCompany: goalForm.company
+      targetCompany: goalForm.company,
+      targetCity: goalForm.city
     });
     setShowEditGoalModal(false);
   };
@@ -482,7 +487,7 @@ export default function CareerDashboard() {
                   </span>
                   <span className="flex items-center gap-1.5 whitespace-nowrap">
                     <span className="material-symbols-outlined text-xs text-primary">location_on</span>
-                    {profile.city}
+                    {careerGoal.city}
                   </span>
                   <span className="flex items-center gap-1.5 whitespace-nowrap">
                     <span className="material-symbols-outlined text-xs text-primary">calendar_today</span>
