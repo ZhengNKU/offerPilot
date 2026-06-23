@@ -80,6 +80,8 @@ class UserProfileResponse(BaseModel):
     membership: Optional[str] = None
     phone: Optional[str] = None
     email: Optional[str] = None
+    targetCity: Optional[str] = None
+    createdAt: Optional[str] = None
 
 class TokenResponse(BaseModel):
     access_token: str
