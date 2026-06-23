@@ -990,23 +990,13 @@ export default function CareerMemoryDashboard() {
                   <div className="col-span-12 md:col-span-5 flex flex-col">
                     <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-4">
                       <div className="space-y-4 flex-1">
-                        <div className="flex justify-between items-center">
+                        <div>
                           <div>
                             <h4 className="text-base font-black text-white flex items-center gap-2">
                               <span className="material-symbols-outlined text-base text-primary">trending_up</span>
                               能力成长曲线
                             </h4>
-                            <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">过去 6 个月各维度技能长效演变</p>
-                          </div>
-                          
-                          {/* Period Selector Dropdown */}
-                          <div className="relative">
-                            <button
-                              onClick={handleInterceptAction}
-                              className="px-2.5 py-1 bg-white/5 border border-white/10 rounded-lg text-xs font-black text-on-surface-variant flex items-center gap-1.5 cursor-pointer"
-                            >
-                              6 个月<span className="material-symbols-outlined text-[11px]">expand_more</span>
-                            </button>
+                            <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">基于 {growthTotal} 次面试分析的五个能力尾端演变趋势</p>
                           </div>
                         </div>
 
@@ -1949,10 +1939,10 @@ export default function CareerMemoryDashboard() {
                         return Math.round(sum / growthPoints.length).toString();
                       };
                       return [
-                        { label: "分析总次数", value: growthTotal.toString() },
                         { label: "细节深度均分", value: avg("expression") },
                         { label: "逻辑自洽均分", value: avg("logic") },
                         { label: "业务理解均分", value: avg("project_depth") },
+                        { label: "数据指标均分", value: avg("ownership") },
                         { label: "技术广度均分", value: avg("system_design") },
                       ].map((card, i) => (
                         <div key={i} className="p-4 rounded-2xl bg-white/[0.01] border border-white/5 space-y-1.5">
