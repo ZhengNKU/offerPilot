@@ -73,7 +73,7 @@ export default function CareerMemoryDashboard() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showLoginModal, setShowLoginModal] = useState(false);
-  const [activeOfferMonth, setActiveOfferMonth] = useState<number | null>(null);
+  const [activeOfferIdx, setActiveOfferIdx] = useState<number | null>(null);
   const [searchSidebarQuery, setSearchSidebarQuery] = useState("");
   const [activeTimelineFilter, setActiveTimelineFilter] = useState("all");
   // 时间轴分页：每页 10 条，filter/search 变更时自动回到第 1 页
@@ -88,6 +88,16 @@ export default function CareerMemoryDashboard() {
   const [growthAxisLabels, setGrowthAxisLabels] = useState<(number | null)[]>([]);
   const [growthTotal, setGrowthTotal] = useState(0);
   const [isLoadingGrowth, setIsLoadingGrowth] = useState(false);
+
+  // Offer 概率预测
+  const [offerTrendPoints, setOfferTrendPoints] = useState<any[]>([]);
+  const [offerCurrentProb, setOfferCurrentProb] = useState<number | null>(null);
+  const [offerTotalSessions, setOfferTotalSessions] = useState(0);
+  const [offerSuggestion, setOfferSuggestion] = useState<{
+    focus_areas: string[];
+    potential_probability: number;
+  } | null>(null);
+  const [isLoadingOfferTrend, setIsLoadingOfferTrend] = useState(false);
 
   const [avatarError, setAvatarError] = useState(false);
 
@@ -323,6 +333,34 @@ export default function CareerMemoryDashboard() {
     router.push(`/debugger/report?sessionId=${sessionId}`);
   }, [router]);
 
+  const fetchOfferTrend = async () => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+    if (!auth.isLoggedIn || !token) {
+      setOfferTrendPoints([]);
+      setOfferCurrentProb(null);
+      setOfferTotalSessions(0);
+      setOfferSuggestion(null);
+      return;
+    }
+    setIsLoadingOfferTrend(true);
+    try {
+      const res = await fetch("http://localhost:8001/api/live/offer-trend", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setOfferTrendPoints(data.points || []);
+        setOfferCurrentProb(data.current_probability ?? null);
+        setOfferTotalSessions(data.total_sessions || 0);
+        setOfferSuggestion(data.suggestion || null);
+      }
+    } catch (err) {
+      console.error("Failed to fetch offer trend:", err);
+    } finally {
+      setIsLoadingOfferTrend(false);
+    }
+  };
+
   const fetchProjects = async () => {
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
     if (!auth.isLoggedIn || !token) {
@@ -378,11 +416,13 @@ export default function CareerMemoryDashboard() {
     fetchSessions();
     fetchProjects();
     fetchGrowthCurve();
+    fetchOfferTrend();
 
     const handleStorageChange = () => {
       fetchSessions();
       fetchProjects();
       fetchGrowthCurve();
+      fetchOfferTrend();
     };
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
@@ -1080,7 +1120,7 @@ export default function CareerMemoryDashboard() {
                             AI 洞察
                           </div>
                           <p className="text-xs text-on-surface-variant/80 leading-relaxed font-bold">
-                            你的核心问题在于“架构对比和方案折中分析能力”不足，而非单纯技术深度不够。
+                            你的核心问题在于"架构对比和方案折中分析能力"不足，而非单纯技术深度不够。
                           </p>
                           <a
                             onClick={() => handleTabChange("weaknesses")}
@@ -1244,10 +1284,16 @@ export default function CareerMemoryDashboard() {
                           <div>
                             <span className="text-xs text-on-surface-variant/40 font-extrabold uppercase">当前 Offer 概率</span>
                             <h3 className="text-4xl font-black text-white mt-1 font-label-mono">
-                              67<span className="text-lg text-on-surface-variant/50 font-normal">%</span>
+                              {isLoadingOfferTrend ? (
+                                <span className="text-on-surface-variant/30">—</span>
+                              ) : offerCurrentProb !== null ? (
+                                <>{offerCurrentProb}<span className="text-lg text-on-surface-variant/50 font-normal">%</span></>
+                              ) : (
+                                <span className="text-on-surface-variant/30">—</span>
+                              )}
                             </h3>
                           </div>
-                          
+
                           {/* Pulsing indicator core */}
                           <div className="relative w-12 h-12 flex items-center justify-center bg-primary/10 rounded-full border border-primary/20">
                             <span className="material-symbols-outlined text-xl text-primary animate-pulse">verified_user</span>
@@ -1256,99 +1302,136 @@ export default function CareerMemoryDashboard() {
 
                         {/* Interactive Prediction SVG Graph */}
                         <div className="relative w-full h-[95px] select-none group/offer">
-                          <svg className="w-full h-full" viewBox="0 0 100 50" preserveAspectRatio="none">
-                            {/* SVG Gradients definitions */}
-                            <defs>
-                              <linearGradient id="offer-area-gradient" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#10b981" stopOpacity="0.2" />
-                                <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
-                              </linearGradient>
-                              <linearGradient id="offer-line-gradient" x1="0" y1="0" x2="1" y2="0">
-                                <stop offset="0%" stopColor="#3b82f6" />
-                                <stop offset="50%" stopColor="#10b981" />
-                                <stop offset="100%" stopColor="#22d3ee" />
-                              </linearGradient>
-                            </defs>
-
-                            {/* Filled Area below path */}
-                            <path d="M 5,42 L 23,39 L 41,35 L 59,28 L 77,25 L 95,22 L 95,50 L 5,50 Z" fill="url(#offer-area-gradient)" />
-                            
-                            {/* Sparkline Path - values: 38, 42, 46, 59, 63, 67 */}
-                            <path d="M 5,42 L 23,39 L 41,35 L 59,28 L 77,25 L 95,22" fill="none" stroke="url(#offer-line-gradient)" strokeWidth="1.2" strokeLinecap="round" />
-
-                            {/* Interactive month circle overlay indicators */}
-                            {[0, 1, 2, 3, 4, 5].map((valIdx) => {
-                              const x = 5 + valIdx * 18;
-                              const y = [42, 39, 35, 28, 25, 22][valIdx];
-                              const isHovered = activeOfferMonth === valIdx;
-                              return (
-                                <g key={valIdx}>
-                                  <circle
-                                    cx={x}
-                                    cy={y}
-                                    r={isHovered ? 2.5 : 1.2}
-                                    fill={isHovered ? "#fff" : "#10b981"}
-                                    stroke="#0b0d19"
-                                    strokeWidth="0.5"
-                                    className="transition-all duration-150"
-                                  />
-                                  {isHovered && (
-                                    <circle
-                                      cx={x}
-                                      cy={y}
-                                      r="4.5"
-                                      fill="transparent"
-                                      stroke="#10b981"
-                                      strokeWidth="0.5"
-                                      className="animate-ping"
-                                    />
-                                  )}
-                                </g>
-                              );
-                            })}
-
-                            {/* Hotspot triggers overlay */}
-                            {[0, 1, 2, 3, 4, 5].map((valIdx) => (
-                              <rect
-                                key={valIdx}
-                                x={valIdx * 18}
-                                y="0"
-                                width="18"
-                                height="50"
-                                fill="transparent"
-                                className="cursor-pointer"
-                                onMouseEnter={() => setActiveOfferMonth(valIdx)}
-                                onMouseLeave={() => setActiveOfferMonth(null)}
-                              />
-                            ))}
-                          </svg>
-
-                          {/* Prediction monthly labels */}
-                          <div className="flex justify-between text-[10px] font-label-mono text-on-surface-variant/40 px-2 font-bold select-none mt-1">
-                            <span>1月 (38%)</span>
-                            <span>2月</span>
-                            <span>3月</span>
-                            <span>4月</span>
-                            <span>5月</span>
-                            <span>6月 (67%)</span>
-                          </div>
-
-                          {/* Tooltip Popup */}
-                          {activeOfferMonth !== null && (
-                            <div
-                              className="absolute bg-surface-container-high border border-white/10 rounded-lg p-2 text-[9px] text-white font-label-mono shadow-xl pointer-events-none z-30"
-                              style={{
-                                left: `${5 + activeOfferMonth * 14}%`,
-                                top: "5%"
-                              }}
-                            >
-                              <span className="font-extrabold text-primary block">
-                                {["1月", "2月", "3月", "4月", "5月", "6月"][activeOfferMonth]} 预测概率
-                              </span>
-                              <span className="text-tertiary font-black font-label-mono mt-0.5 block">
-                                {[38, 42, 46, 59, 63, 67][activeOfferMonth]}% Offer 概率
-                              </span>
+                          {isLoadingOfferTrend ? (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                             </div>
+                          ) : offerTrendPoints.length === 0 ? (
+                            <div className="flex items-center justify-center h-full text-[11px] text-on-surface-variant/40 font-semibold">
+                              暂无实时模拟面试数据
+                            </div>
+                          ) : (
+                            <>
+                              <svg className="w-full h-full" viewBox="0 0 100 50" preserveAspectRatio="none">
+                                {/* SVG Gradients definitions */}
+                                <defs>
+                                  <linearGradient id="offer-area-gradient" x1="0" y1="0" x2="0" y2="1">
+                                    <stop offset="0%" stopColor="#10b981" stopOpacity="0.2" />
+                                    <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+                                  </linearGradient>
+                                  <linearGradient id="offer-line-gradient" x1="0" y1="0" x2="1" y2="0">
+                                    <stop offset="0%" stopColor="#3b82f6" />
+                                    <stop offset="50%" stopColor="#10b981" />
+                                    <stop offset="100%" stopColor="#22d3ee" />
+                                  </linearGradient>
+                                </defs>
+
+                                {(() => {
+                                  const total = offerTrendPoints.length;
+                                  const padL = 5;
+                                  const padR = 5;
+                                  const viewW = 100;
+                                  const viewH = 50;
+                                  const padT = 5;
+                                  const padB = 5;
+                                  const chartW = viewW - padL - padR;
+                                  const chartH = viewH - padT - padB;
+
+                                  const idxToX = (i: number) => {
+                                    if (total <= 1) return padL + chartW / 2;
+                                    return padL + ((i - 1) / (total - 1)) * chartW;
+                                  };
+                                  const probToY = (p: number) => {
+                                    return padT + chartH * (1 - Math.max(0, Math.min(100, p)) / 100);
+                                  };
+
+                                  const lineCoords = offerTrendPoints.map((pt, i) => ({
+                                    x: idxToX(i + 1),
+                                    y: probToY(pt.offer_probability ?? 0),
+                                  }));
+
+                                  // Area path
+                                  const areaD = lineCoords.length > 0
+                                    ? lineCoords.map((c, i) => `${i === 0 ? "M" : "L"} ${c.x},${c.y}`).join(" ")
+                                      + ` L ${lineCoords[lineCoords.length - 1].x},${padT + chartH}`
+                                      + ` L ${lineCoords[0].x},${padT + chartH} Z`
+                                    : "";
+                                  // Line path
+                                  const lineD = lineCoords.map((c, i) => `${i === 0 ? "M" : "L"} ${c.x},${c.y}`).join(" ");
+
+                                  // Hot zone boundaries
+                                  const hotZones = lineCoords.map((_, i) => {
+                                    const left = i === 0 ? padL : (lineCoords[i].x + lineCoords[i - 1].x) / 2;
+                                    const right = i === total - 1 ? padL + chartW : (lineCoords[i].x + lineCoords[i + 1].x) / 2;
+                                    return { left, width: right - left };
+                                  });
+
+                                  return (
+                                    <>
+                                      {/* Filled Area below path */}
+                                      {lineCoords.length > 0 && (
+                                        <path d={areaD} fill="url(#offer-area-gradient)" />
+                                      )}
+                                      {/* Sparkline Path */}
+                                      {lineCoords.length > 0 && (
+                                        <path d={lineD} fill="none" stroke="url(#offer-line-gradient)" strokeWidth="1.2" strokeLinecap="round" />
+                                      )}
+
+                                      {/* Hotspot triggers overlay */}
+                                      {hotZones.map((zone, idx) => (
+                                        <rect
+                                          key={idx}
+                                          x={zone.left}
+                                          y="0"
+                                          width={zone.width}
+                                          height={viewH}
+                                          fill="transparent"
+                                          className="cursor-pointer"
+                                          onMouseEnter={() => setActiveOfferIdx(idx)}
+                                          onMouseLeave={() => setActiveOfferIdx(null)}
+                                        />
+                                      ))}
+                                    </>
+                                  );
+                                })()}
+                              </svg>
+
+                              {/* X-axis labels — 第1次 / 第2次 / ... 仅首尾显示百分比 */}
+                              {offerTrendPoints.length > 0 && (
+                                <div className="flex justify-between text-[10px] font-label-mono text-on-surface-variant/40 px-2 font-bold select-none mt-1">
+                                  {offerTrendPoints.map((pt, i) => {
+                                    const isFirst = i === 0;
+                                    const isLast = i === offerTrendPoints.length - 1 && offerTrendPoints.length > 1;
+                                    const showPercent = isFirst || isLast;
+                                    return (
+                                      <span key={i}>
+                                        {showPercent
+                                          ? `第${i + 1}次 (${pt.offer_probability}%)`
+                                          : `第${i + 1}次`}
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {/* Tooltip Popup */}
+                              {activeOfferIdx !== null && offerTrendPoints[activeOfferIdx] && (
+                                <div
+                                  className="absolute bg-surface-container-high border border-white/10 rounded-lg p-2 text-[9px] text-white font-label-mono shadow-xl pointer-events-none z-30"
+                                  style={{
+                                    left: `${5 + (activeOfferIdx / Math.max(1, offerTrendPoints.length - 1)) * 90}%`,
+                                    top: "5%"
+                                  }}
+                                >
+                                  <span className="font-extrabold text-primary block">
+                                    第{activeOfferIdx + 1}次预测概率
+                                  </span>
+                                  <span className="text-tertiary font-black font-label-mono mt-0.5 block">
+                                    {offerTrendPoints[activeOfferIdx].offer_probability}% Offer 概率
+                                  </span>
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
 
@@ -1356,7 +1439,15 @@ export default function CareerMemoryDashboard() {
                         <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-1 mt-2">
                           <span className="text-xs text-on-surface-variant/40 font-extrabold block">提升建议</span>
                           <p className="text-xs text-on-surface-variant/70 leading-relaxed font-semibold">
-                            如果重点提升“架构表达”和“项目指标量化能力”，预计整体概率可跃升至 <span className="text-tertiary font-black">85%</span>。
+                            {offerSuggestion ? (
+                              <>
+                                如果重点提升"{offerSuggestion.focus_areas.join("和")}"，预计整体概率可跃升至 <span className="text-tertiary font-black">{offerSuggestion.potential_probability}%</span>。
+                              </>
+                            ) : (
+                              <>
+                                完成首次实时模拟面试后，AI 将基于面试表现给出针对性提升建议。
+                              </>
+                            )}
                           </p>
                         </div>
                       </div>
@@ -2003,7 +2094,7 @@ export default function CareerMemoryDashboard() {
                               <span className="material-symbols-outlined text-sm text-primary">support_agent</span>
                             </div>
                             <div className="p-3.5 rounded-2xl bg-white/5 border border-white/5 text-xs text-on-surface-variant/80 font-semibold leading-relaxed">
-                              Dame，你好！我是你的专属AI职业顾问。基于你在“腾讯科技”、“字节跳动”等28次实战测试的反馈，我判定你当前非常契合 <span className="text-white font-extrabold">Staff Engineer</span> 的进阶期。你需要重点打磨架构方案折中与大厂级微服务控制体系。
+                              Dame，你好！我是你的专属AI职业顾问。基于你在"腾讯科技"、"字节跳动"等28次实战测试的反馈，我判定你当前非常契合 <span className="text-white font-extrabold">Staff Engineer</span> 的进阶期。你需要重点打磨架构方案折中与大厂级微服务控制体系。
                             </div>
                           </div>
 
@@ -2012,7 +2103,7 @@ export default function CareerMemoryDashboard() {
                               <span className="material-symbols-outlined text-sm text-secondary">person</span>
                             </div>
                             <div className="p-3.5 rounded-2xl bg-primary text-on-primary text-xs font-semibold leading-relaxed shadow-lg shadow-primary/15">
-                              如何突破在面试中被面试官频繁追问“为什么不选Kafka”这种系统设计八股？
+                              如何突破在面试中被面试官频繁追问"为什么不选Kafka"这种系统设计八股？
                             </div>
                           </div>
 
@@ -2021,7 +2112,7 @@ export default function CareerMemoryDashboard() {
                               <span className="material-symbols-outlined text-sm text-primary">support_agent</span>
                             </div>
                             <div className="p-3.5 rounded-2xl bg-white/5 border border-white/5 text-xs text-on-surface-variant/80 font-semibold leading-relaxed space-y-2">
-                              <p>这是一个经典的“非优解比对”题。回答这类型问题时，严禁背诵八股，请遵循以下三步法陈述：</p>
+                              <p>这是一个经典的"非优解比对"题。回答这类型问题时，严禁背诵八股，请遵循以下三步法陈述：</p>
                               <ol className="list-decimal list-inside space-y-1 font-bold text-white pl-1.5">
                                 <li>吞吐与可靠性折中：‘在我们的写缓冲场景下，数据高可靠是首位，RabbitMQ基于AMQP协议提供更严密的确认应答...’</li>
                                 <li>运维与团队成本：‘当时业务团队对RabbitMQ技术栈更为熟悉，引入Kafka会造成多组Zookeeper运维溢价...’</li>

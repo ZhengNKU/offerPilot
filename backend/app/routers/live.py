@@ -903,6 +903,76 @@ async def batch_delete_live_sessions(
     }
 
 
+
+
+# ---------- Offer 概率趋势（总览看板 CARD 6） ----------
+
+@router.get("/offer-trend")
+async def get_offer_trend(
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
+):
+    """返回当前用户所有已完成实时模拟面试的 Offer 概率时间序列。
+
+    专用于总览看板「Offer 概率预测」卡片折线图。
+    """
+    if not current_user:
+        return {
+            "current_probability": 0,
+            "points": [],
+            "total_sessions": 0,
+            "suggestion": None,
+        }
+
+    stmt = (
+        select(models.InterviewLiveSession)
+        .where(
+            models.InterviewLiveSession.user_id == current_user.id,
+            models.InterviewLiveSession.status == "completed",
+            models.InterviewLiveSession.offer_probability.isnot(None),
+        )
+        .order_by(models.InterviewLiveSession.created_at.asc())
+    )
+    result = await db.execute(stmt)
+    sessions = result.scalars().all()
+
+    points = []
+    for i, s in enumerate(sessions):
+        points.append({
+            "analysis_index": i + 1,
+            "live_id": s.id,
+            "target_role": s.target_role or "",
+            "analysis_time": s.created_at.isoformat() if s.created_at else None,
+            "offer_probability": s.offer_probability,
+        })
+
+    current = sessions[-1].offer_probability if sessions else 0
+
+    # 提升建议：基于最近一次面试的弱点总结
+    suggestion = None
+    if sessions:
+        latest = sessions[-1]
+        weaknesses = latest.summary_weaknesses or []
+        focus_areas = weaknesses[:2] if weaknesses else ["架构表达", "项目指标量化能力"]
+        cur_p = latest.offer_probability or 0
+        potential = min(99, cur_p + round((100 - cur_p) * 0.55))
+        suggestion = {
+            "focus_areas": focus_areas,
+            "potential_probability": potential,
+        }
+
+    logger.info(
+        f"[live] offer-trend user_id={current_user.id} total={len(points)} "
+        f"current={current}"
+    )
+    return {
+        "current_probability": current,
+        "points": points,
+        "total_sessions": len(points),
+        "suggestion": suggestion,
+    }
+
+
 # ---------- WebSocket 端点（PR2） ----------
 
 @router.websocket("/ws/{live_id}")
