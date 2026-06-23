@@ -1036,7 +1036,7 @@ export default function CareerMemoryDashboard() {
                               <span className="material-symbols-outlined text-base text-primary">trending_up</span>
                               能力成长曲线
                             </h4>
-                            <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">基于 {growthTotal} 次面试分析的五个能力尾端演变趋势</p>
+                            <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">基于 {growthTotal} 次面试分析的五个能力维度演变趋势</p>
                           </div>
                         </div>
 
