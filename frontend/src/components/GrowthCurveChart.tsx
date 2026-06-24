@@ -23,7 +23,11 @@ export interface GrowthCurveChartProps {
   points: GrowthPoint[];
   axisLabels: (number | null)[];
   compact?: boolean;
-  onPointClick?: (sessionId: number) => void;
+  onPointClick?: (point: GrowthPoint) => void;
+  /** 展示模式：recent=最近N次, all=全部（默认all保持向后兼容） */
+  mode?: "recent" | "all";
+  /** 最近N次的最大展示数量，默认6 */
+  maxRecentCount?: number;
 }
 
 // ── 维度配置 ────────────────────────────────────────────
@@ -79,6 +83,8 @@ export default function GrowthCurveChart({
   axisLabels,
   compact = false,
   onPointClick,
+  mode = "all",
+  maxRecentCount = 6,
 }: GrowthCurveChartProps) {
   const total = points.length;
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
@@ -116,25 +122,52 @@ export default function GrowthCurveChart({
     return { yMin, yMax };
   }, [points, total]);
 
-  // X 轴范围与有效刻度
-  const validTicks = useMemo(
-    () => axisLabels.filter((l) => l != null) as number[],
-    [axisLabels]
-  );
-  const xMin = validTicks.length > 0 ? validTicks[0] : 1;
-  const xMax = validTicks.length > 0 ? validTicks[validTicks.length - 1] : Math.max(1, total);
+  // ── mode 相关：展示数据点 ──────────────────────────
+  const displayPoints = useMemo(() => {
+    if (mode === "recent") {
+      return points.slice(-maxRecentCount);
+    }
+    return points;
+  }, [mode, points, maxRecentCount]);
+
+  // ── mode 相关：X 轴展示刻度 ───────────────────────
+  const displayTicks = useMemo(() => {
+    if (mode === "recent") {
+      if (total < maxRecentCount) {
+        // 总数不足 N → 强制展示 1..N（空位占位）
+        return Array.from({ length: maxRecentCount }, (_, i) => i + 1);
+      }
+      // 总数 ≥ N → 展示最后 N 个点的实际 analysis_index
+      return points.slice(-maxRecentCount).map((p) => p.analysis_index);
+    }
+    // "all" 模式：使用所有数据点的 analysis_index
+    // （不用后端 axis_labels 采样值，否则 >6 条时 hover 只能吸附到采样点）
+    return points.map((p) => p.analysis_index);
+  }, [mode, total, maxRecentCount, points]);
+
+  // ── mode 相关：X 轴可见标签（all 模式 > 6 条时仅首尾）─
+  const labelTicks = useMemo(() => {
+    if (mode === "all" && displayTicks.length > 6) {
+      return [displayTicks[0], displayTicks[displayTicks.length - 1]];
+    }
+    return displayTicks;
+  }, [mode, displayTicks]);
+
+  // X 轴范围
+  const xMin = displayTicks.length > 0 ? displayTicks[0] : 1;
+  const xMax = displayTicks.length > 0 ? displayTicks[displayTicks.length - 1] : Math.max(1, total);
 
   // ── 鼠标 → 吸附到最近的 X 轴刻度 ──────────────────
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
-      if (validTicks.length === 0) return;
+      if (displayTicks.length === 0) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const svgWidth = rect.width;
       const mx = e.clientX - rect.left;
 
-      let nearestIdx = validTicks[0];
+      let nearestIdx = displayTicks[0];
       let minDist = Infinity;
-      for (const tickIdx of validTicks) {
+      for (const tickIdx of displayTicks) {
         const svgX = indexToX(tickIdx, xMin, xMax, viewW, padL, padR);
         const px = (svgX / viewW) * svgWidth;
         const dist = Math.abs(mx - px);
@@ -145,8 +178,8 @@ export default function GrowthCurveChart({
       }
 
       // 超出刻度间距 60% 不吸附
-      if (validTicks.length >= 2) {
-        const tickSpacing = svgWidth / (validTicks.length - 1);
+      if (displayTicks.length >= 2) {
+        const tickSpacing = svgWidth / (displayTicks.length - 1);
         if (minDist > tickSpacing * 0.6) {
           setHoveredIdx(null);
           return;
@@ -160,16 +193,41 @@ export default function GrowthCurveChart({
       if (ty < 0) ty = 8;
       setTooltipPos({ x: tx, y: ty });
     },
-    [validTicks, xMin, xMax, viewW, padL, padR]
+    [displayTicks, xMin, xMax, viewW, padL, padR]
   );
 
   const handleMouseLeave = useCallback(() => setHoveredIdx(null), []);
 
-  const handleClick = useCallback(() => {
-    if (hoveredIdx === null || !onPointClick) return;
-    const pt = points.find((p) => p.analysis_index === hoveredIdx);
-    if (pt) onPointClick(pt.session_id);
-  }, [hoveredIdx, onPointClick, points]);
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!onPointClick || displayTicks.length === 0) return;
+      const rect = e.currentTarget.getBoundingClientRect();
+      const svgWidth = rect.width;
+      const mx = e.clientX - rect.left;
+
+      // 从点击坐标直接计算最近刻度（不依赖 hover 状态）
+      let nearestIdx: number | null = null;
+      let minDist = Infinity;
+      for (const tickIdx of displayTicks) {
+        const svgX = indexToX(tickIdx, xMin, xMax, viewW, padL, padR);
+        const px = (svgX / viewW) * svgWidth;
+        const dist = Math.abs(mx - px);
+        if (dist < minDist) {
+          minDist = dist;
+          nearestIdx = tickIdx;
+        }
+      }
+
+      if (displayTicks.length >= 2 && nearestIdx !== null) {
+        const tickSpacing = svgWidth / (displayTicks.length - 1);
+        if (minDist > tickSpacing * 0.6) return; // 离任何点都太远，忽略
+      }
+
+      const pt = points.find((p) => p.analysis_index === nearestIdx);
+      if (pt) onPointClick(pt);
+    },
+    [onPointClick, displayTicks, xMin, xMax, viewW, padL, padR, points]
+  );
 
   const hoveredPoint =
     hoveredIdx !== null
@@ -211,9 +269,9 @@ export default function GrowthCurveChart({
           />
         ))}
 
-        {/* ── 五条维度折线 ────────────────────────── */}
+        {/* ── 五条维度折线（使用 displayPoints 控制可见范围）── */}
         {DIMENSIONS.map((dim) => {
-          const coords = points.map((p) => ({
+          const coords = displayPoints.map((p) => ({
             x: indexToX(p.analysis_index, xMin, xMax, viewW, padL, padR),
             y: scoreToY(
               p.scores[dim.key as keyof typeof p.scores] ?? 0,
@@ -243,8 +301,8 @@ export default function GrowthCurveChart({
           );
         })}
 
-        {/* ── X 轴刻度短线（SVG 内） ──────────────── */}
-        {validTicks.map((tickIdx) => {
+        {/* ── X 轴刻度短线（SVG 内，使用 displayTicks）── */}
+        {displayTicks.map((tickIdx) => {
           const tx = indexToX(tickIdx, xMin, xMax, viewW, padL, padR);
           return (
             <line
@@ -270,9 +328,9 @@ export default function GrowthCurveChart({
         )}
       </svg>
 
-      {/* ── X 轴标签（HTML，百分比定位 → 与 SVG 刻度精确对齐）── */}
+      {/* ── X 轴标签（HTML 百分比定位 → 使用 labelTicks 控制可见标签）── */}
       <div className="relative w-full h-[18px] mt-0.5">
-        {validTicks.map((tickIdx) => {
+        {labelTicks.map((tickIdx) => {
           const svgX = indexToX(tickIdx, xMin, xMax, viewW, padL, padR);
           const pct = (svgX / viewW) * 100;
           return (

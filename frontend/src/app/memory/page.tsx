@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
@@ -88,6 +88,7 @@ export default function CareerMemoryDashboard() {
   const [growthAxisLabels, setGrowthAxisLabels] = useState<(number | null)[]>([]);
   const [growthTotal, setGrowthTotal] = useState(0);
   const [isLoadingGrowth, setIsLoadingGrowth] = useState(false);
+  const [growthMode, setGrowthMode] = useState<"recent" | "all">("recent");
 
   // Offer 概率预测
   const [offerTrendPoints, setOfferTrendPoints] = useState<any[]>([]);
@@ -98,6 +99,25 @@ export default function CareerMemoryDashboard() {
     potential_probability: number;
   } | null>(null);
   const [isLoadingOfferTrend, setIsLoadingOfferTrend] = useState(false);
+  const [offerMode, setOfferMode] = useState<"recent" | "all">("recent");
+
+  // Offer 概率折线图展示数据（跟随模式过滤）
+  const displayOfferData = useMemo(() => {
+    const rawTotal = offerTrendPoints.length;
+    const isRecent = offerMode === "recent";
+    const points = isRecent ? offerTrendPoints.slice(-6) : offerTrendPoints;
+    const displayCount = points.length;
+    // X 轴范围：最近六次模式不足 6 条时强制展示 6 个刻度位置
+    const xMax = isRecent && rawTotal < 6 ? 6 : displayCount;
+    // X 轴可见标签
+    let labelIndices: number[];
+    if (isRecent) {
+      labelIndices = Array.from({ length: xMax }, (_, i) => i + 1);
+    } else {
+      labelIndices = xMax > 1 ? [1, xMax] : [1];
+    }
+    return { points, displayCount, xMax, labelIndices, rawTotal };
+  }, [offerMode, offerTrendPoints]);
 
   const [avatarError, setAvatarError] = useState(false);
 
@@ -329,8 +349,26 @@ export default function CareerMemoryDashboard() {
     }
   };
 
-  const handleGrowthPointClick = useCallback((sessionId: number) => {
-    router.push(`/debugger/report?sessionId=${sessionId}`);
+  const handleGrowthPointClick = useCallback((point: GrowthPoint) => {
+    // 先写 localStorage（与 handleViewDetails 保持一致），确保目标页加载正确的面试详情
+    localStorage.setItem("interviewVar_report_mode", point.type);
+    localStorage.setItem("interviewVar_session_id", String(point.session_id));
+    // 解析 session_title 提取公司/岗位/轮次信息
+    const titleParts = point.session_title.split(" · ");
+    if (titleParts.length >= 1) localStorage.setItem("interviewVar_session_company", titleParts[0]);
+    if (titleParts.length >= 2) localStorage.setItem("interviewVar_session_role", titleParts[1]);
+    if (titleParts.length >= 3) localStorage.setItem("interviewVar_session_round", titleParts[2]);
+    if (point.analysis_time) {
+      localStorage.setItem("interviewVar_session_date", point.analysis_time.split("T")[0]);
+    }
+    localStorage.setItem("interviewVar_viewing_session", "true");
+    localStorage.removeItem("interviewVar_task_id");
+
+    if (point.type === "audio") {
+      router.push(`/debugger/voice?sessionId=${point.session_id}`);
+    } else {
+      router.push(`/debugger/record?sessionId=${point.session_id}`);
+    }
   }, [router]);
 
   const fetchOfferTrend = async () => {
@@ -1031,12 +1069,41 @@ export default function CareerMemoryDashboard() {
                     <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-4">
                       <div className="space-y-4 flex-1">
                         <div>
-                          <div>
-                            <h4 className="text-base font-black text-white flex items-center gap-2">
-                              <span className="material-symbols-outlined text-base text-primary">trending_up</span>
-                              能力成长曲线
-                            </h4>
-                            <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">基于 {growthTotal} 次面试分析的五个能力维度演变趋势</p>
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h4 className="text-base font-black text-white flex items-center gap-2">
+                                <span className="material-symbols-outlined text-base text-primary">trending_up</span>
+                                能力成长曲线
+                              </h4>
+                              <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">
+                                {growthMode === "recent"
+                                  ? `基于最近 ${Math.min(growthTotal, 6)} 次面试分析的能力维度趋势`
+                                  : `基于全部 ${growthTotal} 次面试分析的能力维度趋势`}
+                              </p>
+                            </div>
+                            {/* 最近六次 / 全部 切换 */}
+                            <div className="flex bg-white/5 rounded-xl border border-white/10 p-0.5 shrink-0">
+                              <button
+                                onClick={() => setGrowthMode("recent")}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                                  growthMode === "recent"
+                                    ? "bg-primary text-on-primary shadow-md shadow-primary/10"
+                                    : "text-on-surface-variant/60 hover:text-white"
+                                }`}
+                              >
+                                最近六次
+                              </button>
+                              <button
+                                onClick={() => setGrowthMode("all")}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                                  growthMode === "all"
+                                    ? "bg-primary text-on-primary shadow-md shadow-primary/10"
+                                    : "text-on-surface-variant/60 hover:text-white"
+                                }`}
+                              >
+                                全部
+                              </button>
+                            </div>
                           </div>
                         </div>
 
@@ -1068,6 +1135,7 @@ export default function CareerMemoryDashboard() {
                               axisLabels={growthAxisLabels}
                               compact
                               onPointClick={handleGrowthPointClick}
+                              mode={growthMode}
                             />
                           )}
                         </div>
@@ -1272,11 +1340,42 @@ export default function CareerMemoryDashboard() {
                     <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-5">
                       <div className="space-y-4 flex-1">
                         <div>
-                          <h4 className="text-base font-black text-white flex items-center gap-2">
-                            <span className="material-symbols-outlined text-base text-primary">online_prediction</span>
-                            Offer 概率预测
-                          </h4>
-                          <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">基于你当前实力的概率演进</p>
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <h4 className="text-base font-black text-white flex items-center gap-2">
+                                <span className="material-symbols-outlined text-base text-primary">online_prediction</span>
+                                Offer 概率预测
+                              </h4>
+                              <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">
+                                {offerMode === "recent"
+                                  ? `基于最近 ${Math.min(offerTotalSessions, 6)} 次模拟面试的概率演进`
+                                  : `基于全部 ${offerTotalSessions} 次模拟面试的概率演进`}
+                              </p>
+                            </div>
+                            {/* 最近六次 / 全部 切换 */}
+                            <div className="flex bg-white/5 rounded-xl border border-white/10 p-0.5 shrink-0">
+                              <button
+                                onClick={() => setOfferMode("recent")}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                                  offerMode === "recent"
+                                    ? "bg-primary text-on-primary shadow-md shadow-primary/10"
+                                    : "text-on-surface-variant/60 hover:text-white"
+                                }`}
+                              >
+                                最近六次
+                              </button>
+                              <button
+                                onClick={() => setOfferMode("all")}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                                  offerMode === "all"
+                                    ? "bg-primary text-on-primary shadow-md shadow-primary/10"
+                                    : "text-on-surface-variant/60 hover:text-white"
+                                }`}
+                              >
+                                全部
+                              </button>
+                            </div>
+                          </div>
                         </div>
 
                         {/* Current offer metric */}
@@ -1327,7 +1426,8 @@ export default function CareerMemoryDashboard() {
                                 </defs>
 
                                 {(() => {
-                                  const total = offerTrendPoints.length;
+                                  const pts = displayOfferData.points;
+                                  const xMax = displayOfferData.xMax;
                                   const padL = 5;
                                   const padR = 5;
                                   const viewW = 100;
@@ -1337,34 +1437,27 @@ export default function CareerMemoryDashboard() {
                                   const chartW = viewW - padL - padR;
                                   const chartH = viewH - padT - padB;
 
-                                  const idxToX = (i: number) => {
-                                    if (total <= 1) return padL + chartW / 2;
-                                    return padL + ((i - 1) / (total - 1)) * chartW;
+                                  const idxToX = (pos: number) => {
+                                    if (xMax <= 1) return padL + chartW / 2;
+                                    return padL + ((pos - 1) / (xMax - 1)) * chartW;
                                   };
                                   const probToY = (p: number) => {
                                     return padT + chartH * (1 - Math.max(0, Math.min(100, p)) / 100);
                                   };
 
-                                  const lineCoords = offerTrendPoints.map((pt, i) => ({
+                                  const lineCoords: { x: number; y: number }[] = pts.map((pt: any, i: number) => ({
                                     x: idxToX(i + 1),
                                     y: probToY(pt.offer_probability ?? 0),
                                   }));
 
                                   // Area path
                                   const areaD = lineCoords.length > 0
-                                    ? lineCoords.map((c, i) => `${i === 0 ? "M" : "L"} ${c.x},${c.y}`).join(" ")
+                                    ? lineCoords.map((c: { x: number; y: number }, i: number) => `${i === 0 ? "M" : "L"} ${c.x},${c.y}`).join(" ")
                                       + ` L ${lineCoords[lineCoords.length - 1].x},${padT + chartH}`
                                       + ` L ${lineCoords[0].x},${padT + chartH} Z`
                                     : "";
                                   // Line path
-                                  const lineD = lineCoords.map((c, i) => `${i === 0 ? "M" : "L"} ${c.x},${c.y}`).join(" ");
-
-                                  // Hot zone boundaries
-                                  const hotZones = lineCoords.map((_, i) => {
-                                    const left = i === 0 ? padL : (lineCoords[i].x + lineCoords[i - 1].x) / 2;
-                                    const right = i === total - 1 ? padL + chartW : (lineCoords[i].x + lineCoords[i + 1].x) / 2;
-                                    return { left, width: right - left };
-                                  });
+                                  const lineD = lineCoords.map((c: { x: number; y: number }, i: number) => `${i === 0 ? "M" : "L"} ${c.x},${c.y}`).join(" ");
 
                                   return (
                                     <>
@@ -1377,37 +1470,53 @@ export default function CareerMemoryDashboard() {
                                         <path d={lineD} fill="none" stroke="url(#offer-line-gradient)" strokeWidth="1.2" strokeLinecap="round" />
                                       )}
 
-                                      {/* Hotspot triggers overlay */}
-                                      {hotZones.map((zone, idx) => (
-                                        <rect
-                                          key={idx}
-                                          x={zone.left}
-                                          y="0"
-                                          width={zone.width}
-                                          height={viewH}
-                                          fill="transparent"
-                                          className="cursor-pointer"
-                                          onMouseEnter={() => setActiveOfferIdx(idx)}
-                                          onMouseLeave={() => setActiveOfferIdx(null)}
-                                        />
+                                      {/* Data point dots + hover targets */}
+                                      {lineCoords.map((c: { x: number; y: number }, i: number) => (
+                                        <g key={i}>
+                                          {/* Invisible larger hit area for precise hover */}
+                                          <circle
+                                            cx={c.x}
+                                            cy={c.y}
+                                            r="4"
+                                            fill="transparent"
+                                            className="cursor-pointer"
+                                            onMouseEnter={() => setActiveOfferIdx(i)}
+                                            onMouseLeave={() => setActiveOfferIdx(null)}
+                                          />
+                                          {/* Visible dot */}
+                                          <circle
+                                            cx={c.x}
+                                            cy={c.y}
+                                            r="1.5"
+                                            fill="#10b981"
+                                            stroke="rgba(255,255,255,0.3)"
+                                            strokeWidth="0.5"
+                                            className="pointer-events-none"
+                                          />
+                                        </g>
                                       ))}
                                     </>
                                   );
                                 })()}
                               </svg>
 
-                              {/* X-axis labels — 第1次 / 第2次 / ... 仅首尾显示百分比 */}
-                              {offerTrendPoints.length > 0 && (
-                                <div className="flex justify-between text-[10px] font-label-mono text-on-surface-variant/40 px-2 font-bold select-none mt-1">
-                                  {offerTrendPoints.map((pt, i) => {
-                                    const isFirst = i === 0;
-                                    const isLast = i === offerTrendPoints.length - 1 && offerTrendPoints.length > 1;
-                                    const showPercent = isFirst || isLast;
+                              {/* X-axis labels — SVG 坐标系绝对定位，与圆点精确对齐 */}
+                              {displayOfferData.displayCount > 0 && (
+                                <div className="relative w-full h-[18px] mt-0.5">
+                                  {displayOfferData.labelIndices.map((labelIdx: number) => {
+                                    // 使用与 idxToX 相同的公式：padL + ratio * chartW，转换为百分比
+                                    const xMax = displayOfferData.xMax;
+                                    const ratio = xMax <= 1 ? 0.5 : (labelIdx - 1) / (xMax - 1);
+                                    const svgX = 5 + ratio * 90; // padL=5, chartW=90
+                                    const pct = (svgX / 100) * 100; // viewW=100
+                                    const pt = displayOfferData.points[labelIdx - 1];
                                     return (
-                                      <span key={i}>
-                                        {showPercent
-                                          ? `第${i + 1}次 (${pt.offer_probability}%)`
-                                          : `第${i + 1}次`}
+                                      <span
+                                        key={labelIdx}
+                                        className="absolute text-[10px] font-label-mono text-on-surface-variant/40 font-bold whitespace-nowrap"
+                                        style={{ left: `${pct}%`, transform: "translateX(-50%)" }}
+                                      >
+                                        第{labelIdx}次
                                       </span>
                                     );
                                   })}
@@ -1415,11 +1524,11 @@ export default function CareerMemoryDashboard() {
                               )}
 
                               {/* Tooltip Popup */}
-                              {activeOfferIdx !== null && offerTrendPoints[activeOfferIdx] && (
+                              {activeOfferIdx !== null && displayOfferData.points[activeOfferIdx] && (
                                 <div
                                   className="absolute bg-surface-container-high border border-white/10 rounded-lg p-2 text-[9px] text-white font-label-mono shadow-xl pointer-events-none z-30"
                                   style={{
-                                    left: `${5 + (activeOfferIdx / Math.max(1, offerTrendPoints.length - 1)) * 90}%`,
+                                    left: `${5 + (activeOfferIdx / Math.max(1, displayOfferData.xMax - 1)) * 90}%`,
                                     top: "5%"
                                   }}
                                 >
@@ -1427,7 +1536,7 @@ export default function CareerMemoryDashboard() {
                                     第{activeOfferIdx + 1}次预测概率
                                   </span>
                                   <span className="text-tertiary font-black font-label-mono mt-0.5 block">
-                                    {offerTrendPoints[activeOfferIdx].offer_probability}% Offer 概率
+                                    {displayOfferData.points[activeOfferIdx].offer_probability}% Offer 概率
                                   </span>
                                 </div>
                               )}
@@ -2013,21 +2122,51 @@ export default function CareerMemoryDashboard() {
                  ======================================================== */}
               {activeTab === "growth" && (
                 <div className="glass-panel p-8 rounded-3xl border-white/10 w-full text-left space-y-6">
-                  <div>
-                    <h3 className="text-lg font-black text-white flex items-center gap-2">
-                      <span className="material-symbols-outlined text-base text-primary">trending_up</span>
-                      能力成长曲线
-                    </h3>
-                    <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">基于 {growthTotal} 次面试分析的五个能力维度演变趋势</p>
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h3 className="text-lg font-black text-white flex items-center gap-2">
+                        <span className="material-symbols-outlined text-base text-primary">trending_up</span>
+                        能力成长曲线
+                      </h3>
+                      <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">
+                        {growthMode === "recent"
+                          ? `基于最近 ${Math.min(growthTotal, 6)} 次面试分析的能力维度趋势`
+                          : `基于全部 ${growthTotal} 次面试分析的能力维度趋势`}
+                      </p>
+                    </div>
+                    {/* 最近六次 / 全部 切换 */}
+                    <div className="flex bg-white/5 rounded-xl border border-white/10 p-0.5 shrink-0">
+                      <button
+                        onClick={() => setGrowthMode("recent")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                          growthMode === "recent"
+                            ? "bg-primary text-on-primary shadow-md shadow-primary/10"
+                            : "text-on-surface-variant/60 hover:text-white"
+                        }`}
+                      >
+                        最近六次
+                      </button>
+                      <button
+                        onClick={() => setGrowthMode("all")}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                          growthMode === "all"
+                            ? "bg-primary text-on-primary shadow-md shadow-primary/10"
+                            : "text-on-surface-variant/60 hover:text-white"
+                        }`}
+                      >
+                        全部
+                      </button>
+                    </div>
                   </div>
 
-                  {/* 统计卡片 —— 动态计算 */}
+                  {/* 统计卡片 —— 动态计算（跟随模式过滤） */}
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-4 pb-6 border-b border-white/5">
                     {(() => {
+                      const filteredPoints = growthMode === "recent" ? growthPoints.slice(-6) : growthPoints;
                       const avg = (key: string) => {
-                        if (growthPoints.length === 0) return "—";
-                        const sum = growthPoints.reduce((s, p) => s + (p.scores[key as keyof typeof p.scores] ?? 0), 0);
-                        return Math.round(sum / growthPoints.length).toString();
+                        if (filteredPoints.length === 0) return "—";
+                        const sum = filteredPoints.reduce((s, p) => s + (p.scores[key as keyof typeof p.scores] ?? 0), 0);
+                        return Math.round(sum / filteredPoints.length).toString();
                       };
                       return [
                         { label: "细节深度均分", value: avg("expression") },
@@ -2055,13 +2194,16 @@ export default function CareerMemoryDashboard() {
                         points={growthPoints}
                         axisLabels={growthAxisLabels}
                         onPointClick={handleGrowthPointClick}
+                        mode={growthMode}
                       />
                     )}
                   </div>
 
                   {growthTotal > 0 && (
                     <p className="text-[11px] text-on-surface-variant/30 font-semibold text-center">
-                      共 {growthTotal} 次面试分析 · X 轴按分析次数排列 · 鼠标悬停查看详情 · 点击跳转报告
+                      {growthMode === "recent"
+                        ? `共 ${Math.min(growthTotal, 6)} / ${growthTotal} 次面试分析 · X 轴按分析次数排列 · 鼠标悬停查看详情 · 点击跳转报告`
+                        : `共 ${growthTotal} 次面试分析 · X 轴按分析次数排列 · 鼠标悬停查看详情 · 点击跳转报告`}
                     </p>
                   )}
                 </div>
