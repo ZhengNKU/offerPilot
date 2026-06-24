@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -76,6 +76,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [showLogout, setShowLogout] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const userRef = useRef(user);
+  userRef.current = user;
 
   // Load state on mount
   useEffect(() => {
@@ -120,7 +122,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           })
           .then(data => {
             if (data) {
-              const merged = { ...defaultUser, ...user, ...data };
+              // 使用 userRef.current 获取最新用户状态（避免闭包过期）
+              // 过滤 API 返回的 null 值，防止覆盖 localStorage 中已有的有效数据
+              const apiData: any = {};
+              for (const key in data) {
+                if (data[key] !== null && data[key] !== undefined) {
+                  apiData[key] = data[key];
+                }
+              }
+              const merged = { ...defaultUser, ...userRef.current, ...apiData };
               setUser(merged);
               localStorage.setItem("interviewVar_user", JSON.stringify(merged));
               window.dispatchEvent(new Event("storage"));

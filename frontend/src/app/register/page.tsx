@@ -384,6 +384,11 @@ export default function RegisterPage() {
     const trimmed = customCityValue.trim();
     if (!trimmed) return;
     if (!targetCities.includes(trimmed)) {
+      if (targetCities.length >= 3) {
+        auth.triggerToast("最多只能选择三个目标城市！");
+        setCustomCityValue("");
+        return;
+      }
       setTargetCities([...targetCities, trimmed]);
     }
     setCustomCityValue("");
@@ -394,6 +399,10 @@ export default function RegisterPage() {
     if (targetCities.includes(city)) {
       setTargetCities(targetCities.filter((c) => c !== city));
     } else {
+      if (targetCities.length >= 3) {
+        auth.triggerToast("最多只能选择三个目标城市！");
+        return;
+      }
       setTargetCities([...targetCities, city]);
     }
   };
