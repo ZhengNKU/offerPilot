@@ -32,6 +32,12 @@ export interface UseRealtimeAudioApi {
   ) => Promise<boolean>;
   stop: () => void;
   mute: (muted: boolean) => void;
+  /**
+   * AI 说话期间暂停浏览器 Web Speech 识别，防止 TTS 回声被当候选人字幕。
+   * true=AI 正在说（TTS 在播放）→ abort() 当前 recognition 并阻止 onend 自动重启
+   * false=AI 停下 → 重新启动 recognition
+   */
+  setAiSpeaking: (speaking: boolean) => void;
   /** 播放从服务端收到的 PCM16 音频（火山 TTS 24kHz/mono）。无操作即可丢帧。*/
   play: (pcm16: ArrayBuffer, sampleRate?: number) => void;
 }
@@ -91,6 +97,9 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
   const onSttRef = useRef<((text: string, isFinal: boolean) => void) | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const sttActiveRef = useRef(false);
+  // AI 是否正在说话：true 时 abort Web Speech 并阻止 onend 自动重启，
+  // 避免 TTS 回声被浏览器 STT 误识别为候选人字幕。
+  const aiSpeakingRef = useRef(false);
 
   // 播放队列
   const playQueueRef = useRef<ArrayBuffer[]>([]);
@@ -164,6 +173,8 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
           r.continuous = true;
           r.interimResults = true;
           r.onresult = (ev) => {
+            // AI 说话期间（TTS 在播）直接丢弃结果，避免回声被当候选人字幕
+            if (aiSpeakingRef.current) return;
             // 只看最新一条结果；interim 时会被同一 final 覆盖
             for (let i = ev.resultIndex; i < ev.results.length; i++) {
               const res = ev.results[i];
@@ -174,8 +185,9 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
             }
           };
           r.onend = () => {
-            // 浏览器在静音一段时间后会自动 onend；会话还活着就重启，保证连续识别
-            if (sttActiveRef.current) {
+            // 浏览器在静音一段时间后会自动 onend；会话还活着且 AI 没在说话就重启，
+            // 保证连续识别。AI 说话期间的 onend（来自 abort）不重启，由 setAiSpeaking(false) 手动起。
+            if (sttActiveRef.current && !aiSpeakingRef.current) {
               try { r.start(); } catch { /* ignore */ }
             }
           };
@@ -226,6 +238,49 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
 
   const mute = useCallback((muted: boolean) => {
     mutedRef.current = muted;
+  }, []);
+
+  const setAiSpeaking = useCallback((speaking: boolean) => {
+    const was = aiSpeakingRef.current;
+    aiSpeakingRef.current = speaking;
+    if (was === speaking) return;
+    if (speaking) {
+      // AI 开始说话：abort 当前 recognition，让 onend 不重启（onend 已检查 aiSpeakingRef）
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch { /* ignore */ }
+        recognitionRef.current = null;
+      }
+    } else {
+      // AI 说完：重启 recognition（如果 onSttRef 还在，说明要继续识别候选人）
+      if (sttActiveRef.current && onSttRef.current && !recognitionRef.current) {
+        const Ctor = getSpeechRecognitionCtor();
+        if (Ctor) {
+          try {
+            const r = new Ctor();
+            r.lang = "zh-CN";
+            r.continuous = true;
+            r.interimResults = true;
+            r.onresult = (ev) => {
+              if (aiSpeakingRef.current) return;
+              for (let i = ev.resultIndex; i < ev.results.length; i++) {
+                const res = ev.results[i];
+                if (!res || res.length === 0) continue;
+                const text = (res[0] as { transcript: string }).transcript || "";
+                if (!text) continue;
+                onSttRef.current?.(text, !!res.isFinal);
+              }
+            };
+            r.onend = () => {
+              if (sttActiveRef.current && !aiSpeakingRef.current) {
+                try { r.start(); } catch { /* ignore */ }
+              }
+            };
+            r.start();
+            recognitionRef.current = r;
+          } catch { /* ignore */ }
+        }
+      }
+    }
   }, []);
 
   // 内部：把 PCM16 ArrayBuffer 转 Float32Array，喂给 AudioContext
@@ -284,5 +339,5 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { state, start, stop, mute, play };
+  return { state, start, stop, mute, setAiSpeaking, play };
 }

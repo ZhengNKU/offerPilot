@@ -60,6 +60,12 @@ export interface StartOpts {
   apiBase?: string; // 默认 http://localhost:8001
   /** 收到服务端 tts_audio 二进制帧时回调（火山 24kHz/mono PCM16） */
   onAudioFrame?: (pcm16: ArrayBuffer) => void;
+  /**
+   * WS 异常断开兜底：会话进行中（非用户主动 end）发生不可恢复断线时触发，
+   * Hook 会先内部 POST /api/live/sessions/{liveId}/end 触发后端分析，
+   * 然后回调此函数，UI 层应切换到"正在分析"流程。
+   */
+  onAutoEnd?: (liveId: number) => void;
 }
 
 export interface UseRealtimeSessionApi extends RealtimeState {
@@ -69,6 +75,15 @@ export interface UseRealtimeSessionApi extends RealtimeState {
   toggleSpeaker: () => void;
   sendEvent: (name: string, payload?: unknown) => void;
   sendText: (content: string) => void;
+  /**
+   * 快捷操作：暂停 / 跳过 / 提示。
+   * - pause：后端会推 live.pause 事件，客户端据 duration 倒计时并 mute mic。
+   * - skip / hint：后端注入文本让 AI 自然回应，不影响客户端状态。
+   */
+  sendQuickAction: (
+    action: "pause" | "skip" | "hint",
+    payload?: { duration?: number }
+  ) => void;
   /**
    * 浏览器 Web Speech API 识别的候选人语音上行（partial / final 合并接口）。
    * 后端收到后会广播 live.transcript(role=candidate) 给所有客户端，
@@ -107,6 +122,9 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
   const durationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const optsRef = useRef<StartOpts | null>(null);
   const shouldReconnectRef = useRef(false);
+  // 用户主动调用 end() 的标志位：用于在 onclose 阶段区分"用户主动结束"
+  // 与"会话中途异常断开"，前者不应被 UI 当作"连接异常"。
+  const endInitiatedRef = useRef(false);
   const statusRef = useRef<SessionStatus>("idle");
 
   useEffect(() => { statusRef.current = status; }, [status]);
@@ -132,6 +150,13 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
     if (durationTimerRef.current) {
       clearInterval(durationTimerRef.current);
       durationTimerRef.current = null;
+    }
+    // 用户主动 end() 触发的 ws.close(1000)：不视作连接异常，状态走 "ended"。
+    // 此分支必须放在其它 1000/异常分支之前，否则会被覆盖成 "error"。
+    if (endInitiatedRef.current && code === 1000) {
+      endInitiatedRef.current = false; // 一次性 flag
+      setStatus("ended");
+      return;
     }
     if (code === 4001) {
       // 鉴权失败 / 鉴权超时：不可重连
@@ -175,6 +200,28 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
         }
       }, delay);
     } else {
+      // 重连全部失败：若会话原本处于 live，则兜底触发后端分析（已采集的 transcript 不浪费）；
+      // 否则按原逻辑进入 error UI。
+      const wasLive = statusRef.current === "live";
+      const liveId = optsRef.current?.liveId;
+      const token = optsRef.current?.token;
+      const apiBase = optsRef.current?.apiBase || "http://localhost:8001";
+      if (wasLive && liveId && token) {
+        // 标记一次性：避免 onAutoEnd 二次触发同一逻辑
+        endInitiatedRef.current = true;
+        // 关闭后续重连可能：本会话已结束
+        shouldReconnectRef.current = false;
+        setStatus("ended");
+        // 兜底 POST /end：best-effort，失败也不阻塞 UI（pollUntilCompleted 会兜底超时）
+        void fetch(`${apiBase}/api/live/sessions/${liveId}/end`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        }).catch((e) => {
+          console.warn("[realtime] auto-end POST failed:", e);
+        });
+        optsRef.current?.onAutoEnd?.(liveId);
+        return;
+      }
       setStatus("error");
       setError({ code, message: reason || `连接已断开 (code ${code})` });
     }
@@ -215,9 +262,9 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
           t0: data.t0 || 0,
           t1: data.t1 || 0,
         });
-        if (data.role === "candidate" && data.partial === false) {
-          setAiState("thinking");
-        }
+        // 不在这里改 aiState：后端 _set_ai_state 会推 live.metrics 告知真实状态。
+        // 之前这里硬置 thinking 会覆盖后端推的 listening/speaking 真实状态，
+        // 配合后端 _ai_state 变更不再推 live.metrics 的 bug，导致 UI 一直卡在 speaking。
         return;
       case "live.metrics":
         if (data.ai_state) setAiState(data.ai_state);
@@ -281,6 +328,9 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
   }, [connect]);
 
   const end = useCallback(async () => {
+    // 先标记"用户主动结束"，再发 ws.close(1000) —— handleClose 看到此 flag 后
+    // 不会再把它当作连接异常，避免 bootState 在 ending → error → analyzing 之间闪跳。
+    endInitiatedRef.current = true;
     shouldReconnectRef.current = false;
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
@@ -321,6 +371,16 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
       wsRef.current.send(JSON.stringify({ type: "client.text", content }));
     }
   }, []);
+
+  const sendQuickAction = useCallback(
+    (action: "pause" | "skip" | "hint", payload?: { duration?: number }) => {
+      if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+      wsRef.current.send(
+        JSON.stringify({ type: "client.quick_action", action, payload: payload ?? {} })
+      );
+    },
+    []
+  );
 
   /**
    * 浏览器 Web Speech API 识别出的候选人语音上行。
@@ -394,7 +454,7 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
     // state
     status, aiState, micMuted, speakerMuted, transcript, metrics, error, wsUrl,
     // actions
-    start, end, toggleMic, toggleSpeaker, sendEvent, sendText, sendStt, sendBinary, interrupt, reset,
+    start, end, toggleMic, toggleSpeaker, sendEvent, sendText, sendStt, sendBinary, interrupt, reset, sendQuickAction,
   };
 }
 

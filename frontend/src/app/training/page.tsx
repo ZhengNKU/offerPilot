@@ -15,7 +15,7 @@ import { useRealtimeAudio } from "./hooks/useRealtimeAudio";
 //      用 useRealtimeAudio Hook 采集麦克风 + AudioWorklet 下采样
 // ============================================================
 
-type InterviewType = "tech_8gu" | "tech_project" | "tech_scenario" | "hr_comprehensive";
+type InterviewType = "tech_8gu" | "tech_project" | "tech_scenario" | "hr_comprehensive" | "non_tech";
 type Difficulty = "Lv1" | "Lv2" | "Lv3" | "Lv4";
 type DurationMin = 10 | 15 | 20;
 type FollowupRounds = 1 | 2 | 3;
@@ -41,7 +41,8 @@ const INTERVIEW_TYPES: Array<{ value: InterviewType; label: string; persona: str
   { value: "tech_8gu", label: "技术面·八股为主", persona: "书本型面试官" },
   { value: "tech_project", label: "技术面·深挖项目", persona: "刨根问底型" },
   { value: "tech_scenario", label: "技术面·场景题", persona: "架构师型" },
-  { value: "hr_comprehensive", label: "HR面·综合能力", persona: "老 HR 型" },
+  { value: "non_tech", label: "非技术面·业务能力", persona: "资深业务面试官" },
+  { value: "hr_comprehensive", label: "HR面·综合能力", persona: "资深 HR 型" },
 ];
 
 const DIFFICULTIES: Array<{ value: Difficulty; label: string; speed: string }> = [
@@ -72,9 +73,9 @@ function InterviewTrainingPageContent() {
   // targetRole 默认从 auth.user.targetRole 拿（如"高级后端专家"），缺省"后端开发工程师"
   const [targetRole, setTargetRole] = useState<string>(auth.user?.targetRole || "后端开发工程师");
   const [jobDescription, setJobDescription] = useState<string>("");
-  const [interviewType, setInterviewType] = useState<InterviewType>("tech_project");
-  const [difficulty, setDifficulty] = useState<Difficulty>("Lv3");
-  const [durationMin, setDurationMin] = useState<DurationMin>(15);
+  const [interviewType, setInterviewType] = useState<InterviewType>(INTERVIEW_TYPES[0].value);
+  const [difficulty, setDifficulty] = useState<Difficulty>(DIFFICULTIES[0].value);
+  const [durationMin, setDurationMin] = useState<DurationMin>(DURATIONS[0].value);
   const [followupRounds, setFollowupRounds] = useState<FollowupRounds>(2);
   // JD 字符上限：与面试调试器统一为 600 字（避免过长 JD 引发表单性能问题）
   const JD_MAX_LENGTH = 600;
@@ -99,16 +100,20 @@ function InterviewTrainingPageContent() {
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [showNormsModal, setShowNormsModal] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
+  const [feedbackKind, setFeedbackKind] = useState<"tech_question" | "voice" | "ux" | "other">("tech_question");
   // PR6 配额：会员等级 + 当月已用 + 限额
   const [quota, setQuota] = useState<{ membership: string | null; limit_min: number; used_min: number; remaining_min: number } | null>(null);
   const [showHandBadge, setShowHandBadge] = useState(false);
-  const [thinkingTimeLeft, setThinkingTimeLeft] = useState(0);
-  const [isThinkingPaused, setIsThinkingPaused] = useState(false);
 
   const [cameraOn, setCameraOn] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
   const [reportData, setReportData] = useState<any>(null);
   const [reportTranscript, setReportTranscript] = useState<any[]>([]);
+  // 快捷操作：暂停倒计时
+  const [isPaused, setIsPaused] = useState(false);
+  const [pauseCountdown, setPauseCountdown] = useState(0);
+  // 按钮 active 闪烁反馈（按下后 0.6s 高亮）
+  const [activeAction, setActiveAction] = useState<"" | "pause" | "skip" | "hint" | "feedback">("");
 
   // ---------- 模拟分析进度条 ----------
   const [analysisProgress, setAnalysisProgress] = useState(0);
@@ -135,6 +140,9 @@ function InterviewTrainingPageContent() {
   const transcriptContainerRef = useRef<HTMLDivElement>(null);
   const bootStateRef = useRef(bootState);
   useEffect(() => { bootStateRef.current = bootState; }, [bootState]);
+  // 镜像 micMuted 状态，供 setInterval 等 stale-closure 场景读最新值（暂停恢复时使用）
+  const micMutedRef = useRef(micMuted);
+  useEffect(() => { micMutedRef.current = micMuted; }, [micMuted]);
 
   const apiBase = "http://localhost:8001";
   const authHeaders = useCallback((): HeadersInit => {
@@ -210,6 +218,11 @@ function InterviewTrainingPageContent() {
       setBootState("error");
     }
   }, [live.status, live.error]);
+
+  // ---------- AI 说话时暂停浏览器 STT，避免 TTS 回声被当候选人字幕 ----------
+  useEffect(() => {
+    audio.setAiSpeaking(aiState === "speaking");
+  }, [aiState, audio]);
 
   // ---------- 同步 hook status 到 bootState ----------
   useEffect(() => {
@@ -396,12 +409,21 @@ function InterviewTrainingPageContent() {
       // PR5: 用 hook 启动 WS（已含自动重连）
       if (sess.ws_url) {
         const token = localStorage.getItem("interviewVar_token") || "";
+        const targetLiveId = sess.live_session_id;
         // 收到服务端 tts_audio 帧 → 喂给 audio 队列播放
         void live.start({
-          liveId: sess.live_session_id,
+          liveId: targetLiveId,
           wsPath: sess.ws_url,
           token,
           onAudioFrame: (pcm16) => audio.play(pcm16),
+          // WS 中途异常断开兜底：触发后端分析（不浪费已采集的 transcript）
+          onAutoEnd: (autoLiveId) => {
+            console.warn("[training] WS 异常断开，兜底触发分析 live_id=", autoLiveId);
+            audio.stop();
+            stopCamera();
+            setBootState("ending");
+            void runAnalysisFlow(autoLiveId);
+          },
         });
         // PR5: 启动麦克风采集（捕获失败不阻塞 WS）
         // 用 hook 暴露的 sendBinary（不直接访问内部 wsRef）
@@ -418,15 +440,11 @@ function InterviewTrainingPageContent() {
     }
   };
 
-  const handleEnd = async () => {
-    if (!liveSession) return;
-    setShowEndConfirm(false);
-    setBootState("ending");
-    void live.end();
-    audio.stop();
-    stopCamera();
+  // 通用"触发分析 + 轮询"流程：被 handleEnd（用户主动）和 onAutoEnd（WS 异常）共用。
+  // POST /end 若已 analyzing/completed 则直接返回当前状态；前端据此判断是否要 showReport。
+  const runAnalysisFlow = async (liveId: number) => {
     try {
-      const res = await fetch(`${apiBase}/api/live/sessions/${liveSession.live_session_id}/end`, {
+      const res = await fetch(`${apiBase}/api/live/sessions/${liveId}/end`, {
         method: "POST",
         headers: authHeaders(),
       });
@@ -453,6 +471,16 @@ function InterviewTrainingPageContent() {
       auth.triggerToast("无法结束面试");
       setBootState("error");
     }
+  };
+
+  const handleEnd = async () => {
+    if (!liveSession) return;
+    setShowEndConfirm(false);
+    setBootState("ending");
+    void live.end();
+    audio.stop();
+    stopCamera();
+    void runAnalysisFlow(liveSession.live_session_id);
   };
 
   const handleReset = () => {
@@ -504,34 +532,96 @@ function InterviewTrainingPageContent() {
   }, []);
 
   // ============================================================
-  // 快捷操作
+  // 快捷操作（PR-N：暂停 / 跳过 / 提示 / 反馈）
   // ============================================================
 
-  const handleHandRaise = () => {
-    if (live.status !== "live") return;
-    live.sendEvent("hand_raise", {});
-    setShowHandBadge(true);
-    setTimeout(() => setShowHandBadge(false), 3000);
+  const flashActive = (kind: "pause" | "skip" | "hint" | "feedback") => {
+    setActiveAction(kind);
+    setTimeout(() => setActiveAction((cur) => (cur === kind ? "" : cur)), 600);
   };
 
-  const handleThinking = () => {
-    setIsThinkingPaused(true);
-    setThinkingTimeLeft(60);
+  const handlePause = () => {
+    if (live.status !== "live" || isPaused) return;
+    const DURATION = 30;
+    // 1) 通知后端 → 后端会注入文本让 AI 等待 + 30s 后推恢复
+    live.sendQuickAction("pause", { duration: DURATION });
+    // 2) 客户端屏蔽 mic 上行（不进 ASR/VAD）。
+    //    用 micMutedRef 读最新值（避免 setInterval 闭包拿到旧值），按需 toggle：
+    //    原本开着才关，原本关着就不再切（保证暂停期间 mic 一定是关闭的）
+    audio.mute(true);
+    if (!micMutedRef.current) live.toggleMic();
+    setIsPaused(true);
+    setPauseCountdown(DURATION);
     const t = setInterval(() => {
-      setThinkingTimeLeft((s) => {
+      setPauseCountdown((s) => {
         if (s <= 1) {
           clearInterval(t);
-          setIsThinkingPaused(false);
+          // 等后端推 live.pause.active=false；客户端这边先 unmuted 兜底
+          audio.mute(false);
+          // 30s 倒计时结束：自动打开麦克风。
+          // 仅在 mic 仍处于关闭态时才 toggle（用户在暂停期间手动开过就不再切回去）。
+          if (micMutedRef.current) live.toggleMic();
+          setIsPaused(false);
+          auth.triggerToast("已恢复面试");
           return 0;
         }
         return s - 1;
       });
     }, 1000);
-    live.sendEvent("thinking", {});
+    flashActive("pause");
+    auth.triggerToast(`已暂停 ${DURATION} 秒，AI 正在等你`);
   };
 
   const handleSkip = () => {
-    live.sendText("请继续下一题");
+    if (live.status !== "live") return;
+    live.sendQuickAction("skip");
+    flashActive("skip");
+    auth.triggerToast("已发送：本题跳过");
+  };
+
+  const handleHint = () => {
+    if (live.status !== "live") return;
+    live.sendQuickAction("hint");
+    flashActive("hint");
+    auth.triggerToast("已向 AI 申请关键词提示");
+  };
+
+  const handleFeedback = () => {
+    setShowFeedbackModal(true);
+    flashActive("feedback");
+  };
+
+  const submitFeedback = async () => {
+    const content = feedbackText.trim();
+    if (!content) {
+      auth.triggerToast("请输入反馈内容。");
+      return;
+    }
+    if (!liveSession) {
+      // 没 session 时只本地 toast（不该发生，但兜底）
+      auth.triggerToast("感谢你的反馈！");
+      setFeedbackText("");
+      setShowFeedbackModal(false);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `${apiBase}/api/live/sessions/${liveSession.live_session_id}/feedback`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({ kind: feedbackKind, content }),
+        }
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      auth.triggerToast(`反馈已提交`);
+      setFeedbackText("");
+      setShowFeedbackModal(false);
+    } catch (e) {
+      console.error("submit feedback failed", e);
+      auth.triggerToast("提交失败，请稍后重试");
+    }
   };
 
   // ============================================================
@@ -792,22 +882,29 @@ function InterviewTrainingPageContent() {
               </div>
               
               <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
-                {reportTranscript.length === 0 ? (
-                  <p className="text-xs text-on-surface-variant/40 text-center py-6">未记录到对话转文字内容。</p>
-                ) : (
-                  reportTranscript.map((line, idx) => {
-                    // 后端 content 可能是对象 {text, speaker, seq, ...} 也可能是字符串；做兼容
-                    const contentObj = line.content && typeof line.content === "object" ? line.content : null;
-                    const textStr: string =
-                      (contentObj?.text as string | undefined) ??
-                      (typeof line.content === "string" ? line.content : "") ??
-                      (line.text as string | undefined) ??
-                      "";
+                {(() => {
+                  // 后端 content 兼容：可能是 {text, speaker, seq, ...} 或纯字符串
+                  const extractText = (line: any): string => {
+                    const c = line.content;
+                    if (c && typeof c === "object") return (c.text as string) ?? "";
+                    if (typeof c === "string") return c;
+                    return (line.text as string) ?? "";
+                  };
+                  // 过滤掉 trim 后的空行：候选人在没说话/ASR 漏识别时会落空字符串，
+                  // 不渲染避免出现"空回复气泡"破坏对话流。
+                  const nonEmpty = reportTranscript
+                    .map((line, idx) => ({ line, idx, text: extractText(line).trim() }))
+                    .filter((x) => x.text.length > 0);
+                  if (nonEmpty.length === 0) {
+                    return <p className="text-xs text-on-surface-variant/40 text-center py-6">未记录到对话转文字内容。</p>;
+                  }
+                  return nonEmpty.map(({ line, idx, text }) => {
+                    const textStr = text; // 已 trim
                     return (
                       <div key={idx} className={`flex items-start gap-4 p-4 rounded-2xl border transition-all ${
                         line.speaker === "Interviewer" || line.role === "interviewer"
                           ? "bg-primary/5 border-primary/10 text-left"
-                          : "bg-[#060e20] border-white/5 text-left ml-4 md:ml-12"
+                          : "bg-[#060e20] border-white/5 text-left"
                       }`}>
                         <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center font-bold text-xs select-none ${
                           line.speaker === "Interviewer" || line.role === "interviewer"
@@ -828,8 +925,8 @@ function InterviewTrainingPageContent() {
                         </div>
                       </div>
                     );
-                  })
-                )}
+                  });
+                })()}
               </div>
             </div>
           </div>
@@ -1308,6 +1405,12 @@ function InterviewTrainingPageContent() {
                     <span className="material-symbols-outlined text-lg text-primary">touch_app</span>
                     快捷操作
                   </h4>
+                  {isPaused && (
+                    <span className="text-[10px] font-black text-secondary font-label-mono flex items-center gap-1 animate-pulse">
+                      <span className="material-symbols-outlined text-xs">pause_circle</span>
+                      暂停中 {pauseCountdown}s
+                    </span>
+                  )}
                 </div>
 
                 <AnimatePresence>
@@ -1319,22 +1422,70 @@ function InterviewTrainingPageContent() {
                   )}
                 </AnimatePresence>
 
-                <div className="grid grid-cols-4 gap-2 mt-[-2px]">
-                  <button disabled={!isLive} onClick={handleHandRaise} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none">
-                    <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary">pan_tool</span>
-                    <span className="text-sm font-black text-on-surface-variant/60">举手</span>
+                <div className="grid grid-cols-2 gap-2 mt-[-2px]">
+                  <button
+                    disabled={!isLive || isPaused}
+                    onClick={handlePause}
+                    className={`p-3 rounded-2xl border flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:cursor-not-allowed ${
+                      activeAction === "pause" || isPaused
+                        ? "bg-secondary/20 border-secondary text-secondary"
+                        : "bg-white/[0.01] border-white/5 hover:border-white/10"
+                    }`}
+                  >
+                    <span className={`material-symbols-outlined text-base ${activeAction === "pause" || isPaused ? "text-secondary" : "text-on-surface-variant/40 group-hover:text-primary"}`}>
+                      {isPaused ? "pause_circle" : "pause"}
+                    </span>
+                    <span className={`text-sm font-black ${isPaused ? "text-secondary" : "text-on-surface-variant/60"}`}>
+                      {isPaused ? `${pauseCountdown}s` : "暂停 30s"}
+                    </span>
                   </button>
-                  <button disabled={!isLive || isThinkingPaused} onClick={handleThinking} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none">
-                    <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary">{isThinkingPaused ? `pause_circle ${thinkingTimeLeft}s` : "hourglass_empty"}</span>
-                    <span className="text-sm font-black text-on-surface-variant/60">{isThinkingPaused ? `${thinkingTimeLeft}s` : "思考"}</span>
+                  <button
+                    disabled={!isLive}
+                    onClick={handleSkip}
+                    className={`p-3 rounded-2xl border flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none ${
+                      activeAction === "skip"
+                        ? "bg-primary/20 border-primary text-primary"
+                        : "bg-white/[0.01] border-white/5 hover:border-white/10"
+                    }`}
+                  >
+                    <span className={`material-symbols-outlined text-base ${activeAction === "skip" ? "text-primary" : "text-on-surface-variant/40 group-hover:text-primary"}`}>
+                      skip_next
+                    </span>
+                    <span className={`text-sm font-black ${activeAction === "skip" ? "text-primary" : "text-on-surface-variant/60"}`}>
+                      跳过本题
+                    </span>
                   </button>
-                  <button disabled={!isLive} onClick={handleSkip} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none">
-                    <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary">skip_next</span>
-                    <span className="text-sm font-black text-on-surface-variant/60">跳过</span>
+                  <button
+                    disabled={!isLive}
+                    onClick={handleHint}
+                    className={`p-3 rounded-2xl border flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none ${
+                      activeAction === "hint"
+                        ? "bg-tertiary/20 border-tertiary text-tertiary"
+                        : "bg-white/[0.01] border-white/5 hover:border-white/10"
+                    }`}
+                  >
+                    <span className={`material-symbols-outlined text-base ${activeAction === "hint" ? "text-tertiary" : "text-on-surface-variant/40 group-hover:text-primary"}`}>
+                      lightbulb
+                    </span>
+                    <span className={`text-sm font-black ${activeAction === "hint" ? "text-tertiary" : "text-on-surface-variant/60"}`}>
+                      关键词提示
+                    </span>
                   </button>
-                  <button disabled={!isLive} onClick={() => setShowFeedbackModal(true)} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none">
-                    <span className="material-symbols-outlined text-base text-on-surface-variant/40 group-hover:text-primary">flag</span>
-                    <span className="text-sm font-black text-on-surface-variant/60">反馈</span>
+                  <button
+                    disabled={!isLive}
+                    onClick={handleFeedback}
+                    className={`p-3 rounded-2xl border flex flex-col items-center justify-center gap-2 text-center transition-all cursor-pointer group disabled:opacity-30 disabled:pointer-events-none ${
+                      activeAction === "feedback"
+                        ? "bg-amber-500/20 border-amber-500 text-amber-500"
+                        : "bg-white/[0.01] border-white/5 hover:border-white/10"
+                    }`}
+                  >
+                    <span className={`material-symbols-outlined text-base ${activeAction === "feedback" ? "text-amber-500" : "text-on-surface-variant/40 group-hover:text-primary"}`}>
+                      flag
+                    </span>
+                    <span className={`text-sm font-black ${activeAction === "feedback" ? "text-amber-500" : "text-on-surface-variant/60"}`}>
+                      反馈
+                    </span>
                   </button>
                 </div>
               </div>
@@ -1534,8 +1685,21 @@ function InterviewTrainingPageContent() {
                 </button>
               </div>
               <div className="space-y-4 text-xs font-semibold text-white">
-                <div className="space-y-3.5 text-left">
-                  <label className="text-on-surface-variant font-bold">请详细描述你遇到的问题或建议：</label>
+                <div className="space-y-1.5 text-left">
+                  <label className="text-on-surface-variant font-bold">反馈类型</label>
+                  <select
+                    value={feedbackKind}
+                    onChange={(e) => setFeedbackKind(e.target.value as any)}
+                    className="w-full px-4 py-2.5 bg-[#060e20] border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-xs text-white font-black"
+                  >
+                    <option value="tech_question">题目 / 提问</option>
+                    <option value="voice">声音 / 语速</option>
+                    <option value="ux">交互 / 体验</option>
+                    <option value="other">其他</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5 text-left">
+                  <label className="text-on-surface-variant font-bold">详细描述</label>
                   <textarea
                     rows={4}
                     value={feedbackText}
@@ -1547,15 +1711,7 @@ function InterviewTrainingPageContent() {
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button onClick={() => setShowFeedbackModal(false)} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white text-xs font-black rounded-lg border border-white/10 transition-all cursor-pointer">取消</button>
-                <button onClick={() => {
-                  if (feedbackText.trim()) {
-                    auth.triggerToast("感谢你的反馈！面试VAR AI 团队会尽快诊断。");
-                    setFeedbackText("");
-                    setShowFeedbackModal(false);
-                  } else {
-                    auth.triggerToast("请输入反馈内容。");
-                  }
-                }} className="px-4.5 py-2 bg-primary text-on-primary text-xs font-black rounded-lg shadow-md cursor-pointer">提交反馈</button>
+                <button onClick={submitFeedback} className="px-4.5 py-2 bg-primary text-on-primary text-xs font-black rounded-lg shadow-md cursor-pointer">提交反馈</button>
               </div>
             </motion.div>
           </div>

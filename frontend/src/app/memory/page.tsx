@@ -300,7 +300,7 @@ export default function CareerMemoryDashboard() {
               completed: "已完成",
               failed: "评估失败"
             } as Record<string, string>
-          )[l.status] || l.status,
+          )[l.status] || "未知状态",
           company: l.company_style || "—",
           role,
           round: `${durMin > 0 ? durMin + "分钟 · " : ""}${round}`,

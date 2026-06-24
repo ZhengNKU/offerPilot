@@ -370,6 +370,8 @@ class InterviewLiveSession(Base):
     executive_summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     analysis_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     transcript: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
+    # PR-N: 候选人在面试过程中提交的反馈（type: tech_question/voice/ux/other + content + ts）
+    feedback: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
     
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

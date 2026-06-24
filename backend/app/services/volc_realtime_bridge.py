@@ -282,7 +282,7 @@ def parse_response(data: bytes) -> Dict[str, Any]:
 @dataclass
 class RealtimeEvent:
     """火山 Realtime 事件归一化结果，供上层 LiveSessionBridge 消费。"""
-    type: str  # tts_audio | tts_text | tts_segment_start | user_started | turn_complete | session_finished | dialog_finished | error | server_event
+    type: str  # tts_audio | tts_text | tts_segment_start | user_started | turn_complete | session_finished | dialog_finished | error | invalid_speaker | server_event
     audio: Optional[bytes] = None
     text: Optional[str] = None
     is_final: bool = False
@@ -323,6 +323,7 @@ class VolcRealtimeBridge:
         system_role: str,
         bot_name: str = "面试官",
         speaking_style: str = "你的说话风格简洁明了，语速适中，语调自然。",
+        speech_rate: float = 1.0,
         recv_timeout: int = 60,
     ):
         if websockets is None:
@@ -332,6 +333,11 @@ class VolcRealtimeBridge:
                 "火山 Realtime 鉴权字段未配置齐全（api_key/app_key/resource_id/wss_url）。"
                 "请检查 backend/.env。"
             )
+        # 火山 TTS speech_rate 推荐范围 0.5~2.0，超出会被服务端夹断；这里做一次夹断保护
+        if speech_rate < 0.5:
+            speech_rate = 0.5
+        elif speech_rate > 2.0:
+            speech_rate = 2.0
         self.api_key = api_key       # e536139a-... (Access Key, → X-Api-Key)
         self.app_key = app_key       # PlgvMymc7f3tQnJ6 (固定常量, → X-Api-App-Key)
         self.resource_id = resource_id
@@ -340,6 +346,7 @@ class VolcRealtimeBridge:
         self.system_role = system_role
         self.bot_name = bot_name
         self.speaking_style = speaking_style
+        self.speech_rate = float(speech_rate)
         self.recv_timeout = recv_timeout
 
         self._ws = None
@@ -421,6 +428,9 @@ class VolcRealtimeBridge:
             },
             "tts": {
                 "speaker": self.voice,
+                # 火山 TTS 语速字段：speech_rate（推荐 0.5~2.0，1.0 为默认）
+                # 来源于 live_config.LIVE_PROFILES[].speech_speed，按难度档位 0.9~1.2 区分
+                "speech_rate": self.speech_rate,
                 "audio_config": {
                     "channel": 1,
                     "format": "pcm_s16le",
@@ -477,6 +487,23 @@ class VolcRealtimeBridge:
             ))
         except Exception as e:
             logger.warning(f"[volc] trigger_response 失败: {e}")
+
+    async def send_chat_text(self, content: str) -> None:
+        """
+        把一段文本作为"用户输入"注入，让 LLM 看到后自然回应。
+        用于快捷操作（跳过 / 提示 / 暂停注入文本让 AI 等待）—— 走 chat_text_query (event 501)。
+        """
+        if self._closed or self._ws is None:
+            return
+        if not content or not content.strip():
+            return
+        try:
+            await self._ws.send(make_full_request(
+                EVT_CHAT_TEXT_QUERY, self._session_id, {"content": content}, JSON, GZIP
+            ))
+            logger.info(f"[volc] chat_text_query 已发: {content[:50]!r}")
+        except Exception as e:
+            logger.warning(f"[volc] send_chat_text 失败: {e}")
 
     async def cancel_response(self) -> None:
         """
@@ -619,6 +646,11 @@ class VolcRealtimeBridge:
         if msg_type == SERVER_ERROR_RESPONSE:
             logger.error(f"[volc] 服务端错误: code={parsed.get('code')} payload={payload}")
             text = json.dumps(payload, ensure_ascii=False) if payload is not None else str(parsed.get("code"))
+            # 火山音色 ID 校验失败（sami error / codes=40000000 / InvalidSpeaker）：
+            # 单独发一类事件，让 live_bridge 触发"音色 fallback + 关闭会话"链路，
+            # 避免对牛弹琴 30 秒。
+            if isinstance(payload, dict) and "InvalidSpeaker" in str(payload.get("error", "")):
+                return RealtimeEvent(type="invalid_speaker", raw=parsed, text=text)
             return RealtimeEvent(type="error", raw=parsed, text=text)
 
         return None

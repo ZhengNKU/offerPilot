@@ -35,6 +35,43 @@ function NewAnalysisDebuggerContent() {
   const [isUploading, setIsUploading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
+  const [remainingCount, setRemainingCount] = useState<number | "unlimited" | null>(null);
+
+  const checkRemainingLimit = async () => {
+    if (!auth.isLoggedIn) {
+      const hasAnalyzedKey = `interviewVar_analyzed_${activeMode}`;
+      if (localStorage.getItem(hasAnalyzedKey) === "true") {
+        setRemainingCount(0);
+      } else {
+        setRemainingCount(1);
+      }
+      return;
+    }
+
+    if (auth.user?.membership === "pro" || auth.user?.membership === "max") {
+      setRemainingCount("unlimited");
+      return;
+    }
+
+    const token = localStorage.getItem("interviewVar_token");
+    try {
+      const checkRes = await fetch("http://localhost:8001/api/audio/check_limit", {
+        headers: token ? { "Authorization": `Bearer ${token}` } : {}
+      });
+      if (checkRes.ok) {
+        setRemainingCount(1);
+      } else {
+        setRemainingCount(0);
+      }
+    } catch (err) {
+      setRemainingCount(1);
+    }
+  };
+
+  useEffect(() => {
+    checkRemainingLimit();
+  }, [activeMode, auth.isLoggedIn, auth.user?.membership]);
+
   // Audio/Dialogue context fields - ALL TEXT INPUTS except onJob and date (Defaulted to empty)
   const [audioForm, setAudioForm] = useState({
     isOnJob: "yes",
@@ -382,6 +419,7 @@ function NewAnalysisDebuggerContent() {
         });
 
         // Step 4: Navigate to voice analysis report page (data is ready)
+        await checkRemainingLimit();
         router.push("/debugger/voice");
 
       } catch (e: any) {
@@ -468,6 +506,7 @@ function NewAnalysisDebuggerContent() {
         // Step 4: Navigate to record report page — pass sessionId in URL so the
         // target page reads from URL truth (avoids the localStorage handoff
         // race that exists when sessionId lives only in storage).
+        await checkRemainingLimit();
         setIsAnalyzing(false);
         router.push(`/debugger/record?sessionId=${sessionId}`);
 
@@ -532,6 +571,7 @@ function NewAnalysisDebuggerContent() {
         // Cache the analysis data to localStorage
         localStorage.setItem("interviewVar_resume_analysis_result", JSON.stringify(analysisData));
         localStorage.setItem("interviewVar_analyzed_resume", "true");
+        await checkRemainingLimit();
         setTaskProgress(100);
 
         // 跳转带上 id，方便后续从历史列表/分享链接重新进入同一份报告
@@ -762,9 +802,19 @@ function NewAnalysisDebuggerContent() {
                   </h2>
                 </div>
 
-                <div className="px-3.5 py-1.5 rounded bg-primary/10 border border-primary/20 text-primary font-label-mono text-sm font-bold uppercase animate-pulse">
-                  免费体验剩余：1次
-                </div>
+                {remainingCount !== null && (
+                  <div className={`px-3.5 py-1.5 rounded font-label-mono text-sm font-bold uppercase transition-all duration-300 ${
+                    remainingCount === "unlimited"
+                      ? "bg-tertiary/10 border border-tertiary/20 text-tertiary"
+                      : remainingCount === 0
+                      ? "bg-secondary/10 border border-secondary/20 text-secondary"
+                      : "bg-primary/10 border border-primary/20 text-primary animate-pulse"
+                  }`}>
+                    {remainingCount === "unlimited"
+                      ? "PRO会员：无限体验"
+                      : `免费体验剩余：${remainingCount}次`}
+                  </div>
+                )}
               </div>
 
               {/* Upload drag drop areas */}

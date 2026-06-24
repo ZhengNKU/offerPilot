@@ -113,6 +113,24 @@ class LiveSessionBridge:
         # PR6 调试：浏览器 → 后端 上行 audio 帧计数（每 50 帧打一次日志）
         self._audio_frame_count: int = 0
 
+    # ---------- AI 状态机辅助 ----------
+    async def _set_ai_state(self, new_state: str) -> None:
+        """
+        改 AI 状态机。状态有变化时才推 live.metrics 给前端，避免 ws 帧风暴。
+        这是修复「AI 状态一直停在 speaking」bug 的关键：之前所有 _ai_state 赋值都没推事件，
+        前端只能靠 binary 帧（一来就 set speaking）来推断；现在每次状态变更都明确告知前端。
+        """
+        if new_state == self._ai_state:
+            return
+        self._ai_state = new_state
+        try:
+            await self._send_text_event({
+                "type": "live.metrics",
+                "ai_state": new_state,
+            })
+        except Exception as e:
+            logger.debug(f"[bridge] push live.metrics 失败: {e}")
+
     # ---------- 主循环 ----------
 
     async def run(self) -> None:
@@ -132,6 +150,12 @@ class LiveSessionBridge:
             "duration_min": self.row.duration_min,
             "followup_rounds": self.row.followup_rounds,
             "ts": datetime.utcnow().isoformat() + "Z",
+        })
+        # 同步推一次 AI 状态（默认 listening：等候选人开口或 SayHello 触发 speaking）
+        self._ai_state = "listening"
+        await self._send_text_event({
+            "type": "live.metrics",
+            "ai_state": self._ai_state,
         })
         logger.info(f"[bridge] live_id={self.row.id} ready, mode={'volc' if self.volc else 'echo'}")
 
@@ -247,8 +271,12 @@ class LiveSessionBridge:
             logger.info(f"[bridge] mic muted={muted}")
             return
         if mtype == "client.event":
-            # 透传：举手/思考/跳过 等快捷操作
+            # 透传：保留给不需要 AI 响应的辅助信号（如 UI 调试）
             logger.info(f"[bridge] client.event name={data.get('name')} payload={data.get('payload')}")
+            return
+        if mtype == "client.quick_action":
+            # 快捷操作（暂停 / 跳过 / 提示）：持久化 + 必要时注入文本让 AI 知道
+            await self._handle_quick_action(data)
             return
         if mtype == "client.text":
             # 候选人发送文本（备用通道，PR2 echo 用）
@@ -362,7 +390,7 @@ class LiveSessionBridge:
         """归一化事件 → 浏览器 WS 消息 + AI 状态机更新。"""
         if ev.type == "tts_segment_start":
             # 火山 event 350：段起始占位（text=''），仅切换 AI 状态，不推 transcript
-            self._ai_state = "speaking"
+            await self._set_ai_state("speaking")
             return
         if ev.type == "tts_text":
             # AI 流式文本（event 350/351 sentence streaming）
@@ -372,7 +400,7 @@ class LiveSessionBridge:
         if ev.type == "tts_audio":
             # AI 语音片段，推浏览器（二进制）
             if ev.audio:
-                self._ai_state = "speaking"
+                await self._set_ai_state("speaking")
                 self._ai_is_speaking = True
                 try:
                     await self.ws.send_bytes(ev.audio)
@@ -381,12 +409,13 @@ class LiveSessionBridge:
                     self._closed = True
             return
         if ev.type == "tts_end":
-            # 一段 AI 音频结束
+            # 一段 AI 音频结束 → 切回 idle（等候选人开口或下一段 AI 主动起 segment_start）
             self._ai_is_speaking = False
+            await self._set_ai_state("idle")
             return
         if ev.type == "asr_partial":
             # 候选人 partial 文本
-            self._ai_state = "thinking"
+            await self._set_ai_state("thinking")
             await self._send_text_event({
                 "type": "live.transcript",
                 "role": "candidate",
@@ -422,11 +451,12 @@ class LiveSessionBridge:
                     "ended_at": _time.time(),
                 },
             })
-            self._ai_state = "listening"
+            # 候选人说完 final 后 AI 通常在思考/正在组织回答，保持 listening 即可
+            await self._set_ai_state("listening")
             return
         if ev.type == "speech_started":
             # 候选人开始说话 → 如果 AI 在讲，发 cancel
-            self._ai_state = "listening"
+            await self._set_ai_state("listening")
             if self._ai_is_speaking and self.volc is not None:
                 logger.info(f"[bridge] 候选人打断 AI 说话")
                 try:
@@ -436,7 +466,8 @@ class LiveSessionBridge:
                 self._ai_is_speaking = False
             return
         if ev.type == "speech_stopped":
-            self._ai_state = "thinking"
+            # 候选人停嘴 → 切 thinking（AI 在组织下一段回答）
+            await self._set_ai_state("thinking")
             return
         if ev.type == "error":
             logger.error(f"[bridge] volc error: {ev.text}")
@@ -445,6 +476,29 @@ class LiveSessionBridge:
                 "code": 500,
                 "message": ev.text or "volc error",
             })
+            return
+        if ev.type == "invalid_speaker":
+            # 火山音色 ID 不可用：立刻关闭会话让前端走分析流程，
+            # 避免"对牛弹琴 30 秒"。
+            logger.error(
+                f"[bridge] live_id={self.row.id} 火山音色无效，主动终止会话 "
+                f"(voice={getattr(self.volc, 'voice', '?')}): {ev.text}"
+            )
+            await self._send_text_event({
+                "type": "live.error",
+                "code": 5501,
+                "message": (
+                    f"AI 面试官音色配置不可用（{getattr(self.volc, 'voice', '?')}）。"
+                    "已自动结束本场面试，请稍后重试或联系管理员。"
+                ),
+            })
+            # 触发主循环 finally → _on_close → 关 volc + 写 transcript → DB status=ended
+            # 浏览器侧会收到 ws close，触发 useRealtimeSession 的 onAutoEnd → POST /end → 分析流程
+            self._closed = True
+            try:
+                await self.ws.close(code=1011, reason="invalid_speaker")
+            except Exception:
+                pass
             return
         if ev.type == "dialog_finished":
             # 让 _volc_event_loop 退出
@@ -559,6 +613,114 @@ class LiveSessionBridge:
         except Exception as e:
             logger.warning(f"[bridge] send_text 失败: {e}")
             self._closed = True
+
+    # ---------- 快捷操作（PR-N：暂停 / 跳过 / 提示） ----------
+
+    async def _handle_quick_action(self, data: dict) -> None:
+        """
+        浏览器发送 {type: client.quick_action, action: 'pause'|'skip'|'hint', payload?: {...}}
+        - 持久化：所有 quick_action 入 _pending_messages（speaker=system, content.kind=action），
+          报告页可复盘"候选人在 Q3 跳过了本题"。
+        - 暂停特殊：mute mic + 注入文本让 AI 等待 + 30s 定时器自动恢复。
+        - 跳过/提示：注入文本让 AI 知道，不需要本地状态。
+        """
+        import time as _time
+        action = data.get("action")
+        payload = data.get("payload") or {}
+        if action not in ("pause", "skip", "hint"):
+            logger.warning(f"[bridge] 未识别的 quick_action: {action}")
+            return
+
+        # 1. 持久化到 pending_messages
+        self._seq += 1
+        now = _time.time()
+        self._pending_messages.append({
+            "seq": self._seq,
+            "content": {
+                "speaker": "system",
+                "seq": self._seq,
+                "kind": f"quick_action.{action}",
+                "payload": payload,
+                "started_at": now,
+                "ended_at": now,
+            },
+        })
+
+        # 2. 通知浏览器（让前端按钮态切换、倒计时等）
+        await self._send_text_event({
+            "type": "live.quick_action",
+            "action": action,
+            "seq": self._seq,
+            "ts": now,
+        })
+
+        # 3. 行为分发
+        if action == "pause":
+            duration = int(payload.get("duration", 30))
+            await self._apply_pause(duration)
+        elif action == "skip":
+            # 注入文本让 AI 知道要切下一题（按 system_prompt 规则 AI 会自然转移）
+            try:
+                await self.volc.send_chat_text(
+                    f"候选人说：本题我不太清楚，请直接出下一题。"
+                )
+            except Exception as e:
+                logger.warning(f"[bridge] pause→inject text 失败: {e}")
+        elif action == "hint":
+            try:
+                await self.volc.send_chat_text(
+                    "系统提示：候选人在请求提示。请用一句话给一个关键词线索，但不要直接给答案。"
+                )
+            except Exception as e:
+                logger.warning(f"[bridge] hint→inject text 失败: {e}")
+
+    async def _apply_pause(self, duration: int) -> None:
+        """
+        候选人按「暂停」：30s 内屏蔽 mic + 让 AI 等待。
+        注意：火山 realtime 没法彻底关 VAD，我们靠两条路径协同：
+        1) 通知前端 mic 静音（前端 audio hook stop 推 audio frame）
+        2) 推注入文本「我需要 30 秒思考」让 AI 知道进入静默期
+        3) duration 秒后自动恢复 + 推「我准备好了」让 AI 继续
+        """
+        import time as _time
+        # 通知前端进入 paused 态（前端用此启倒计时 UI + 屏蔽 mic 帧）
+        await self._send_text_event({
+            "type": "live.pause",
+            "active": True,
+            "duration": duration,
+            "ts": _time.time(),
+        })
+        # 注入文本让 AI 进入静默等待
+        try:
+            await self.volc.send_chat_text(
+                f"候选人说：我需要 {duration} 秒时间思考一下，请稍等，不要打断我。"
+            )
+        except Exception as e:
+            logger.warning(f"[bridge] pause→inject 失败: {e}")
+
+        # 启动定时器：duration 秒后恢复
+        async def _resume():
+            try:
+                await asyncio.sleep(duration)
+            except asyncio.CancelledError:
+                return
+            if self._closed:
+                return
+            await self._send_text_event({
+                "type": "live.pause",
+                "active": False,
+                "ts": _time.time(),
+            })
+            try:
+                await self.volc.send_chat_text("我准备好了，请继续。")
+            except Exception as e:
+                logger.warning(f"[bridge] pause resume→inject 失败: {e}")
+
+        # 取消旧定时器（如有），避免连点累积
+        prev = getattr(self, "_pause_task", None)
+        if prev and not prev.done():
+            prev.cancel()
+        self._pause_task = asyncio.create_task(_resume())
 
     # ---------- 关闭 / 归档 ----------
 

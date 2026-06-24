@@ -90,14 +90,14 @@ async def upsert_user_live_minutes(
 
 # ---------- Schemas ----------
 
-INTERVIEW_TYPE_VALUES = ("tech_8gu", "tech_project", "tech_scenario", "hr_comprehensive")
+INTERVIEW_TYPE_VALUES = ("tech_8gu", "tech_project", "tech_scenario", "non_tech", "hr_comprehensive")
 DIFFICULTY_VALUES = ("Lv1", "Lv2", "Lv3", "Lv4")
 DURATION_VALUES = (10, 15, 20)
 
 
 class CreateLiveSessionRequest(BaseModel):
     """POST /api/live/sessions 入参。"""
-    interview_type: Literal["tech_8gu", "tech_project", "tech_scenario", "hr_comprehensive"]
+    interview_type: Literal["tech_8gu", "tech_project", "tech_scenario", "non_tech", "hr_comprehensive"]
     difficulty: Literal["Lv1", "Lv2", "Lv3", "Lv4"]
     duration_min: Literal[10, 15, 20]
     followup_rounds: int = Field(ge=1, le=3)
@@ -155,9 +155,11 @@ async def create_live_session(
     # 缓存到本地变量，避免 rollback 后访问 ORM 属性触发 MissingGreenlet
     current_user_id = current_user.id if current_user else None
 
-    # 防御性清理：用户重新点"开始"时，主动把上一次卡住的 active session 标 error
+    # 防御性清理：用户重新点"开始"时，主动把上一次卡住的 active session 标 failed
     # （WS 接入失败 / 浏览器崩溃 / 火山 404 等场景都会留 status=live 的僵尸行）
     # 用户显式选择"新建" = 旧会话作废，避免反复 409
+    # 注意：不要写 status="error"，那是英文原始值，前端时间轴没有 error 映射会原样显示，
+    #       统一用 failed（前端映射"评估失败"）以保持中文文案一致。
     if current_user_id is not None:
         try:
             stale_res = await db.execute(
@@ -166,7 +168,7 @@ async def create_live_session(
                     models.InterviewLiveSession.user_id == current_user_id,
                     models.InterviewLiveSession.status.in_(("created", "ws_connecting", "live", "ending")),
                 )
-                .values(status="error", ended_at=func.now())
+                .values(status="failed", ended_at=func.now())
                 .returning(models.InterviewLiveSession.id)
             )
             stale_ids = [r[0] for r in stale_res]
@@ -363,6 +365,50 @@ async def get_live_session_report(
         "duration_min": row.duration_min,
         "interview_type": row.interview_type
     }
+
+
+class FeedbackRequest(BaseModel):
+    """POST /api/live/sessions/{id}/feedback 入参。"""
+    kind: Literal["tech_question", "voice", "ux", "other"] = "other"
+    content: str = Field(min_length=1, max_length=500)
+
+
+@router.post("/sessions/{live_id}/feedback")
+async def submit_live_feedback(
+    live_id: int,
+    req: FeedbackRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
+):
+    """
+    候选人在面试过程中提交的反馈（快捷操作 / 反馈按钮）。
+    追加到 InterviewLiveSession.feedback JSONB 数组，便于运营做质量监控。
+    """
+    row_res = await db.execute(
+        select(models.InterviewLiveSession).where(models.InterviewLiveSession.id == live_id)
+    )
+    row = row_res.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Live session {live_id} 不存在",
+        )
+    # 鉴权：必须是本人（或匿名 session 允许任何来源写）
+    if current_user is not None and row.user_id is not None and row.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权向该会话提交反馈",
+        )
+    feedback = list(row.feedback or [])
+    feedback.append({
+        "kind": req.kind,
+        "content": req.content.strip(),
+        "ts": datetime.utcnow().isoformat() + "Z",
+    })
+    row.feedback = feedback
+    await db.commit()
+    logger.info(f"[live] live_id={live_id} 收到反馈 kind={req.kind} content={req.content[:50]!r}")
+    return {"ok": True, "feedback_count": len(feedback)}
 
 
 @router.post("/sessions/{live_id}/end", response_model=LiveSessionResponse)
@@ -975,6 +1021,140 @@ async def get_offer_trend(
 
 # ---------- WebSocket 端点（PR2） ----------
 
+
+async def _fetch_candidate_context_full(
+    db: AsyncSession, user_id: int, target_role: str
+) -> tuple[str, dict | None, list[dict], dict | None]:
+    """
+    拉候选人的 4 类数据 → 返回 (context_str, profile_dict, projects_list, resume_summary)。
+    既给 system prompt 拼【候选人背景】段，也给 pick_intro_questions 喂 dict。
+    任一查询失败 / 无数据就跳过该段，整体不抛错。
+    """
+    from app.services.live_config import build_candidate_context
+
+    # 1. UserProfile
+    profile_dict: dict | None = None
+    try:
+        prof_res = await db.execute(
+            select(models.UserProfile).where(models.UserProfile.user_id == user_id)
+        )
+        prof = prof_res.scalar_one_or_none()
+        if prof is not None:
+            profile_dict = {
+                "experience_years": prof.experience_years,
+                "experience_months": prof.experience_months,
+                "company_name": prof.company_name,
+                "role_name": prof.role_name,
+                "school": prof.school,
+                "degree": prof.degree,
+                "target_company": prof.target_company,
+                "target_grade": prof.target_grade,
+            }
+    except Exception as e:
+        logger.warning(f"[live] 取 UserProfile 失败: {e}")
+
+    # 2. ProjectMemory（按 importance desc 限 3 条；同 importance 时按 mastery desc）
+    projects_list: list[dict] = []
+    try:
+        proj_res = await db.execute(
+            select(models.ProjectMemory)
+            .where(models.ProjectMemory.user_id == user_id)
+            .order_by(
+                models.ProjectMemory.importance.desc(),
+                models.ProjectMemory.mastery_level.desc(),
+            )
+            .limit(3)
+        )
+        for p in proj_res.scalars().all():
+            projects_list.append({
+                "project_name": p.project_name,
+                "role": p.role,
+                "tech_stack": p.tech_stack or [],
+                "metrics": p.metrics or {},
+            })
+    except Exception as e:
+        logger.warning(f"[live] 取 ProjectMemory 失败: {e}")
+
+    # 3. 最近 ResumeAnalysis.result_json
+    resume_summary: dict | None = None
+    try:
+        ra_res = await db.execute(
+            select(models.ResumeAnalysis)
+            .where(models.ResumeAnalysis.user_id == user_id)
+            .order_by(models.ResumeAnalysis.created_at.desc())
+            .limit(1)
+        )
+        ra = ra_res.scalar_one_or_none()
+        if ra is not None and ra.result_json:
+            rj = dict(ra.result_json)  # 复制防污染
+            # 冗余字段如果没填就回填
+            if rj.get("score") is None and ra.score is not None:
+                rj["score"] = ra.score
+            resume_summary = rj
+    except Exception as e:
+        logger.warning(f"[live] 取 ResumeAnalysis 失败: {e}")
+
+    # 4. 最近一次面试评测（优先 InterviewLiveSession，fallback InterviewSession）
+    last_analysis: dict | None = None
+    try:
+        # 先看 InterviewLiveSession（实时面试归档）
+        live_res = await db.execute(
+            select(models.InterviewLiveSession)
+            .where(
+                models.InterviewLiveSession.user_id == user_id,
+                models.InterviewLiveSession.status == "completed",
+                models.InterviewLiveSession.ipi_score.is_not(None),
+            )
+            .order_by(models.InterviewLiveSession.ended_at.desc())
+            .limit(1)
+        )
+        last = live_res.scalar_one_or_none()
+        if last is None:
+            # fallback 到 InterviewSession（录音分析）
+            sess_res = await db.execute(
+                select(models.InterviewSession)
+                .where(
+                    models.InterviewSession.user_id == user_id,
+                    models.InterviewSession.status == "completed",
+                    models.InterviewSession.ipi_score > 0,
+                )
+                .order_by(models.InterviewSession.updated_at.desc())
+                .limit(1)
+            )
+            last = sess_res.scalar_one_or_none()
+            if last is not None:
+                last_analysis = {
+                    "ipi_score": last.ipi_score,
+                    "summary_strengths": last.summary_strengths or [],
+                    "summary_weaknesses": last.summary_weaknesses or [],
+                }
+        else:
+            last_analysis = {
+                "ipi_score": last.ipi_score,
+                "summary_strengths": last.summary_strengths or [],
+                "summary_weaknesses": last.summary_weaknesses or [],
+            }
+    except Exception as e:
+        logger.warning(f"[live] 取最近面试评测失败: {e}")
+
+    context_str = build_candidate_context(
+        profile=profile_dict,
+        projects=projects_list,
+        resume_summary=resume_summary,
+        last_analysis=last_analysis,
+        target_role=target_role,
+    )
+    return context_str, profile_dict, projects_list, resume_summary
+
+
+# 旧 API 兼容：仅返回字符串（不再被调用，保留给可能的旧 caller）
+async def _fetch_candidate_context(
+    db: AsyncSession, user_id: int, target_role: str
+) -> str:
+    ctx_str, _, _, _ = await _fetch_candidate_context_full(db, user_id, target_role)
+    return ctx_str
+
+
 @router.websocket("/ws/{live_id}")
 async def ws_live(websocket: WebSocket, live_id: int):
     """
@@ -1059,11 +1239,45 @@ async def ws_live(websocket: WebSocket, live_id: int):
         use_volc = bool(settings.VOLC_REALTIME_API_KEY)
         if use_volc:
             from app.services.volc_realtime_bridge import VolcRealtimeBridge
-            from app.services.live_config import build_system_prompt, select_voice, get_profile
+            from app.services.live_config import (
+                build_system_prompt, build_candidate_context,
+                pick_intro_questions,
+                select_voice, get_profile,
+            )
             try:
                 # 提前取 profile（bridge 实例化时就要用 bot_name）
                 profile = get_profile(row.interview_type, row.difficulty)
                 voice = select_voice(row.interview_type, row.difficulty)
+
+                # PR-N: 拼候选人背景（简历画像 / 项目记忆 / 历史面试评测），
+                # 同时生成「按背景动态选」的开场白作为 SayHello 的 content。
+                candidate_context = ""
+                intro_content = ""
+                user_profile_dict: dict | None = None
+                projects_list: list[dict] = []
+                resume_summary_dict: dict | None = None
+                if row.user_id is not None:
+                    try:
+                        (
+                            candidate_context,
+                            user_profile_dict,
+                            projects_list,
+                            resume_summary_dict,
+                        ) = await _fetch_candidate_context_full(
+                            db, user_id=row.user_id, target_role=row.target_role or ""
+                        )
+                        intro_content = pick_intro_questions(
+                            interview_type=row.interview_type,
+                            profile=user_profile_dict,
+                            projects=projects_list,
+                            resume_summary=resume_summary_dict,
+                            target_role=row.target_role or "",
+                        )
+                    except Exception as ctx_err:
+                        logger.warning(
+                            f"[ws] live_id={live_id} 拉候选人背景失败（不影响继续）: {ctx_err}"
+                        )
+
                 system_prompt = build_system_prompt(
                     interview_type=row.interview_type,
                     difficulty=row.difficulty,
@@ -1073,6 +1287,7 @@ async def ws_live(websocket: WebSocket, live_id: int):
                     duration_min=row.duration_min,
                     followup_rounds=row.followup_rounds,
                     job_description=row.job_description,
+                    candidate_context=candidate_context,
                 )
                 volc_bridge = VolcRealtimeBridge(
                     api_key=settings.VOLC_REALTIME_API_KEY,   # → X-Api-Key (Access Key)
@@ -1082,11 +1297,13 @@ async def ws_live(websocket: WebSocket, live_id: int):
                     voice=voice,
                     system_role=system_prompt,                # volc dialog.system_role
                     bot_name=profile.get("persona_cn", "面试官"),
+                    # 语速档位（0.9~1.2）→ 火山 TTS speech_rate；让 Lv1~Lv4 真的听出快慢差异
+                    speech_rate=profile.get("speech_speed", 1.0),
                 )
                 await volc_bridge.connect()
-                # 触发 AI 开场白（SayHello）
+                # 触发 AI 开场白（SayHello）：用 pick_intro_questions 选出的「按背景开场白」
                 try:
-                    await volc_bridge.say_hello()
+                    await volc_bridge.say_hello(content=intro_content or "")
                 except Exception as e:
                     logger.warning(f"[ws] live_id={live_id} SayHello 失败（不影响连接）: {e}")
 
@@ -1178,12 +1395,12 @@ async def ws_live(websocket: WebSocket, live_id: int):
                     await db.execute(
                         update(models.InterviewLiveSession)
                         .where(models.InterviewLiveSession.id == live_id)
-                        .values(status="error", ended_at=func.now())
+                        .values(status="failed", ended_at=func.now())
                     )
                     await db.commit()
-                    logger.info(f"[ws] live_id={live_id} session marked as error in DB")
+                    logger.info(f"[ws] live_id={live_id} session marked as failed in DB")
                 except Exception as db_err:
-                    logger.exception(f"[ws] live_id={live_id} 标记 error 失败: {db_err}")
+                    logger.exception(f"[ws] live_id={live_id} 标记 failed 失败: {db_err}")
                 try:
                     await websocket.close(code=4503, reason="volc_unavailable")
                 except Exception:
