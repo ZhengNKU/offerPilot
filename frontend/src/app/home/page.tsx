@@ -19,7 +19,7 @@ export default function CareerDashboard() {
     experience: "6年经验",
     city: "深圳",
     joinDays: 128,
-    tags: ["后端开发", "分布式系统", "系统设计", "性能优化"],
+    tags: [] as string[],
     company: "腾讯科技",
     role: "高级后端工程师",
     level: "高级",
@@ -34,7 +34,8 @@ export default function CareerDashboard() {
   const [careerGoal, setCareerGoal] = useState({
     role: "架构师",
     level: "P7",
-    salary: "50K - 70K",
+    salaryMin: 50,
+    salaryMax: 70,
     city: "深圳",
     company: "腾讯/美团等 (目标)",
     matchRate: 72
@@ -144,14 +145,27 @@ export default function CareerDashboard() {
           ? Math.floor((Date.now() - new Date(auth.user.createdAt).getTime()) / 86400000)
           : prev.joinDays
       }));
-      setCareerGoal(prev => ({
-        ...prev,
-        role: auth.user.targetRole || prev.role,
-        level: auth.user.targetGrade || prev.level,
-        salary: auth.user.targetSalary || prev.salary,
-        company: auth.user.targetCompany || prev.company,
-        city: auth.user.targetCity || prev.city
-      }));
+      setCareerGoal(prev => {
+        // 解析目标薪资字符串 → min/max
+        const next: any = {
+          role: auth.user.targetRole || prev.role,
+          level: auth.user.targetGrade || prev.level,
+          company: auth.user.targetCompany || prev.company,
+          city: auth.user.targetCity || prev.city,
+          matchRate: prev.matchRate
+        };
+        const salStr = auth.user.targetSalary || "";
+        const salMatch = salStr.match(/(\d+)\s*K/i);
+        const salMatchMax = salStr.match(/[-~—–]\s*(\d+)\s*K/i);
+        if (salMatch && salMatchMax) {
+          next.salaryMin = parseInt(salMatch[1]);
+          next.salaryMax = parseInt(salMatchMax[1]);
+        } else {
+          next.salaryMin = prev.salaryMin;
+          next.salaryMax = prev.salaryMax;
+        }
+        return next;
+      });
       setAccountSecurity(prev => ({
         ...prev,
         email: auth.user.email || "未绑定",
@@ -191,6 +205,19 @@ export default function CareerDashboard() {
 
   const handleSaveGoal = (e: React.FormEvent) => {
     e.preventDefault();
+    // 校验期望薪资：最低不能高于最高
+    if (goalForm.salaryMin > goalForm.salaryMax) {
+      auth.triggerToast("最低薪资不能高于最高薪资，请重新输入！");
+      setGoalForm({ ...goalForm, salaryMin: careerGoal.salaryMin, salaryMax: careerGoal.salaryMax });
+      return;
+    }
+    // 校验目标城市：最多三个
+    const cities = goalForm.city.split(/[、,，]/).map(c => c.trim()).filter(Boolean);
+    if (cities.length > 3) {
+      auth.triggerToast("最多只能选择三个目标城市！");
+      setGoalForm({ ...goalForm, city: careerGoal.city });
+      return;
+    }
     const randomMatch = Math.floor(Math.random() * 20) + 65; // 65 - 85
     setCareerGoal({
       ...goalForm,
@@ -199,7 +226,7 @@ export default function CareerDashboard() {
     auth.updateUser({
       targetRole: goalForm.role,
       targetGrade: goalForm.level,
-      targetSalary: goalForm.salary,
+      targetSalary: `${goalForm.salaryMin}K - ${goalForm.salaryMax}K`,
       targetCompany: goalForm.company,
       targetCity: goalForm.city
     });
@@ -552,7 +579,7 @@ export default function CareerDashboard() {
                     </div>
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标薪资</span>
-                      <span className="text-base font-black text-tertiary block mt-0.5 whitespace-nowrap">{careerGoal.salary}</span>
+                      <span className="text-base font-black text-tertiary block mt-0.5 whitespace-nowrap">{careerGoal.salaryMin}K - {careerGoal.salaryMax}K</span>
                     </div>
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标城市</span>
@@ -1075,27 +1102,15 @@ export default function CareerDashboard() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">当前月薪范围</label>
-                    <input
-                      type="text"
-                      placeholder="例如：25K - 35K"
-                      value={profileForm.salary || ""}
-                      onChange={(e) => setProfileForm({ ...profileForm, salary: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">城市</label>
-                    <input
-                      type="text"
-                      required
-                      value={profileForm.city}
-                      onChange={(e) => setProfileForm({ ...profileForm, city: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <label className="text-on-surface-variant/60 font-bold block">当前月薪范围</label>
+                  <input
+                    type="text"
+                    placeholder="例如：25K - 35K"
+                    value={profileForm.salary || ""}
+                    onChange={(e) => setProfileForm({ ...profileForm, salary: e.target.value })}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -1120,17 +1135,6 @@ export default function CareerDashboard() {
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">专业技术标签 (用英文逗号隔开)</label>
-                  <input
-                    type="text"
-                    required
-                    value={profileForm.tagsString}
-                    onChange={(e) => setProfileForm({ ...profileForm, tagsString: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
-                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -1211,7 +1215,7 @@ export default function CareerDashboard() {
               <form onSubmit={handleSaveGoal} className="space-y-4 text-sm font-semibold text-white">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">目标岗位</label>
+                    <label className="text-on-surface-variant/60 font-bold block h-5">目标岗位</label>
                     <input
                       type="text"
                       required
@@ -1221,7 +1225,7 @@ export default function CareerDashboard() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">目标职级</label>
+                    <label className="text-on-surface-variant/60 font-bold block h-5">目标职级</label>
                     <input
                       type="text"
                       required
@@ -1234,17 +1238,26 @@ export default function CareerDashboard() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">目标城市</label>
+                    <label className="text-on-surface-variant/60 font-bold flex items-center gap-0.5 h-5">
+                      目标城市
+                      <span className="relative group cursor-help leading-none">
+                        <span className="block rounded-full bg-white/30 w-[11px] h-[11px] flex items-center justify-center text-[7px] font-bold text-surface select-none">i</span>
+                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 bg-[#1a2236] border border-white/10 rounded-lg text-[11px] text-white/70 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none font-normal">
+                          最多3个，用顿号隔开
+                        </span>
+                      </span>
+                    </label>
                     <input
                       type="text"
                       required
+                      placeholder="例如：上海、深圳、杭州"
                       value={goalForm.city}
                       onChange={(e) => setGoalForm({ ...goalForm, city: e.target.value })}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">目标公司 (选填)</label>
+                    <label className="text-on-surface-variant/60 font-bold flex items-center h-5">目标公司 (选填)</label>
                     <input
                       type="text"
                       placeholder="例如：腾讯科技"
@@ -1255,15 +1268,35 @@ export default function CareerDashboard() {
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">期望薪资范围</label>
-                  <input
-                    type="text"
-                    required
-                    value={goalForm.salary}
-                    onChange={(e) => setGoalForm({ ...goalForm, salary: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-on-surface-variant/60 font-bold block">期望薪资范围</label>
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          required
+                          value={goalForm.salaryMin || ""}
+                          onChange={(e) => setGoalForm({ ...goalForm, salaryMin: parseInt(e.target.value) || 0 })}
+                          className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                      </div>
+                      <span className="text-white/30 font-bold text-sm shrink-0">-</span>
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          required
+                          value={goalForm.salaryMax || ""}
+                          onChange={(e) => setGoalForm({ ...goalForm, salaryMax: parseInt(e.target.value) || 0 })}
+                          className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="pt-6 border-t border-white/5 flex gap-4 justify-end text-sm font-black">

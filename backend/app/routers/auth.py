@@ -47,7 +47,7 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
         membership=user.membership,
         phone=user.phone,
         email=user.email,
-        targetCity=p.target_cities[0] if p.target_cities else None,
+        targetCity="、".join(p.target_cities) if p.target_cities else None,
         createdAt=user.created_at.isoformat() if user.created_at else None
     )
 
@@ -269,6 +269,11 @@ async def register_complete(
     # Save UserProfile details
     prof = req.profile
     exp = req.expectations
+    if len(exp.target_cities) > 3:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="最多只能选择三个目标城市"
+        )
     new_profile = models.UserProfile(
         user_id=new_user.id,
         gender=prof.gender,
@@ -542,7 +547,22 @@ async def profile_update(
     if req.degree is not None: p.degree = req.degree
     if req.has_experience is not None: p.has_experience = req.has_experience
     
-    if req.target_cities is not None: p.target_cities = req.target_cities
+    # 校验目标薪资范围
+    target_min = req.target_salary_min if req.target_salary_min is not None else p.target_salary_min
+    target_max = req.target_salary_max if req.target_salary_max is not None else p.target_salary_max
+    if target_min is not None and target_max is not None and target_min > target_max:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="最低薪资不能高于最高薪资"
+        )
+
+    if req.target_cities is not None:
+        if len(req.target_cities) > 3:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="最多只能选择三个目标城市"
+            )
+        p.target_cities = req.target_cities
     if req.target_company is not None: p.target_company = req.target_company
     if req.target_role is not None: p.target_role = req.target_role
     if req.target_grade is not None: p.target_grade = req.target_grade
