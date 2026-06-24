@@ -296,3 +296,14 @@ body {
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(175, 167, 255, 0.5);
 }
+.hero-select {
+  --tw-bg-opacity: 1;
+  background-color: rgb(255 255 255 / 0.05) !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none'%3E%3Cpath d='M3 4.5L6 7.5L9 4.5' stroke='%23ffffff' stroke-opacity='0.3' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat !important;
+  background-position: right 10px center !important;
+  padding-right: 32px !important;
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+}
+.hero-select::-ms-expand { display: none; }
