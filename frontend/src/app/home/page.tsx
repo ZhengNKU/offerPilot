@@ -498,16 +498,18 @@ export default function CareerDashboard() {
                 <p className="text-sm font-bold text-on-surface-variant/75 text-left leading-none">{profile.title}</p>
                 
                 {/* Tags Row */}
-                <div className="flex flex-wrap gap-1.5 pt-0.5">
-                  {profile.tags.map((tag, i) => (
-                    <span key={i} className="px-2.5 py-0.5 rounded-lg bg-white/5 text-on-surface-variant/75 text-[11px] font-bold border border-white/5 whitespace-nowrap">
-                      {tag}
-                    </span>
-                  ))}
-                </div>
+                {profile.tags && profile.tags.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {profile.tags.map((tag, i) => (
+                      <span key={i} className="px-2.5 py-0.5 rounded-lg bg-white/5 text-on-surface-variant/75 text-[11px] font-bold border border-white/5 whitespace-nowrap">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 {/* Metadata details row */}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-on-surface-variant/60 font-semibold font-label-mono pt-1">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-on-surface-variant/60 font-semibold font-label-mono">
                   <span className="flex items-center gap-1.5 whitespace-nowrap">
                     <span className="material-symbols-outlined text-xs text-primary">business_center</span>
                     {profile.experience}

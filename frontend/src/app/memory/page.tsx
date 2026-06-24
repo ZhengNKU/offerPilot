@@ -1124,7 +1124,7 @@ export default function CareerMemoryDashboard() {
                         </div>
 
                         {/* 能力成长曲线图 (真实数据) */}
-                        <div className="relative w-full h-[150px] mt-2">
+                        <div className="relative w-full h-[250px] mt-2">
                           {isLoadingGrowth ? (
                             <div className="w-full h-full flex items-center justify-center">
                               <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
