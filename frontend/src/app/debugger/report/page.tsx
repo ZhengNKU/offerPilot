@@ -52,7 +52,7 @@ export default function CareerDashboard() {
 
   // Synchronize search params and highlights (History navbar action)
   const handleHistoryRedirect = () => {
-    router.push("/debugger/records?tab=timeline");
+    router.push("/debugger/record?tab=timeline");
   };
 
   // Safe client-side hooks
@@ -153,7 +153,7 @@ export default function CareerDashboard() {
             <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               面试调试器
             </a>
-            <a onClick={() => router.push("/debugger/records")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/debugger/record")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业记忆看板
             </a>
             <a onClick={() => router.push("/debugger/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
@@ -549,7 +549,7 @@ export default function CareerDashboard() {
                     最近活动
                   </h4>
                   <span 
-                    onClick={() => router.push("/debugger/records?tab=timeline")}
+                    onClick={() => router.push("/debugger/record?tab=timeline")}
                     className="text-sm text-primary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-1"
                   >
                     查看全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
