@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 import redis.asyncio as aioredis
 
 from app import models, schemas
+from app.services.match_scorer import compute_match_rate_from_profile
 from app.database import get_db, get_redis
 from app.utils.security import (
     get_password_hash,
@@ -48,7 +49,8 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
         phone=user.phone,
         email=user.email,
         targetCity="、".join(p.target_cities) if p.target_cities else None,
-        createdAt=user.created_at.isoformat() if user.created_at else None
+        createdAt=user.created_at.isoformat() if user.created_at else None,
+        matchRate=p.match_rate,
     )
 
 # FastAPI dependency to fetch logged-in user details
@@ -297,7 +299,13 @@ async def register_complete(
         target_salary_max=exp.target_salary_max
     )
     db.add(new_profile)
-    
+
+    # 计算初始匹配度
+    try:
+        new_profile.match_rate = compute_match_rate_from_profile(new_profile)
+    except Exception as e:
+        logging.warning(f"match_rate compute failed on register: {e}")
+
     from sqlalchemy.exc import IntegrityError
     try:
         await db.commit() # Commit transaction
@@ -509,6 +517,34 @@ async def get_me(
     return format_user_profile(current_user)
 
 
+@router.get("/match-rate")
+async def get_match_rate(
+    current_user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    实时计算并返回当前用户的求职目标匹配度。
+
+    前端在「职业驾驶舱」页面加载、编辑个人职业资料成功后、
+    求职目标编辑成功后调用此接口，获取最新的匹配度分数。
+    """
+    p = current_user.profile
+    if not p:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="用户档案不存在"
+        )
+    try:
+        rate = compute_match_rate_from_profile(p)
+        # 持久化缓存到数据库
+        p.match_rate = rate
+        await db.commit()
+    except Exception as e:
+        logging.error(f"match_rate compute failed: {e}")
+        rate = p.match_rate  # fallback to cached value
+    return {"matchRate": rate}
+
+
 @router.put("/profile/update", response_model=schemas.UserProfileResponse)
 async def profile_update(
     req: schemas.ProfileUpdateReq,
@@ -568,7 +604,14 @@ async def profile_update(
     if req.target_grade is not None: p.target_grade = req.target_grade
     if req.target_salary_min is not None: p.target_salary_min = req.target_salary_min
     if req.target_salary_max is not None: p.target_salary_max = req.target_salary_max
-    
+
+    # 重新计算求职目标匹配度（职业档案或求职目标变更后自动触发）
+    try:
+        p.match_rate = compute_match_rate_from_profile(p)
+    except Exception as e:
+        logging.warning(f"match_rate compute failed on profile update: {e}")
+        p.match_rate = None
+
     await db.commit()
     await db.refresh(current_user)
     return format_user_profile(current_user)
