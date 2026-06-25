@@ -82,6 +82,7 @@ class UserProfileResponse(BaseModel):
     email: Optional[str] = None
     targetCity: Optional[str] = None
     createdAt: Optional[str] = None
+    matchRate: Optional[int] = None
 
 class TokenResponse(BaseModel):
     access_token: str

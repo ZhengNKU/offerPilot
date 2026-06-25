@@ -27,6 +27,7 @@ export interface UserProfile {
   email?: string;
   targetCity?: string;
   createdAt?: string;
+  matchRate?: number;
 }
 
 interface AuthContextType {
@@ -41,7 +42,7 @@ interface AuthContextType {
   login: (data?: Partial<UserProfile>) => void;
   logout: () => void;
   deleteAccount: () => void;
-  updateUser: (data: Partial<UserProfile>) => void;
+  updateUser: (data: Partial<UserProfile>) => Promise<number | null>;
   triggerToast: (msg: string) => void;
 }
 
@@ -210,7 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     window.dispatchEvent(new Event("storage"));
   };
 
-  const updateUser = async (data: Partial<UserProfile>) => {
+  const updateUser = async (data: Partial<UserProfile>): Promise<number | null> => {
     const newUser = { ...user, ...data };
     setUser(newUser);
     localStorage.setItem("interviewVar_user", JSON.stringify(newUser));
@@ -227,7 +228,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           body.job_status = data.status === "在职" ? "active" : data.status === "离职" ? "resigned" : "student";
         }
         if (data.avatar !== undefined) body.avatar_url = data.avatar;
-        
+
         if (data.years !== undefined) {
           const matched = data.years.match(/^(\d+年)?(\d+个月)?/);
           body.experience_years = matched?.[1] || "在校/应届";
@@ -235,7 +236,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         if (data.company !== undefined) body.company_name = data.company;
         if (data.role !== undefined) body.role_name = data.role.split(" · ")[0];
-        
+
         if (data.salary !== undefined) {
           const salMatch = data.salary.match(/(\d+)K\s*-\s*(\d+)K/i);
           if (salMatch) {
@@ -246,7 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.school !== undefined) body.school = data.school;
         if (data.degree !== undefined) body.degree = data.degree;
         if (data.hasExp !== undefined) body.has_experience = data.hasExp;
-        
+
         if (data.targetCompany !== undefined) body.target_company = data.targetCompany;
         if (data.targetRole !== undefined) body.target_role = data.targetRole;
         if (data.targetGrade !== undefined) body.target_grade = data.targetGrade;
@@ -259,7 +260,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        await fetch("http://localhost:8001/api/auth/profile/update", {
+        const res = await fetch("http://localhost:8001/api/auth/profile/update", {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
@@ -267,10 +268,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           },
           body: JSON.stringify(body)
         });
+        if (res.ok) {
+          const backendData = await res.json();
+          // 使用后端算法计算出的真实 matchRate
+          const realMatchRate: number | null = backendData.matchRate ?? null;
+          if (realMatchRate !== null) {
+            const updatedUser = { ...newUser, matchRate: realMatchRate };
+            setUser(updatedUser);
+            localStorage.setItem("interviewVar_user", JSON.stringify(updatedUser));
+            window.dispatchEvent(new Event("storage"));
+          }
+          return realMatchRate;
+        }
       } catch (e) {
         console.error("Failed to sync profile to backend", e);
       }
     }
+    return null;
   };
 
   // Sync state between tabs/windows

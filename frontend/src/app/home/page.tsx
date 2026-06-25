@@ -179,7 +179,7 @@ export default function CareerDashboard() {
         level: auth.user.targetGrade || prev.level,
         company: auth.user.targetCompany || prev.company,
         city: auth.user.targetCity || prev.city,
-        matchRate: prev.matchRate
+        matchRate: auth.user.matchRate ?? prev.matchRate
       };
       const salStr = auth.user.targetSalary || "";
       const salMatch = salStr.match(/(\d+)\s*K/i);
@@ -225,7 +225,7 @@ export default function CareerDashboard() {
     setShowEditProfileModal(false);
   };
 
-  const handleSaveGoal = (e: React.FormEvent) => {
+  const handleSaveGoal = async (e: React.FormEvent) => {
     e.preventDefault();
     // 校验期望薪资：最低不能高于最高
     if (goalForm.salaryMin > goalForm.salaryMax) {
@@ -240,17 +240,18 @@ export default function CareerDashboard() {
       setGoalForm({ ...goalForm, city: careerGoal.city });
       return;
     }
-    const randomMatch = Math.floor(Math.random() * 20) + 65; // 65 - 85
-    setCareerGoal({
-      ...goalForm,
-      matchRate: randomMatch
-    });
-    auth.updateUser({
+    // 先同步目标到后端，后端会自动计算真实的 matchRate 并返回
+    const realMatchRate = await auth.updateUser({
       targetRole: goalForm.role,
       targetGrade: goalForm.level,
       targetSalary: `${goalForm.salaryMin}K - ${goalForm.salaryMax}K`,
       targetCompany: goalForm.company,
       targetCity: goalForm.city
+    });
+    // 使用后端算法计算出的真实匹配度（如果后端未返回则保留当前值）
+    setCareerGoal({
+      ...goalForm,
+      matchRate: realMatchRate ?? careerGoal.matchRate
     });
     setShowEditGoalModal(false);
   };
@@ -368,7 +369,7 @@ export default function CareerDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-on-background font-body-md flex flex-col relative overflow-hidden select-none">
+    <div className="min-h-screen bg-background text-on-background font-body-md flex flex-col relative overflow-hidden select-none pt-20">
       
       {/* Background visual scifi canvas grid */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px),linear-gradient(to_bottom,#ffffff03_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />
@@ -378,7 +379,7 @@ export default function CareerDashboard() {
       {/* ========================================================
           GLOBAL TOP NAVIGATION NAVBAR
          ======================================================== */}
-      <nav className="border-b border-white/5 bg-surface-container/60 backdrop-blur-xl h-20 w-full relative z-40 shrink-0">
+      <nav className="fixed top-0 w-full z-40 bg-surface/80 backdrop-blur-xl border-b border-white/10 h-20">
         <div className="px-gutter h-full max-w-container-max mx-auto flex items-center justify-between relative">
           
           <div

@@ -53,7 +53,10 @@ class UserProfile(Base):
     target_grade: Mapped[Optional[str]] = mapped_column(String(50), default="高级", nullable=True)
     target_salary_min: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     target_salary_max: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    
+
+    # 求职目标匹配度（30-97，由 match_scorer 算法计算）
+    match_rate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user: Mapped["User"] = relationship("User", back_populates="profile")

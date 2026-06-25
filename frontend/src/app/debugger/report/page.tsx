@@ -104,13 +104,21 @@ export default function CareerDashboard() {
     setShowEditProfileModal(false);
   };
 
-  const handleSaveGoal = (e: React.FormEvent) => {
+  const handleSaveGoal = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Simulate dynamic match rate recalculation based on salary/level input
-    const randomMatch = Math.floor(Math.random() * 20) + 65; // 65 - 85
+    // 解析薪资格式 "50K - 70K" → salMin, salMax
+    const salMatch = goalForm.salary.match(/(\d+)K\s*-\s*(\d+)K/i);
+    const targetSalaryStr = goalForm.salary || "50K - 70K";
+    // 同步目标到后端，后端会自动计算真实的 matchRate 并返回
+    const realMatchRate = await auth.updateUser({
+      targetRole: goalForm.role,
+      targetGrade: goalForm.level,
+      targetSalary: targetSalaryStr,
+      targetCity: goalForm.city
+    });
     setCareerGoal({
       ...goalForm,
-      matchRate: randomMatch
+      matchRate: realMatchRate ?? careerGoal.matchRate
     });
     setShowEditGoalModal(false);
   };
@@ -122,7 +130,7 @@ export default function CareerDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-on-background font-body-md flex flex-col relative overflow-hidden">
+    <div className="min-h-screen bg-background text-on-background font-body-md flex flex-col relative overflow-hidden select-none pt-20">
       
       {/* Background visual scifi canvas grid */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff03_1px,transparent_1px),linear-gradient(to_bottom,#ffffff03_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />
@@ -132,7 +140,7 @@ export default function CareerDashboard() {
       {/* ========================================================
           GLOBAL TOP NAVIGATION NAVBAR
          ======================================================== */}
-      <nav className="border-b border-white/5 bg-surface-container/60 backdrop-blur-xl h-20 w-full relative z-40 shrink-0">
+      <nav className="fixed top-0 w-full z-40 bg-surface/80 backdrop-blur-xl border-b border-white/10 h-20">
         <div className="px-gutter h-full max-w-container-max mx-auto flex items-center justify-between relative">
           
           <div onClick={() => router.push("/")} className="flex items-center gap-3 text-lg font-black text-white tracking-widest cursor-pointer select-none">
