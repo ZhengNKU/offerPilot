@@ -69,8 +69,9 @@ export default function CareerDashboard() {
   const [emailCode, setEmailCode] = useState("");
   const [phoneCode, setPhoneCode] = useState("");
 
-  // Track previous auth user to avoid redundant syncs
-  const prevAuthUserRef = useRef(auth.user);
+  // Track previous auth user identity to avoid redundant syncs
+  // 使用 name 字符串比较而非对象引用 —— 页面切换时 auth.user 引用可能不变，但组件重新挂载需同步
+  const prevAuthUserIdRef = useRef<string | null>(null);
 
   // ── Modal open handlers (reset form state from current data) ──
   const handleOpenProfileModal = () => {
@@ -138,11 +139,12 @@ export default function CareerDashboard() {
     router.push("/memory?tab=timeline");
   };
 
-  // Subscribe to external auth context — sync into local state only when user actually changes
+  // Subscribe to external auth context — sync into local state only when user identity actually changes
   useEffect(() => {
     if (!auth.isLoggedIn || !auth.user) return;
-    if (auth.user === prevAuthUserRef.current) return;
-    prevAuthUserRef.current = auth.user;
+    // 用 name 字段标识用户身份（页面切换时组件 mount → ref 为 null → 一定会同步）
+    if (auth.user.name === prevAuthUserIdRef.current) return;
+    prevAuthUserIdRef.current = auth.user.name;
     setAvatarError(false);
     setProfile(prev => {
       const yrsMatch = auth.user.years?.match(/(\d+)年/);
