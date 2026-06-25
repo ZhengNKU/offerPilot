@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
@@ -16,14 +16,16 @@ export default function CareerDashboard() {
     name: "张三",
     status: "在职",
     title: "高级后端工程师",
-    experience: "6年经验",
+    experienceYears: "6年",
+    experienceMonths: "0个月",
     city: "深圳",
     joinDays: 128,
     tags: [] as string[],
     company: "腾讯科技",
     role: "高级后端工程师",
     level: "高级",
-    salary: "25K - 35K",
+    salaryMin: 25,
+    salaryMax: 35,
     gender: "male",
     age: "26",
     school: "清华大学",
@@ -67,14 +69,50 @@ export default function CareerDashboard() {
   const [emailCode, setEmailCode] = useState("");
   const [phoneCode, setPhoneCode] = useState("");
 
-  // Clear code details on tab change
-  useEffect(() => {
+  // Track previous auth user to avoid redundant syncs
+  const prevAuthUserRef = useRef(auth.user);
+
+  // ── Modal open handlers (reset form state from current data) ──
+  const handleOpenProfileModal = () => {
+    setProfileForm({ ...profile, tagsString: profile.tags.join(", ") });
+    setAvatarError(false);
+    setShowEditProfileModal(true);
+  };
+
+  const handleOpenGoalModal = () => {
+    setGoalForm({ ...careerGoal });
+    setShowEditGoalModal(true);
+  };
+
+  const handleOpenSecurityModal = () => {
+    setSecurityForm({ ...accountSecurity });
     setEmailCode("");
     setPhoneCode("");
     setEmailCountdown(0);
     setPhoneCountdown(0);
-  }, [securityTab]);
+    setSecurityTab("phone");
+    setShowEditSecurityModal(true);
+  };
 
+  const handleCloseSecurityModal = () => {
+    setEmailCode("");
+    setPhoneCode("");
+    setEmailCountdown(0);
+    setPhoneCountdown(0);
+    setShowEditSecurityModal(false);
+  };
+
+  const handleSecurityTabChange = (tab: "email" | "phone") => {
+    if (tab !== securityTab) {
+      setEmailCode("");
+      setPhoneCode("");
+      setEmailCountdown(0);
+      setPhoneCountdown(0);
+      setSecurityTab(tab);
+    }
+  };
+
+  // ── Countdown timers ──
   useEffect(() => {
     let interval: any;
     if (emailCountdown > 0) {
@@ -95,47 +133,34 @@ export default function CareerDashboard() {
     return () => clearInterval(interval);
   }, [phoneCountdown]);
 
-  useEffect(() => {
-    if (!showEditSecurityModal) {
-      setEmailCode("");
-      setPhoneCode("");
-      setEmailCountdown(0);
-      setPhoneCountdown(0);
-      setSecurityForm({ ...accountSecurity });
-      setSecurityTab("phone");
-    }
-  }, [showEditSecurityModal, accountSecurity]);
-
   // Synchronize search params and highlights (History navbar action)
   const handleHistoryRedirect = () => {
     router.push("/memory?tab=timeline");
   };
 
-  // Safe client-side hooks
+  // Subscribe to external auth context — sync into local state only when user actually changes
   useEffect(() => {
-    setProfileForm({ ...profile, tagsString: profile.tags.join(", ") });
-  }, [profile]);
-
-  useEffect(() => {
-    setGoalForm({ ...careerGoal });
-  }, [careerGoal]);
-
-  useEffect(() => {
-    setSecurityForm({ ...accountSecurity });
-  }, [accountSecurity]);
-
-  useEffect(() => {
-    if (auth.isLoggedIn && auth.user) {
-      setProfile(prev => ({
+    if (!auth.isLoggedIn || !auth.user) return;
+    if (auth.user === prevAuthUserRef.current) return;
+    prevAuthUserRef.current = auth.user;
+    setAvatarError(false);
+    setProfile(prev => {
+      const yrsMatch = auth.user.years?.match(/(\d+)年/);
+      const mthsMatch = auth.user.years?.match(/(\d+)个月/);
+      const salMatch = auth.user.salary?.match(/(\d+)\s*K/i);
+      const salMatchMax = auth.user.salary?.match(/[-~—–]\s*(\d+)\s*K/i);
+      return {
         ...prev,
         name: auth.user.name,
         status: auth.user.status || prev.status,
         title: auth.user.role || prev.title,
-        experience: auth.user.years || prev.experience,
+        experienceYears: yrsMatch ? yrsMatch[1] + "年" : prev.experienceYears,
+        experienceMonths: mthsMatch ? mthsMatch[1] + "个月" : prev.experienceMonths,
         company: auth.user.company || prev.company,
         role: auth.user.role ? auth.user.role.split(" · ")[0] : prev.role,
         level: auth.user.role ? auth.user.role.split(" · ")[1] || prev.level : prev.level,
-        salary: auth.user.salary || prev.salary,
+        salaryMin: salMatch ? parseInt(salMatch[1]) : prev.salaryMin,
+        salaryMax: salMatchMax ? parseInt(salMatchMax[1]) : prev.salaryMax,
         gender: auth.user.gender || prev.gender,
         age: auth.user.age || prev.age,
         school: auth.user.school || prev.school,
@@ -144,39 +169,34 @@ export default function CareerDashboard() {
         joinDays: auth.user.createdAt
           ? Math.floor((Date.now() - new Date(auth.user.createdAt).getTime()) / 86400000)
           : prev.joinDays
-      }));
-      setCareerGoal(prev => {
-        // 解析目标薪资字符串 → min/max
-        const next: any = {
-          role: auth.user.targetRole || prev.role,
-          level: auth.user.targetGrade || prev.level,
-          company: auth.user.targetCompany || prev.company,
-          city: auth.user.targetCity || prev.city,
-          matchRate: prev.matchRate
-        };
-        const salStr = auth.user.targetSalary || "";
-        const salMatch = salStr.match(/(\d+)\s*K/i);
-        const salMatchMax = salStr.match(/[-~—–]\s*(\d+)\s*K/i);
-        if (salMatch && salMatchMax) {
-          next.salaryMin = parseInt(salMatch[1]);
-          next.salaryMax = parseInt(salMatchMax[1]);
-        } else {
-          next.salaryMin = prev.salaryMin;
-          next.salaryMax = prev.salaryMax;
-        }
-        return next;
-      });
-      setAccountSecurity(prev => ({
-        ...prev,
-        email: auth.user.email || "未绑定",
-        phone: auth.user.phone || "未绑定"
-      }));
-    }
+      };
+    });
+    setCareerGoal(prev => {
+      const next: any = {
+        role: auth.user.targetRole || prev.role,
+        level: auth.user.targetGrade || prev.level,
+        company: auth.user.targetCompany || prev.company,
+        city: auth.user.targetCity || prev.city,
+        matchRate: prev.matchRate
+      };
+      const salStr = auth.user.targetSalary || "";
+      const salMatch = salStr.match(/(\d+)\s*K/i);
+      const salMatchMax = salStr.match(/[-~—–]\s*(\d+)\s*K/i);
+      if (salMatch && salMatchMax) {
+        next.salaryMin = parseInt(salMatch[1]);
+        next.salaryMax = parseInt(salMatchMax[1]);
+      } else {
+        next.salaryMin = prev.salaryMin;
+        next.salaryMax = prev.salaryMax;
+      }
+      return next;
+    });
+    setAccountSecurity(prev => ({
+      ...prev,
+      email: auth.user.email || "未绑定",
+      phone: auth.user.phone || "未绑定"
+    }));
   }, [auth.isLoggedIn, auth.user]);
-
-  useEffect(() => {
-    setAvatarError(false);
-  }, [auth.user.avatar]);
 
   // Handlers for Save actions
   const handleSaveProfile = (e: React.FormEvent) => {
@@ -190,10 +210,10 @@ export default function CareerDashboard() {
     auth.updateUser({
       name: profileForm.name,
       status: profileForm.status,
-      years: profileForm.experience,
+      years: `${profileForm.experienceYears}${profileForm.experienceMonths}`,
       company: profileForm.company,
       role: `${profileForm.role} · ${profileForm.level || "高级"}`,
-      salary: profileForm.salary,
+      salary: `${profileForm.salaryMin}K - ${profileForm.salaryMax}K`,
       gender: profileForm.gender,
       age: profileForm.age,
       school: profileForm.school,
@@ -339,7 +359,7 @@ export default function CareerDashboard() {
       }));
 
       auth.triggerToast("修改成功！");
-      setShowEditSecurityModal(false);
+      handleCloseSecurityModal();
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！");
     }
@@ -483,8 +503,8 @@ export default function CareerDashboard() {
                 {/* Name Row */}
                 <div className="flex items-center gap-3">
                   <h2 className="text-2xl font-black text-white whitespace-nowrap">{profile.name}</h2>
-                  <span 
-                    onClick={() => setShowEditProfileModal(true)} 
+                  <span
+                    onClick={handleOpenProfileModal}
                     className="material-symbols-outlined text-xs text-on-surface-variant/40 hover:text-white cursor-pointer transition-colors"
                   >
                     edit
@@ -512,7 +532,7 @@ export default function CareerDashboard() {
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-on-surface-variant/60 font-semibold font-label-mono">
                   <span className="flex items-center gap-1.5 whitespace-nowrap">
                     <span className="material-symbols-outlined text-xs text-primary">business_center</span>
-                    {profile.experience}
+                    {profile.experienceYears}{profile.experienceMonths !== "0个月" ? profile.experienceMonths : ""}
                   </span>
                   <span className="flex items-center gap-1.5 whitespace-nowrap">
                     <span className="material-symbols-outlined text-xs text-primary">location_on</span>
@@ -561,8 +581,8 @@ export default function CareerDashboard() {
                     求职目标
                     <span className="text-[12px] font-label-mono text-on-surface-variant/40 font-bold">Career Goal</span>
                   </h4>
-                  <button 
-                    onClick={() => setShowEditGoalModal(true)} 
+                  <button
+                    onClick={handleOpenGoalModal}
                     className="text-sm text-primary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
                   >
                     <span className="material-symbols-outlined text-xs">edit</span>编辑
@@ -939,7 +959,7 @@ export default function CareerDashboard() {
               {/* Core Actions buttons */}
               <div className="flex flex-wrap items-center gap-3.5 shrink-0 justify-between lg:justify-end text-sm font-black">
                 <button
-                  onClick={() => setShowEditSecurityModal(true)}
+                  onClick={handleOpenSecurityModal}
                   className="px-5 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl border border-white/10 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-base">edit</span>
@@ -1034,7 +1054,7 @@ export default function CareerDashboard() {
                     <select
                       value={profileForm.status}
                       onChange={(e) => setProfileForm({ ...profileForm, status: e.target.value })}
-                      className="w-full px-4 py-3 bg-[#060e20] border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white appearance-none hero-select"
                     >
                       <option className="bg-[#0e1626]" value="在职">在职</option>
                       <option className="bg-[#0e1626]" value="离职">离职</option>
@@ -1049,7 +1069,7 @@ export default function CareerDashboard() {
                     <select
                       value={profileForm.gender || "male"}
                       onChange={(e) => setProfileForm({ ...profileForm, gender: e.target.value })}
-                      className="w-full px-4 py-3 bg-[#060e20] border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white appearance-none hero-select"
                     >
                       <option className="bg-[#0e1626]" value="male">男</option>
                       <option className="bg-[#0e1626]" value="female">女</option>
@@ -1106,26 +1126,56 @@ export default function CareerDashboard() {
 
                 <div className="space-y-1.5">
                   <label className="text-on-surface-variant/60 font-bold block">当前月薪范围</label>
-                  <input
-                    type="text"
-                    placeholder="例如：25K - 35K"
-                    value={profileForm.salary || ""}
-                    onChange={(e) => setProfileForm({ ...profileForm, salary: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
-                  />
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        required
+                        value={profileForm.salaryMin || ""}
+                        onChange={(e) => setProfileForm({ ...profileForm, salaryMin: parseInt(e.target.value) || 0 })}
+                        className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                    </div>
+                    <span className="text-white/30 font-bold text-sm shrink-0">-</span>
+                    <div className="relative flex-1">
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        required
+                        value={profileForm.salaryMax || ""}
+                        onChange={(e) => setProfileForm({ ...profileForm, salaryMax: parseInt(e.target.value) || 0 })}
+                        className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-on-surface-variant/60 font-bold block">工作年限</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="例如：2年6个月"
-                      value={profileForm.experience}
-                      onChange={(e) => setProfileForm({ ...profileForm, experience: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
-                    />
+                    <div className="flex gap-2">
+                      <select
+                        value={profileForm.experienceYears}
+                        onChange={(e) => setProfileForm({ ...profileForm, experienceYears: e.target.value })}
+                        className="flex-1 px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-primary/40 text-sm appearance-none hero-select"
+                      >
+                        {["在校/应届", "1年", "2年", "3年", "4年", "5年", "6年", "7年", "8年", "9年", "10年以上"].map((y) => (
+                          <option key={y} className="bg-[#0e1626] text-white">{y}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={profileForm.experienceMonths}
+                        onChange={(e) => setProfileForm({ ...profileForm, experienceMonths: e.target.value })}
+                        className="flex-1 px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-primary/40 text-sm appearance-none hero-select"
+                      >
+                        {["0个月", "1个月", "2个月", "3个月", "4个月", "5个月", "6个月", "7个月", "8个月", "9个月", "10个月", "11个月"].map((m) => (
+                          <option key={m} className="bg-[#0e1626] text-white">{m}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
                   <div className="space-y-1.5">
                     <label className="text-on-surface-variant/60 font-bold block">职业头衔</label>
@@ -1155,7 +1205,7 @@ export default function CareerDashboard() {
                     <select
                       value={profileForm.degree || "本科"}
                       onChange={(e) => setProfileForm({ ...profileForm, degree: e.target.value })}
-                      className="w-full px-4 py-3 bg-[#060e20] border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white appearance-none hero-select"
                     >
                       {["大专", "本科", "硕士", "博士", "其他"].map((d) => (
                         <option key={d} className="bg-[#0e1626]" value={d}>{d}</option>
@@ -1328,7 +1378,7 @@ export default function CareerDashboard() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setShowEditSecurityModal(false)}
+              onClick={handleCloseSecurityModal}
               className="absolute inset-0 bg-surface/60 backdrop-blur-md"
             />
 
@@ -1344,7 +1394,7 @@ export default function CareerDashboard() {
                   修改账号与安全设置
                 </h3>
                 <button
-                  onClick={() => setShowEditSecurityModal(false)}
+                  onClick={handleCloseSecurityModal}
                   className="text-on-surface-variant hover:text-white transition-colors cursor-pointer flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/5"
                 >
                   <span className="material-symbols-outlined text-base">close</span>
@@ -1357,7 +1407,7 @@ export default function CareerDashboard() {
                 <div className="flex bg-[#050B1A] p-1.5 rounded-xl border border-white/5 font-bold text-sm select-none">
                   <button
                     type="button"
-                    onClick={() => setSecurityTab("phone")}
+                    onClick={() => handleSecurityTabChange("phone")}
                     className={`flex-1 py-2.5 rounded-lg text-center transition-all cursor-pointer ${
                       securityTab === "phone" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
                     }`}
@@ -1366,7 +1416,7 @@ export default function CareerDashboard() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setSecurityTab("email")}
+                    onClick={() => handleSecurityTabChange("email")}
                     className={`flex-1 py-2.5 rounded-lg text-center transition-all cursor-pointer ${
                       securityTab === "email" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
                     }`}
@@ -1463,7 +1513,7 @@ export default function CareerDashboard() {
                 <div className="pt-6 border-t border-white/5 flex gap-4 justify-end text-sm font-black">
                   <button
                     type="button"
-                    onClick={() => setShowEditSecurityModal(false)}
+                    onClick={handleCloseSecurityModal}
                     className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all text-white cursor-pointer"
                   >
                     取消
