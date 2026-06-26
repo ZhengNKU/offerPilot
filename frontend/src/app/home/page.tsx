@@ -860,9 +860,9 @@ export default function CareerDashboard() {
                 {/* 2x2 grid of Action buttons */}
                 <div className="grid grid-cols-2 gap-3.5 py-1 mt-[-2px]">
                   {[
-                    { label: "新建录音分析", sub: "上传音频智能分析", icon: "mic", color: "text-[#4edea3] bg-[#4edea3]/10 border-[#4edea3]/20", path: "/debugger" },
-                    { label: "新建记录分析", sub: "粘贴记录 AI 剖析", icon: "edit_document", color: "text-[#60a5fa] bg-[#60a5fa]/10 border-[#60a5fa]/20", path: "/debugger" },
-                    { label: "新建简历分析", sub: "深度优化简历内容", icon: "description", color: "text-[#a78bfa] bg-[#a78bfa]/10 border-[#a78bfa]/20", path: "/debugger" },
+                    { label: "新建录音分析", sub: "上传音频智能分析", icon: "mic", color: "text-[#4edea3] bg-[#4edea3]/10 border-[#4edea3]/20", path: "/debugger?mode=audio" },
+                    { label: "新建记录分析", sub: "粘贴记录 AI 剖析", icon: "edit_document", color: "text-[#60a5fa] bg-[#60a5fa]/10 border-[#60a5fa]/20", path: "/debugger?mode=text" },
+                    { label: "新建简历分析", sub: "深度优化简历内容", icon: "description", color: "text-[#a78bfa] bg-[#a78bfa]/10 border-[#a78bfa]/20", path: "/debugger?mode=resume" },
                     { label: "开始模拟面试", sub: "AI 面试官实战演练", icon: "support_agent", color: "text-amber-500 bg-amber-500/10 border-amber-500/20", path: "/training" }
                   ].map((act, i) => (
                     <button
