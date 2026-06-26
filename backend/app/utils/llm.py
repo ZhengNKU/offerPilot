@@ -294,7 +294,10 @@ async def analyze_interview_dialogue(
         res_data = await asyncio.to_thread(call_minimax_sync, payload)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
-        parsed_data = json.loads(content_clean)
+        parsed_data = _safe_json_parse(content_clean, log_label="dialogue")
+        if parsed_data is None:
+            logger.error("[dialogue] unable to parse MiniMax response as JSON after repair")
+            return {}
         return parsed_data
     except Exception as e:
         logger.error(f"Failed calling MiniMax API: {str(e)}")
@@ -385,7 +388,7 @@ async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str
         content_clean = _strip_codeblock(content)
         # DEBUG: log raw content to diagnose empty-content returns
         logger.info(f"[sectionize] raw content (first 300): {content_clean[:300]!r}")
-        parsed = json.loads(content_clean)
+        parsed = _safe_json_parse(content_clean, log_label="sectionize")
         if isinstance(parsed, dict):
             raw_sections = parsed.get("sections") or []
         elif isinstance(parsed, list):
@@ -515,7 +518,14 @@ async def generate_section_optimization_advice(dialogue_text: str) -> Dict[str, 
         res_data = await asyncio.to_thread(call_minimax_sync, payload)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
-        parsed_data = json.loads(content_clean)
+        parsed_data = _safe_json_parse(content_clean, log_label="optimize")
+        if parsed_data is None:
+            logger.error("[optimize] unable to parse MiniMax response as JSON after repair")
+            return {
+                "conclusion": "分析失败，请稍后重试",
+                "original": "无法提取原版回答",
+                "optimized": "暂无高分话术推荐",
+            }
         return parsed_data
     except Exception as e:
         logger.error(f"Failed to generate optimization advice: {e}")
@@ -583,7 +593,10 @@ async def generate_transcript_highlights(segments: List[Dict[str, Any]]) -> List
         res_data = await asyncio.to_thread(call_minimax_sync, payload)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
-        parsed = json.loads(content_clean)
+        parsed = _safe_json_parse(content_clean, log_label="highlights")
+        if parsed is None:
+            logger.error("[highlights] unable to parse MiniMax response as JSON after repair")
+            return []
         return parsed.get("highlights") or []
     except Exception as e:
         logger.error(f"Failed to generate highlights: {e}")
@@ -829,7 +842,10 @@ async def analyze_resume_text(
         content = res_data["choices"][0]["message"]["content"]
         logger.info(f"[resume] received content len={len(content)} chars")
         content_clean = _strip_codeblock(content)
-        parsed_data = json.loads(content_clean)
+        parsed_data = _safe_json_parse(content_clean, log_label="resume")
+        if parsed_data is None:
+            logger.error("[resume] unable to parse MiniMax response as JSON after repair")
+            return {}
         return parsed_data
     except Exception as e:
         logger.error(f"Failed to analyze resume via MiniMax: {e}")
