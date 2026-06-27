@@ -20,3 +20,9 @@ pdf2docx>=0.5
 # 实时语音面试（Volcano Doubao Realtime WSS client）
 websockets>=12.0
 
+# AI 职业顾问：MiniMax embedding 异步 HTTP 客户端
+httpx>=0.27
+# pgvector Python 类型映射（Vector(N) 在 SQLAlchemy 中使用）
+pgvector>=0.3
+
+

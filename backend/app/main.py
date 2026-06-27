@@ -11,7 +11,7 @@ if sys.platform == "win32":
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
-from app.routers import auth, audio, file, resume, live
+from app.routers import auth, audio, file, resume, live, counselor
 
 try:
     import app.routers.memory as _memory_router
@@ -56,8 +56,8 @@ logging.getLogger("watchfiles").setLevel(logging.WARNING)
 
 app = FastAPI(
     title="面试VAR - Backend Services",
-    description="Backend user authentication, profiles management, and LangGraph APIs.",
-    version="1.0.0"
+    description="Backend user authentication, profiles management, LangGraph APIs, and AI Career Counselor.",
+    version="1.1.0"
 )
 
 @app.middleware("http")
@@ -92,6 +92,7 @@ app.include_router(audio.router)
 app.include_router(file.router)
 app.include_router(resume.router)
 app.include_router(live.router)
+app.include_router(counselor.router)
 if _MEMORY_LOADED and _memory_router is not None:
     app.include_router(_memory_router.router)
     logging.info("[main] Memory router registered successfully")
@@ -101,10 +102,20 @@ else:
 
 @app.on_event("startup")
 async def startup_event():
-    # Automatically create tables in local PostgreSQL on startup (development convenience)
+    # 1. 确保 pgvector 扩展已启用（AI 职业顾问向量库依赖）
+    try:
+        async with engine.begin() as conn:
+            from sqlalchemy import text as _text
+            await conn.execute(_text("CREATE EXTENSION IF NOT EXISTS vector"))
+        logging.info("[startup] pgvector extension verified")
+    except Exception as _e:
+        logging.error(f"[startup] Failed to ensure pgvector extension: {_e}")
+        # 不抛出——其他功能可用，仅 counselor 向量检索不可用
+
+    # 2. Automatically create tables in local PostgreSQL on startup (development convenience)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        
+
     # 启动后台定期清理任务
     asyncio.create_task(run_periodic_cleanup())
     # 启动标签字典种子数据初始化

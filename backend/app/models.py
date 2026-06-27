@@ -1,8 +1,9 @@
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import ForeignKey, String, Integer, Boolean, DateTime, func, ARRAY, Float, BigInteger, UniqueConstraint, Index, text
+from sqlalchemy import ForeignKey, String, Integer, Boolean, DateTime, func, ARRAY, Float, BigInteger, UniqueConstraint, Index, text, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from pgvector.sqlalchemy import Vector
 from app.database import Base
 
 class User(Base):
@@ -422,4 +423,145 @@ class UserLiveMinutes(Base):
 
     __table_args__ = (
         UniqueConstraint("user_id", "period_type", "period_key", name="uq_user_live_minutes"),
+    )
+
+
+# ============================================================================
+# AI 职业顾问（counselor）相关表
+# ============================================================================
+
+# Source type 枚举值（用于 user_analysis_embeddings.source_type 与 counselor_messages.citations）
+COUNSELOR_SOURCE_TYPES = (
+    "interview_summary",     # interview_sessions.analysis_result 切分后的面试总结
+    "interview_section",     # transcript_sections 单个语义段
+    "resume_analysis",       # resume_analyses.result_json 切分后的简历分析
+    "project_memory",        # project_memories 单个项目
+    "live_interview",        # interview_live_sessions.analysis_result 实时面试报告
+)
+
+
+class UserAnalysisEmbedding(Base):
+    """
+    用户历史分析片段的向量库（AI 职业顾问 RAG 召回用）。
+
+    每条记录 = 一个语义完整的分析片段 + 它的 1536 维 embedding。
+    source_type + source_id + chunk_index 唯一定位来源，支持后续溯源 / 删除 / 幂等 upsert。
+
+    关键约束：
+      - vector(1536) 使用 MiniMax embo-01 输出维度
+      - HNSW 索引用 vector_cosine_ops（MiniMax 向量未归一化，必须用 cosine 距离）
+      - 写入用 type=db，查询用 type=query（embo-01 非对称嵌入）
+    """
+    __tablename__ = "user_analysis_embeddings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 来源类型：见 COUNSELOR_SOURCE_TYPES
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # 来源 ID（如 interview_sessions.id / resume_analyses.id / project_memories.id）
+    source_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # 片段在来源中的索引（一份分析可能切成多段，从 0 开始）
+    chunk_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 片段标题（用于前端显示「引用自：xxx」）
+    chunk_title: Mapped[str] = mapped_column(String(128), nullable=False)
+    # 实际文本（喂给 embedding 的内容 + 给 LLM 看的引用原文）
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # 元数据 JSONB（公司 / 时间 / 评分 / 分类等，召回时可作为过滤条件）
+    meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    # 1536 维向量（MiniMax embo-01 输出维度）
+    embedding = mapped_column(Vector(1536), nullable=False)
+    # 写入时间
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        # 幂等 upsert 的关键约束
+        UniqueConstraint("source_type", "source_id", "chunk_index", name="uq_source_chunk"),
+        # HNSW 索引：单列（pgvector HNSW 不支持多列索引）
+        # m=16, ef_construction=64 适合中小规模（单用户 <1k 向量，总量 <10w）
+        # ops class 必须用 vector_cosine_ops，因为 MiniMax 向量未做 L2 归一化
+        Index(
+            "ix_user_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+        # 按 (source_type, source_id) 查询所有 chunk 时用（如删除某场面试时）
+        Index("ix_user_emb_source", "source_type", "source_id"),
+    )
+    # user_id 上的 btree 索引由 ForeignKey 自动创建（ix_user_analysis_embeddings_user_id）
+
+
+class CounselorSession(Base):
+    """
+    AI 职业顾问的对话会话。
+
+    summary / summary_upto_msg_id 字段用于长会话压缩：
+    当 message_count > 阈值（如 10 轮）时，触发一次 LLM 总结前 N 轮对话，
+    后续请求把 summary + 最近 K 轮原 message 作为上下文。
+    """
+    __tablename__ = "counselor_sessions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 首问自动生成的标题（用 LLM 抽取 6-12 字）
+    title: Mapped[str] = mapped_column(String(128), nullable=False)
+    # 压缩后的历史摘要
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # summary 覆盖到的最后一条消息 id（summary 之后的消息以原始 messages 形式存在）
+    summary_upto_msg_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, nullable=True, comment="summary 覆盖到的最后一条消息 id"
+    )
+    # 消息总数（用于触发 summary 压缩的判断）
+    message_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 会话状态：active (刚创建) → streaming (LLM 生成中) → completed / stopped / failed
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="active",
+        comment="active, streaming, stopped, completed, failed",
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    messages: Mapped[List["CounselorMessage"]] = relationship(
+        "CounselorMessage", back_populates="session",
+        cascade="all, delete-orphan", order_by="CounselorMessage.id",
+    )
+
+
+class CounselorMessage(Base):
+    """
+    顾问会话中的单条消息（一轮对话）。
+
+    content: JSON 数组，包含 [{role, content}, ...]，一条记录存储一轮完整对话
+    citations: LLM 输出中提到的 [cite:TYPE#ID#CHUNK] 标记解析后存入此处
+    """
+    __tablename__ = "counselor_messages"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("counselor_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # 引用：[{source_type, source_id, chunk_index, chunk_title, snippet}, ...]
+    citations: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # 召回的 chunk 列表（context 注入的来源），用于前端调试面板展示
+    recalled_chunks: Mapped[list] = mapped_column(JSONB, default=list, nullable=False)
+    # 流式是否完整结束（False = 异常中断，可用于排查）
+    stream_completed: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    session: Mapped["CounselorSession"] = relationship(
+        "CounselorSession", back_populates="messages"
     )

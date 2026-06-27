@@ -683,6 +683,89 @@ def call_minimax_stream(payload: dict, timeout: float = 300.0) -> dict:
     raise last_exc if last_exc else RuntimeError("call_minimax_stream exhausted retries")
 
 
+async def call_minimax_stream_chunks(payload: dict, timeout: float = 300.0):
+    """
+    逐 chunk yield 文本片段（async generator），供 SSE 消费。
+
+    与 call_minimax_stream 的区别：
+      - call_minimax_stream: 消费完整流，拼接后返回 dict（用于 JSON 解析）
+      - call_minimax_stream_chunks: 逐 chunk yield 字符串片段（用于 SSE 流式输出）
+
+    重试策略：MiniMax 上游偶发 429/5xx/529(Overloaded)。stream 模式下
+    urllib3 的 Retry adapter 帮不上（response 已建立连接才 raise），手写指数退避。
+    """
+    url = f"{settings.MINIMAX_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.MINIMAX_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    stream_payload = {**payload, "stream": True}
+    retryable_status = {429, 500, 502, 503, 504, 529}
+    max_attempts = 4
+
+    def _do_request():
+        return requests.post(
+            url, headers=headers, json=stream_payload, timeout=timeout,
+            proxies={"http": None, "https": None}, stream=True,
+        )
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(max_attempts):
+        try:
+            resp = await asyncio.to_thread(_do_request)
+            if resp.status_code in retryable_status:
+                raise requests.HTTPError(
+                    f"{resp.status_code} retryable from MiniMax upstream",
+                    response=resp,
+                )
+            resp.raise_for_status()
+
+            for raw in resp.iter_lines(decode_unicode=True):
+                if not raw:
+                    continue
+                line = raw.strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                try:
+                    delta = chunk["choices"][0].get("delta") or {}
+                    piece = delta.get("content")
+                    if piece:
+                        yield piece
+                except (KeyError, IndexError, TypeError):
+                    continue
+            # 正常结束，退出重试循环
+            return
+        except requests.HTTPError as e:
+            last_exc = e
+            status_code = e.response.status_code if e.response is not None else None
+            if status_code not in retryable_status or attempt == max_attempts - 1:
+                raise
+            wait = 1.5 * (2 ** attempt)
+            logger.warning(
+                "[MiniMax stream_chunks] upstream %s, retry %d/%d after %.1fs",
+                status_code, attempt + 1, max_attempts - 1, wait,
+            )
+            await asyncio.sleep(wait)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_exc = e
+            if attempt == max_attempts - 1:
+                raise
+            wait = 1.5 * (2 ** attempt)
+            logger.warning(
+                "[MiniMax stream_chunks] %s, retry %d/%d after %.1fs",
+                type(e).__name__, attempt + 1, max_attempts - 1, wait,
+            )
+            await asyncio.sleep(wait)
+    raise last_exc if last_exc else RuntimeError("call_minimax_stream_chunks exhausted retries")
+
+
 async def analyze_resume_text(
     resume_text: str,
     profile_data: Optional[dict] = None,

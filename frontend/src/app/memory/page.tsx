@@ -5,6 +5,16 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import GrowthCurveChart, { type GrowthPoint } from "@/components/GrowthCurveChart";
+import CounselorPanel from "@/components/counselor/CounselorPanel";
+import {
+  listSessions as listCounselorSessions,
+  getSession as getCounselorSessionDetail,
+  deleteSession as deleteCounselorSession,
+  getCounselorStats,
+  type SessionListItem as CounselorSessionListItem,
+  type MessageItem as CounselorMessageItem,
+  type CounselorStats as CounselorStatsData,
+} from "@/lib/counselorClient";
 
 interface SessionHistoryItem {
   id: string;
@@ -45,12 +55,128 @@ interface ProjectMemoryItem {
   updated_at: string | null;
 }
 
+function formatRelativeTime(dateStr: string) {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMin < 1) return "刚刚";
+    if (diffMin < 60) return `${diffMin}分钟前`;
+    if (diffHours < 24) return `${diffHours}小时前`;
+    if (diffDays < 30) return `${diffDays}天前`;
+    return d.toLocaleDateString();
+  } catch (e) {
+    return dateStr;
+  }
+}
+
+const buildPageList = (cur: number, total: number): (number | "…")[] => {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+  const pages: (number | "…")[] = [1];
+  const start = Math.max(2, cur - 2);
+  const end = Math.min(total - 1, cur + 2);
+  if (start > 2) pages.push("…");
+  for (let i = start; i <= end; i++) pages.push(i);
+  if (end < total - 1) pages.push("…");
+  pages.push(total);
+  return pages;
+};
+
 export default function CareerMemoryDashboard() {
   const router = useRouter();
   const auth = useAuth();
 
   // Active tab management: overview, timeline, projects, knowledge, weaknesses, growth, advisor
   const [activeTab, setActiveTab] = useState("overview");
+
+  // AI 职业顾问 (Counselor) Lifted State
+  const [counselorSessions, setCounselorSessions] = useState<CounselorSessionListItem[]>([]);
+  const [counselorSessionId, setCounselorSessionId] = useState<number | null>(null);
+  const [counselorMessages, setCounselorMessages] = useState<CounselorMessageItem[]>([]);
+  const [counselorInput, setCounselorInput] = useState("");
+  const [counselorStreaming, setCounselorStreaming] = useState(false);
+  const [counselorPending, setCounselorPending] = useState<any | null>(null);
+  const [counselorRemaining, setCounselorRemaining] = useState<number | null>(null);
+  const [counselorStats, setCounselorStats] = useState<CounselorStatsData | null>(null);
+  const [isLoadingCounselorStats, setIsLoadingCounselorStats] = useState(false);
+  const [counselorPage, setCounselorPage] = useState(1);
+  const [counselorSessionsTotal, setCounselorSessionsTotal] = useState(0);
+
+  // Load counselor sessions list with pagination
+  const loadCounselorSessions = useCallback(async (page = 1) => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+    if (!auth.isLoggedIn || !token) {
+      setCounselorSessions([]);
+      setCounselorSessionsTotal(0);
+      return;
+    }
+    try {
+      const limit = COUNSELOR_PAGE_SIZE;
+      const offset = (page - 1) * limit;
+      const r = await listCounselorSessions(limit, offset);
+      setCounselorSessions(r.sessions);
+      setCounselorSessionsTotal(r.total);
+    } catch (e) {
+      console.error("load counselor sessions failed:", e);
+    }
+  }, [auth.isLoggedIn]);
+
+  // Load counselor session detail
+  const loadCounselorSession = useCallback(async (sid: number) => {
+    try {
+      const r = await getCounselorSessionDetail(sid);
+      setCounselorMessages(r.session.messages as CounselorMessageItem[]);
+      setCounselorSessionId(sid);
+      setCounselorPending(null);
+    } catch (e) {
+      console.error("load counselor session failed:", e);
+    }
+  }, []);
+
+  // Start new session
+  const newCounselorSession = useCallback(() => {
+    setCounselorSessionId(null);
+    setCounselorMessages([]);
+    setCounselorPending(null);
+  }, []);
+
+  // Delete counselor session
+  const handleDeleteCounselorSession = useCallback((sid: number) => {
+    setDeleteTarget(`counselor-${sid}`);
+    setShowConfirmModal(true);
+  }, []);
+
+  const [selectedCounselorIds, setSelectedCounselorIds] = useState<number[]>([]);
+
+  // Delete selected counselor sessions in batch
+  const handleDeleteCounselorSessionBatch = useCallback(() => {
+    if (selectedCounselorIds.length === 0) return;
+    setDeleteTarget("counselor-batch");
+    setShowConfirmModal(true);
+  }, [selectedCounselorIds.length]);
+
+  // Fetch counselor statistics
+  const fetchCounselorStats = useCallback(async () => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+    if (!auth.isLoggedIn || !token) {
+      setCounselorStats(null);
+      return;
+    }
+    setIsLoadingCounselorStats(true);
+    try {
+      const stats = await getCounselorStats();
+      setCounselorStats(stats);
+    } catch (e) {
+      console.error("fetch counselor stats failed:", e);
+    } finally {
+      setIsLoadingCounselorStats(false);
+    }
+  }, [auth.isLoggedIn]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -62,14 +188,23 @@ export default function CareerMemoryDashboard() {
     }
   }, []);
 
-  const handleTabChange = (tab: string) => {
+  const handleTabChange = (tab: string, resetSession: boolean = false) => {
     setActiveTab(tab);
+    if (tab === "advisor" && resetSession) {
+      newCounselorSession();
+    }
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.searchParams.set("tab", tab);
       window.history.pushState(null, "", url.toString());
     }
   };
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.scrollTo(0, 0);
+    }
+  }, [activeTab]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -79,6 +214,8 @@ export default function CareerMemoryDashboard() {
   // 时间轴分页：每页 10 条，filter/search 变更时自动回到第 1 页
   const TIMELINE_PAGE_SIZE = 10;
   const [timelinePage, setTimelinePage] = useState(1);
+  // 职业顾问会话分页：与后端 /api/counselor/sessions 默认 limit 对齐
+  const COUNSELOR_PAGE_SIZE = 10;
 
   const [historyItems, setHistoryItems] = useState<SessionHistoryItem[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -473,6 +610,14 @@ export default function CareerMemoryDashboard() {
     }
   }, [activeTab]);
 
+  // 加载 AI 职业顾问数据
+  useEffect(() => {
+    if (auth.isLoggedIn) {
+      loadCounselorSessions(counselorPage);
+      fetchCounselorStats();
+    }
+  }, [auth.isLoggedIn, counselorPage, loadCounselorSessions, fetchCounselorStats]);
+
   const handleInterceptAction = () => {
     setShowLoginModal(true);
   };
@@ -613,6 +758,53 @@ export default function CareerMemoryDashboard() {
 
         setSelectedIds([]);
         await fetchSessions();
+      } else if (deleteTarget === "counselor-batch") {
+        try {
+          const deletePromises = selectedCounselorIds.map(sid => deleteCounselorSession(sid));
+          await Promise.all(deletePromises);
+          auth.triggerToast("批量删除成功");
+          setSelectedCounselorIds([]);
+
+          // Determine target page after batch delete
+          let targetPage = counselorPage;
+          const remainingItems = counselorSessions.length - selectedCounselorIds.length;
+          if (remainingItems <= 0 && counselorPage > 1) {
+            targetPage = counselorPage - 1;
+            setCounselorPage(targetPage);
+          }
+          await loadCounselorSessions(targetPage);
+
+          // Refresh stats
+          const stats = await getCounselorStats();
+          setCounselorStats(stats);
+
+          // Reset active session if it was deleted
+          if (selectedCounselorIds.includes(counselorSessionId || 0)) {
+            newCounselorSession();
+          }
+        } catch (e: any) {
+          auth.triggerToast("批量删除失败：" + e.message);
+        }
+      } else if (typeof deleteTarget === "string" && deleteTarget.startsWith("counselor-")) {
+        const sid = parseInt(deleteTarget.replace("counselor-", ""), 10);
+        try {
+          await deleteCounselorSession(sid);
+          if (counselorSessionId === sid) {
+            newCounselorSession();
+          }
+          // If deleting the last item on the page, go to the previous page
+          let targetPage = counselorPage;
+          if (counselorSessions.length === 1 && counselorPage > 1) {
+            targetPage = counselorPage - 1;
+            setCounselorPage(targetPage);
+          }
+          await loadCounselorSessions(targetPage);
+          // Refresh stats
+          const stats = await getCounselorStats();
+          setCounselorStats(stats);
+        } catch (e: any) {
+          auth.triggerToast("删除失败：" + e.message);
+        }
       } else if (deleteTarget) {
         const item = historyItems.find(x => x.id === deleteTarget);
         let deleteUrl: string;
@@ -677,7 +869,7 @@ export default function CareerMemoryDashboard() {
   const allSelected = visibleIds.length > 0 && visibleIds.every(id => selectedIds.includes(id));
 
   return (
-    <main className="pt-20 bg-background text-on-surface select-none min-h-screen flex flex-col justify-between relative overflow-hidden pb-4">
+    <main className="pt-20 bg-background text-on-surface select-text min-h-screen flex flex-col justify-between relative overflow-hidden pb-4">
       {/* Absolute Ambient Halo */}
       <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[800px] h-[800px] bg-primary/5 rounded-full blur-[140px] -z-10 pointer-events-none"></div>
 
@@ -781,7 +973,7 @@ export default function CareerMemoryDashboard() {
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => handleTabChange(tab.id)}
+                    onClick={() => handleTabChange(tab.id, tab.id === "advisor")}
                     className={`flex items-center gap-3.5 px-4.5 py-4 rounded-2xl text-base font-black transition-all w-full text-left cursor-pointer group ${
                       isActive
                         ? "bg-primary text-on-primary shadow-lg shadow-primary/20 scale-[1.02]"
@@ -799,73 +991,186 @@ export default function CareerMemoryDashboard() {
               })}
             </div>
 
-            {/* Quick Search */}
-            <div className="flex flex-col gap-2.5">
-              <span className="text-xs font-label-mono tracking-widest text-on-surface-variant/40 font-bold uppercase">
-                快速搜索
-              </span>
-              <div className="relative">
-                <span className="material-symbols-outlined text-sm absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant/40">
-                  search
-                </span>
-                <input
-                  type="text"
-                  placeholder="搜索数据和职业记忆..."
-                  value={searchSidebarQuery}
-                  onChange={(e) => setSearchSidebarQuery(e.target.value)}
-                  className="pl-9 pr-6 py-2.5 bg-white/5 border border-white/10 rounded-xl text-xs text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-10 w-full"
-                />
-                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono px-1 py-0.5 rounded bg-white/10 text-on-surface-variant/40">
-                  /
-                </span>
-              </div>
-            </div>
+            {/* One-click start new session */}
+            <button
+              onClick={() => {
+                newCounselorSession();
+                handleTabChange("advisor");
+              }}
+              className="w-full py-2.5 bg-gradient-to-r from-primary/20 to-secondary/20 hover:from-primary/30 hover:to-secondary/30 text-xs font-black text-white rounded-xl border border-primary/30 hover:border-primary/50 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-primary/5"
+            >
+              <span className="material-symbols-outlined text-sm font-bold">add</span>
+              新建会话
+            </button>
 
-            {/* Tag Management */}
-            <div className="flex flex-col gap-3.5">
-              <span className="text-xs font-label-mono tracking-widest text-on-surface-variant/40 font-bold uppercase">
-                标签管理
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  { name: "技术面试", count: 28 },
-                  { name: "系统设计", count: 14 },
-                  { name: "场景题", count: 8 },
-                  { name: "项目介绍", count: 11 },
-                  { name: "算法", count: 9 },
-                  { name: "行为面试", count: 7 }
-                ].map((tag, idx) => (
-                  <button
-                    key={idx}
-                    className="px-2.5 py-1.5 rounded-lg bg-white/5 border border-white/5 text-xs font-bold text-on-surface-variant hover:text-white hover:border-white/15 transition-all cursor-pointer whitespace-nowrap"
-                  >
-                    {tag.name} ({tag.count})
-                  </button>
-                ))}
+            {/* History Session List */}
+            <div className="flex flex-col gap-2.5 flex-1 min-h-0">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-label-mono tracking-widest text-on-surface-variant/40 font-bold uppercase">
+                  历史会话
+                </span>
+                {counselorSessions.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => loadCounselorSessions(counselorPage)}
+                      title="刷新历史会话"
+                      className="p-1 rounded-md text-on-surface-variant/60 hover:text-white hover:bg-white/5 transition-all cursor-pointer flex items-center justify-center translate-y-[1px]"
+                    >
+                      <span className="material-symbols-outlined text-[15px] leading-none">refresh</span>
+                    </button>
+                    <label className="flex items-center gap-1 cursor-pointer text-sm font-bold text-on-surface-variant/60 hover:text-white transition-all select-none">
+                      <input
+                        type="checkbox"
+                        checked={counselorSessions.length > 0 && counselorSessions.every(s => selectedCounselorIds.includes(s.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedCounselorIds(counselorSessions.map(s => s.id));
+                          } else {
+                            setSelectedCounselorIds([]);
+                          }
+                        }}
+                        className="w-3 h-3 rounded border-white/10 bg-white/5 text-primary focus:ring-primary focus:ring-offset-0 focus:ring-1 cursor-pointer transition-all accent-primary"
+                      />
+                      全选
+                    </label>
+                    {selectedCounselorIds.length > 0 && (
+                      <button
+                        onClick={handleDeleteCounselorSessionBatch}
+                        className="text-[10px] text-red-400 hover:text-red-300 font-bold flex items-center gap-0.5 cursor-pointer transition-colors"
+                        title="批量删除"
+                      >
+                        <span className="material-symbols-outlined text-[12px]">delete_sweep</span>
+                        删除({selectedCounselorIds.length})
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
+              <div className="overflow-y-auto h-[280px] pr-1 flex flex-col gap-1.5">
+                {counselorSessions.length === 0 ? (
+                  <div className="text-center py-8 text-xs text-on-surface-variant/40">
+                    暂无历史会话
+                  </div>
+                ) : (
+                  counselorSessions.map((s) => {
+                    const isActive = activeTab === "advisor" && counselorSessionId === s.id;
+                    const displaySummary = s.summary || s.title || "新会话";
+                    return (
+                      <div
+                        key={s.id}
+                        onClick={() => {
+                          loadCounselorSession(s.id);
+                          handleTabChange("advisor");
+                        }}
+                        title={displaySummary}
+                        className={`group flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer ${
+                          isActive
+                            ? "bg-primary/10 border-primary/30 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)]"
+                            : "bg-white/0 border-transparent text-on-surface-variant hover:bg-white/5 hover:text-white"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <input
+                            type="checkbox"
+                            checked={selectedCounselorIds.includes(s.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedCounselorIds(prev => [...prev, s.id]);
+                              } else {
+                                setSelectedCounselorIds(prev => prev.filter(id => id !== s.id));
+                              }
+                            }}
+                            className="w-3.5 h-3.5 rounded border-white/10 bg-white/5 text-primary focus:ring-primary focus:ring-offset-0 focus:ring-1 cursor-pointer transition-all accent-primary shrink-0"
+                          />
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className="text-sm font-bold truncate pr-1">
+                              {displaySummary}
+                            </span>
+                            <span className="text-xs text-on-surface-variant/40 mt-0.5">
+                              {formatRelativeTime(s.created_at || "")}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteCounselorSession(s.id);
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 text-on-surface-variant/60 hover:text-red-400 rounded-lg transition-all"
+                          title="删除会话"
+                        >
+                          <span className="material-symbols-outlined text-[16px] block">
+                            delete
+                          </span>
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
 
-            {/* Bottom Memory Active Status */}
-            <div className="mt-auto p-4.5 rounded-2xl bg-gradient-to-br from-primary/10 to-secondary/5 border border-primary/20 relative overflow-hidden text-left flex flex-col gap-3.5 shadow-[0_4px_20px_rgba(192,193,255,0.05)]">
-              <div className="absolute top-[-20px] right-[-20px] w-16 h-16 bg-primary/10 rounded-full blur-xl animate-pulse"></div>
-              
-              <div className="flex items-center gap-2.5">
-                <div className="w-7 h-7 rounded-lg bg-primary/20 flex items-center justify-center border border-primary/30">
-                  <span className="material-symbols-outlined text-base text-primary animate-pulse">
-                    memory
-                  </span>
-                </div>
-                <span className="text-xs md:text-base font-black text-white">AI 长期记忆已开启</span>
+              {/* Pagination Controls — 参考分析时间轴模式：只要有会话就显示分页按钮 */}
+              {counselorSessionsTotal > 0 && (() => {
+                const totalPages = Math.max(1, Math.ceil(counselorSessionsTotal / COUNSELOR_PAGE_SIZE));
+                const pageList = buildPageList(counselorPage, totalPages);
+                return (
+                  <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between font-label-mono text-xs text-on-surface-variant/50 w-full select-none">
+                    <span>共 {counselorSessionsTotal} 条</span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setCounselorPage(p => Math.max(1, p - 1))}
+                        disabled={counselorPage <= 1}
+                        className={`px-2.5 py-1 rounded border border-white/5 ${
+                          counselorPage <= 1
+                            ? "bg-white/5 text-white/30 cursor-not-allowed"
+                            : "bg-white/5 hover:bg-white/10 hover:text-white cursor-pointer"
+                        }`}
+                      >
+                        &lt;
+                      </button>
+                      {pageList.map((p, idx) =>
+                        p === "…" ? (
+                          <span key={`e-${idx}`} className="px-1.5 py-1 text-on-surface-variant/40">…</span>
+                        ) : (
+                          <button
+                            key={p}
+                            onClick={() => setCounselorPage(p)}
+                            className={`px-2.5 py-1 rounded cursor-pointer transition-all ${
+                              counselorPage === p
+                                ? "bg-primary text-on-primary font-bold"
+                                : "bg-white/5 hover:bg-white/10 hover:text-white border border-white/5"
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        )
+                      )}
+                      <button
+                        onClick={() => setCounselorPage(p => Math.min(totalPages, p + 1))}
+                        disabled={counselorPage >= totalPages}
+                        className={`px-2.5 py-1 rounded border border-white/5 ${
+                          counselorPage >= totalPages
+                            ? "bg-white/5 text-white/30 cursor-not-allowed"
+                            : "bg-white/5 hover:bg-white/10 hover:text-white cursor-pointer"
+                        }`}
+                      >
+                        &gt;
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Footer Retention Note — 放在 history block 内部，让 history 框延伸到面板底部，与右侧卡片对齐 */}
+              <div className="mt-auto p-3.5 rounded-xl bg-white/5 border border-white/5 text-left flex items-center gap-2.5">
+                <span className="material-symbols-outlined text-xs text-on-surface-variant/60 shrink-0">
+                  info
+                </span>
+                <p className="text-xs text-on-surface-variant/60 leading-normal font-bold">
+                  历史会话仅保留30天，系统将自动清理过期记录
+                </p>
               </div>
-              <p className="text-[11px] md:text-xs text-on-surface-variant/70 leading-relaxed font-semibold">
-                Agent 持续学习你的面试表现，提炼项目亮点并追踪长周期技能波动，提供定制化晋升路线。
-              </p>
-              <button
-                onClick={handleInterceptAction}
-                className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-sm">settings</span>记忆设置
-              </button>
             </div>
           </div>
         </div>
@@ -983,7 +1288,7 @@ export default function CareerMemoryDashboard() {
                 </div>
 
                 <button
-                  onClick={() => handleTabChange("advisor")}
+                  onClick={() => handleTabChange("advisor", true)}
                   className="px-3.5 py-2.5 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-black rounded-xl border border-primary/25 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1 shrink-0"
                 >
                   查看详细报告<span className="material-symbols-outlined text-[11px]">expand_more</span>
@@ -1000,7 +1305,7 @@ export default function CareerMemoryDashboard() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
-              className="w-full"
+              className="w-full flex-1 min-h-0"
             >
               {/* ========================================================
                   TAB PANEL 1: OVERVIEW DASHBOARD (总览看板)
@@ -1789,18 +2094,6 @@ export default function CareerMemoryDashboard() {
 
                     {/* Pagination — 每页 TIMELINE_PAGE_SIZE 条；filter/search 变化会回到第 1 页 */}
                     {visibleItems.length > 0 && (() => {
-                      // 生成带省略号的页码数组：始终显示首尾，中间最多 5 个 + 省略
-                      const buildPageList = (cur: number, total: number): (number | "…")[] => {
-                        if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-                        const pages: (number | "…")[] = [1];
-                        const start = Math.max(2, cur - 2);
-                        const end = Math.min(total - 1, cur + 2);
-                        if (start > 2) pages.push("…");
-                        for (let i = start; i <= end; i++) pages.push(i);
-                        if (end < total - 1) pages.push("…");
-                        pages.push(total);
-                        return pages;
-                      };
                       const pageList = buildPageList(safeTimelinePage, timelineTotalPages);
                       return (
                         <div className="mt-8 pt-6 border-t border-white/5 flex items-center justify-between font-label-mono text-xs text-on-surface-variant/50 w-full select-none">
@@ -2213,106 +2506,105 @@ export default function CareerMemoryDashboard() {
                   TAB PANEL 7: AI CAREER ADVISOR (交互顾问面板)
                  ======================================================== */}
               {activeTab === "advisor" && (
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 w-full text-left">
-                  {/* Left chatbot preview panel */}
-                  <div className="col-span-12 md:col-span-8 flex flex-col">
-                    <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col justify-between gap-5 h-full">
-                      <div className="space-y-4 flex-1">
-                        <div className="flex items-center gap-3 pb-4 border-b border-white/5">
-                          <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center border border-primary/30 relative">
-                            <span className="material-symbols-outlined text-lg text-primary animate-pulse">support_agent</span>
-                            <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-tertiary border-2 border-background"></span>
-                          </div>
-                          <div>
-                            <h4 className="text-base font-black text-white">面试VAR 智能职业顾问</h4>
-                            <p className="text-xs text-tertiary font-extrabold mt-0.5">在线 · 基于您142次测评学习中</p>
-                          </div>
-                        </div>
-
-                        {/* Interactive chat logs previews */}
-                        <div className="space-y-4 py-2">
-                          <div className="flex items-start gap-3.5 max-w-xl">
-                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                              <span className="material-symbols-outlined text-sm text-primary">support_agent</span>
-                            </div>
-                            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/5 text-xs text-on-surface-variant/80 font-semibold leading-relaxed">
-                              Dame，你好！我是你的专属AI职业顾问。基于你在"腾讯科技"、"字节跳动"等28次实战测试的反馈，我判定你当前非常契合 <span className="text-white font-extrabold">Staff Engineer</span> 的进阶期。你需要重点打磨架构方案折中与大厂级微服务控制体系。
-                            </div>
-                          </div>
-
-                          <div className="flex items-start gap-3.5 max-w-xl self-end flex-row-reverse ml-auto">
-                            <div className="w-8 h-8 rounded-full bg-secondary/15 flex items-center justify-center shrink-0">
-                              <span className="material-symbols-outlined text-sm text-secondary">person</span>
-                            </div>
-                            <div className="p-3.5 rounded-2xl bg-primary text-on-primary text-xs font-semibold leading-relaxed shadow-lg shadow-primary/15">
-                              如何突破在面试中被面试官频繁追问"为什么不选Kafka"这种系统设计八股？
-                            </div>
-                          </div>
-
-                          <div className="flex items-start gap-3.5 max-w-xl">
-                            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                              <span className="material-symbols-outlined text-sm text-primary">support_agent</span>
-                            </div>
-                            <div className="p-3.5 rounded-2xl bg-white/5 border border-white/5 text-xs text-on-surface-variant/80 font-semibold leading-relaxed space-y-2">
-                              <p>这是一个经典的"非优解比对"题。回答这类型问题时，严禁背诵八股，请遵循以下三步法陈述：</p>
-                              <ol className="list-decimal list-inside space-y-1 font-bold text-white pl-1.5">
-                                <li>吞吐与可靠性折中：‘在我们的写缓冲场景下，数据高可靠是首位，RabbitMQ基于AMQP协议提供更严密的确认应答...’</li>
-                                <li>运维与团队成本：‘当时业务团队对RabbitMQ技术栈更为熟悉，引入Kafka会造成多组Zookeeper运维溢价...’</li>
-                                <li>功能完备性：‘我们需要RabbitMQ死信队列来进行延迟处理...’</li>
-                              </ol>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Chat text box input */}
-                      <div className="relative">
-                        <input
-                          type="text"
-                          placeholder="向AI顾问咨询你的求职困惑、弱点改进方法或简历包装建议..."
-                          className="w-full pl-4 pr-12 py-3 bg-white/5 border border-white/10 rounded-2xl text-xs text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12"
-                        />
-                        <button
-                          onClick={handleInterceptAction}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 rounded-xl bg-primary text-on-primary flex items-center justify-center hover:scale-105 active:scale-95 transition-all cursor-pointer"
-                        >
-                          <span className="material-symbols-outlined text-sm">send</span>
-                        </button>
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 w-full text-left items-stretch h-full">
+                  {/* Left chatbot panel — real interactive */}
+                  <div className="col-span-12 md:col-span-8 flex flex-col h-full">
+                    <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col min-h-[680px] h-full w-full relative">
+                      <CounselorPanel
+                        variant="compact"
+                        currentSessionId={counselorSessionId}
+                        setCurrentSessionId={setCounselorSessionId}
+                        sessions={counselorSessions}
+                        setSessions={setCounselorSessions}
+                        loadSessions={loadCounselorSessions}
+                        loadSession={loadCounselorSession}
+                        newSession={newCounselorSession}
+                        handleDeleteSession={handleDeleteCounselorSession}
+                        messages={counselorMessages}
+                        setMessages={setCounselorMessages}
+                        input={counselorInput}
+                        setInput={setCounselorInput}
+                        streaming={counselorStreaming}
+                        setStreaming={setCounselorStreaming}
+                        pending={counselorPending}
+                        setPending={setCounselorPending}
+                        remaining={counselorRemaining}
+                        setRemaining={setCounselorRemaining}
+                        stats={counselorStats}
+                      />
                     </div>
                   </div>
 
                   {/* Right side strategies column */}
-                  <div className="col-span-12 md:col-span-4 flex flex-col gap-6">
-                    <div className="glass-panel p-6 rounded-3xl border-white/10 space-y-5.5 h-full text-left">
+                  <div className="col-span-12 md:col-span-4 flex flex-col gap-6 justify-between h-full">
+                    {/* Widget 1: 能力数据来源 */}
+                    <div className="glass-panel p-5 rounded-3xl border-white/10 space-y-4 text-left flex-1 flex flex-col justify-center">
                       <div>
                         <h4 className="text-base font-black text-white flex items-center gap-2">
-                          <span className="material-symbols-outlined text-base text-primary">verified</span>
-                          晋升保障权益
+                          <span className="material-symbols-outlined text-base text-primary">data_usage</span>
+                          能力数据来源
                         </h4>
-                        <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">解锁完整的职业驾驶舱分析矩阵</p>
                       </div>
-
-                      <div className="space-y-4 border-b border-white/5 pb-5">
+                      <div className="space-y-3.5 border-b border-white/5 pb-4 flex-1 flex flex-col justify-center">
                         {[
-                          { label: "定制化简历改进逻辑图", val: "无限次生成" },
-                          { label: "大厂核心提问频次拓扑", val: "全盘解锁" },
-                          { label: "长周期弱点专项防御计划", val: "终身保存" },
-                          { label: "1对1模拟实战诊断接口", val: "全天候开启" }
-                        ].map((serv, i) => (
+                          { label: "面试分析", val: `${counselorStats?.interview_count ?? historyItems.filter(item => item.type === "audio" || item.type === "text" || item.type === "live").length} 次`, icon: "analytics" },
+                          { label: "简历分析", val: `${counselorStats?.resume_count ?? 3} 次`, icon: "description" },
+                          { label: "项目记忆", val: `${counselorStats?.project_count ?? projectTotal} 个`, icon: "folder_shared" },
+                          { label: "时间跨度", val: `${counselorStats?.experience_years ?? "1个月"}`, icon: "schedule" }
+                        ].map((stat, i) => (
                           <div key={i} className="flex justify-between items-center text-sm font-semibold">
-                            <span className="text-on-surface-variant/80">{serv.label}</span>
-                            <span className="text-tertiary font-black font-label-mono">{serv.val}</span>
+                            <span className="text-on-surface-variant/80 flex items-center gap-2">
+                              <span className="material-symbols-outlined text-sm text-primary/60">{stat.icon}</span>
+                              {stat.label}
+                            </span>
+                            <span className="text-white font-black font-label-mono">{stat.val}</span>
                           </div>
                         ))}
                       </div>
-
                       <button
-                        onClick={handleInterceptAction}
-                        className="w-full py-3.5 bg-gradient-to-r from-primary to-secondary text-on-primary text-sm font-black rounded-2xl hover:scale-[1.01] active:scale-98 transition-all shadow-lg shadow-primary/20 cursor-pointer text-center"
+                        onClick={() => handleTabChange("timeline")}
+                        className="text-sm text-primary hover:text-primary/80 font-black flex items-center gap-1 mt-1 cursor-pointer transition-colors shrink-0"
                       >
-                        升级为 Pro 专家会员
+                        查看数据详情 <span className="material-symbols-outlined text-sm">arrow_right_alt</span>
                       </button>
+                    </div>
+
+                    {/* Widget 2: 使用建议 */}
+                    <div className="glass-panel p-5 rounded-3xl border-white/10 space-y-4 text-left flex-1 flex flex-col justify-center">
+                      <div>
+                        <h4 className="text-base font-black text-white flex items-center gap-2">
+                          <span className="material-symbols-outlined text-base text-primary">tips_and_updates</span>
+                          使用建议
+                        </h4>
+                      </div>
+                      <div className="space-y-3 flex-1 flex flex-col justify-center">
+                        {[
+                          { text: "具体问题能获得更精准的建议", icon: "lightbulb" },
+                          { text: "结合自身情况理性参考", icon: "handshake" },
+                          { text: "定期回顾会话获得持续提升", icon: "loop" }
+                        ].map((item, i) => (
+                          <div key={i} className="flex items-start gap-2.5 text-sm font-semibold leading-relaxed text-on-surface-variant/80">
+                            <span className="material-symbols-outlined text-sm text-primary shrink-0 mt-0.5">{item.icon}</span>
+                            <span>{item.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Widget 3: 隐私保护 */}
+                    <div className="glass-panel p-5 rounded-3xl border-white/10 space-y-4 text-left flex-1 flex flex-col justify-center">
+                      <div>
+                        <h4 className="text-base font-black text-white flex items-center gap-2">
+                          <span className="material-symbols-outlined text-base text-tertiary">shield</span>
+                          隐私保护
+                        </h4>
+                      </div>
+                      <div className="flex gap-3 items-start p-3 bg-tertiary/5 rounded-xl border border-tertiary/10">
+                        <span className="material-symbols-outlined text-lg text-tertiary shrink-0 mt-0.5">verified_user</span>
+                        <p className="text-sm text-on-surface-variant/70 leading-relaxed font-semibold">
+                          你的所有对话内容仅存储在本地，我们不会将任何信息用于其他用途。
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2323,126 +2615,128 @@ export default function CareerMemoryDashboard() {
           {/* ========================================================
               BOTTOM AI CAREER ADVISOR STRATEGY BAR
              ======================================================== */}
-          <div className="glass-panel p-6 rounded-3xl border-white/10 relative overflow-hidden text-left flex flex-col gap-6 shadow-2xl w-full">
-            {/* Background glowing particles */}
-            <div className="absolute top-1/2 left-6 -translate-y-1/2 w-28 h-28 bg-primary/10 rounded-full blur-2xl pointer-events-none animate-pulse"></div>
+          {activeTab !== "advisor" && (
+            <div className="glass-panel p-6 rounded-3xl border-white/10 relative overflow-hidden text-left flex flex-col gap-6 shadow-2xl w-full">
+              {/* Background glowing particles */}
+              <div className="absolute top-1/2 left-6 -translate-y-1/2 w-28 h-28 bg-primary/10 rounded-full blur-2xl pointer-events-none animate-pulse"></div>
 
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-4 border-b border-white/5 relative z-10">
-              <div className="flex items-center gap-3">
-                {/* AI Agent Avatar core */}
-                <div className="relative">
-                  <div className="w-11 h-11 rounded-full bg-primary/20 flex items-center justify-center border border-primary/30 shadow-[0_0_15px_rgba(192,193,255,0.2)]">
-                    <span className="material-symbols-outlined text-xl text-primary animate-pulse">support_agent</span>
+              <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 pb-4 border-b border-white/5 relative z-10">
+                <div className="flex items-center gap-3">
+                  {/* AI Agent Avatar core */}
+                  <div className="relative">
+                    <div className="w-11 h-11 rounded-full bg-primary/20 flex items-center justify-center border border-primary/30 shadow-[0_0_15px_rgba(192,193,255,0.2)]">
+                      <span className="material-symbols-outlined text-xl text-primary animate-pulse">support_agent</span>
+                    </div>
+                    <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-tertiary border-2 border-background"></span>
                   </div>
-                  <span className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-tertiary border-2 border-background"></span>
+                  <div>
+                    <h4 className="text-base font-black text-white">AI 职业顾问</h4>
+                    <p className="text-xs text-on-surface-variant/60 font-semibold mt-0.5">基于你所有的面试记录 and 分析，AI 为你定制建议</p>
+                  </div>
                 </div>
-                <div>
-                  <h4 className="text-base font-black text-white">AI 职业顾问</h4>
-                  <p className="text-xs text-on-surface-variant/60 font-semibold mt-0.5">基于你所有的面试记录和分析，AI 为你定制建议</p>
-                </div>
+
+                <button
+                  onClick={() => handleTabChange("advisor", true)}
+                  className="px-5 py-2.5 bg-primary text-on-primary text-sm font-black rounded-xl hover:scale-[1.02] active:scale-98 transition-all shadow-[0_4px_15px_rgba(192,193,255,0.3)] cursor-pointer"
+                >
+                  咨询 AI 顾问
+                </button>
               </div>
 
-              <button
-                onClick={() => handleTabChange("advisor")}
-                className="px-5 py-2.5 bg-primary text-on-primary text-sm font-black rounded-xl hover:scale-[1.02] active:scale-98 transition-all shadow-[0_4px_15px_rgba(192,193,255,0.3)] cursor-pointer"
-              >
-                咨询 AI 顾问
-              </button>
+              {/* AI Advisor Columns */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative z-10">
+                
+                {/* Card 1: 本周重点提升 */}
+                <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-primary/20 hover:scale-[1.01] transition-all duration-300">
+                  <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
+                    <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20 shrink-0">
+                      <span className="material-symbols-outlined text-base text-primary animate-pulse">rocket_launch</span>
+                    </div>
+                    <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">本周重点提升</span>
+                  </div>
+                  <div className="space-y-2 mt-1">
+                    {[
+                      "架构表达框架建立",
+                      "项目指标定量细化",
+                      "系统设计 trade-off 表达"
+                    ].map((text, i) => (
+                      <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
+                        <span className="material-symbols-outlined text-xs text-primary shrink-0">arrow_right_alt</span>
+                        <span className="leading-snug">{text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Card 2: 近期面试趋势 */}
+                <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-secondary/20 hover:scale-[1.01] transition-all duration-300">
+                  <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
+                    <div className="w-8 h-8 rounded-xl bg-secondary/10 flex items-center justify-center border border-secondary/20 shrink-0">
+                      <span className="material-symbols-outlined text-base text-secondary animate-pulse">trending_up</span>
+                    </div>
+                    <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">近期面试趋势</span>
+                  </div>
+                  <div className="space-y-2 mt-1">
+                    {[
+                      "系统设计出现频率上升 23%",
+                      "分布式相关问题增加明显",
+                      "面试官更关注工程落地细节"
+                    ].map((text, i) => (
+                      <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
+                        <span className="material-symbols-outlined text-xs text-secondary shrink-0">insights</span>
+                        <span className="leading-snug">{text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Card 3: 推荐行动 */}
+                <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-amber-500/20 hover:scale-[1.01] transition-all duration-300">
+                  <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
+                    <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20 shrink-0">
+                      <span className="material-symbols-outlined text-base text-amber-500 animate-pulse">task_alt</span>
+                    </div>
+                    <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">推荐行动</span>
+                  </div>
+                  <div className="space-y-2 mt-1">
+                    {[
+                      "完成 3 次真题模拟面试",
+                      "优化 2 个核心项目描述",
+                      "补充架构师深度表达训练"
+                    ].map((text, i) => (
+                      <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
+                        <span className="material-symbols-outlined text-xs text-amber-500 shrink-0">play_circle</span>
+                        <span className="leading-snug">{text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Card 4: 职业发展建议 */}
+                <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-tertiary/20 hover:scale-[1.01] transition-all duration-300">
+                  <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
+                    <div className="w-8 h-8 rounded-xl bg-tertiary/10 flex items-center justify-center border border-tertiary/20 shrink-0">
+                      <span className="material-symbols-outlined text-base text-tertiary animate-pulse">military_tech</span>
+                    </div>
+                    <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">职业发展建议</span>
+                  </div>
+                  <div className="space-y-2 mt-1">
+                    {[
+                      "建议向 Staff Engineer 方向准备",
+                      "提升技术影响力和领导力表达",
+                      "密切关注一线大厂架构能力变化"
+                    ].map((text, i) => (
+                      <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
+                        <span className="material-symbols-outlined text-xs text-tertiary shrink-0">explore</span>
+                        <span className="leading-snug">{text}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
             </div>
-
-            {/* AI Advisor Columns */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative z-10">
-              
-              {/* Card 1: 本周重点提升 */}
-              <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-primary/20 hover:scale-[1.01] transition-all duration-300">
-                <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
-                  <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20 shrink-0">
-                    <span className="material-symbols-outlined text-base text-primary animate-pulse">rocket_launch</span>
-                  </div>
-                  <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">本周重点提升</span>
-                </div>
-                <div className="space-y-2 mt-1">
-                  {[
-                    "架构表达框架建立",
-                    "项目指标定量细化",
-                    "系统设计 trade-off 表达"
-                  ].map((text, i) => (
-                    <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
-                      <span className="material-symbols-outlined text-xs text-primary shrink-0">arrow_right_alt</span>
-                      <span className="leading-snug">{text}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Card 2: 近期面试趋势 */}
-              <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-secondary/20 hover:scale-[1.01] transition-all duration-300">
-                <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
-                  <div className="w-8 h-8 rounded-xl bg-secondary/10 flex items-center justify-center border border-secondary/20 shrink-0">
-                    <span className="material-symbols-outlined text-base text-secondary animate-pulse">trending_up</span>
-                  </div>
-                  <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">近期面试趋势</span>
-                </div>
-                <div className="space-y-2 mt-1">
-                  {[
-                    "系统设计出现频率上升 23%",
-                    "分布式相关问题增加明显",
-                    "面试官更关注工程落地细节"
-                  ].map((text, i) => (
-                    <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
-                      <span className="material-symbols-outlined text-xs text-secondary shrink-0">insights</span>
-                      <span className="leading-snug">{text}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Card 3: 推荐行动 */}
-              <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-amber-500/20 hover:scale-[1.01] transition-all duration-300">
-                <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
-                  <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20 shrink-0">
-                    <span className="material-symbols-outlined text-base text-amber-500 animate-pulse">task_alt</span>
-                  </div>
-                  <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">推荐行动</span>
-                </div>
-                <div className="space-y-2 mt-1">
-                  {[
-                    "完成 3 次真题模拟面试",
-                    "优化 2 个核心项目描述",
-                    "补充架构师深度表达训练"
-                  ].map((text, i) => (
-                    <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
-                      <span className="material-symbols-outlined text-xs text-amber-500 shrink-0">play_circle</span>
-                      <span className="leading-snug">{text}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Card 4: 职业发展建议 */}
-              <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-tertiary/20 hover:scale-[1.01] transition-all duration-300">
-                <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
-                  <div className="w-8 h-8 rounded-xl bg-tertiary/10 flex items-center justify-center border border-tertiary/20 shrink-0">
-                    <span className="material-symbols-outlined text-base text-tertiary animate-pulse">military_tech</span>
-                  </div>
-                  <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">职业发展建议</span>
-                </div>
-                <div className="space-y-2 mt-1">
-                  {[
-                    "建议向 Staff Engineer 方向准备",
-                    "提升技术影响力和领导力表达",
-                    "密切关注一线大厂架构能力变化"
-                  ].map((text, i) => (
-                    <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
-                      <span className="material-symbols-outlined text-xs text-tertiary shrink-0">explore</span>
-                      <span className="leading-snug">{text}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-            </div>
-          </div>
+          )}
 
         </div>
 
@@ -2562,9 +2856,13 @@ export default function CareerMemoryDashboard() {
               <p className="text-on-surface-variant text-sm leading-relaxed max-w-xs mx-auto font-semibold">
                 {deleteTarget === "batch"
                   ? `您已选择批量删除 ${selectedIds.length} 条面试分析记录，此操作将永久删除关联的对象存储音频文件和数据库分析报告，且不可撤销。`
-                  : deleteTarget && typeof deleteTarget === "string" && deleteTarget.startsWith("project-")
-                    ? "此操作将永久删除该项目记忆记录，且不可撤销。"
-                    : "此操作将永久删除此面试分析记录，以及关联的对象存储音频文件和数据库分析报告，且不可撤销。"}
+                  : deleteTarget === "counselor-batch"
+                    ? `您已选择批量删除 ${selectedCounselorIds.length} 个会话，此操作不可撤销。`
+                    : typeof deleteTarget === "string" && deleteTarget.startsWith("counselor-")
+                      ? "此操作将永久删除该会话，且不可撤销。"
+                      : deleteTarget && typeof deleteTarget === "string" && deleteTarget.startsWith("project-")
+                        ? "此操作将永久删除该项目记忆记录，且不可撤销。"
+                        : "此操作将永久删除此面试分析记录，以及关联的对象存储音频文件和数据库分析报告，且不可撤销。"}
               </p>
             </div>
 

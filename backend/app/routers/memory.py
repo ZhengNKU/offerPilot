@@ -16,6 +16,7 @@ from sqlalchemy.future import select
 from app import models, schemas
 from app.database import get_db
 from app.routers.auth import get_current_user_optional
+from app.services.embedding_indexer import schedule_index, delete_source_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +262,14 @@ async def create_project(
     await db.refresh(pm)
 
     logger.info(f"[memory] 用户手动创建项目记忆 id={pm.id} name='{pm.project_name}'")
+
+    # 触发 AI 职业顾问索引
+    schedule_index({
+        "kind": "project_memory",
+        "user_id": user.id,
+        "project_id": pm.id,
+    })
+
     return _project_to_dict(pm)
 
 
@@ -317,6 +326,14 @@ async def update_project(
     await db.refresh(pm)
 
     logger.info(f"[memory] 用户手动更新项目记忆 id={pm.id} name='{pm.project_name}' v{pm.version}")
+
+    # 触发 AI 职业顾问索引（更新即重新切片 + embedding）
+    schedule_index({
+        "kind": "project_memory",
+        "user_id": user.id,
+        "project_id": pm.id,
+    })
+
     return _project_to_dict(pm)
 
 
@@ -341,6 +358,14 @@ async def delete_project(
     await db.commit()
 
     logger.info(f"[memory] 用户删除项目记忆 id={project_id} name='{pm.project_name}'")
+
+    # 同步删除 AI 职业顾问向量索引
+    try:
+        deleted = await delete_source_embeddings("project_memory", project_id)
+        logger.info(f"[memory] 已清理 {deleted} 条项目记忆向量索引")
+    except Exception as e:
+        logger.error(f"[memory] 清理向量索引失败: {e!r}")
+
     return {"message": "删除成功"}
 
 

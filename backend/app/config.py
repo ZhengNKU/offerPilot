@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     MINIMAX_API_KEY: str = "sk-cp-MWMKKxL_Pw6DnMDlTOsoH-r0CuKRlIjej1HllThrp0W5ibWrTW9-7c4AZR3OjV0fQDckONY9mtTgYxLARigGIKatRyJXStX1aeLadgwlirjSp2PREMklY_g"
     MINIMAX_BASE_URL: str = "https://api.minimaxi.com/v1"
 
+    # MiniMax Embedding API（AI 职业顾问用）
+    # 注意：与 chat 端点域名不同——chat 用 api.minimaxi.com，embedding 用 api.minimax.chat
+    MINIMAX_GROUP_ID: str = "2041338752588062737"
+    MINIMAX_EMBEDDING_URL: str = "https://api.minimax.chat/v1/embeddings"
+    EMBEDDING_MODEL: str = "embo-01"
+    EMBEDDING_DIM: int = 1536
+    EMBEDDING_BATCH_SIZE: int = 32
+    EMBEDDING_TIMEOUT_S: float = 30.0
+    EMBEDDING_QPS: int = 20
+
     # Volcano Engine (ByteDance Doubao) ASR
     VOLC_ASR_API_KEY: str = "91b64a7e-bd24-41ba-95e7-b1dbca5cb6b3"
     VOLC_ASR_RESOURCE_ID: str = "volc.seedasr.auc"
@@ -65,6 +75,9 @@ class Settings(BaseSettings):
     FILE_RETENTION_DAYS_MAX: int = 120
     # 过期文件清理任务运行周期，单位：小时
     FILE_CLEANUP_INTERVAL_HOURS: int = 24
+
+    # Aliyun Bailian DASHSCOPE_API_KEY
+    DASHSCOPE_API_KEY: str = ""
     
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

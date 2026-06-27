@@ -18,6 +18,7 @@ from app.database import async_session
 from app.models import ProjectMemory
 from app.utils.llm import extract_project_experiences
 from app.utils.resume_parser import parse_resume_structure
+from app.services.embedding_indexer import schedule_index
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +138,18 @@ async def _run_project_memory_sub_agent_impl(payload: dict) -> None:
                     continue
 
             await db.commit()
+
+            # 触发 AI 职业顾问索引（fire-and-forget；每个新插入/更新的项目都索引）
+            for r in upsert_results:
+                try:
+                    schedule_index({
+                        "kind": "project_memory",
+                        "user_id": user_id,
+                        "project_id": r["project_id"],
+                    })
+                except Exception:
+                    # schedule_index 本身已 try/except，这里再保险
+                    pass
     except Exception:
         logger.error(
             f"[project_memory_agent] 数据库写入失败: {traceback.format_exc()}"

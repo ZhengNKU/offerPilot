@@ -16,6 +16,7 @@ from app.database import get_db
 from app.routers.auth import get_current_user_optional
 from app.routers.file import get_cos_client, bucket
 from app.utils.resume_parser import extract_resume_text, parse_resume_structure
+from app.services.embedding_indexer import schedule_index
 from app.utils.llm import analyze_resume_text
 from app.utils.docx_resume_writer import rewrite_resume_docx, BulletMatchError
 from app.utils.pdf_to_docx import convert_pdf_to_docx
@@ -163,6 +164,14 @@ async def analyze_resume(
     db.add(record)
     await db.commit()
     await db.refresh(record)
+
+    # 触发 AI 职业顾问索引（fire-and-forget；失败不影响主流程）
+    if current_user:
+        schedule_index({
+            "kind": "resume_analysis",
+            "user_id": current_user.id,
+            "resume_analysis_id": record.id,
+        })
 
     return {
         "id": record.id,

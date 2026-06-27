@@ -14,6 +14,7 @@ from app.database import get_db, async_session
 from app.routers.auth import get_current_user_optional
 from app.utils.llm import analyze_interview_dialogue, sectionize_transcript, generate_transcript_highlights
 from app.utils.asr import call_minimax_asr
+from app.services.embedding_indexer import schedule_index
 
 logger = logging.getLogger(__name__)
 
@@ -683,6 +684,19 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
         db.add(risk)
 
         await db.commit()
+
+    # 触发 AI 职业顾问索引（fire-and-forget；失败不影响主流程）
+    if session.user_id:
+        schedule_index({
+            "kind": "interview_summary",
+            "user_id": session.user_id,
+            "session_id": session_id,
+        })
+        schedule_index({
+            "kind": "interview_sections_bulk",
+            "user_id": session.user_id,
+            "session_id": session_id,
+        })
 
     _set_progress(100, "completed")
     logger.info(f"[task={task_id}] Analysis complete for session {session_id}")
