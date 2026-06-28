@@ -553,3 +553,135 @@ async def get_growth_curve(
         "total_analyses": total,
         "axis_labels": axis_labels,
     }
+
+
+# ============================================================================
+# 分析时间轴（全量历史记录聚合接口）
+# ============================================================================
+
+@router.get("/timeline")
+async def get_timeline(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
+    """返回当前用户的全量分析历史（时间轴），合并三个数据源：
+
+    - interview_sessions（录音/文字面试）
+    - resume_analyses（简历分析）
+    - interview_live_sessions（实时模拟面试）
+
+    按 created_at 倒序排列，供前端 memory 时间轴和 home 最近活动共用。
+    """
+    if not current_user:
+        return {"items": []}
+
+    items: list[dict] = []
+
+    # 1. 面试会话（音频 + 文字）
+    audio_result = await db.execute(
+        select(models.InterviewSession)
+        .where(models.InterviewSession.user_id == current_user.id)
+        .order_by(models.InterviewSession.created_at.desc())
+    )
+    for s in audio_result.scalars().all():
+        # 解析 title 提取 company/role/round
+        if s.title and " · " in s.title:
+            parts = s.title.split(" · ")
+            company = parts[0] if len(parts) >= 1 else s.title
+            role = parts[1] if len(parts) >= 2 else "录音分析"
+            round_label = parts[2] if len(parts) >= 3 else "技术面试"
+        else:
+            company = s.title or "语音面试"
+            role = "录音分析"
+            round_label = "技术面试"
+
+        grade = "待提升候选人"
+        if s.ipi_score >= 80:
+            grade = "优秀候选人"
+        elif s.ipi_score >= 70:
+            grade = "中级候选人"
+
+        items.append({
+            "id": str(s.id),
+            "type": "text" if s.audio_url == "text_mode" else "audio",
+            "title": s.title or "未命名面试分析",
+            "score": s.ipi_score or 0,
+            "grade": grade,
+            "company": company,
+            "role": role,
+            "round": round_label,
+            "details": s.executive_summary or "",
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        })
+
+    # 2. 简历分析
+    resume_result = await db.execute(
+        select(models.ResumeAnalysis, models.UploadedFile.filename)
+        .join(models.UploadedFile, models.ResumeAnalysis.file_id == models.UploadedFile.id)
+        .where(models.ResumeAnalysis.user_id == current_user.id)
+        .order_by(models.ResumeAnalysis.created_at.desc())
+    )
+    for ra, filename in resume_result.all():
+        items.append({
+            "id": str(ra.id),
+            "type": "resume",
+            "title": f"简历优化 · {filename or '简历'}",
+            "score": ra.score or 0,
+            "grade": "优秀简历" if (ra.score or 0) >= 85 else ("良好简历" if (ra.score or 0) >= 70 else "待提升简历"),
+            "company": "个人简历",
+            "role": filename or "未知岗位",
+            "round": "简历深度分析",
+            "details": f"ATS通过率 {ra.ats_pass_rate or 0}%。评分 {ra.score or 0}分，预计优化后 {ra.optimized_score or 0}分。",
+            "created_at": ra.created_at.isoformat() if ra.created_at else None,
+            "ats_pass_rate": ra.ats_pass_rate,
+            "optimized_score": ra.optimized_score,
+        })
+
+    # 3. 实时模拟面试
+    live_result = await db.execute(
+        select(models.InterviewLiveSession)
+        .where(models.InterviewLiveSession.user_id == current_user.id)
+        .order_by(models.InterviewLiveSession.created_at.desc())
+    )
+    interview_type_label: dict[str, str] = {
+        "tech_8gu": "技术面·八股",
+        "tech_project": "技术面·项目",
+        "tech_scenario": "技术面·场景",
+        "hr_comprehensive": "HR面",
+    }
+    difficulty_label: dict[str, str] = {
+        "Lv1": "友善", "Lv2": "偏友好", "Lv3": "有压力", "Lv4": "严苟",
+    }
+    for l in live_result.scalars().all():
+        dur_min = round((l.duration_sec or 0) / 60)
+        live_role = interview_type_label.get(l.interview_type, "实时模拟")
+        live_round = difficulty_label.get(l.difficulty, l.difficulty or "—")
+        live_score = l.ipi_score or 0
+        items.append({
+            "id": str(l.session_id or l.id),
+            "liveId": l.id,
+            "type": "live",
+            "title": f"实时模拟面试 · {l.target_role or '面试'}",
+            "score": live_score,
+            "grade": "已完成" if l.status == "completed" else (
+                {"created": "等待开始", "ws_connecting": "连接中", "live": "进行中",
+                 "ending": "正在结束", "ended": "已结束", "analyzing": "分析中",
+                 "failed": "评估失败"}.get(l.status, "未知状态")
+            ),
+            "company": l.company_style or "—",
+            "role": live_role,
+            "round": f"{dur_min}分钟 · {live_round}" if dur_min > 0 else live_round,
+            "details": f"{live_role} · {live_round}" + (f" · {l.persona_cn}" if l.persona_cn else ""),
+            "created_at": l.created_at.isoformat() if l.created_at else None,
+            "interview_type": l.interview_type,
+            "difficulty": l.difficulty,
+            "duration_sec": l.duration_sec,
+            "status": l.status,
+            "persona_cn": l.persona_cn,
+        })
+
+    # 按 created_at 倒序
+    items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+
+    logger.info(f"[memory] timeline user_id={current_user.id} total={len(items)}")
+    return {"items": items}
