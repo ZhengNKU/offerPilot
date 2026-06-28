@@ -5,6 +5,47 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 
+interface TimelineItem {
+  id: string;
+  type: "audio" | "text" | "resume" | "live";
+  title: string;
+  score: number;
+  grade: string;
+  company: string;
+  role: string;
+  round: string;
+  details: string;
+  created_at: string | null;
+}
+
+function formatRelativeTime(dateStr: string): string {
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+    if (diffMin < 1) return "刚刚";
+    if (diffMin < 60) return `${diffMin}分钟前`;
+    if (diffHours < 24) return `${diffHours}小时前`;
+    if (diffDays < 30) return `${diffDays}天前`;
+    return d.toLocaleDateString();
+  } catch {
+    return dateStr;
+  }
+}
+
+async function fetchTimeline(token: string): Promise<TimelineItem[]> {
+  const res = await fetch("http://localhost:8001/api/memory/timeline", {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.items || [];
+}
+
 export default function CareerDashboard() {
   const router = useRouter();
   const auth = useAuth();
@@ -12,6 +53,14 @@ export default function CareerDashboard() {
   // =========================================================================
   // STATE MANAGEMENT
   // =========================================================================
+  const [recentActivity, setRecentActivity] = useState<TimelineItem[]>([]);
+
+  // 最近活动：从分析时间轴数据源获取
+  useEffect(() => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+    if (!auth.isLoggedIn || !token) return;
+    fetchTimeline(token).then(items => setRecentActivity(items));
+  }, [auth.isLoggedIn]);
   const [profile, setProfile] = useState({
     name: "张三",
     status: "在职",
@@ -806,41 +855,59 @@ export default function CareerDashboard() {
                 <div className="relative pl-5.5 space-y-3 py-1 flex-1 flex flex-col justify-start mt-[-2px]">
                   <div className="absolute left-1.5 top-2.5 bottom-2.5 w-0.5 bg-white/5" />
                   
-                  {[
-                    { time: "昨天 20:30", type: "录音分析", label: "字节跳动 后端开发", sub: "技术二面", score: 82, rating: "good", color: "bg-primary" },
-                    { time: "3天前 15:21", type: "简历优化", label: "腾讯 后台开发工程师", sub: "优化版 v2", score: null, rating: "normal", color: "bg-secondary" },
-                    { time: "5天前 11:05", type: "模拟面试", label: "系统设计专场", sub: "专项训练", score: 76, rating: "good", color: "bg-tertiary" },
-                    { time: "7天前 09:40", type: "面试记录分析", label: "美团 技术一面", sub: "风险点 3 个", score: 71, rating: "risk", color: "bg-amber-500" }
-                  ].map((node, i) => (
-                    <div key={i} className="relative flex justify-between items-start text-sm font-semibold">
-                      <div className={`absolute -left-5 top-1.5 w-2 h-2 rounded-full ${node.color} ring-4 ring-background z-10`} />
-                      
-                      <div className="text-left space-y-0.5 min-w-0 pr-4">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                           <span className="text-xs text-on-surface-variant/40 font-label-mono">{node.time}</span>
-                           <span className="text-white/10 font-normal">|</span>
-                           <span className="text-xs text-primary/70 font-extrabold uppercase">{node.type}</span>
-                        </div>
-                        <p className="text-sm font-black text-white truncate leading-snug mt-0.5">
-                          {node.label} <span className="text-on-surface-variant/45 font-medium">[{node.sub}]</span>
-                        </p>
-                      </div>
+                  {recentActivity.length === 0 ? (
+                    <span className="text-xs text-on-surface-variant/50 text-center py-4 block">
+                      {auth.isLoggedIn ? "暂无活动记录" : "请先登录"}
+                    </span>
+                  ) : (
+                    recentActivity.slice(0, 5).map((item, i) => {
+                      const typeLabel: Record<string, string> = {
+                        audio: "录音分析", text: "记录分析", resume: "简历优化", live: "模拟面试",
+                      };
+                      const dotColor: Record<string, string> = {
+                        audio: "bg-primary", text: "bg-primary", resume: "bg-secondary", live: "bg-tertiary",
+                      };
+                      const hasScore = item.score > 0;
+                      const scoreRating =
+                        item.score >= 80 ? "good" : item.score >= 60 ? "normal" : "risk";
 
-                      <div className="shrink-0 flex items-center">
-                        {node.score ? (
-                           <span className={`font-black font-label-mono text-xs md:text-sm px-2 py-0.5 rounded-lg whitespace-nowrap ${
-                            node.rating === "good" ? "bg-tertiary/10 text-tertiary border border-tertiary/20" : 
-                            node.rating === "risk" ? "bg-secondary/15 text-secondary border border-secondary/20" :
-                            "bg-white/5 text-on-surface-variant/60"
-                          }`}>
-                            评分 {node.score}
-                          </span>
-                        ) : (
-                          <span className="text-on-surface-variant/30 font-semibold font-label-mono text-xs px-2 whitespace-nowrap">—</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                      return (
+                        <div key={item.id} className="relative flex justify-between items-start text-sm font-semibold">
+                          <div className={`absolute -left-5 top-1.5 w-2 h-2 rounded-full ${dotColor[item.type] || "bg-white/30"} ring-4 ring-background z-10`} />
+
+                          <div className="text-left space-y-0.5 min-w-0 pr-4">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs text-on-surface-variant/40 font-label-mono">
+                                {formatRelativeTime(item.created_at || "")}
+                              </span>
+                              <span className="text-white/10 font-normal">|</span>
+                              <span className="text-xs text-primary/70 font-extrabold uppercase">
+                                {typeLabel[item.type] || item.type}
+                              </span>
+                            </div>
+                            <p className="text-sm font-black text-white truncate leading-snug mt-0.5">
+                              {item.company} · {item.role}
+                              <span className="text-on-surface-variant/45 font-medium"> [{item.round}]</span>
+                            </p>
+                          </div>
+
+                          <div className="shrink-0 flex items-center">
+                            {hasScore ? (
+                              <span className={`font-black font-label-mono text-xs md:text-sm px-2 py-0.5 rounded-lg whitespace-nowrap ${
+                                scoreRating === "good" ? "bg-tertiary/10 text-tertiary border border-tertiary/20" :
+                                scoreRating === "risk" ? "bg-secondary/15 text-secondary border border-secondary/20" :
+                                "bg-white/5 text-on-surface-variant/60"
+                              }`}>
+                                评分 {item.score}
+                              </span>
+                            ) : (
+                              <span className="text-on-surface-variant/30 font-semibold font-label-mono text-xs px-2 whitespace-nowrap">—</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
                 </div>
 
               </div>
