@@ -1227,7 +1227,7 @@ export default function CareerMemoryDashboard() {
                   <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">apartment</span>{auth.user.company || "腾讯科技"}</span>
                   <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">work</span>{auth.user.role ? auth.user.role.split(" · ")[0] : "后端开发工程师"}</span>
                   <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">military_tech</span>{auth.user.role ? auth.user.role.split(" · ")[1] || "P6" : "P6"}</span>
-                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">pin_drop</span>上海</span>
+                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">pin_drop</span>{auth.user.targetCity || "—"}</span>
                   <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">schedule</span>{auth.user.years || "6年经验"}</span>
                 </div>
               </div>
@@ -1240,12 +1240,12 @@ export default function CareerMemoryDashboard() {
               <div className="flex gap-5 px-4.5 py-3.5 rounded-2xl bg-white/[0.02] border border-white/5 shrink-0 justify-between sm:justify-start">
                 <div className="text-left whitespace-nowrap min-w-0">
                   <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block whitespace-nowrap">目标岗位</span>
-                  <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">Staff Engineer</span>
+                  <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{auth.user.targetRole || "—"}</span>
                 </div>
                 <div className="w-px bg-white/10 self-stretch my-1 shrink-0"></div>
                 <div className="text-left whitespace-nowrap min-w-0">
                   <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block whitespace-nowrap">目标薪资</span>
-                  <span className="text-base font-black text-tertiary block mt-0.5 whitespace-nowrap">70K - 90K</span>
+                  <span className="text-base font-black text-tertiary block mt-0.5 whitespace-nowrap">{auth.user.targetSalary || "—"}</span>
                 </div>
               </div>
 
@@ -1254,10 +1254,10 @@ export default function CareerMemoryDashboard() {
                 <div className="text-left">
                   <span className="text-xs md:text-sm font-label-mono text-primary font-black uppercase tracking-wider block">AI 职业总结</span>
                   <ul className="text-xs text-on-surface-variant/60 space-y-0.5 mt-1 list-disc list-inside font-semibold leading-relaxed">
-                    <li>具备 P6 技术能力水平</li>
-                    <li>系统设计能力较强</li>
-                    <li>表达能力有待提升</li>
-                    <li>面试通过率预计 <span className="text-primary font-extrabold">67%</span></li>
+                    <li>目标岗位：{auth.user.targetRole || "—"}</li>
+                    <li>目标公司：{auth.user.targetCompany || "—"}</li>
+                    <li>目标职级：{auth.user.targetGrade || "—"}</li>
+                    <li>岗位匹配度预计 <span className="text-primary font-extrabold">{auth.user.matchRate ?? 0}%</span></li>
                   </ul>
                 </div>
 
@@ -1272,7 +1272,7 @@ export default function CareerMemoryDashboard() {
                       stroke="url(#summary-circle-gradient)"
                       strokeWidth="4.5"
                       strokeDasharray={2 * Math.PI * 26}
-                      strokeDashoffset={2 * Math.PI * 26 * (1 - 0.67)}
+                      strokeDashoffset={2 * Math.PI * 26 * (1 - (auth.user.matchRate ?? 0) / 100)}
                       strokeLinecap="round"
                     />
                     <defs>
@@ -1283,7 +1283,7 @@ export default function CareerMemoryDashboard() {
                     </defs>
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className="text-sm font-black text-white font-label-mono">67%</span>
+                    <span className="text-sm font-black text-white font-label-mono">{auth.user.matchRate ?? 0}%</span>
                   </div>
                 </div>
 
