@@ -132,6 +132,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }
               }
               const merged = { ...defaultUser, ...userRef.current, ...apiData };
+              // API 返回的 role 可能不含当前职级（仅岗位名），
+              // 此时保留 localStorage 中的完整版本（"岗位 · 职级"），防止职级信息丢失
+              if (apiData.role && !apiData.role.includes(" · ") && userRef.current.role && userRef.current.role.includes(" · ")) {
+                merged.role = userRef.current.role;
+              }
               setUser(merged);
               localStorage.setItem("interviewVar_user", JSON.stringify(merged));
               window.dispatchEvent(new Event("storage"));
@@ -235,7 +240,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           body.experience_months = matched?.[2] || "0个月";
         }
         if (data.company !== undefined) body.company_name = data.company;
-        if (data.role !== undefined) body.role_name = data.role.split(" · ")[0];
+        if (data.role !== undefined) body.role_name = data.role;
 
         if (data.salary !== undefined) {
           const salMatch = data.salary.match(/(\d+)K\s*-\s*(\d+)K/i);

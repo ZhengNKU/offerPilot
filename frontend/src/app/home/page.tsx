@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
@@ -118,9 +118,6 @@ export default function CareerDashboard() {
   const [emailCode, setEmailCode] = useState("");
   const [phoneCode, setPhoneCode] = useState("");
 
-  // Track previous auth user identity to avoid redundant syncs
-  // 使用 name 字符串比较而非对象引用 —— 页面切换时 auth.user 引用可能不变，但组件重新挂载需同步
-  const prevAuthUserIdRef = useRef<string | null>(null);
 
   // ── Modal open handlers (reset form state from current data) ──
   const handleOpenProfileModal = () => {
@@ -188,12 +185,9 @@ export default function CareerDashboard() {
     router.push("/memory?tab=timeline");
   };
 
-  // Subscribe to external auth context — sync into local state only when user identity actually changes
+  // Subscribe to external auth context — sync into local state whenever auth.user changes
   useEffect(() => {
     if (!auth.isLoggedIn || !auth.user) return;
-    // 用 name 字段标识用户身份（页面切换时组件 mount → ref 为 null → 一定会同步）
-    if (auth.user.name === prevAuthUserIdRef.current) return;
-    prevAuthUserIdRef.current = auth.user.name;
     setAvatarError(false);
     setProfile(prev => {
       const yrsMatch = auth.user.years?.match(/(\d+)年/);
@@ -250,15 +244,16 @@ export default function CareerDashboard() {
   }, [auth.isLoggedIn, auth.user]);
 
   // Handlers for Save actions
-  const handleSaveProfile = (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     const updatedProfile = {
       ...profileForm,
+      title: `${profileForm.role} · ${profileForm.level || "高级"}`,
       tags: profileForm.tagsString.split(",").map(t => t.trim()).filter(Boolean)
     };
     setProfile(updatedProfile);
     
-    auth.updateUser({
+    await auth.updateUser({
       name: profileForm.name,
       status: profileForm.status,
       years: `${profileForm.experienceYears}${profileForm.experienceMonths}`,

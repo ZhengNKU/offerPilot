@@ -30,7 +30,7 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
     return schemas.UserProfileResponse(
         name=user.username,
         avatar=p.avatar_url,
-        role=f"{p.role_name or '后端开发工程师'} · {p.target_grade or '高级'}",
+        role=p.role_name or "后端开发工程师",
         company=p.company_name or "暂无公司",
         years=f"{p.experience_years or '在校/应届'}{p.experience_months or '0个月'}",
         status="在职" if p.job_status == "active" else "离职" if p.job_status == "resigned" else "在校生",
