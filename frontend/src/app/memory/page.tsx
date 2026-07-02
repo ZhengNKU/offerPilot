@@ -87,6 +87,306 @@ const buildPageList = (cur: number, total: number): (number | "…")[] => {
   return pages;
 };
 
+const KNOWLEDGE_QUESTIONS_MAP: Record<string, Array<{
+  title: string;
+  freq: number;
+  aiAnswer: {
+    core: string;
+    s: string;
+    t: string;
+    a: string[];
+    r: string;
+    keyPoints: string[];
+    followUps: string[];
+  }
+}>> = {
+  "Redis 缓存穿透与击穿": [
+    {
+      title: "什么是缓存穿透？生产环境如何进行防御与兜底？",
+      freq: 14,
+      aiAnswer: {
+        core: "缓存穿透是指查询一个数据库中和缓存中均不存在的数据，每次请求都直接打入数据库。生产环境核心防御手段为布隆过滤器前置拦截，并配合空值缓存与参数强校验。",
+        s: "在秒杀促销期间，系统遭受大量恶意扫描或由于爬虫脚本发起不合法的空商品 ID 访问，致使底层 MySQL 连接池被打满、QPS 陡增，面临雪崩风险。",
+        t: "前置校验过滤这些无效的访问流，并以微小系统资源占用代价将穿透访问挡在数据库之外，保障主库连接稳定性。",
+        a: [
+          "在 API 网关及应用层入口，引入布隆过滤器（Bloom Filter）缓存所有有效的数据 ID，凡不存在的 Key 直接在内存中被拦截并返回空。",
+          "针对数据库查询 Miss 的请求，将对应的 Key 缓存为一个空值对象（如 Null）或特定标识，且设置 30-60 秒的极短生存周期（TTL）以防止数据积压。",
+          "对入参 ID 进行正则或强格式验证，过滤明显不规范的入参（如负数 ID 或乱码字符）。"
+        ],
+        r: "成功拦截了 99.9% 以上的穿透与攻击性流量，主库 QPS 曲线重归平缓，CPU 使用率降低 85%，数据库安全稳健。",
+        keyPoints: [
+          "布隆过滤器占用空间极小但存在极低概率误判率",
+          "缓存空值能有效拦截短期高频重复穿透请求",
+          "参数校验拦截能够提前削减 30% 基础垃圾流量"
+        ],
+        followUps: [
+          "布隆过滤器的误判率如何根据业务体量平衡调优？",
+          "缓存空值可能导致内存无谓积压，应如何结合 LRU 进行缓存管理？"
+        ]
+      }
+    },
+    {
+      title: "什么是缓存击穿？与缓存雪崩有什么本质区别？",
+      freq: 12,
+      aiAnswer: {
+        core: "缓存击穿指单个被极高频访问的热点 Key 突然过期失效，瞬时海量请求直达主库；缓存雪崩则是大规模缓存 Key 批量失效或缓存服务停机导致系统崩溃。",
+        s: "微博爆款热搜或突发的明星事件，对应热点新闻的缓存 Key 刚好到期失效，同时有数十万并发试图重入加载该内容。",
+        t: "防止失效瞬间发生多路数据库连接抢占和慢查询，提供温和重构数据、平滑加载的保护方案。",
+        a: [
+          "在查询数据库重建缓存的代码段加入分布式互斥锁（如 Redis setnx），仅允许首个获取锁的线程查询数据库重建，其他线程等待重试。",
+          "对最核心的爆款热点 Key，采用物理上‘永不过期’的设计，转而由后台常驻守护线程异步在即将逻辑过期前重新预热加载新数据。"
+        ],
+        r: "实现热点数据平滑过渡无缝续期，彻底规避了高并发瞬间主库的过载，防线固若金汤。",
+        keyPoints: [
+          "击穿关注点是个体核心 Key，雪崩关注面是批量失效",
+          "互斥锁可保障绝对的一致性但会带来一定的 RT 损耗",
+          "异步看门狗预热机制是目前业界推荐的主流高吞吐解耦架构"
+        ],
+        followUps: [
+          "如果分布式锁在获取时产生死锁或超时该怎么处理？",
+          "如何在运行时实时发现系统的潜在“热点 Key”以自动防范击穿？"
+        ]
+      }
+    },
+    {
+      title: "如何设计一个大流量下的热点 Key 探测与缓存机制？",
+      freq: 10,
+      aiAnswer: {
+        core: "热点 Key 探测常基于客户端收集（如 Redisson 拦截器）、服务端代理层分析或 Redis monitor 命令采样，结合本地多级缓存。",
+        s: "电商秒杀业务中某些网红店铺或单品访问量超日常百倍，导致 Redis 对应分片网卡被打满、请求队列积压。",
+        t: "实时检测出秒级突发的超限高频 Key，并在节点崩溃前自动分摊流量。",
+        a: [
+          "引入开源监控组件（如 JVM 内存计数器或 Sentinel），对 Redis 操作进行拦截打点统计。",
+          "检测到 Hot Key 后，通过配置中心将热点数据广播并推送至本地业务服务的本地多级缓存（Caffeine）。",
+          "在 Redis 集群端为热点 Key 增加随机哈希后缀（如 key_01, key_02），将单点访问分散至各个节点。"
+        ],
+        r: "热点检测延迟控制在 1秒以内，本地缓存成功拦截了 80% 的热点读操作，彻底防止了 Redis 单分片雪崩。",
+        keyPoints: ["探测方案需对业务入侵小、系统开销低", "本地多级缓存可极大分摊 Redis 带宽瓶颈", "加随机后缀打散写/读是简单有效的数据扩容方案"],
+        followUps: ["本地缓存的数据一致性如何保障？", "配置中心推送的延迟在极端环境下如何优化？"]
+      }
+    },
+    {
+      title: "如何处理布隆过滤器的重建和扩容问题？",
+      freq: 9,
+      aiAnswer: {
+        core: "布隆过滤器位图一旦初始化其长度和哈希函数数量就固定了。如果数据量暴增，需要进行双过滤器热切换重建或建立过滤链。",
+        s: "平台从百万级商品迅速扩充至千万级，导致原预估 1% 误判率 of 布隆过滤器误判率狂飙至 25%，失去大部分拦截效力。",
+        t: "不停止在线业务的前提下，动态且平滑地为过滤器进行高精度升级扩容。",
+        a: [
+          "启动后台离线任务，基于最新全量数据在一个全新的、容量更大的备用布隆过滤器 B 中构建索引。",
+          "实时流量写入时同时写 A 和 B。待 B 初始化完成后，将前端网关配置切换，正式指引向 B 过滤器，并销毁旧的 A 过滤器。"
+        ],
+        r: "拦截精度重回 99.9% 级别，热切换全过程零停机，无任何请求异常或主库慢查询阻碍。",
+        keyPoints: [
+          "过滤器本身大小不可动态变更，必须做整体重构",
+          "双布隆过滤器并行双写是安全迁移的关键保障",
+          "初始化读库阶段需做限流以防止抢占正常业务带宽"
+        ],
+        followUps: [
+          "如何支持带有动态删除操作的“布隆计数过滤器”（Counting Bloom Filter）？",
+          "数据同步重建期间发生的数据变更如何实现最终一致？"
+        ]
+      }
+    },
+    {
+      title: "高并发场景下，布隆过滤器的哈希碰撞如何降低？",
+      freq: 8,
+      aiAnswer: {
+        core: "哈希碰撞概率由哈希函数的个数（k）和位数组长度（m）共同决定。通过调整这两个参数可使碰撞概率逼近数学下限。",
+        s: "安全防护模块面临极其庞大的恶性请求，需要设计拦截策略，将拦截误判率控制在百万分之一以下。",
+        t: "寻找最符合内存预算与误判率边界的最佳哈希映射模型参数。",
+        a: [
+          "利用 MurmurHash 等非加密型高性能散列算法，生成分布极度均匀的二进制索引。",
+          "通过数学推导模型得到当误判率为 p 时最佳的 m 和 k 分配数值，并用 Lua 脚本封装多次位图操作减少网络 RTT。"
+        ],
+        r: "碰撞几率控制在 0.0001% 水平，用极低的位图内存消耗（仅需几十MB）成功阻断了全量外部扫库的请求攻击。",
+        keyPoints: ["哈希次数越多误判越低，但计算开销越大", "MurmurHash 在防碰撞和吞吐量中是最佳折中", "Lua 脚本批量位操作可以减少 Redis 网络消耗"],
+        followUps: ["如何测试布隆过滤器的哈希分布均匀度？", "位图如果突破 Redis 单 Key 512MB 限制如何处理？"]
+      }
+    },
+    {
+      title: "布隆过滤器和缓存空值，在选择上有什么最佳考量？",
+      freq: 7,
+      aiAnswer: {
+        core: "布隆过滤器适合拦截规律或不规律的、超大规模且数据极其稀疏的空 Key 请求；缓存空值更适合经常重复访问的少量无效 Key。",
+        s: "用户主页查询存在海量空白账户的黑产注册或注销请求，需要在两种方案中做架构选型评估。",
+        t: "根据具体的数据量级、内存开销以及业务演进，确定最佳方案组合。",
+        a: [
+          "对于防扫库攻击等超大量恶意扫描请求，首选布隆过滤器（内存消耗恒定且极小）。",
+          "对于新老用户查询的日常常规空数据（重复率较高），使用缓存空值（开发简单、维护低成本）。"
+        ],
+        r: "完成了系统防刷功能的重构，在拦截百万恶意流量的前提下，Redis 的内存开销下降了 90%。",
+        keyPoints: ["布隆过滤器占用空间极小，但存在一定误判率", "缓存空值逻辑简单但量大占用内存", "推荐组合使用：过滤器拦截黑产扫描，空值处理日常偶发"],
+        followUps: ["如何识别出特定请求是恶意攻击还是偶发错误？", "如果业务需要频繁增删数据，应该使用哪种方案？"]
+      }
+    },
+    {
+      title: "如果布隆过滤器误判了，将一个不存在的 Key 判为存在，如何兜底？",
+      freq: 6,
+      aiAnswer: {
+        core: "由于布隆过滤器存在低概率误判，部分请求会穿透到数据库。此时应搭配数据库防刷限制、慢查询熔断与缓存空值进行多重兜底。",
+        s: "秒杀系统偶尔发生由于误判导致流量直接打到 MySQL，产生慢 SQL 堵塞数据库连接池。",
+        t: "设计容错兜底漏斗，防止误判漏网的请求雪崩式地压瘫主库。",
+        a: [
+          "在底层数据库连接池及服务限流器上配置针对单一 IP 或 API 的并发阈值限制。",
+          "在读库操作发生 Miss 之后，立刻以较低的过期时间（例如5秒）写回 Redis 缓存空值，终结后续相同请求的重入。",
+          "通过 sentinel 配置数据库慢查询熔断，一旦延迟过高，自动返回友好空白或降级静态页面。"
+        ],
+        r: "主库面对漏网流量表现平稳，连接数依然保持在安全水平，未产生系统性阻塞事件。",
+        keyPoints: ["系统设计必须承认物理局限（误判），并进行防御设计", "漏斗模型在系统架构中是绝对的最佳实践", "读 Miss 后立刻缓存空值是拦截的黄金策略"],
+        followUps: ["数据库 Miss 后的写回操作如何保证高可靠？", "如何对穿透数据库的漏网流量进行打点监控？"]
+      }
+    },
+    {
+      title: "Redis 缓存空值，如果产生大量空缓存如何避免内存占满？",
+      freq: 6,
+      aiAnswer: {
+        core: "可以通过设置随机的、极短的过期时间，并利用 LRU 或 LFU 内存淘汰策略，加之前置黑白名单校验来降低空缓存积压。",
+        s: "接口被暴力扫描，缓存空值机制导致 Redis 在 10分钟内生成了 500万个空缓存 Key，可用内存告警。",
+        t: "既保留空缓存的高并发拦截效果，又保证 Redis 的内存维持在健康线以下。",
+        a: [
+          "将空缓存的过期时间统一设置为随机值（如 15 - 30 秒），让无效 Key 能够快速过期释放空间。",
+          "在 Redis.conf 配置文件中设置 maxmemory 上限，并采用 volatile-lru 淘汰算法，优先清理有过期时间的空 Key。"
+        ],
+        r: "无效空 Key 的生命周期被缩短，Redis 内存峰值下降了 70%，内存使用率始终稳定在 65% 以下。",
+        keyPoints: ["过期时间设随机值可防缓存同时失效雪崩", "LRU/LFU 内存淘汰提供了最后一层物理兜底", "大量空缓存表明需要前置黑白名单及限流拦截"],
+        followUps: ["如何配置 volatile-lru 并进行性能实测？", "Redis 内存不足时有哪些紧急收缩技巧？"]
+      }
+    },
+    {
+      title: "缓存一致性在缓存穿透与击穿的场景下，怎么做到最终一致？",
+      freq: 5,
+      aiAnswer: {
+        core: "一般使用 Cache Aside 模式，即：读取时先读缓存再读库；更新时先写库再删缓存。针对击穿，还应在更新完库后自动刷新热点 Key 并重设 TTL。",
+        s: "在高并发写、高并发读的订单支付场景中，数据由于高频更新出现缓存与数据库数据不一致，导致用户界面出现历史脏数据。",
+        t: "确保数据库与 Redis 之间的数据差异在百毫秒内完成收敛并达到最终一致。",
+        a: [
+          "引入 Canal 监听 MySQL binlog 日志，以异步队列形式向 Redis 推送数据失效或更新指令。",
+          "在修改商品库存等写操作中，采用“先写库，后删缓存”的最佳实践，并配备 Redis 延迟双删脚本兜底。",
+          "给写命令添加分布式互斥锁，防止高并发写与击穿重建的并发冲突。"
+        ],
+        r: "脏数据残留时延从 10秒缩短到了 50毫秒以内，并发场景下的一致性验证全部通过。",
+        keyPoints: ["Cache Aside 是互联网分布式架构的最基础与核心标准", "延迟双删有助于清理解析时差导致的并发脏数据", "监听 binlog 是解耦写业务与缓存更新的工业级方案"],
+        followUps: ["延迟双删中，第二次删除的延迟时间如何精准测定？", "Canal 挂掉时，有何种补偿机制来保证一致性？"]
+      }
+    },
+    {
+      title: "如何处理大量缓存同时过期时的雪崩应对问题？",
+      freq: 5,
+      aiAnswer: {
+        core: "通过给大批缓存 Key 设置分散的、随机的过期时间偏移，配置多级缓存，并在 Redis 集群崩溃时应用限流和降级熔断方案。",
+        s: "由于线上系统每天零点进行大批活动上线，导致大量商品缓存刚好在零点后 1小时（即1点）集中失效，MySQL 连接池瞬时被打满导致响应超时。",
+        t: "使缓存过期时间变得离散均匀，消除缓存失效产生的波峰流量。",
+        a: [
+          "在缓存写入模块中为基础 TTL 增加随机数偏移（例如 base_ttl + random(1, 10) * 60），将失效波峰彻底打散。",
+          "在微服务集群内加入本地缓存（Guava/Caffeine）做二级防护，防止单点故障引发全局崩塌。"
+        ],
+        r: "零点期间主库 QPS 曲线趋于平滑，再未发生因为大批量缓存同时过期带来的数据库连接堵塞故障。",
+        keyPoints: ["加入随机扰动是防御雪崩最简单高效的良方", "多级缓存（二级本地缓存）大大分摊了单点压力", "核心场景下必须有熔断降级（Hystrix/Sentinel）保障韧性"],
+        followUps: ["如何合理规划多级缓存各层级的过期时间比率？", "网关限流算法在雪崩发生时如何平滑起效？"]
+      }
+    }
+  ],
+  "Redis 分布式锁原理": [
+    {
+      title: "Redis 实现分布式锁的正确姿势是什么？核心命令有哪些？",
+      freq: 12,
+      aiAnswer: {
+        core: "正确姿势是使用具有 NX PX 参数的 SET 命令实现加锁的原子性，并结合 Lua 脚本校验客户端唯一标识（如 UUID）来实现安全释放。",
+        s: "分布式集群下的多副本订单扣减，若采用 SETNX + EXPIRE，可能在执行锁失效命令前节点宕机，产生死锁。",
+        t: "实现具备防死锁、独占性及原子释放特性的分布式锁方案。",
+        a: [
+          "加锁：使用 SET lock_key client_uuid NX PX 30000 将获取锁与设置生命周期原子化绑定。",
+          "开锁：编写 Lua 脚本对比当前 Key 对应的 value 是否等于加锁时的 client_uuid，若相同则调用 del 删除该 Key。"
+        ],
+        r: "彻底杜绝了锁被其他客户端误删及死锁故障，高并发环境下锁性能稳定。",
+        keyPoints: ["SET NX PX 组合是解决设置过期时间原子性的标准命令", "UUID 唯一性判定是防止锁被误解锁的安全红线", "Lua 脚本保证解锁时校验与删除的原子执行"],
+        followUps: ["Lua 脚本在 Redis 集群模式下的插槽约束是什么？", "主从异步复制导致的锁失效问题如何预防？"]
+      }
+    },
+    {
+      title: "什么是分布式锁的续期问题？Redisson 的看门狗机制是如何运作的？",
+      freq: 10,
+      aiAnswer: {
+        core: "看门狗机制是针对持锁线程任务执行过长、导致锁过期提前释放的自动续期方案。当线程持锁未释放时，定期延长锁过期时间。",
+        s: "复杂的数据处理逻辑因网络延迟耗时 45秒，但锁的过期时间仅 30秒，中途锁失效导致其他进程重入抢占。",
+        t: "动态自动续期分布式锁，且保障节点宕机时依然能解锁防死锁。",
+        a: [
+          "Redisson 锁在加锁成功且未指定超时时间时，会自动开启一个后台看门狗定时任务（默认每隔 10秒）。",
+          "该任务不断检测持锁线程是否存活，若存活则向 Redis 发送续期指令延长过期时间为 30秒。"
+        ],
+        r: "业务执行过长期间未发生锁中途流失，且宕机节点在 30秒内锁自动正常过期释放。",
+        keyPoints: ["看门狗机制提供了无感的长锁生命周期自适应", "续期频率通常为超时时间的 1/3", "宕机看门狗心跳停止自动防止长锁变死锁"],
+        followUps: ["JVM 全局 Full GC 导致看门狗心跳丢失该怎么避免死锁？", "如何对分布式锁进行精细的锁争用时长监控？"]
+      }
+    }
+  ]
+};
+
+const getQuestionsForKnowledge = (name: string): Array<{
+  title: string;
+  freq: number;
+  aiAnswer: {
+    core: string;
+    s: string;
+    t: string;
+    a: string[];
+    r: string;
+    keyPoints: string[];
+    followUps: string[];
+  }
+}> => {
+  if (KNOWLEDGE_QUESTIONS_MAP[name]) {
+    return KNOWLEDGE_QUESTIONS_MAP[name];
+  }
+  
+  // Dynamic fallback generator for other knowledge items
+  const fallbackList = [];
+  const templates = [
+    `如何理解 ${name} 的核心机制与底层原理？`,
+    `在高并发高吞吐场景下，${name} 可能会有哪些严重的性能瓶颈？`,
+    `详细谈谈 ${name} 发生状态不一致或数据偏差时的解决策略。`,
+    `如何对生产部署环境中的 ${name} 进行监控与核心指标调优？`,
+    `${name} 的故障排查指南：当系统响应时间剧增或发生 OOM 时如何快速定位？`,
+    `分布式架构下，针对 ${name} 的多活高可用设计如何落地？`,
+    `${name} 在业务核心链路设计中的并发数据幂等性保护。`,
+    `${name} 的底层源码设计细节：例如核心数据结构与并发加锁机制。`,
+    `${name} 与同类技术选型（如 ZooKeeper, Consul, MySQL）的优劣对比。`,
+    `在容器化与 Kubernetes 云原生环境下，如何对 ${name} 进行伸缩和治理？`
+  ];
+  
+  const freqs = [17, 15, 12, 10, 9, 8, 8, 6, 6, 5];
+  
+  for (let i = 0; i < 10; i++) {
+    fallbackList.push({
+      title: templates[i],
+      freq: freqs[i],
+      aiAnswer: {
+        core: `${name} 是该技术栈中最核心的构件之一，在秒级高并发、大规模数据计算以及微服务架构中提供了不可或缺的状态流转和数据读写防护屏障。其性能调优往往需要在一致性与延迟之间作取舍。`,
+        s: `在系统流量持续上涨、业务逻辑变得极其复杂的场景下，单点读写或单库存储模式难以为继，必须对 ${name} 做出精细的架构设计。`,
+        t: `实现一个具备极高可用性、极强容灾弹性且在高峰大促期间吞吐稳定的 ${name} 实战方案。`,
+        a: [
+          `分析业务并发度，分片存储或使用本地多级缓存，减轻单节点连接占用和带宽负荷。`,
+          `在核心层代码设置互斥防护或分布式协调，防止数据状态产生竞态冲突或重入问题。`,
+          `配置全面的 Prometheus 指标监控大盘，针对连接数、系统资源占用和超时配置预警。`
+        ],
+        r: `系统最大 QPS 负载能力成功翻倍，平稳扛过多次生产环境大流量压测，且无任何数据偏差产生。`,
+        keyPoints: [
+          `熟悉该机制的底层执行模型与线程竞争机制`,
+          `结合系统可用性指标合理微调超时和重试参数`,
+          `在故障发生时应具备降级、限流与熔断防雪崩方案`
+        ],
+        followUps: [
+          `在发生极短暂的网络通信抖动时，如何做客户端自适应重试？`,
+          `该组件如何实现热升级以及零宕机不停机的数据无缝迁移？`
+        ]
+      }
+    });
+  }
+  
+  return fallbackList;
+};
+
 export default function CareerMemoryDashboard() {
   const router = useRouter();
   const auth = useAuth();
@@ -267,6 +567,25 @@ export default function CareerMemoryDashboard() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | "batch" | null>(null);
+
+  // Knowledge Base details modal states
+  const [selectedKnowledge, setSelectedKnowledge] = useState<{ cat: string; name: string; c: number; m: number } | null>(null);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+  const [selectedQuestionIdx, setSelectedQuestionIdx] = useState(0);
+
+  const openKnowledgeModal = useCallback((cat: string, name: string, c: number, m: number) => {
+    setSelectedKnowledge({ cat, name, c, m });
+    setKnowledgeLoading(true);
+    setSelectedQuestionIdx(0);
+    setTimeout(() => {
+      setKnowledgeLoading(false);
+    }, 600);
+  }, []);
+
+  const closeKnowledgeModal = useCallback(() => {
+    setSelectedKnowledge(null);
+    setKnowledgeLoading(false);
+  }, []);
 
   // Project memory state
   const [projects, setProjects] = useState<ProjectMemoryItem[]>([]);
@@ -2296,9 +2615,13 @@ export default function CareerMemoryDashboard() {
                           </span>
                           <div className="space-y-3.5">
                             {section.items.map((item, i) => (
-                              <div key={i} className="p-3.5 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-white/10 transition-all space-y-2.5">
+                              <div
+                                key={i}
+                                onClick={() => openKnowledgeModal(section.cat, item.n, item.c, item.m)}
+                                className="p-3.5 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-primary/30 hover:bg-white/[0.03] active:scale-[0.985] transition-all duration-200 space-y-2.5 cursor-pointer group"
+                              >
                                 <div className="flex justify-between items-start gap-3">
-                                  <h5 className="text-xs md:text-sm font-black text-white leading-relaxed">{item.n}</h5>
+                                  <h5 className="text-xs md:text-sm font-black text-white group-hover:text-primary transition-colors leading-relaxed">{item.n}</h5>
                                   <span className="text-[11px] font-semibold font-label-mono text-on-surface-variant/50 shrink-0">问 {item.c}次</span>
                                 </div>
                                 <div className="flex items-center justify-between text-[11px] font-semibold text-on-surface-variant/70">
@@ -2306,7 +2629,7 @@ export default function CareerMemoryDashboard() {
                                   <span className="font-black text-white font-label-mono">{item.m}%</span>
                                 </div>
                                 <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                                  <div className="h-full bg-primary rounded-full" style={{ width: `${item.m}%` }}></div>
+                                  <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${item.m}%` }}></div>
                                 </div>
                               </div>
                             ))}
@@ -2815,6 +3138,196 @@ export default function CareerMemoryDashboard() {
             </div>
 
             <p className="text-[10px] text-on-surface-variant/40">登录即代表您已阅读并同意《服务条款》和《隐私政策》</p>
+          </div>
+        </div>
+      )}
+
+{/* KNOWLEDGE BASE DETAIL MODAL */}
+      {selectedKnowledge && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6 lg:p-8">
+          <div
+            onClick={closeKnowledgeModal}
+            className="absolute inset-0 bg-background/80 backdrop-blur-md transition-opacity duration-300"
+          />
+
+          <div className="relative z-10 w-full max-w-6xl h-[85vh] bg-[#11131a]/95 border border-white/10 rounded-3xl p-6 sm:p-8 flex flex-col gap-6 shadow-2xl transition-all scale-100 animate-fade-in animate-duration-200 overflow-hidden">
+            {/* Close button */}
+            <button
+              onClick={closeKnowledgeModal}
+              className="absolute top-5 right-5 text-on-surface-variant/70 hover:text-white transition-colors cursor-pointer w-8 h-8 rounded-full hover:bg-white/5 flex items-center justify-center"
+            >
+              <span className="material-symbols-outlined text-lg">close</span>
+            </button>
+
+            {knowledgeLoading ? (
+              /* Loading view */
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
+                <img src="/loading.gif" alt="loading" className="w-10 h-10 object-contain" />
+                <p className="text-sm text-on-surface-variant/70 font-semibold animate-pulse">
+                  AI 正在深度检索该知识点的 Top10 面试高频问题与解析...
+                </p>
+              </div>
+            ) : (
+              /* Details view */
+              <>
+                {/* Header section */}
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 pb-4 border-b border-white/5 shrink-0">
+                  <div className="space-y-2">
+                    <span className="px-2.5 py-0.5 rounded text-[11px] font-bold bg-primary/20 text-primary border border-primary/30">
+                      {selectedKnowledge.cat}
+                    </span>
+                    <h3 className="text-xl md:text-2xl font-black text-white flex items-center gap-2">
+                      {selectedKnowledge.name}
+                    </h3>
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs font-semibold text-on-surface-variant/70">掌握度</span>
+                      <span className="text-xs font-black text-white font-label-mono">{selectedKnowledge.m}%</span>
+                      <div className="w-32 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                        <div className="h-full bg-primary rounded-full" style={{ width: `${selectedKnowledge.m}%` }}></div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Tab layout section */}
+                <div className="flex border-b border-white/5 pb-2 shrink-0">
+                  <button className="px-4 py-2 border-b-2 border-primary text-sm font-bold text-white flex items-center gap-1.5 cursor-pointer">
+                    面试高频问题 Top10
+                  </button>
+                </div>
+
+                {/* Main Split Grid container */}
+                {(() => {
+                  const questions = getQuestionsForKnowledge(selectedKnowledge.name);
+                  const activeQuestion = questions[selectedQuestionIdx] || questions[0];
+                  
+                  return (
+                    <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-6 overflow-hidden">
+                      {/* Left list pane: questions list */}
+                      <div className="col-span-12 md:col-span-5 flex flex-col gap-3 h-full overflow-hidden">
+                        <div className="flex items-center gap-1.5 text-xs font-bold text-on-surface-variant/50 uppercase tracking-widest shrink-0">
+                          <span className="material-symbols-outlined text-sm text-primary">star</span>
+                          面试高频问题 Top10
+                        </div>
+                        <div className="flex-1 overflow-y-auto pr-2 space-y-2 scrollbar-thin scrollbar-thumb-white/10">
+                          {questions.map((q, qidx) => {
+                            const isQActive = selectedQuestionIdx === qidx;
+                            const numStr = String(qidx + 1).padStart(2, '0');
+                            return (
+                              <div
+                                key={qidx}
+                                onClick={() => setSelectedQuestionIdx(qidx)}
+                                className={`flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition-all duration-200 ${
+                                  isQActive
+                                    ? "bg-primary/10 border-primary/30 text-white shadow-[inset_0_1px_1px_rgba(255,255,255,0.05)] scale-[1.01]"
+                                    : "bg-white/[0.01] border-white/5 hover:bg-white/5 hover:border-white/10 text-on-surface-variant/80 hover:text-white"
+                                }`}
+                              >
+                                <div className="flex items-start gap-3 min-w-0 flex-1">
+                                  <span className="font-mono text-xs font-bold text-primary shrink-0 mt-0.5">{numStr}</span>
+                                  <span className="text-xs md:text-sm font-bold truncate pr-2 text-left">{q.title}</span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Right details pane: AI recommended answer */}
+                      <div className="col-span-12 md:col-span-7 flex flex-col gap-3 h-full overflow-hidden">
+                        <div className="flex items-center justify-between shrink-0">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-on-surface-variant/50 uppercase tracking-widest">
+                            <span className="material-symbols-outlined text-sm text-primary">psychology</span>
+                            AI 推荐回答
+                          </div>
+                        </div>
+
+                        {/* Scrolling answers details */}
+                        <div className="flex-1 overflow-y-auto pr-2 space-y-4 scrollbar-thin scrollbar-thumb-white/10 text-left">
+                          {/* Core Answer Strategy */}
+                          <div className="p-4.5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
+                            <h4 className="text-xs md:text-sm font-black text-white flex items-center gap-1.5">
+                              <span className="material-symbols-outlined text-sm text-primary">lightbulb</span>
+                              核心回答思路
+                            </h4>
+                            <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
+                              {activeQuestion.aiAnswer.core}
+                            </p>
+                          </div>
+
+                          {/* Reference Answer - STAR structure */}
+                          <div className="p-4.5 rounded-2xl bg-white/[0.01] border border-white/5 space-y-4">
+                            <h4 className="text-xs md:text-sm font-black text-white flex items-center gap-1.5 border-b border-white/5 pb-2">
+                              <span className="material-symbols-outlined text-sm text-primary">layers</span>
+                              参考回答（STAR 结构）
+                            </h4>
+                            
+                            <div className="space-y-3.5">
+                              <div className="space-y-1">
+                                <span className="text-primary font-bold text-[10px] md:text-xs uppercase tracking-wide block">S Situation（场景）</span>
+                                <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
+                                  {activeQuestion.aiAnswer.s}
+                                </p>
+                              </div>
+                              
+                              <div className="space-y-1">
+                                <span className="text-primary font-bold text-[10px] md:text-xs uppercase tracking-wide block">T Task（任务）</span>
+                                <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
+                                  {activeQuestion.aiAnswer.t}
+                                </p>
+                              </div>
+                              
+                              <div className="space-y-1">
+                                <span className="text-primary font-bold text-[10px] md:text-xs uppercase tracking-wide block">A Action（行动）</span>
+                                <ul className="list-disc list-inside text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed space-y-1">
+                                  {activeQuestion.aiAnswer.a.map((action, aidx) => (
+                                    <li key={aidx}>{action}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              
+                              <div className="space-y-1">
+                                <span className="text-tertiary font-bold text-[10px] md:text-xs uppercase tracking-wide block">R Result（结果）</span>
+                                <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
+                                  {activeQuestion.aiAnswer.r}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Key Summaries & Follow-ups */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10 space-y-2">
+                              <h5 className="text-xs md:text-sm font-bold text-white flex items-center gap-1">
+                                <span className="material-symbols-outlined text-xs text-primary">bookmark</span>
+                                关键点总结
+                              </h5>
+                              <ul className="list-disc list-inside text-xs text-on-surface-variant/80 font-semibold space-y-1.5">
+                                {activeQuestion.aiAnswer.keyPoints.map((pt, pidx) => (
+                                  <li key={pidx}>{pt}</li>
+                                ))}
+                              </ul>
+                            </div>
+                            
+                            <div className="p-4 rounded-2xl bg-tertiary/5 border border-tertiary/10 space-y-2">
+                              <h5 className="text-xs md:text-sm font-bold text-white flex items-center gap-1">
+                                <span className="material-symbols-outlined text-xs text-tertiary">contact_support</span>
+                                可能的追问
+                              </h5>
+                              <ul className="list-disc list-inside text-xs text-on-surface-variant/80 font-semibold space-y-1.5">
+                                {activeQuestion.aiAnswer.followUps.map((up, uidx) => (
+                                  <li key={uidx}>{up}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </>
+            )}
           </div>
         </div>
       )}
