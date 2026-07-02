@@ -1535,11 +1535,6 @@ export default function CareerMemoryDashboard() {
                   <span className="px-3.5 py-1 rounded-full bg-tertiary/10 text-tertiary text-xs md:text-sm font-black border border-tertiary/20 whitespace-nowrap">
                     {auth.user.status || "在职"}
                   </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {["Backend Engineer", "AI Engineer", "System Design"].map((tag, i) => (
-                      <span key={i} className="px-2.5 py-0.5 rounded bg-white/5 text-on-surface-variant/75 text-[11px] font-bold border border-white/5 whitespace-nowrap">{tag}</span>
-                    ))}
-                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-on-surface-variant/60 font-semibold font-label-mono">
