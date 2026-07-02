@@ -555,7 +555,7 @@ async def _run_analysis_for_live(
 
         dialogue_text = "\n".join(dialogue_parts)
         
-        # 4. 调用 LLM 评估 (MiniMax-M3)
+        # 4. 调用 LLM 评估 (DeepSeek)
         from app.routers.audio import analyze_interview_dialogue
         
         # Safe fallback scores

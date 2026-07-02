@@ -1154,7 +1154,7 @@ function InterviewTrainingPageContent() {
                         正在生成 AI 面试报告
                       </h3>
                       <p className="text-base md:text-lg text-white/70 font-semibold">
-                        基于你的回答由 MiniMax-M3 生成深度分析...
+                        基于你的回答由 DeepSeek 生成深度分析...
                       </p>
                     </div>
 

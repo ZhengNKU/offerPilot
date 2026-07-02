@@ -13,7 +13,7 @@ from app import models, database
 from app.database import get_db, async_session
 from app.routers.auth import get_current_user_optional
 from app.utils.llm import analyze_interview_dialogue, sectionize_transcript, generate_transcript_highlights
-from app.utils.asr import call_minimax_asr
+from app.utils.asr import call_volc_asr
 from app.services.embedding_indexer import schedule_index
 
 logger = logging.getLogger(__name__)
@@ -277,8 +277,8 @@ task_store: Dict[str, Dict[str, Any]] = {}
 async def run_real_analysis(session_id: int, task_id: str, profile_data: Optional[dict]):
     """
     Real analysis pipeline:
-      1. ASR  — call MiniMax speech recognition on the COS audio URL
-      2. LLM  — call MiniMax-M3 to evaluate the real transcript
+      1. ASR  — call Volc Engine ASR on the COS audio URL
+      2. LLM  — call DeepSeek (reasoning model) to evaluate the real transcript
       3. DB   — persist transcript segments, scores, risks, improvements
     Falls back to safe mock data if any API call fails.
     """
@@ -311,7 +311,7 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
 
     _set_progress(15, "processing")
 
-    # ── Step 2: Real ASR via MiniMax or load from DB (for text/live mode) ─
+    # ── Step 2: Real ASR via Volc Engine or load from DB (for text/live mode) ─
     # PR4: 'live' 走与 text_mode 相同分支 —— 实时模式 ASR 在火山端完成，
     #      bridge 已把 transcript 写入 InterviewTranscript.data，直接读出。
     raw_segments: List[Dict[str, Any]] = []
@@ -329,7 +329,7 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
     else:
         logger.info(f"[task={task_id}] Starting ASR for session {session_id}, url={audio_url}")
         try:
-            raw_segments = await asyncio.to_thread(call_minimax_asr, audio_url)
+            raw_segments = await asyncio.to_thread(call_volc_asr, audio_url)
             logger.info(f"[task={task_id}] ASR returned {len(raw_segments)} segments")
         except Exception as e:
             logger.warning(f"[task={task_id}] ASR failed, will use mock transcript: {e}")
@@ -524,8 +524,8 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
 
     _set_progress(70, "processing")
 
-    # ── Step 4: Real LLM evaluation via MiniMax-M3 ───────────────────────
-    logger.info(f"[task={task_id}] Calling MiniMax-M3 LLM for evaluation")
+    # ── Step 4: Real LLM evaluation via DeepSeek ─────────────────────────
+    logger.info(f"[task={task_id}] Calling DeepSeek LLM for evaluation")
 
     # Safe fallback scores
     ipi_score = 65

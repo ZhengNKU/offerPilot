@@ -51,7 +51,7 @@ offerPilot/
 
 ## 项目亮点
 
-- **真实录音闭环**：上传 mp3/wav → 调用火山引擎大模型 ASR → MiniMax-M3 推理评分 → 一键产出 IPI 分数、Offer 概率、风险点、STAR 优化话术、语义分段小评。
+- **真实录音闭环**：上传 mp3/wav → 调用火山引擎大模型 ASR → DeepSeek (reasoning) 推理评分 → 一键产出 IPI 分数、Offer 概率、风险点、STAR 优化话术、语义分段小评。
 - **简历原文保真改写**：上传 PDF/DOCX → 规则化抽取结构 → LLM 仅优化工作经历 bullets → `python-docx` 原地替换 run 文字，**字体/颜色/分栏/图标全部保留**，bullet 匹配率 < 80% 自动报错。
 - **会员分层 + 文件生命周期管理**：Free / Pro / Max 三档免费 7 / 30 / 120 天保留；后台 `run_periodic_cleanup` 每 24h 清理过期文件与离线用户文件。
 - **多模态视觉体验**：玻璃拟态 + 3D 倾斜卡片 + GSAP / Framer Motion 动效 + Tailwind 4 自定义主题，深色太空感 UI。
@@ -86,7 +86,7 @@ offerPilot/
 | 数据库 | **PostgreSQL 14+** |
 | 缓存 | **Redis 6+**（验证码 / 限流 / Token 黑名单） |
 | 对象存储 | **腾讯云 COS**（`ap-nanjing` · bucket `offer-pilot-1392177347`） |
-| 大模型 | **MiniMax-M3**（`https://api.minimaxi.com/v1`） |
+| 大模型（文本生成） | **DeepSeek**（`https://api.deepseek.com/v1`，OpenAI-compatible） |
 | ASR | **火山引擎大模型 ASR**（`volc.seedasr.auc`） |
 | 短信 | 腾讯云 SMS（缺省时回退到日志模拟） |
 | 邮件 | SMTP（缺省时回退到日志模拟） |
@@ -122,7 +122,7 @@ offerPilot/
 │           ├── sms.py             # 腾讯云短信 SDK 封装
 │           ├── email.py           # SMTP 邮件 + 模板（CID 内嵌 logo）
 │           ├── asr.py             # 火山引擎 ASR Submit/Query 轮询
-│           ├── llm.py             # MiniMax-M3 Chat 调用与 JSON 鲁棒解析
+│           ├── llm.py             # DeepSeek Chat 调用与 JSON 鲁棒解析
 │           ├── resume_parser.py   # PDF/DOCX 文本 + 结构抽取（保真）
 │           ├── docx_resume_writer.py  # 原地替换 run 文字，保留样式
 │           ├── pdf_to_docx.py     # PDF → DOCX（pdf2docx + PyMuPDF）
@@ -219,8 +219,16 @@ SMTP_SENDER=
 SMTP_USE_SSL=True
 
 # 大模型 & ASR
+# 文本生成 LLM（DeepSeek，OpenAI-compatible）
+DEEPSEEK_API_KEY=
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-v4-flash
+
+# 求职顾问 RAG 的 Embedding 链路（仍走 MiniMax embo-01，独立配置）
 MINIMAX_API_KEY=sk-cp-...
-MINIMAX_BASE_URL=https://api.minimaxi.com/v1
+MINIMAX_GROUP_ID=
+MINIMAX_EMBEDDING_URL=https://api.minimax.chat/v1/embeddings
+
 VOLC_ASR_API_KEY=
 VOLC_ASR_RESOURCE_ID=volc.seedasr.auc
 
@@ -340,7 +348,7 @@ npm run dev
 | --- | --- | --- |
 | GET | `/check_limit` | 免费用户是否还有 1 次体验机会 |
 | POST | `/create_session` | 基于已上传 COS URL 创建一个面试会话（不再二次上传） |
-| POST | `/start_analysis` | 启动后台分析：ASR → MiniMax 推理 → 写库 |
+| POST | `/start_analysis` | 启动后台分析：ASR → DeepSeek 推理 → 写库 |
 | GET | `/task_progress/{task_id}` | 轮询任务进度（in-memory `task_store`） |
 | GET | `/session/{session_id}/report` | 取报告汇总 |
 | GET | `/session/{session_id}/transcript` | 取转写（含 highlights） |
@@ -410,7 +418,7 @@ npm run dev
    │  2) POST /api/resume/analyze {file_id}
    │     ├─ extract_resume_text()               PDF / DOCX → 纯文本
    │     ├─ parse_resume_structure()            规则化（保真）抽取
-   │     ├─ analyze_resume_text()               MiniMax 综合评分
+   │     ├─ analyze_resume_text()               DeepSeek 综合评分
    │     ├─ 用画像薪资覆盖 LLM 提取值
    │     └─ 落库 resume_analyses
    │
@@ -443,7 +451,8 @@ npm run dev
 | `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` | — | 短信 / COS 共用 |
 | `TENCENT_SMS_APP_ID` / `_SIGN_NAME` / `_TEMPLATE_ID` | — | 缺省时回退日志模拟 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_SENDER` / `SMTP_USE_SSL` | — | 缺省时回退日志模拟 |
-| `MINIMAX_API_KEY` / `MINIMAX_BASE_URL` | `https://api.minimaxi.com/v1` | LLM 推理 |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | `https://api.deepseek.com/v1` / `deepseek-v4-flash` | 文本生成 LLM（DeepSeek，OpenAI-compatible） |
+| `MINIMAX_API_KEY` / `MINIMAX_EMBEDDING_URL` / `MINIMAX_GROUP_ID` | `https://api.minimax.chat/v1/embeddings` | AI 职业顾问 RAG 的 Embedding（embo-01，独立链路） |
 | `VOLC_ASR_API_KEY` / `VOLC_ASR_RESOURCE_ID` | `volc.seedasr.auc` | 火山引擎大模型 ASR |
 | `FILE_RETENTION_DAYS_FREE` / `_PRO` / `_MAX` | `7` / `30` / `120` | 文件保留 |
 | `FILE_CLEANUP_INTERVAL_HOURS` | `24` | 清理周期 |
@@ -570,7 +579,7 @@ interviewVar_user        // JSON 序列化的 UserProfile
                                       │  └──────────────────┘  │
                                       │  ┌──────────────────┐  │
                                       │  │ 外部能力          │  │
-                                      │  │ · MiniMax-M3     │  │
+                                      │  │ · DeepSeek        │  │
                                       │  │ · 火山引擎 ASR   │  │
                                       │  │ · 腾讯云 SMS     │  │
                                       │  │ · SMTP 邮件      │  │
@@ -590,9 +599,10 @@ interviewVar_user        // JSON 序列化的 UserProfile
 - 在 `backend/.env` 填入 `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY`；COS 客户端会按需懒加载。
 
 **Q3. ASR 一直 pending / LLM 调用超时？**
-- 检查 `VOLC_ASR_API_KEY` 和 `MINIMAX_API_KEY` 是否有效；
+- 检查 `VOLC_ASR_API_KEY` 和 `DEEPSEEK_API_KEY` 是否有效；
 - `llm.py` 已对 SSL / 连接抖动做了 4 次指数退避重试（`Retry(total=4, ...)`）；
-- 长转写（>80 句）默认 120s 超时；如仍不够请在 `call_minimax_sync` 调大 `timeout`。
+- 长转写（>80 句）默认 120s 超时；如仍不够请在 `call_llm_sync` 调大 `timeout`。
+- Embedding 失败单独排查：`MINIMAX_API_KEY` / `MINIMAX_GROUP_ID` / `MINIMAX_EMBEDDING_URL` 是否有效。
 
 **Q4. 简历改写下载失败：`简历排版与诊断结果不匹配`？**
 - 这是 `docx_resume_writer.BulletMatchError`：bullet 匹配率 < 80%。

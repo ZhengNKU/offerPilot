@@ -312,6 +312,5 @@ def _parse_volc_result(qdata: dict) -> List[Dict[str, Any]]:
     return segments
 
 
-# Backward-compat alias
-def call_minimax_asr(audio_url: str) -> List[Dict[str, Any]]:
-    return call_volc_asr(audio_url)
+# Backward-compat alias removed: callers now use `call_volc_asr` directly.
+# (历史名称 `call_minimax_asr` 仅是早期 ASR 接入时的命名遗留，函数体内调的是火山引擎。)

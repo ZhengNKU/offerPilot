@@ -22,11 +22,15 @@ class Settings(BaseSettings):
     SMTP_SENDER: str = ""
     SMTP_USE_SSL: bool = True
     
-    MINIMAX_API_KEY: str = "sk-cp-MWMKKxL_Pw6DnMDlTOsoH-r0CuKRlIjej1HllThrp0W5ibWrTW9-7c4AZR3OjV0fQDckONY9mtTgYxLARigGIKatRyJXStX1aeLadgwlirjSp2PREMklY_g"
-    MINIMAX_BASE_URL: str = "https://api.minimaxi.com/v1"
+    # 文本生成 LLM：DeepSeek（OpenAI-compatible）
+    DEEPSEEK_API_KEY: str = ""
+    DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
+    DEEPSEEK_MODEL: str = "deepseek-v4-flash"
 
     # MiniMax Embedding API（AI 职业顾问用）
-    # 注意：与 chat 端点域名不同——chat 用 api.minimaxi.com，embedding 用 api.minimax.chat
+    # 注意：与 chat 端点域名不同——embedding 用 api.minimax.chat
+    # 与文本生成 LLM 是两条独立链路：embo-01 仍走 MiniMax，文本生成走 deepseek。
+    MINIMAX_API_KEY: str = ""
     MINIMAX_GROUP_ID: str = "2041338752588062737"
     MINIMAX_EMBEDDING_URL: str = "https://api.minimax.chat/v1/embeddings"
     EMBEDDING_MODEL: str = "embo-01"

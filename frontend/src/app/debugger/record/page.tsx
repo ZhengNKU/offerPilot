@@ -858,7 +858,7 @@ export default function InterviewRecordAnalysisPage() {
                 {taskStep || "面试VAR AI 正在分析中..."}
               </h3>
               <p className="text-base md:text-lg text-white/70 font-semibold">
-                文本诊断 + MiniMax-M3 智能评估，分析完成后自动进入报告
+                文本诊断 + DeepSeek 智能评估，分析完成后自动进入报告
               </p>
             </div>
 

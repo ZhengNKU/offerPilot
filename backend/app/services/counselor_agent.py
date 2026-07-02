@@ -5,7 +5,7 @@
   2. fetch_project_memories: 取项目记忆 Top 8
   3. fetch_user_profile: 取用户画像
   4. build_messages: 组装 system prompt + 历史 + 当前 user message
-  5. stream_chat: 调 call_minimax_stream_chunks 流式产出
+  5. stream_chat: 调 call_llm_stream_chunks 流式产出
   6. extract_citations: 解析 LLM 输出中的 [cite:TYPE#ID#CHUNK] 标记
   7. persist_message: 落库
 """
@@ -23,7 +23,7 @@ from app import models
 from app.config import settings
 from app.database import async_session
 from app.services.embedding import embed_for_query
-from app.utils.llm import call_minimax_stream_chunks, call_minimax_sync
+from app.utils.llm import call_llm_stream_chunks, call_llm_sync
 from app.services.mcp_client import search_web
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ PROJECT_MEMORY_TOP_N = 8         # 注入项目记忆数
 HISTORY_KEEP_RECENT = 6           # summary 之外保留的最近轮数
 SUMMARY_TRIGGER_AT = 10           # 超过此轮数触发 summary 压缩
 MAX_CONTEXT_TOKENS = 6000         # system prompt 最大 tokens 估值
-COUNSELOR_MODEL = "MiniMax-M3"  # 与项目其他 LLM 调用保持一致
+COUNSELOR_MODEL = settings.DEEPSEEK_MODEL  # 与项目其他 LLM 调用保持一致
 
 # 引用标记格式：[cite:TYPE#ID#CHUNK]
 CITE_PATTERN = re.compile(r"\[cite:(\w+)#(\d+)#(\d+)\]")
@@ -257,7 +257,7 @@ SYSTEM_PROMPT_TEMPLATE = """你是 OfferPilot 的 AI 职业顾问。你的职责
 
 
 def _generate_search_query(user_message: str) -> Optional[str]:
-    """使用 MiniMax 判断是否需要联网搜索。如果需要，返回搜索 query；否则返回 None"""
+    """使用 LLM 判断是否需要联网搜索。如果需要，返回搜索 query；否则返回 None"""
     prompt = """你是一个智能求职助手，负责判断用户的输入是否需要实时联网搜索相关公司背景、岗位要求、面试经验、技术文档或最新资讯。
 
 如果需要，请根据用户意图提取或生成一个最适合搜索引擎的简短中文关键词查询字符串（不要有任何解释、不要带双引号或标点符号）。
@@ -268,7 +268,7 @@ def _generate_search_query(user_message: str) -> Optional[str]:
 请输出 "NO" 或 搜索查询词："""
     
     payload = {
-        "model": "MiniMax-M3",
+        "model": settings.DEEPSEEK_MODEL,
         "messages": [
             {"role": "user", "content": prompt.format(user_message=user_message)}
         ],
@@ -276,7 +276,7 @@ def _generate_search_query(user_message: str) -> Optional[str]:
         "max_tokens": 50
     }
     try:
-        resp = call_minimax_sync(payload)
+        resp = call_llm_sync(payload)
         ans = resp["choices"][0]["message"]["content"].strip()
         ans = re.sub(r"<think>.*?</think>", "", ans, flags=re.DOTALL).strip()
         ans = ans.strip('"').strip("'").strip()
@@ -467,7 +467,7 @@ async def _generate_session_summary(db: AsyncSession, session_id: int) -> str:
 
     questions_text = "\n".join(f"- {q}" for q in user_questions)
 
-    from app.utils.llm import call_minimax_sync
+    from app.utils.llm import call_llm_sync
     payload = {
         "model": COUNSELOR_MODEL,
         "messages": [
@@ -488,7 +488,7 @@ async def _generate_session_summary(db: AsyncSession, session_id: int) -> str:
         "max_tokens": 80,
     }
     try:
-        res = await asyncio.to_thread(call_minimax_sync, payload)
+        res = await asyncio.to_thread(call_llm_sync, payload)
         summary = res["choices"][0]["message"]["content"].strip()
         summary = summary.strip('"\'\u201c\u201d\u2018\u2019')
         summary = re.sub(r"<think>.*?</think>", "", summary, flags=re.DOTALL).strip()
@@ -592,7 +592,7 @@ async def stream_chat(
 
         full_text_parts: list[str] = []
         try:
-            async for piece in call_minimax_stream_chunks(payload, timeout=120.0):
+            async for piece in call_llm_stream_chunks(payload, timeout=120.0):
                 # 用户主动 stop：跳出循环，后续走 partial save
                 if stop_event is not None and stop_event.is_set():
                     logger.info(f"[counselor] stop_event triggered mid-stream, session={session_id}")
@@ -724,7 +724,7 @@ async def _maybe_summarize(db: AsyncSession, session_id: int, sess: models.Couns
             conv_lines.append(f"[用户] {m.content[:500]}")
     conversation = "\n".join(conv_lines)
 
-    from app.utils.llm import call_minimax_sync
+    from app.utils.llm import call_llm_sync
     payload = {
         "model": COUNSELOR_MODEL,
         "messages": [
@@ -735,7 +735,7 @@ async def _maybe_summarize(db: AsyncSession, session_id: int, sess: models.Couns
         "max_tokens": 500,
     }
     try:
-        result = await asyncio.to_thread(call_minimax_sync, payload)
+        result = await asyncio.to_thread(call_llm_sync, payload)
         summary = result["choices"][0]["message"]["content"].strip()
         # strip code block
         if summary.startswith("```"):

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def _build_resilient_session() -> requests.Session:
     """构造一个能扛瞬时 SSL / 连接抖动的 requests Session。
 
-    现象：minimaxi 网关偶发在 TLS 握手或流式首包时返回 SSLEOFError
+    现象：DeepSeek 网关偶发在 TLS 握手或流式首包时返回 SSLEOFError
     ("UNEXPECTED_EOF_WHILE_READING")，单次直连 100% 失败。
     解决：自动重试 SSL/连接类错误 + 指数退避，最多 4 次。
     """
@@ -40,10 +40,10 @@ def _build_resilient_session() -> requests.Session:
 
 _RESILIENT_SESSION = _build_resilient_session()
 
-def call_minimax_sync(payload: dict) -> dict:
-    url = f"{settings.MINIMAX_BASE_URL}/chat/completions"
+def call_llm_sync(payload: dict) -> dict:
+    url = f"{settings.DEEPSEEK_BASE_URL}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {settings.MINIMAX_API_KEY}",
+        "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
     # 120s: long transcripts (e.g. 89 segments) can take well over 30s for
@@ -56,7 +56,7 @@ def call_minimax_sync(payload: dict) -> dict:
 def _strip_codeblock(text: str) -> str:
     """Strip fences so json.loads can parse the body. Two kinds of fences show
     up in LLM output:
-      1) <think>...</think>  — MiniMax-M3 (and most reasoning models) prefix
+      1) <think>...</think>  — DeepSeek reasoning model (and most reasoning models) prefix
          their answer with a chain-of-thought block. We need to drop that
          block before looking for the JSON body.
       2) ```json ... ```     — model wraps JSON in a code fence.
@@ -82,7 +82,7 @@ def _strip_codeblock(text: str) -> str:
 def _repair_llm_json(text: str) -> str:
     """尝试修复 LLM 返回的常见 JSON 格式错误。
 
-    MiniMax-M3 在输出大型 JSON 时偶发下列问题，本函数按优先级尝试修复：
+    DeepSeek reasoning model 在输出大型 JSON 时偶发下列问题，本函数按优先级尝试修复：
       1. 尾逗号（"key": value, }  →  "key": value }）
       2. 字符串值中含未转义换行符
       3. 缺失逗号（相邻属性间漏了逗号）
@@ -209,7 +209,7 @@ async def analyze_interview_dialogue(
     existing_projects: Optional[list[dict]] = None,
 ) -> Dict[str, Any]:
     """
-    Calls MiniMax-M3 API to analyze the interview dialogue and return evaluation results in JSON.
+    Calls DeepSeek reasoning model API to analyze the interview dialogue and return evaluation results in JSON.
 
     existing_projects: 用户已有的项目记忆列表 [{"id": int, "project_name": str}, ...]
         LLM 在提取 mentioned_projects 时会直接填 matched_existing_id。
@@ -282,7 +282,7 @@ async def analyze_interview_dialogue(
         )
         
     payload = {
-        "model": "MiniMax-M3",
+        "model": settings.DEEPSEEK_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
@@ -291,23 +291,23 @@ async def analyze_interview_dialogue(
     }
     
     try:
-        res_data = await asyncio.to_thread(call_minimax_sync, payload)
+        res_data = await asyncio.to_thread(call_llm_sync, payload)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         parsed_data = _safe_json_parse(content_clean, log_label="dialogue")
         if parsed_data is None:
-            logger.error("[dialogue] unable to parse MiniMax response as JSON after repair")
+            logger.error("[dialogue] unable to parse DeepSeek response as JSON after repair")
             return {}
         return parsed_data
     except Exception as e:
-        logger.error(f"Failed calling MiniMax API: {str(e)}")
+        logger.error(f"Failed calling DeepSeek API: {str(e)}")
 
     return {}
 
 
 async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Use MiniMax-M3 to semantically split a transcript (list of ASR segments)
+    Use DeepSeek reasoning model to semantically split a transcript (list of ASR segments)
     into 3-8 topical sections like 「自我介绍」「项目深挖」「Redis 追问」.
 
     Input  segments: [{start_time, end_time, speaker, content}, ...]  (seconds)
@@ -373,7 +373,7 @@ async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str
     user_content = f"对话列表（共 {len(segments)} 句，时间范围 {min_t:.2f}s - {max_t:.2f}s）：\n{dialogue_text}\n"
 
     payload = {
-        "model": "MiniMax-M3",
+        "model": settings.DEEPSEEK_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user",   "content": user_content},
@@ -383,7 +383,7 @@ async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str
 
     raw_sections: List[Dict[str, Any]] = []
     try:
-        res_data = await asyncio.to_thread(call_minimax_sync, payload)
+        res_data = await asyncio.to_thread(call_llm_sync, payload)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         # DEBUG: log raw content to diagnose empty-content returns
@@ -394,7 +394,7 @@ async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str
         elif isinstance(parsed, list):
             raw_sections = parsed
     except Exception as e:
-        logger.error(f"[sectionize] MiniMax call failed: {e}")
+        logger.error(f"[sectionize] DeepSeek call failed: {e}")
         # Dump the whole response so we can see what LLM actually returned
         try:
             logger.error(f"[sectionize] raw response_data dump: {json.dumps(res_data, ensure_ascii=False)[:2000]}")
@@ -403,7 +403,7 @@ async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str
         return []
 
     if not raw_sections:
-        logger.warning("[sectionize] MiniMax returned no sections")
+        logger.warning("[sectionize] DeepSeek returned no sections")
         return []
 
     # Validate & snap to known segment boundaries
@@ -506,7 +506,7 @@ async def generate_section_optimization_advice(dialogue_text: str) -> Dict[str, 
     )
 
     payload = {
-        "model": "MiniMax-M3",
+        "model": settings.DEEPSEEK_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"面试对话片段：\n{dialogue_text}"}
@@ -515,12 +515,12 @@ async def generate_section_optimization_advice(dialogue_text: str) -> Dict[str, 
     }
 
     try:
-        res_data = await asyncio.to_thread(call_minimax_sync, payload)
+        res_data = await asyncio.to_thread(call_llm_sync, payload)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         parsed_data = _safe_json_parse(content_clean, log_label="optimize")
         if parsed_data is None:
-            logger.error("[optimize] unable to parse MiniMax response as JSON after repair")
+            logger.error("[optimize] unable to parse DeepSeek response as JSON after repair")
             return {
                 "conclusion": "分析失败，请稍后重试",
                 "original": "无法提取原版回答",
@@ -538,7 +538,7 @@ async def generate_section_optimization_advice(dialogue_text: str) -> Dict[str, 
 
 async def generate_transcript_highlights(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
-    Calls MiniMax-M3 LLM to analyze candidate's utterances, returning highlights
+    Calls DeepSeek reasoning model LLM to analyze candidate's utterances, returning highlights
     with type ('strength', 'risk', 'tech') and 'tip' explanation.
     """
     if not segments:
@@ -581,7 +581,7 @@ async def generate_transcript_highlights(segments: List[Dict[str, Any]]) -> List
     )
 
     payload = {
-        "model": "MiniMax-M3",
+        "model": settings.DEEPSEEK_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": f"对话列表：\n{dialogue_text}"}
@@ -590,12 +590,12 @@ async def generate_transcript_highlights(segments: List[Dict[str, Any]]) -> List
     }
 
     try:
-        res_data = await asyncio.to_thread(call_minimax_sync, payload)
+        res_data = await asyncio.to_thread(call_llm_sync, payload)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         parsed = _safe_json_parse(content_clean, log_label="highlights")
         if parsed is None:
-            logger.error("[highlights] unable to parse MiniMax response as JSON after repair")
+            logger.error("[highlights] unable to parse DeepSeek response as JSON after repair")
             return []
         return parsed.get("highlights") or []
     except Exception as e:
@@ -603,18 +603,18 @@ async def generate_transcript_highlights(segments: List[Dict[str, Any]]) -> List
         return []
 
 
-def call_minimax_stream(payload: dict, timeout: float = 300.0) -> dict:
+def call_llm_stream(payload: dict, timeout: float = 300.0) -> dict:
     """
-    流式调用 MiniMax API，把所有 chunk 拼接后返回与非流式格式一致的 dict。
-    用于：简历分析等长输出场景，避免 MiniMax 网关 ~90s 的 idle timeout
+    流式调用 DeepSeek API，把所有 chunk 拼接后返回与非流式格式一致的 dict。
+    用于：简历分析等长输出场景，避免 DeepSeek 网关长 idle timeout
     在推理 + 大 JSON 输出过程中主动断开连接（RemoteDisconnected）。
 
-    重试策略：MiniMax 上游偶发 429 / 5xx / 529(Overloaded)。stream 模式下
+    重试策略：DeepSeek 上游偶发 429 / 5xx / 529(Overloaded)。stream 模式下
     urllib3 的 Retry adapter 帮不上（response 已建立连接才 raise），手写指数退避。
     """
-    url = f"{settings.MINIMAX_BASE_URL}/chat/completions"
+    url = f"{settings.DEEPSEEK_BASE_URL}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {settings.MINIMAX_API_KEY}",
+        "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
     stream_payload = {**payload, "stream": True}
@@ -632,7 +632,7 @@ def call_minimax_stream(payload: dict, timeout: float = 300.0) -> dict:
                 if resp.status_code in retryable_status:
                     # 抬到 HTTPError，由下面的 except 决定是否重试
                     raise requests.HTTPError(
-                        f"{resp.status_code} retryable from MiniMax upstream",
+                        f"{resp.status_code} retryable from DeepSeek upstream",
                         response=resp,
                     )
                 resp.raise_for_status()
@@ -666,7 +666,7 @@ def call_minimax_stream(payload: dict, timeout: float = 300.0) -> dict:
                 raise
             wait = 1.5 * (2 ** attempt)  # 1.5s, 3s, 6s
             logger.warning(
-                "[MiniMax stream] upstream %s, retry %d/%d after %.1fs",
+                "[DeepSeek stream]upstream %s, retry %d/%d after %.1fs",
                 status_code, attempt + 1, max_attempts - 1, wait,
             )
             time.sleep(wait)
@@ -676,27 +676,27 @@ def call_minimax_stream(payload: dict, timeout: float = 300.0) -> dict:
                 raise
             wait = 1.5 * (2 ** attempt)
             logger.warning(
-                "[MiniMax stream] %s, retry %d/%d after %.1fs",
+                "[DeepSeek stream]%s, retry %d/%d after %.1fs",
                 type(e).__name__, attempt + 1, max_attempts - 1, wait,
             )
             time.sleep(wait)
-    raise last_exc if last_exc else RuntimeError("call_minimax_stream exhausted retries")
+    raise last_exc if last_exc else RuntimeError("call_llm_stream exhausted retries")
 
 
-async def call_minimax_stream_chunks(payload: dict, timeout: float = 300.0):
+async def call_llm_stream_chunks(payload: dict, timeout: float = 300.0):
     """
     逐 chunk yield 文本片段（async generator），供 SSE 消费。
 
-    与 call_minimax_stream 的区别：
-      - call_minimax_stream: 消费完整流，拼接后返回 dict（用于 JSON 解析）
-      - call_minimax_stream_chunks: 逐 chunk yield 字符串片段（用于 SSE 流式输出）
+    与 call_llm_stream 的区别：
+      - call_llm_stream: 消费完整流，拼接后返回 dict（用于 JSON 解析）
+      - call_llm_stream_chunks: 逐 chunk yield 字符串片段（用于 SSE 流式输出）
 
-    重试策略：MiniMax 上游偶发 429/5xx/529(Overloaded)。stream 模式下
+    重试策略：DeepSeek 上游偶发 429/5xx/529(Overloaded)。stream 模式下
     urllib3 的 Retry adapter 帮不上（response 已建立连接才 raise），手写指数退避。
     """
-    url = f"{settings.MINIMAX_BASE_URL}/chat/completions"
+    url = f"{settings.DEEPSEEK_BASE_URL}/chat/completions"
     headers = {
-        "Authorization": f"Bearer {settings.MINIMAX_API_KEY}",
+        "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
     stream_payload = {**payload, "stream": True}
@@ -715,7 +715,7 @@ async def call_minimax_stream_chunks(payload: dict, timeout: float = 300.0):
             resp = await asyncio.to_thread(_do_request)
             if resp.status_code in retryable_status:
                 raise requests.HTTPError(
-                    f"{resp.status_code} retryable from MiniMax upstream",
+                    f"{resp.status_code} retryable from DeepSeek upstream",
                     response=resp,
                 )
             resp.raise_for_status()
@@ -749,7 +749,7 @@ async def call_minimax_stream_chunks(payload: dict, timeout: float = 300.0):
                 raise
             wait = 1.5 * (2 ** attempt)
             logger.warning(
-                "[MiniMax stream_chunks] upstream %s, retry %d/%d after %.1fs",
+                "[DeepSeek stream_chunks]upstream %s, retry %d/%d after %.1fs",
                 status_code, attempt + 1, max_attempts - 1, wait,
             )
             await asyncio.sleep(wait)
@@ -759,11 +759,11 @@ async def call_minimax_stream_chunks(payload: dict, timeout: float = 300.0):
                 raise
             wait = 1.5 * (2 ** attempt)
             logger.warning(
-                "[MiniMax stream_chunks] %s, retry %d/%d after %.1fs",
+                "[DeepSeek stream_chunks]%s, retry %d/%d after %.1fs",
                 type(e).__name__, attempt + 1, max_attempts - 1, wait,
             )
             await asyncio.sleep(wait)
-    raise last_exc if last_exc else RuntimeError("call_minimax_stream_chunks exhausted retries")
+    raise last_exc if last_exc else RuntimeError("call_llm_stream_chunks exhausted retries")
 
 
 async def analyze_resume_text(
@@ -772,8 +772,8 @@ async def analyze_resume_text(
     parsed_structure: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """
-    Calls MiniMax LLM to analyze the extracted resume text and return structured analysis in JSON.
-    使用流式调用绕开 MiniMax 网关 ~90s 的 idle timeout，禁用系统代理。
+    Calls DeepSeek (reasoning model) to analyze the extracted resume text and return structured analysis in JSON.
+    使用流式调用绕开 DeepSeek 网关长 idle timeout，禁用系统代理。
 
     parsed_structure: 服务端正则解析出的结构化简历（公司/岗位/时间/bullets 等原文），
     传给 LLM 仅作为 "verbatim 参照表"，避免 LLM 把 "ByteDance" 改写成 "字节跳动"、
@@ -911,7 +911,7 @@ async def analyze_resume_text(
         user_content += f"\n求职期望画像信息：\n{json.dumps(profile_data, ensure_ascii=False)}\n"
 
     payload = {
-        "model": "MiniMax-M3",
+        "model": settings.DEEPSEEK_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
@@ -921,17 +921,17 @@ async def analyze_resume_text(
 
     try:
         logger.info(f"[resume] analyzing resume_text len={len(resume_text)} chars")
-        res_data = await asyncio.to_thread(call_minimax_stream, payload, 300.0)
+        res_data = await asyncio.to_thread(call_llm_stream, payload, 300.0)
         content = res_data["choices"][0]["message"]["content"]
         logger.info(f"[resume] received content len={len(content)} chars")
         content_clean = _strip_codeblock(content)
         parsed_data = _safe_json_parse(content_clean, log_label="resume")
         if parsed_data is None:
-            logger.error("[resume] unable to parse MiniMax response as JSON after repair")
+            logger.error("[resume] unable to parse DeepSeek response as JSON after repair")
             return {}
         return parsed_data
     except Exception as e:
-        logger.error(f"Failed to analyze resume via MiniMax: {e}")
+        logger.error(f"Failed to analyze resume via DeepSeek: {e}")
         return {}
 
 
@@ -1035,7 +1035,7 @@ async def extract_project_experiences(
     )
 
     payload = {
-        "model": "MiniMax-M3",
+        "model": settings.DEEPSEEK_MODEL,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
@@ -1050,7 +1050,7 @@ async def extract_project_experiences(
             f"[project_extract] extracting projects from resume len={len(resume_text)} "
             f"existing_projects={len(existing_projects)}"
         )
-        res_data = await asyncio.to_thread(call_minimax_stream, payload, 120.0)
+        res_data = await asyncio.to_thread(call_llm_stream, payload, 120.0)
         content = res_data["choices"][0]["message"]["content"]
         logger.info(f"[project_extract] received content len={len(content)} chars")
         content_clean = _strip_codeblock(content)
@@ -1073,7 +1073,7 @@ async def extract_project_experiences(
                     "请重新输出完整结果。"
                 )}
             ]
-            retry_data = await asyncio.to_thread(call_minimax_stream, retry_payload, 120.0)
+            retry_data = await asyncio.to_thread(call_llm_stream, retry_payload, 120.0)
             retry_content = retry_data["choices"][0]["message"]["content"]
             logger.info(f"[project_extract] 重试返回 content len={len(retry_content)} chars")
             retry_clean = _strip_codeblock(retry_content)

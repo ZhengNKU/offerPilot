@@ -768,10 +768,10 @@ function NewAnalysisDebuggerContent() {
                   </h3>
                   <p className="text-base md:text-lg text-white/70 font-semibold">
                     {activeMode === "resume"
-                      ? "PDF/DOCX 文本提取 + MiniMax-M3 智能评估，分析完成后自动进入报告"
+                      ? "PDF/DOCX 文本提取 + DeepSeek 智能评估，分析完成后自动进入报告"
                       : activeMode === "text"
-                      ? "文本诊断 + MiniMax-M3 智能评估，分析完成后自动进入报告"
-                      : "ASR 语音识别 + MiniMax-M3 智能评估，分析完成后自动进入报告"}
+                      ? "文本诊断 + DeepSeek 智能评估，分析完成后自动进入报告"
+                      : "ASR 语音识别 + DeepSeek 智能评估，分析完成后自动进入报告"}
                   </p>
                 </div>
 
