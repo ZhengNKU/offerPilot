@@ -1601,12 +1601,6 @@ export default function CareerMemoryDashboard() {
                   </div>
                 </div>
 
-                <button
-                  onClick={() => handleTabChange("advisor", true)}
-                  className="px-3.5 py-2.5 bg-primary/10 hover:bg-primary/20 text-primary text-xs font-black rounded-xl border border-primary/25 transition-all whitespace-nowrap cursor-pointer flex items-center gap-1 shrink-0"
-                >
-                  查看详细报告<span className="material-symbols-outlined text-[11px]">expand_more</span>
-                </button>
               </div>
 
             </div>
