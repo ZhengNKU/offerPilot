@@ -1655,9 +1655,9 @@ export default function CareerMemoryDashboard() {
                                   };
                                 case "text":
                                   return {
-                                    label: "文本分析",
-                                    dotColor: "bg-primary",
-                                    textColor: "text-primary/70",
+                                    label: "记录分析",
+                                    dotColor: "bg-purple-400",
+                                    textColor: "text-purple-400/70",
                                   };
                                 case "resume":
                                   return {

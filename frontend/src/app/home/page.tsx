@@ -860,7 +860,7 @@ export default function CareerDashboard() {
                         audio: "录音分析", text: "记录分析", resume: "简历优化", live: "模拟面试",
                       };
                       const dotColor: Record<string, string> = {
-                        audio: "bg-primary", text: "bg-primary", resume: "bg-secondary", live: "bg-tertiary",
+                        audio: "bg-primary", text: "bg-purple-400", resume: "bg-secondary", live: "bg-tertiary",
                       };
                       const hasScore = item.score > 0;
                       const scoreRating =
@@ -879,6 +879,7 @@ export default function CareerDashboard() {
                               <span className={`text-xs font-extrabold uppercase ${
                                 item.type === "resume" ? "text-secondary/70" :
                                 item.type === "live" ? "text-tertiary/70" :
+                                item.type === "text" ? "text-purple-400/70" :
                                 "text-primary/70"
                               }`}>
                                 {typeLabel[item.type] || item.type}
