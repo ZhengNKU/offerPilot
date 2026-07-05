@@ -562,7 +562,7 @@ export default function CareerDashboard() {
                     onClick={() => router.push("/debugger/record?tab=timeline")}
                     className="text-sm text-primary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-1"
                   >
-                    查看全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
+                    查看全部 <span className="material-symbols-outlined text-sm">keyboard_arrow_right</span>
                   </span>
                 </div>
 

@@ -28,6 +28,7 @@ interface SessionHistoryItem {
   role: string;
   round: string;
   details: string;
+  raw_created_at?: string;
 }
 
 interface ProjectMemoryItem {
@@ -1621,59 +1622,106 @@ export default function CareerMemoryDashboard() {
               {activeTab === "overview" && (
                 <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch w-full">
                   
-                  {/* CARD 1: 分析时间轴 (Interview Timeline) */}
+                  {/* CARD 1: 最近活动 */}
                   <div className="col-span-12 md:col-span-4 flex flex-col">
                     <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-5">
                       <div className="space-y-4 flex-1">
-                        <div>
+                        <div className="flex justify-between items-center pb-1">
                           <h4 className="text-base font-black text-white flex items-center gap-2">
                             <span className="material-symbols-outlined text-base text-primary">schedule</span>
-                            分析时间轴
+                            最近活动
                           </h4>
-                          <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">完整记录你的每一次面试经历</p>
+                          <button
+                            onClick={() => handleTabChange("timeline")}
+                            className="text-xs text-on-surface-variant/60 hover:text-white flex items-center gap-0.5 cursor-pointer transition-colors font-bold"
+                          >
+                            查看全部
+                            <span className="material-symbols-outlined text-sm leading-none">chevron_right</span>
+                          </button>
                         </div>
 
                         {/* Recent Nodes List */}
                         <div className="relative pl-5.5 space-y-4.5 py-1">
-                          <div className="absolute left-2 top-1.5 bottom-1.5 w-0.5 bg-white/5"></div>
+                          <div className="absolute left-1.5 top-2.5 bottom-2.5 w-0.5 bg-white/5"></div>
                           
-                          {historyItems.length > 0 ? (
-                            historyItems.slice(0, 5).map((item, index) => {
+                          {historyItems.length > 0 ? (() => {
+                            const getAnalysisTypeInfo = (type: "audio" | "text" | "resume" | "live") => {
+                              switch (type) {
+                                case "audio":
+                                  return {
+                                    label: "录音分析",
+                                    dotColor: "bg-primary",
+                                    textColor: "text-primary/70",
+                                  };
+                                case "text":
+                                  return {
+                                    label: "文本分析",
+                                    dotColor: "bg-primary",
+                                    textColor: "text-primary/70",
+                                  };
+                                case "resume":
+                                  return {
+                                    label: "简历优化",
+                                    dotColor: "bg-secondary",
+                                    textColor: "text-secondary/70",
+                                  };
+                                case "live":
+                                  return {
+                                    label: "模拟面试",
+                                    dotColor: "bg-tertiary",
+                                    textColor: "text-tertiary/70",
+                                  };
+                                default:
+                                  return {
+                                    label: "录音分析",
+                                    dotColor: "bg-primary",
+                                    textColor: "text-primary/70",
+                                  };
+                              }
+                            };
+
+                            return historyItems.slice(0, 5).map((item, index) => {
+                              const typeInfo = getAnalysisTypeInfo(item.type);
+                              const displayTime = formatRelativeTime(item.raw_created_at || item.date);
+                              
+                              const companyText = item.company || "模拟面试";
+                              const roleText = item.role;
+                              const bracketText = item.type === "resume" ? item.round : (item.raw_created_at ? item.raw_created_at.split('T')[0] : (item.date.includes(' ') ? item.date.split(' ')[0] : item.date));
+
                               return (
-                                <div key={index} className="relative flex justify-between items-center group">
-                                  <div className={`absolute -left-5.5 top-1.5 w-2.5 h-2.5 rounded-full border border-background z-10 ${
-                                    item.score >= 80 ? "bg-primary" : "bg-secondary"
-                                  }`} />
+                                <div key={index} className="relative flex justify-between items-center group py-0.5">
+                                  <div className={`absolute -left-[19px] top-1.5 w-2 h-2 rounded-full ring-4 ring-[#11131a] z-10 ${typeInfo.dotColor}`} />
                                   
-                                  <div className="space-y-0.5">
-                                    <div className="flex items-center gap-2">
-                                      <span className="text-[11px] font-label-mono text-on-surface-variant/40">{item.date}</span>
-                                      <span className="text-xs md:text-sm font-black text-white">{item.company}</span>
+                                  <div className="space-y-1 text-left">
+                                    <div className="flex items-center gap-1.5 text-xs font-semibold text-on-surface-variant/40">
+                                      <span>{displayTime}</span>
+                                      <span>|</span>
+                                      <span className={typeInfo.textColor}>{typeInfo.label}</span>
                                     </div>
-                                    <p className="text-xs text-on-surface-variant/50 font-semibold">{item.role} · {item.round}</p>
+                                    <p className="text-xs md:text-sm text-white/90 font-medium">
+                                      {companyText} · {roleText}
+                                    </p>
                                   </div>
 
-                                  <div className="text-right">
-                                    <span className={`text-sm font-black font-label-mono ${item.score >= 80 ? "text-tertiary" : "text-primary"}`}>{item.score}</span>
-                                    <span className="text-[11px] text-on-surface-variant/30 font-label-mono">/100</span>
+                                  <div className={`px-2.5 py-1 rounded-full text-xs border font-label-mono shrink-0 ${
+                                    item.score > 0 && item.score < 60
+                                      ? "bg-[#fb7185]/10 text-[#fb7185] border-[#fb7185]/20 font-bold"
+                                      : item.score >= 60
+                                        ? "bg-white/5 text-[#94a3b8] border-white/5 font-semibold"
+                                        : "bg-white/5 text-on-surface-variant/40 border-white/5"
+                                  }`}>
+                                    评分 <span className="ml-0.5">{item.score > 0 ? item.score : "待评估"}</span>
                                   </div>
                                 </div>
                               );
-                            })
-                          ) : (
+                            });
+                          })() : (
                             <div className="text-xs text-on-surface-variant/50 text-center py-4">
                               {auth.isLoggedIn ? "暂无历史面试记录" : "请先登录查看历史记录"}
                             </div>
                           )}
                         </div>
                       </div>
-
-                      <button
-                        onClick={() => handleTabChange("timeline")}
-                        className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer"
-                      >
-                        查看全部 {historyItems.length} 次分析
-                      </button>
                     </div>
                   </div>
 

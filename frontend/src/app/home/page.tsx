@@ -842,7 +842,7 @@ export default function CareerDashboard() {
                     onClick={handleHistoryRedirect}
                     className="text-sm text-primary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-1"
                   >
-                    查看全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
+                    查看全部 <span className="material-symbols-outlined text-sm">keyboard_arrow_right</span>
                   </span>
                 </div>
 
@@ -876,13 +876,16 @@ export default function CareerDashboard() {
                                 {formatRelativeTime(item.created_at || "")}
                               </span>
                               <span className="text-white/10 font-normal">|</span>
-                              <span className="text-xs text-primary/70 font-extrabold uppercase">
+                              <span className={`text-xs font-extrabold uppercase ${
+                                item.type === "resume" ? "text-secondary/70" :
+                                item.type === "live" ? "text-tertiary/70" :
+                                "text-primary/70"
+                              }`}>
                                 {typeLabel[item.type] || item.type}
                               </span>
                             </div>
                             <p className="text-sm font-black text-white truncate leading-snug mt-0.5">
                               {item.company} · {item.role}
-                              <span className="text-on-surface-variant/45 font-medium"> [{item.round}]</span>
                             </p>
                           </div>
 

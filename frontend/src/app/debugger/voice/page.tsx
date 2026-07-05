@@ -2509,7 +2509,6 @@ export default function InterviewVoiceAnalysisPage() {
                   <div className="w-16 h-16 rounded-full border-4 border-dashed border-[#00D4FF] flex items-center justify-center relative animate-[spin_6s_linear_infinite]" />
                   <div className="space-y-1 mt-2">
                     <p className="text-sm font-black text-white animate-pulse">正在利用大模型重塑最优答题话术...</p>
-                    <p className="text-xs text-white/40 font-bold font-mono">ALIGNING_WITH_SENIOR_ARCHITECT_EXPECTATIONS</p>
                   </div>
                 </div>
               ) : (
