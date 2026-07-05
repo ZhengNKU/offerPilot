@@ -1900,15 +1900,11 @@ export default function CareerMemoryDashboard() {
                               };
                               const colorClass = colorMap[proj.category] || "text-primary bg-primary/10 border-primary/20";
                               const initial = (proj.project_name || "?")[0].toUpperCase();
-                              let dateStr = "最近更新: --";
-                              if (proj.updated_at) {
-                                const d = new Date(proj.updated_at);
-                                dateStr = `最近更新: ${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-                              }
                               return (
                                 <div
                                   key={proj.id}
-                                  className="p-3.5 rounded-2xl bg-white/[0.01] hover:bg-white/[0.03] border border-white/5 flex items-center justify-between gap-3 group transition-all"
+                                  onClick={() => setSelectedProject(proj)}
+                                  className="p-3.5 rounded-2xl bg-white/[0.01] hover:bg-white/[0.03] active:scale-[0.985] border border-white/5 flex items-center justify-between gap-3 group transition-all cursor-pointer"
                                 >
                                   <div className="flex items-center gap-3">
                                     <div className={`w-8 h-8 rounded-xl flex items-center justify-center font-bold text-xs ${colorClass}`}>
@@ -1917,13 +1913,15 @@ export default function CareerMemoryDashboard() {
                                     <div className="space-y-0.5">
                                       <div className="flex items-center gap-1.5 flex-wrap">
                                         <h5 className="text-sm font-black text-white group-hover:text-primary transition-colors">{proj.project_name}</h5>
-                                        {proj.sub_tags.slice(0, 2).map((t, i) => (
+                                        {(proj.tech_stack || []).slice(0, 2).map((t, i) => (
                                           <span key={i} className="px-1.5 py-0.5 rounded text-[10px] font-black border bg-white/5 text-on-surface-variant/50 border-white/5">
                                             {t}
                                           </span>
                                         ))}
                                       </div>
-                                      <p className="text-xs text-on-surface-variant/40 font-semibold">{dateStr}</p>
+                                      <p className="text-xs text-on-surface-variant/40 font-semibold">
+                                        面试提及: <span className="text-primary font-black font-label-mono">{proj.mention_count || 0}</span> 次
+                                      </p>
                                     </div>
                                   </div>
                                   <span className="material-symbols-outlined text-sm text-on-surface-variant/30 group-hover:text-white transition-all group-hover:translate-x-0.5">
