@@ -35,7 +35,9 @@ PROJECT_MEMORY_TOP_N = 8         # 注入项目记忆数
 HISTORY_KEEP_RECENT = 6           # summary 之外保留的最近轮数
 SUMMARY_TRIGGER_AT = 10           # 超过此轮数触发 summary 压缩
 MAX_CONTEXT_TOKENS = 6000         # system prompt 最大 tokens 估值
-COUNSELOR_MODEL = settings.DEEPSEEK_MODEL  # 与项目其他 LLM 调用保持一致
+# P0 优化 O2：职业顾问用 fast（chat），原 reasoning 模型过慢。
+# 职业顾问是基于上下文的总结/建议，不需要推理，chat 模型足够。
+COUNSELOR_MODEL = settings.DEEPSEEK_MODEL_FAST
 
 # 引用标记格式：[cite:TYPE#ID#CHUNK]
 CITE_PATTERN = re.compile(r"\[cite:(\w+)#(\d+)#(\d+)\]")

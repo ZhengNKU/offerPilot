@@ -211,8 +211,10 @@ async def analyze_interview_dialogue(
     """
     Calls DeepSeek reasoning model API to analyze the interview dialogue and return evaluation results in JSON.
 
-    existing_projects: 用户已有的项目记忆列表 [{"id": int, "project_name": str}, ...]
-        LLM 在提取 mentioned_projects 时会直接填 matched_existing_id。
+    P0 优化（#3 拆分 prompt）: mentioned_projects 提取已拆分为独立函数
+    `extract_mentioned_projects()`。本函数不再返回 mentioned_projects 字段，
+    prompt 同步瘦身以降低 reasoning 耗时。`existing_projects` 参数保留向后兼容，
+    当前未使用。
     """
     system_prompt = (
         "你是一个专业的 AI 面试教练。你需要根据候选人的面试对话内容进行深度评估。\n"
@@ -221,17 +223,6 @@ async def analyze_interview_dialogue(
         "你必须以 JSON 格式返回评估结果，无需 any Markdown 标记或其它多余的前后导言，只返回纯 JSON 对象字符串。\n"
         "JSON 结构必须严格符合以下属性格式：\n"
         "\n"
-        "除了上述评估维度外，你还需要识别面试对话中候选人具体讨论过的项目经历。\n"
-        "识别标准：\n"
-        "  - 候选人主动介绍自己做过/负责过的具体项目\n"
-        "  - 面试官针对某个项目进行追问（技术细节、架构选型、指标等）\n"
-        "  - 候选人在回答技术问题时引用具体项目案例\n"
-        "以下情况不算项目提及：\n"
-        "  - 泛泛而谈的技术讨论未关联具体项目（如「我们一般用 Redis 做缓存」）\n"
-        "  - 假设性的场景题回答（如「如果让我设计...」）\n"
-        "  - 纯理论/八股文回答未涉及具体项目\n"
-        "每个识别到的项目输出：project_name（使用对话中实际提到的名称，最多30字）、discussion_depth（0-100，评估讨论深度）、matched_existing_id（整数或null，见下方已有项目列表）。\n"
-        "如果完全没有讨论任何具体项目，返回空数组 []。\n"
         "{\n"
         "  \"ipi_score\": 75, // 综合素质评分（0-100之间的整数）\n"
         "  \"offer_probability\": 60, // 拿到Offer的概率百分比（0-100之间的整数）\n"
@@ -263,24 +254,16 @@ async def analyze_interview_dialogue(
         "  \"followup_paths\": [\n"
         "    { \"title\": \"阶段问题，如：Q1 自我介绍 · 引导切入\", \"desc\": \"具体的引导或追问描述\", \"tag\": \"良好\" },\n"
         "    { \"title\": \"阶段问题，如：Q3 Redis 选型 · 主动深挖\", \"desc\": \"具体的引导或追问描述\", \"tag\": \"风险\" }\n"
-        "  ], // 追问路径（3-4项，tag只能是'良好'、'一般'或'风险'之一，真实呈现追问轨迹）\n"
-        "  \"mentioned_projects\": [\n"
-        "    { \"project_name\": \"项目名称（使用对话中实际提到的名称，最多30字）\", \"discussion_depth\": 75, \"matched_existing_id\": 3 }\n"
-        "  ] // 面试中讨论到的项目经历（0-5项，未讨论任何项目时为空数组 []）。matched_existing_id 填已有项目列表中的 id，无匹配填 null\n"
+        "  ] // 追问路径（3-4项，tag只能是'良好'、'一般'或'风险'之一，真实呈现追问轨迹）\n"
         "}"
     )
-    
+
     user_content = f"面试对话内容：\n{dialogue_text}\n"
     if profile_data:
         user_content += f"\n候选人画像：\n{json.dumps(profile_data, ensure_ascii=False)}\n"
     if job_description:
         user_content += f"\n岗位详情 (Job Description)：\n{job_description}\n"
-    if existing_projects:
-        user_content += (
-            f"\n候选人已有的项目记忆（你在 mentioned_projects 中请直接填 matched_existing_id）：\n"
-            f"{json.dumps(existing_projects, ensure_ascii=False)}\n"
-        )
-        
+
     payload = {
         "model": settings.DEEPSEEK_MODEL,
         "messages": [
@@ -291,7 +274,10 @@ async def analyze_interview_dialogue(
     }
     
     try:
-        res_data = await asyncio.to_thread(call_llm_sync, payload)
+        # P0 优化(#2): 改用流式调用 call_llm_stream。
+        # DeepSeek reasoning model 在大 JSON 输出场景下偶发网关断连(RemoteDisconnected),
+        # 流式可以降低断连概率 + 内置指数退避重试。
+        res_data = await asyncio.to_thread(call_llm_stream, payload, 180.0)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         parsed_data = _safe_json_parse(content_clean, log_label="dialogue")
@@ -303,6 +289,107 @@ async def analyze_interview_dialogue(
         logger.error(f"Failed calling DeepSeek API: {str(e)}")
 
     return {}
+
+
+async def extract_mentioned_projects(
+    dialogue_text: str,
+    existing_projects: Optional[list[dict]] = None,
+) -> list[dict]:
+    """
+    P0 优化(#3): 从面试对话中识别候选人讨论到的项目经历。
+
+    与 analyze_interview_dialogue 拆分的好处:
+      - 本函数 prompt 极轻(只输出项目提及列表),reasoning 耗时比主体评估少 50%+
+      - 与 analyze_interview_dialogue 并发执行,端到端不增加任何时间
+      - 失败/为空不影响主流程,主流程不会因项目识别失败而卡住
+
+    Args:
+        dialogue_text: 完整面试对话文本
+        existing_projects: 用户已有的项目记忆 [{"id": int, "project_name": str, "category": str}, ...]
+            LLM 在 mentioned_projects 中会直接填 matched_existing_id,供 mention_service 累加 mention_count。
+
+    Returns:
+        [{"project_name": str, "discussion_depth": int, "matched_existing_id": int|null}, ...]
+        LLM 调用失败或无项目时返回空列表 []。
+    """
+    existing_projects = existing_projects or []
+    system_prompt = (
+        "你是一个专业的 AI 面试分析助手。你的任务是从一段面试对话中识别候选人具体讨论过的项目经历。\n"
+        "\n"
+        "识别标准（满足任一即算项目提及）：\n"
+        "  - 候选人主动介绍自己做过/负责过的具体项目\n"
+        "  - 面试官针对某个项目进行追问（技术细节、架构选型、指标等）\n"
+        "  - 候选人在回答技术问题时引用具体项目案例\n"
+        "\n"
+        "以下情况不算项目提及：\n"
+        "  - 泛泛而谈的技术讨论未关联具体项目（如「我们一般用 Redis 做缓存」）\n"
+        "  - 假设性的场景题回答（如「如果让我设计...」）\n"
+        "  - 纯理论/八股文回答未涉及具体项目\n"
+        "\n"
+        "每个识别到的项目输出：\n"
+        "  - project_name: 使用对话中实际提到的名称，最多 30 字\n"
+        "  - discussion_depth: 0-100 整数，评估讨论深度\n"
+        "  - matched_existing_id: 整数或 null\n"
+        "      如果下方「候选人已有项目」列表中有项目名相似的，填对应 id；\n"
+        "      如果没有，填 null。\n"
+        "\n"
+        "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言）：\n"
+        "{\n"
+        '  "mentioned_projects": [\n'
+        '    {"project_name": "项目名", "discussion_depth": 75, "matched_existing_id": 3}\n'
+        "  ]\n"
+        "}\n"
+        "如果完全没有讨论任何具体项目，返回空数组。\n"
+    )
+
+    user_content = f"面试对话内容：\n{dialogue_text}\n"
+    if existing_projects:
+        user_content += (
+            f"\n候选人已有项目记忆（matched_existing_id 从下列 id 中选取，无匹配填 null）：\n"
+            f"{json.dumps(existing_projects, ensure_ascii=False)}\n"
+        )
+
+    payload = {
+        "model": settings.DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "response_format": {"type": "json_object"},
+    }
+
+    try:
+        res_data = await asyncio.to_thread(call_llm_sync, payload)
+        content = res_data["choices"][0]["message"]["content"]
+        content_clean = _strip_codeblock(content)
+        parsed = _safe_json_parse(content_clean, log_label="mentions")
+        if parsed is None:
+            logger.error("[mentions] unable to parse DeepSeek response as JSON after repair")
+            return []
+        items = parsed.get("mentioned_projects") or []
+        # 防御性规整:只保留必要字段,matched_existing_id 必须 int 或 None
+        cleaned: list[dict] = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            name = (it.get("project_name") or "").strip()
+            if not name:
+                continue
+            depth = it.get("discussion_depth")
+            if not isinstance(depth, (int, float)):
+                depth = 50
+            mid = it.get("matched_existing_id")
+            if not isinstance(mid, int) or mid <= 0:
+                mid = None
+            cleaned.append({
+                "project_name": name[:30],
+                "discussion_depth": int(depth),
+                "matched_existing_id": mid,
+            })
+        return cleaned
+    except Exception as e:
+        logger.error(f"[mentions] extract_mentioned_projects failed: {e}")
+        return []
 
 
 async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

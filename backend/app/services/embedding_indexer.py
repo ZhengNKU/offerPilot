@@ -387,6 +387,21 @@ def schedule_index(payload: dict) -> None:
     asyncio.create_task(_index_with_safety(payload))
 
 
+def schedule_batch_index(payloads: list[dict]) -> None:
+    """P0 优化 O4：fire-and-forget 批量索引。
+
+    与 schedule_index 的区别：
+      - schedule_index：每个 payload 一次 embed API 调用，N 个 payload 串行
+      - schedule_batch_index：把所有 payload 的 chunks 一次性 batch 调 embed API（节省 N-1 次 RTT）
+        然后按 source 并发 upsert 到 DB
+
+    适用场景：项目记忆子任务一次产生 N 个 project，需要批量索引
+    """
+    if not payloads:
+        return
+    asyncio.create_task(_index_batch_with_safety(payloads))
+
+
 async def _index_with_safety(payload: dict) -> None:
     """所有异常在此层捕获，绝不向上传播。"""
     try:
@@ -408,6 +423,198 @@ async def _index_with_safety(payload: dict) -> None:
     except Exception:
         logger.error(
             f"[indexer] 未捕获异常 kind={payload.get('kind')}: {traceback.format_exc()}"
+        )
+
+
+# ============================================================================
+# 3.5 P0 优化 O4：批量索引（一次性 batch 调 embed API + 并发 upsert）
+# ============================================================================
+
+async def _prepare_chunks_for_payload(payload: dict) -> Optional[tuple]:
+    """根据 payload 准备 chunks（不调 embed、不写 DB）。
+    返回 (user_id, source_type, source_id, chunks) 或 None（无数据时）。
+    """
+    kind = payload.get("kind")
+    try:
+        if kind == "interview_summary":
+            user_id = payload["user_id"]
+            session_id = payload["session_id"]
+            async with async_session() as db:
+                sess = await db.get(models.InterviewSession, session_id)
+                if not sess or not sess.analysis_result:
+                    return None
+                chunks = chunk_interview_summary(sess.analysis_result, sess.title or f"面试{session_id}")
+            return (user_id, "interview_summary", session_id, chunks) if chunks else None
+
+        if kind == "resume_analysis":
+            user_id = payload["user_id"]
+            resume_analysis_id = payload["resume_analysis_id"]
+            async with async_session() as db:
+                ra = await db.get(models.ResumeAnalysis, resume_analysis_id)
+                if not ra or not ra.result_json:
+                    return None
+                file_name = "简历"
+                if ra.file_id:
+                    f = await db.get(models.UploadedFile, ra.file_id)
+                    if f:
+                        file_name = f.filename
+                chunks = chunk_resume_analysis(ra.result_json, file_name)
+            return (user_id, "resume_analysis", resume_analysis_id, chunks) if chunks else None
+
+        if kind == "project_memory":
+            user_id = payload["user_id"]
+            project_id = payload["project_id"]
+            async with async_session() as db:
+                pm = await db.get(models.ProjectMemory, project_id)
+                if not pm or pm.user_id != user_id:
+                    return None
+                chunks = chunk_project_memory(pm)
+            return (user_id, "project_memory", project_id, chunks) if chunks else None
+
+        if kind == "live_interview":
+            user_id = payload["user_id"]
+            live_session_id = payload["live_session_id"]
+            async with async_session() as db:
+                live = await db.get(models.InterviewLiveSession, live_session_id)
+                if not live or not live.analysis_result:
+                    return None
+                title = f"{live.target_role or '面试'} · 实时面试{live_session_id}"
+                analysis = dict(live.analysis_result)
+                analysis.setdefault("ipi_score", live.ipi_score)
+                analysis.setdefault("offer_probability", live.offer_probability)
+                if live.summary_strengths and not analysis.get("summary_strengths"):
+                    analysis["summary_strengths"] = live.summary_strengths
+                if live.summary_weaknesses and not analysis.get("summary_weaknesses"):
+                    analysis["summary_weaknesses"] = live.summary_weaknesses
+                if live.summary_suggestions and not analysis.get("summary_suggestions"):
+                    analysis["summary_suggestions"] = live.summary_suggestions
+                if live.executive_summary and not analysis.get("executive_summary"):
+                    analysis["executive_summary"] = live.executive_summary
+                chunks = chunk_interview_summary(analysis, title)
+            return (user_id, "live_interview", live_session_id, chunks) if chunks else None
+
+        # interview_section / interview_sections_bulk 走原路径（每个 section 是一个独立 source，
+        # 且 chunks 内容差异大，不适合 batch；保留 schedule_index 单条路径）
+        logger.warning(f"[indexer] batch path 不支持 kind={kind!r}，降级为单条 schedule_index")
+        schedule_index(payload)
+        return None
+    except Exception:
+        logger.error(f"[indexer] 准备 chunks 失败 kind={kind}: {traceback.format_exc()}")
+        return None
+
+
+async def _upsert_chunks_with_vectors(
+    user_id: int,
+    source_type: str,
+    source_id: int,
+    chunks: list[dict],
+    vectors: list[list[float]],
+) -> bool:
+    """与 _upsert_chunks 类似，但 vectors 是外部传入的（已经算好）。
+    用于 batch 索引：所有 chunks 的 vectors 一次性 embed 出来后，按 source 分组并发 upsert。
+    """
+    if len(vectors) != len(chunks):
+        logger.error(
+            f"[indexer] batch upsert 向量数 ({len(vectors)}) 与 chunk 数 ({len(chunks)}) 不一致 "
+            f"user_id={user_id} source={source_type}/{source_id}"
+        )
+        return False
+
+    async with async_session() as db:
+        try:
+            await db.execute(
+                delete(models.UserAnalysisEmbedding).where(
+                    models.UserAnalysisEmbedding.source_type == source_type,
+                    models.UserAnalysisEmbedding.source_id == source_id,
+                )
+            )
+            rows = [
+                {
+                    "user_id": user_id,
+                    "source_type": source_type,
+                    "source_id": source_id,
+                    "chunk_index": c["index"],
+                    "chunk_title": c["title"],
+                    "content": c["content"],
+                    "meta": c["meta"],
+                    "embedding": vec,
+                }
+                for c, vec in zip(chunks, vectors)
+            ]
+            await db.execute(models.UserAnalysisEmbedding.__table__.insert(), rows)
+            await db.commit()
+            logger.info(
+                f"[indexer] indexed user_id={user_id} source={source_type}/{source_id} chunks={len(rows)}"
+            )
+            return True
+        except Exception as e:
+            await db.rollback()
+            logger.error(
+                f"[indexer] batch DB 写入失败 user_id={user_id} "
+                f"source={source_type}/{source_id}: {e!r}"
+            )
+            return False
+
+
+async def _index_batch_with_safety(payloads: list[dict]) -> None:
+    """P0 优化 O4：批量索引主入口。
+
+    流程：
+      1. 并发从 DB 读出每个 payload 对应的 chunks（不调 embed）
+      2. 把所有 chunks 的文本一次性 batch 调 embed API（节省 N-1 次 RTT）
+      3. 按 source 分组 → 并发 upsert 到 DB
+    """
+    try:
+        # Step 1: 并发准备所有 chunks
+        prepared = await asyncio.gather(
+            *[_prepare_chunks_for_payload(p) for p in payloads]
+        )
+        # 过滤 None（无数据 / 降级走单条路径的）
+        valid = [item for item in prepared if item]
+        if not valid:
+            logger.info("[indexer] batch: no valid chunks to index")
+            return
+
+        # Step 2: 一次性 batch 调 embed
+        all_texts: list[str] = []
+        # (user_id, source_type, source_id, chunks) 列表 → 记录每个 chunk 在 all_texts 中的起止位置
+        source_boundaries: list[tuple[int, int, int, list[dict], int, int]] = []
+        cursor = 0
+        for user_id, stype, sid, chunks in valid:
+            n = len(chunks)
+            source_boundaries.append((user_id, stype, sid, chunks, cursor, cursor + n))
+            all_texts.extend(c["content"] for c in chunks)
+            cursor += n
+
+        try:
+            all_vectors = await embed_for_storage(all_texts)
+        except Exception as e:
+            logger.error(f"[indexer] batch embed 失败 texts={len(all_texts)}: {e!r}")
+            return
+
+        if len(all_vectors) != len(all_texts):
+            logger.error(
+                f"[indexer] batch embed 返回向量数 ({len(all_vectors)}) "
+                f"与文本数 ({len(all_texts)}) 不一致"
+            )
+            return
+
+        # Step 3: 按 source 并发 upsert
+        async def _upsert_one(b):
+            user_id, stype, sid, chunks, lo, hi = b
+            return await _upsert_chunks_with_vectors(
+                user_id, stype, sid, chunks, all_vectors[lo:hi]
+            )
+
+        results = await asyncio.gather(*[_upsert_one(b) for b in source_boundaries])
+        ok_count = sum(1 for r in results if r)
+        logger.info(
+            f"[indexer] batch indexed: {ok_count}/{len(source_boundaries)} sources, "
+            f"{len(all_texts)} chunks total"
+        )
+    except Exception:
+        logger.error(
+            f"[indexer] batch 未捕获异常: {traceback.format_exc()}"
         )
 
 

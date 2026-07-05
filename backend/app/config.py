@@ -25,7 +25,11 @@ class Settings(BaseSettings):
     # 文本生成 LLM：DeepSeek（OpenAI-compatible）
     DEEPSEEK_API_KEY: str = ""
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com/v1"
+    # 主模型（reasoning，用于深度诊断/创作）
     DEEPSEEK_MODEL: str = "deepseek-v4-flash"
+    # 快速模型（chat，用于结构化抽取/分类/分段）
+    # P0 优化 O2：把结构化抽取类任务从 reasoning 切到 chat，预计提速 3-5x
+    DEEPSEEK_MODEL_FAST: str = "deepseek-chat"
 
     # MiniMax Embedding API（AI 职业顾问用）
     # 注意：与 chat 端点域名不同——embedding 用 api.minimax.chat

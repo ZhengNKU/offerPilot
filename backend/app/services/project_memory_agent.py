@@ -18,7 +18,7 @@ from app.database import async_session
 from app.models import ProjectMemory
 from app.utils.llm import extract_project_experiences
 from app.utils.resume_parser import parse_resume_structure
-from app.services.embedding_indexer import schedule_index
+from app.services.embedding_indexer import schedule_index, schedule_batch_index
 
 logger = logging.getLogger(__name__)
 
@@ -139,17 +139,30 @@ async def _run_project_memory_sub_agent_impl(payload: dict) -> None:
 
             await db.commit()
 
-            # 触发 AI 职业顾问索引（fire-and-forget；每个新插入/更新的项目都索引）
-            for r in upsert_results:
+            # P0 优化 O4：批量触发 AI 职业顾问索引
+            # 旧逻辑：每个新插入/更新的项目都单独 schedule_index → N 次串行 embed API 调用
+            # 新逻辑：一次性 schedule_batch_index → 1 次 batch embed + 并发 upsert
+            index_payloads = [
+                {
+                    "kind": "project_memory",
+                    "user_id": user_id,
+                    "project_id": r["project_id"],
+                }
+                for r in upsert_results
+            ]
+            if index_payloads:
                 try:
-                    schedule_index({
-                        "kind": "project_memory",
-                        "user_id": user_id,
-                        "project_id": r["project_id"],
-                    })
+                    schedule_batch_index(index_payloads)
                 except Exception:
-                    # schedule_index 本身已 try/except，这里再保险
-                    pass
+                    # 降级：批量失败时退回逐个 schedule
+                    logger.warning(
+                        f"[project_memory_agent] schedule_batch_index 失败，降级为逐个 schedule_index"
+                    )
+                    for p in index_payloads:
+                        try:
+                            schedule_index(p)
+                        except Exception:
+                            pass
     except Exception:
         logger.error(
             f"[project_memory_agent] 数据库写入失败: {traceback.format_exc()}"
