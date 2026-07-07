@@ -1341,10 +1341,10 @@ export default function InterviewVoiceAnalysisPage() {
       return;
     }
 
-    const company = interviewInfo.company || "面试公司";
-    const role = interviewInfo.role || "面试岗位";
-    const round = interviewInfo.round || "面试轮次";
-    const date = interviewInfo.time || "2026-06-07";
+    const company = interviewInfo.company || "—";
+    const role = interviewInfo.role || "—";
+    const round = interviewInfo.round || "—";
+    const date = interviewInfo.time || "—";
     const score = reportData ? reportData.ipi_score : activeSeg?.score || 0;
     const grade = reportData ? (reportData.ipi_score >= 80 ? "优秀" : reportData.ipi_score >= 65 ? "中等" : "预警") : activeSeg?.badgeText || "";
 
@@ -1746,36 +1746,36 @@ export default function InterviewVoiceAnalysisPage() {
                     <div className="flex justify-between items-center">
                       <span>是否在职</span>
                       <span className="px-2 py-0.5 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/20 text-xs font-extrabold">
-                        {interviewInfo.isOnJob}
+                        {interviewInfo.isOnJob || "—"}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>工作年限</span>
-                      <span className="text-white font-extrabold">{interviewInfo.years}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.years || "—"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>面试公司</span>
-                      <span className="text-white font-extrabold">{interviewInfo.company}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.company || "—"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>面试岗位</span>
-                      <span className="text-white font-extrabold">{interviewInfo.role}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.role || "—"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>面试轮次</span>
-                      <span className="text-white font-extrabold">{interviewInfo.round}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.round || "—"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>面试时间</span>
-                      <span className="text-white font-extrabold">{interviewInfo.time}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.time || "—"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>岗位职级</span>
-                      <span className="text-white font-extrabold">{interviewInfo.level}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.level || "—"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>期望薪资</span>
-                      <span className="text-white font-extrabold">{interviewInfo.salary}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.salary || "—"}</span>
                     </div>
                   </div>
                 </div>

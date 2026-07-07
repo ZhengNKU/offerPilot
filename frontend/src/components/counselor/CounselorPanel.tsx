@@ -26,6 +26,10 @@ interface PendingAssistant {
   streaming: boolean;
 }
 
+let lastAutoSentPrompt: string | null = null;
+let activeAbortController: AbortController | null = null;
+let abortTimeoutId: any = null;
+
 const WELCOME_CARDS = [
   {
     title: "我如何拿到心仪的 offer？",
@@ -80,6 +84,8 @@ interface Props {
   remaining?: number | null;
   setRemaining?: React.Dispatch<React.SetStateAction<number | null>> | ((r: number | null) => void);
   stats?: CounselorStats | null;
+  autoSendPrompt?: string | null;
+  onClearAutoSendPrompt?: () => void;
 }
 
 export default function CounselorPanel(props: Props) {
@@ -121,6 +127,8 @@ export default function CounselorPanel(props: Props) {
   const abortControllerRef = useRef<AbortController | null>(null);
   // 消息区滚动容器的 ref；只滚这个容器，不影响外层页面
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  // 记录已经自动发送的 prompt 防止 StrictMode 下重复触发
+  const autoSentRef = useRef<string | null>(null);
 
   // Load functions fallback
   const loadSessions = props.loadSessions || useCallback(async () => {
@@ -180,6 +188,11 @@ export default function CounselorPanel(props: Props) {
 
   // 页面离开 / tab 切换 / 组件卸载：自动 abort 在飞流
   useEffect(() => {
+    if (abortTimeoutId) {
+      clearTimeout(abortTimeoutId);
+      abortTimeoutId = null;
+    }
+
     const onBeforeUnload = () => {
       if (abortControllerRef.current) {
         // 关闭 SSE → 触发后端 CancelledError → 后端落 partial
@@ -207,10 +220,12 @@ export default function CounselorPanel(props: Props) {
         window.removeEventListener("beforeunload", onBeforeUnload);
         document.removeEventListener("visibilitychange", onVisibilityChange);
       }
-      // 组件卸载（路由跳转）也 abort
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
+      // 组件卸载（路由跳转）也 abort (延时 50ms 以防 StrictMode remount 误杀)
+      abortTimeoutId = setTimeout(() => {
+        if (activeAbortController) {
+          activeAbortController.abort();
+        }
+      }, 50);
     };
     // 只在挂载时注册一次；stopStreaming 通过 ref.current 闭包访问
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -251,6 +266,7 @@ export default function CounselorPanel(props: Props) {
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    activeAbortController = controller;
 
     let finalCitations: Citation[] = [];
     let finalChunks: RecalledChunk[] = [];
@@ -273,7 +289,20 @@ export default function CounselorPanel(props: Props) {
           try { await loadSessions(); } catch { /* ignore */ }
         } else if (ev.event === "token") {
           assistantContent += ev.data.text;
-          setPending((p) => (p ? { ...p, content: assistantContent } : p));
+          setPending((p) => {
+            if (p) {
+              return { ...p, content: assistantContent };
+            } else {
+              return {
+                role: "assistant",
+                content: assistantContent,
+                citations: [],
+                recalledChunks: [],
+                contextSummary: null,
+                streaming: true,
+              };
+            }
+          });
         } else if (ev.event === "done") {
           finalCitations = ev.data.citations;
           finalChunks = ev.data.recalled_chunks;
@@ -309,11 +338,14 @@ export default function CounselorPanel(props: Props) {
         };
         setMessages((prev) => [...prev, finalMsg]);
       }
-      setPending(null);
-      setStreaming(false);
-      // 释放本轮的 controller
+      // 释放本轮 of controller，只有是当前活跃请求才清空状态
       if (abortControllerRef.current === controller) {
+        setPending(null);
+        setStreaming(false);
         abortControllerRef.current = null;
+        if (activeAbortController === controller) {
+          activeAbortController = null;
+        }
       }
       if (!errored) {
         // 成功后刷新历史列表（message_count、status、summary 都会更新）
@@ -327,6 +359,23 @@ export default function CounselorPanel(props: Props) {
     }
   };
 
+  useEffect(() => {
+    // 父级通过 props.autoSendPrompt 注入开场白（每次非空都触发一次）
+    if (props.autoSendPrompt) {
+      if (props.autoSendPrompt !== lastAutoSentPrompt) {
+        lastAutoSentPrompt = props.autoSendPrompt;
+        sendMessage(props.autoSendPrompt);
+        if (props.onClearAutoSendPrompt) {
+          props.onClearAutoSendPrompt();
+        }
+      }
+    } else {
+      // 当父级清空时，把 lastAutoSentPrompt 也清空，以便下次可以再次触发相同的开场白
+      lastAutoSentPrompt = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.autoSendPrompt]);
+
   const clearConversation = () => {
     newSession();
   };
@@ -334,7 +383,7 @@ export default function CounselorPanel(props: Props) {
   // ── compact 模式：内嵌在 glass-panel 内部 ──
   if (variant === "compact") {
     return (
-      <div className="flex flex-col h-full relative text-left">
+      <div className="flex flex-col h-full relative text-left min-h-0">
         {/* 顶部工具栏 */}
         <div className="flex items-center justify-between pb-4 border-b border-white/5 mb-2.5 shrink-0">
           <div className="flex items-center gap-3">

@@ -58,15 +58,14 @@ async def sync_project_mentions(
         # ── 写入：mention_count += 1 + 最近提及摘要 ──
         if matched_project_ids:
             now_utc = datetime.utcnow()
-            # 获取 session 标题（格式: 公司 · 岗位 · 日期）
+            # 从结构化列读公司+岗位，拼成可读标题
             session_title = ""
             async with async_session() as db:
                 from app.models import InterviewSession
                 sess = await db.get(InterviewSession, session_id)
-                if sess and sess.title:
-                    # 从 "中兴通讯 · 后端开发工程师 · 2026-06-21" 中提取公司+岗位
-                    parts = sess.title.split(" · ")
-                    session_title = "".join(parts[:2]) if len(parts) >= 2 else sess.title
+                if sess:
+                    parts = [sess.company or "", sess.role or ""]
+                    session_title = "".join(p for p in parts if p)
                 # 格式化: 2026/06/21·中兴通讯后端开发工程师面试
                 date_str = now_utc.strftime("%Y/%m/%d")
                 summary = f"{date_str}·{session_title}面试" if session_title else date_str

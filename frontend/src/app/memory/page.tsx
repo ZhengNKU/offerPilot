@@ -404,9 +404,12 @@ export default function CareerMemoryDashboard() {
   const [counselorPending, setCounselorPending] = useState<any | null>(null);
   const [counselorRemaining, setCounselorRemaining] = useState<number | null>(null);
   const [counselorStats, setCounselorStats] = useState<CounselorStatsData | null>(null);
+  // 每次 askAdvisor 触发时 +1，作为 <CounselorPanel key=...> 强制重挂载以清理旧会话状态
+  const [counselorSessionKey, setCounselorSessionKey] = useState(0);
   const [isLoadingCounselorStats, setIsLoadingCounselorStats] = useState(false);
   const [counselorPage, setCounselorPage] = useState(1);
   const [counselorSessionsTotal, setCounselorSessionsTotal] = useState(0);
+  const [counselorAutoSendPrompt, setCounselorAutoSendPrompt] = useState<string | null>(null);
 
   // Load counselor sessions list with pagination
   const loadCounselorSessions = useCallback(async (page = 1) => {
@@ -446,6 +449,16 @@ export default function CareerMemoryDashboard() {
     setCounselorPending(null);
   }, []);
 
+  const askAdvisor = useCallback((promptText: string) => {
+    // 直接 push 到 CounselorPanel 的 autoSendPrompt prop，触发其 useEffect 立即发送
+    // （用 state 而不是 localStorage，避免刷新时机与 SSR 不一致的问题）
+    newCounselorSession();
+    setActiveTab("advisor");
+    // 重挂 CounselorPanel 清掉旧会话上下文；新挂载 + autoSendPrompt prop 即可触发首问
+    setCounselorSessionKey(k => k + 1);
+    setCounselorAutoSendPrompt(promptText);
+  }, [newCounselorSession]);
+
   // Delete counselor session
   const handleDeleteCounselorSession = useCallback((sid: number) => {
     setDeleteTarget(`counselor-${sid}`);
@@ -478,6 +491,53 @@ export default function CareerMemoryDashboard() {
       setIsLoadingCounselorStats(false);
     }
   }, [auth.isLoggedIn]);
+
+  const [advisorInsights, setAdvisorInsights] = useState<{
+    focus_areas: string[];
+    interview_trends: string[];
+    recommended_actions: string[];
+    career_suggestions: string[];
+    is_customized: boolean;
+    target_role?: string;
+    updated_at?: string | null;
+    status?: string;
+  } | null>(null);
+  const [isLoadingAdvisorInsights, setIsLoadingAdvisorInsights] = useState(false);
+
+  const fetchAdvisorInsights = useCallback(async () => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+    if (!auth.isLoggedIn || !token) {
+      setAdvisorInsights(null);
+      return;
+    }
+    setIsLoadingAdvisorInsights(true);
+    try {
+      const res = await fetch("http://localhost:8001/api/counselor/advisor-insights", {
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAdvisorInsights(data);
+      }
+    } catch (e) {
+      console.error("fetch advisor insights failed:", e);
+    } finally {
+      setIsLoadingAdvisorInsights(false);
+    }
+  }, [auth.isLoggedIn]);
+
+  // 当处于 AI 建议生成中状态时，开启每 3 秒一次的自动轮询拉取
+  useEffect(() => {
+    if (!advisorInsights || advisorInsights.status !== "generating" || !auth.isLoggedIn) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      fetchAdvisorInsights();
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [advisorInsights?.status, fetchAdvisorInsights, auth.isLoggedIn]);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -651,17 +711,13 @@ export default function CareerMemoryDashboard() {
           dateStr = `${mm}-${dd} ${hh}:${min}`;
         }
 
-        let company = "面试会话";
-        let role = "录音分析";
-        let round = "技术面试";
-        if (session.title && session.title.includes(" · ")) {
-          const parts = session.title.split(" · ");
-          if (parts.length >= 1) company = parts[0];
-          if (parts.length >= 2) role = parts[1];
-          if (parts.length >= 3) round = parts[2];
-        } else {
-          company = session.title || "语音面试";
-        }
+        // 直接用后端返回的结构化字段，不再解析 title
+        const company = session.company || "";
+        const role = session.role || (session.audio_url === "text_mode" ? "面试记录" : "录音分析");
+        const round = session.round || "";
+        const displayTitle = session.display_title
+          || [company, role, round].filter(Boolean).join(" · ")
+          || "未命名面试分析";
 
         let grade = "待提升候选人";
         if (session.ipi_score >= 80) grade = "优秀候选人";
@@ -672,7 +728,7 @@ export default function CareerMemoryDashboard() {
           date: dateStr,
           raw_created_at: session.created_at || "",
           type: (session.audio_url === "text_mode" ? "text" : "audio") as "audio" | "text",
-          title: session.title || "未命名面试分析",
+          title: displayTitle,
           score: session.ipi_score || 0,
           grade,
           company,
@@ -810,14 +866,14 @@ export default function CareerMemoryDashboard() {
     // 先写 localStorage（与 handleViewDetails 保持一致），确保目标页加载正确的面试详情
     localStorage.setItem("interviewVar_report_mode", point.type);
     localStorage.setItem("interviewVar_session_id", String(point.session_id));
-    // 解析 session_title 提取公司/岗位/轮次信息
-    const titleParts = point.session_title.split(" · ");
-    if (titleParts.length >= 1) localStorage.setItem("interviewVar_session_company", titleParts[0]);
-    if (titleParts.length >= 2) localStorage.setItem("interviewVar_session_role", titleParts[1]);
-    if (titleParts.length >= 3) localStorage.setItem("interviewVar_session_round", titleParts[2]);
-    if (point.analysis_time) {
-      localStorage.setItem("interviewVar_session_date", point.analysis_time.split("T")[0]);
-    }
+    // 直接读后端返回的结构化字段；title 不再参与数据解析
+    localStorage.setItem("interviewVar_session_company", ((point as any).company as string) || "");
+    localStorage.setItem("interviewVar_session_role", ((point as any).role as string) || "");
+    localStorage.setItem("interviewVar_session_round", ((point as any).round as string) || "");
+    localStorage.setItem(
+      "interviewVar_session_date",
+      ((point as any).date as string) || (point.analysis_time ? point.analysis_time.split("T")[0] : "")
+    );
     localStorage.setItem("interviewVar_viewing_session", "true");
     localStorage.removeItem("interviewVar_task_id");
 
@@ -923,20 +979,26 @@ export default function CareerMemoryDashboard() {
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [auth.isLoggedIn]);
 
-  // 切换到项目记忆库 Tab 时刷新数据
+  // 切换到总览看板时，刷新项目、分析趋势及AI顾问意见；切换到项目记忆库 Tab 时刷新项目
   useEffect(() => {
-    if (activeTab === "projects") {
+    if (activeTab === "overview" && auth.isLoggedIn) {
+      fetchProjects();
+      fetchGrowthCurve();
+      fetchOfferTrend();
+      fetchAdvisorInsights();
+    } else if (activeTab === "projects") {
       fetchProjects();
     }
-  }, [activeTab]);
+  }, [activeTab, auth.isLoggedIn, fetchAdvisorInsights]);
 
   // 加载 AI 职业顾问数据
   useEffect(() => {
     if (auth.isLoggedIn) {
       loadCounselorSessions(counselorPage);
       fetchCounselorStats();
+      fetchAdvisorInsights();
     }
-  }, [auth.isLoggedIn, counselorPage, loadCounselorSessions, fetchCounselorStats]);
+  }, [auth.isLoggedIn, counselorPage, loadCounselorSessions, fetchCounselorStats, fetchAdvisorInsights]);
 
   const handleInterceptAction = () => {
     setShowLoginModal(true);
@@ -948,7 +1010,7 @@ export default function CareerMemoryDashboard() {
     localStorage.setItem("interviewVar_session_role", item.role);
     localStorage.setItem("interviewVar_session_years", "3-5年");
     localStorage.setItem("interviewVar_session_round", item.round);
-    localStorage.setItem("interviewVar_session_date", item.date.includes("202") ? item.date.split(" ")[0] : "2026-06-01");
+    localStorage.setItem("interviewVar_session_date", item.date.split(" ")[0]);
     localStorage.setItem("interviewVar_session_grade", item.type === "resume" ? "L8 / P7" : "P6");
     localStorage.setItem("interviewVar_session_salary", item.type === "resume" ? "35K-45K" : "35-40K");
     localStorage.setItem("interviewVar_viewing_session", "true");
@@ -1264,7 +1326,9 @@ export default function CareerMemoryDashboard() {
       </nav>
 
       {/* Main Workspace Frame */}
-      <div className="flex-1 max-w-container-max mx-auto w-full px-gutter py-8 grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch relative z-10">
+      <div className={`flex-1 max-w-container-max mx-auto w-full px-gutter py-8 grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch relative z-10 ${
+        activeTab === "advisor" ? "h-[850px]" : ""
+      }`}>
         
         {/* ========================================================
             LEFT SIDEBAR: 职业记忆库 navigation
@@ -1317,7 +1381,7 @@ export default function CareerMemoryDashboard() {
                 newCounselorSession();
                 handleTabChange("advisor");
               }}
-              className="w-full py-2.5 bg-gradient-to-r from-primary/20 to-secondary/20 hover:from-primary/30 hover:to-secondary/30 text-xs font-black text-white rounded-xl border border-primary/30 hover:border-primary/50 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-primary/5"
+              className="w-full py-2.5 bg-gradient-to-r from-primary/20 to-secondary/20 hover:from-primary/30 hover:to-secondary/30 text-base font-black text-white rounded-xl border border-primary/30 hover:border-primary/50 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-primary/5"
             >
               <span className="material-symbols-outlined text-sm font-bold">add</span>
               新建会话
@@ -1498,7 +1562,7 @@ export default function CareerMemoryDashboard() {
         {/* ========================================================
             RIGHT CONTAINER: Header + Grid Widgets + Footer
            ======================================================== */}
-        <div className="col-span-12 md:col-span-9 lg:col-span-9.5 flex flex-col gap-6">
+        <div className="col-span-12 md:col-span-9 lg:col-span-9.5 flex flex-col gap-6 h-full">
 
           {/* ========================================================
               TOP PROFILE SUMMARY BAR
@@ -1614,7 +1678,7 @@ export default function CareerMemoryDashboard() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
-              className="w-full flex-1 min-h-0"
+              className={`w-full flex-1 min-h-0 ${activeTab === "advisor" ? "flex flex-col" : ""}`}
             >
               {/* ========================================================
                   TAB PANEL 1: OVERVIEW DASHBOARD (总览看板)
@@ -2864,12 +2928,18 @@ export default function CareerMemoryDashboard() {
                   TAB PANEL 7: AI CAREER ADVISOR (交互顾问面板)
                  ======================================================== */}
               {activeTab === "advisor" && (
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 w-full text-left items-stretch h-full">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 w-full text-left items-stretch h-[698px] max-h-[698px] flex-1 min-h-0">
                   {/* Left chatbot panel — real interactive */}
-                  <div className="col-span-12 md:col-span-8 flex flex-col h-full">
-                    <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col min-h-[680px] h-full w-full relative">
+                  <div className="col-span-12 md:col-span-8 flex flex-col h-[698px] max-h-[698px] min-h-0">
+                    <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col h-[698px] max-h-[698px] w-full relative min-h-0">
                       <CounselorPanel
+                        key={counselorSessionKey}
                         variant="compact"
+                        stats={counselorStats}
+                        remaining={counselorRemaining}
+                        setRemaining={setCounselorRemaining}
+                        autoSendPrompt={counselorAutoSendPrompt}
+                        onClearAutoSendPrompt={() => setCounselorAutoSendPrompt(null)}
                         currentSessionId={counselorSessionId}
                         setCurrentSessionId={setCounselorSessionId}
                         sessions={counselorSessions}
@@ -2877,7 +2947,6 @@ export default function CareerMemoryDashboard() {
                         loadSessions={loadCounselorSessions}
                         loadSession={loadCounselorSession}
                         newSession={newCounselorSession}
-                        handleDeleteSession={handleDeleteCounselorSession}
                         messages={counselorMessages}
                         setMessages={setCounselorMessages}
                         input={counselorInput}
@@ -2886,15 +2955,13 @@ export default function CareerMemoryDashboard() {
                         setStreaming={setCounselorStreaming}
                         pending={counselorPending}
                         setPending={setCounselorPending}
-                        remaining={counselorRemaining}
-                        setRemaining={setCounselorRemaining}
-                        stats={counselorStats}
+                        handleDeleteSession={handleDeleteCounselorSession}
                       />
                     </div>
                   </div>
 
                   {/* Right side strategies column */}
-                  <div className="col-span-12 md:col-span-4 flex flex-col gap-6 justify-between h-full">
+                  <div className="col-span-12 md:col-span-4 flex flex-col gap-6 justify-between h-[698px] max-h-[698px] min-h-0">
                     {/* Widget 1: 能力数据来源 */}
                     <div className="glass-panel p-5 rounded-3xl border-white/10 space-y-4 text-left flex-1 flex flex-col justify-center">
                       <div>
@@ -2989,7 +3056,7 @@ export default function CareerMemoryDashboard() {
                   </div>
                   <div>
                     <h4 className="text-base font-black text-white">AI 职业顾问</h4>
-                    <p className="text-xs text-on-surface-variant/60 font-semibold mt-0.5">基于你所有的面试记录 and 分析，AI 为你定制建议</p>
+                    <p className="text-xs text-on-surface-variant/60 font-semibold mt-0.5">基于你所有的面试记录和分析，AI 为你定制建议</p>
                   </div>
                 </div>
 
@@ -3002,97 +3069,223 @@ export default function CareerMemoryDashboard() {
               </div>
 
               {/* AI Advisor Columns */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 relative z-10">
-                
-                {/* Card 1: 本周重点提升 */}
-                <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-primary/20 hover:scale-[1.01] transition-all duration-300">
-                  <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
-                    <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20 shrink-0">
-                      <span className="material-symbols-outlined text-base text-primary animate-pulse">rocket_launch</span>
-                    </div>
-                    <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">本周重点提升</span>
-                  </div>
-                  <div className="space-y-2 mt-1">
-                    {[
-                      "架构表达框架建立",
-                      "项目指标定量细化",
-                      "系统设计 trade-off 表达"
-                    ].map((text, i) => (
-                      <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
-                        <span className="material-symbols-outlined text-xs text-primary shrink-0">arrow_right_alt</span>
-                        <span className="leading-snug">{text}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+              {(() => {
+                const getPrompt = (text: string, moduleKey: string) => {
+                  switch (text) {
+                    case "架构表达框架建立":
+                      return "我想了解关于『架构表达框架建立』的建议。在面试中，我该如何系统地向面试官展现我的架构设计表达框架？";
+                    case "项目指标定量细化":
+                      return "我想了解如何进行『项目指标定量细化』？如何发掘简历中项目的核心量化指标，在面试中表现出强有力的数据说服力？";
+                    case "系统设计 trade-off 表达":
+                      return "我想了解在面试中关于『系统设计 trade-off 表达』的深度建议。怎样阐述技术选型时的权衡（trade-off）才显得成熟和严谨？";
+                    case "系统设计出现频率上升 23%":
+                      return "我看到近期面试趋势中『系统设计出现频率上升了23%』，AI 顾问对此有什么深度洞察或高频考点预测吗？";
+                    case "分布式相关问题增加明显":
+                      return "我注意到『分布式相关问题增加明显』这一趋势，在近期的面试准备中，有哪些分布式系统的关键难点和高频考点我需要着重补齐？";
+                    case "面试官更关注工程落地细节":
+                      return "关于『面试官更关注工程落地细节』这一趋势，我应该如何在面试中生动具体地描述我的工程落地细节和难题攻关过程？";
+                    case "完成 3 次真题模拟面试":
+                      return "我想进行『完成 3 次真题模拟面试』这一行动。AI 顾问能否根据我的技术背景，推荐一些适合我的真题，并指导我如何高效进行模拟面试？";
+                    case "优化 2 个核心项目描述":
+                      return "关于『优化 2 个核心项目描述』这一推荐行动，我该如何利用 AI 来修改和突出我的项目难点、技术架构与业务成果？";
+                    case "补充架构师深度表达训练":
+                      return "我想了解如何进行『补充架构师深度表达训练』？有哪些核心的话术框架或者思维模型可以帮助我在面试中展示出架构师的深度和格局？";
+                    case "建议向 Staff Engineer 方向准备":
+                      return "AI 顾问建议我『向 Staff Engineer 方向准备』，能为我详细分析一下我当前能力与 Staff Engineer 之间的 Gap，以及我接下来中长期的成长路线图吗？";
+                    case "提升技术影响力和领导力表达":
+                      return "我该如何提升我的『技术影响力和领导力表达』？在面试或者日常工作中，如何展示我的技术影响力和技术领导力（Leadership）？";
+                    case "密切关注一线大厂架构能力变化":
+                      return "对于『密切关注一线大厂架构能力变化』，近期一线大厂对架构师/高级工程师的架构能力标准有哪些新的变化和核心技术要求？";
+                  }
 
-                {/* Card 2: 近期面试趋势 */}
-                <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-secondary/20 hover:scale-[1.01] transition-all duration-300">
-                  <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
-                    <div className="w-8 h-8 rounded-xl bg-secondary/10 flex items-center justify-center border border-secondary/20 shrink-0">
-                      <span className="material-symbols-outlined text-base text-secondary animate-pulse">trending_up</span>
-                    </div>
-                    <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">近期面试趋势</span>
-                  </div>
-                  <div className="space-y-2 mt-1">
-                    {[
-                      "系统设计出现频率上升 23%",
-                      "分布式相关问题增加明显",
-                      "面试官更关注工程落地细节"
-                    ].map((text, i) => (
-                      <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
-                        <span className="material-symbols-outlined text-xs text-secondary shrink-0">insights</span>
-                        <span className="leading-snug">{text}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                  switch (moduleKey) {
+                    case "focus_areas":
+                      return `作为我的 AI 职业顾问，我希望针对『${text}』这个重点提升维度获得系统性的学习与面试通关建议。在面试中，我应该如何向面试官系统性地展现这一能力，避免在这一块暴露短板？`;
+                    case "interview_trends":
+                      return `关于近期面试趋势中提及的『${text}』，我希望深入了解：当前公司在这一维度的核心考察偏好是什么？为了应对这一趋势，有哪些典型高频面试真题与考点我需要着重补齐？`;
+                    case "recommended_actions":
+                      return `在 AI 职业顾问推荐我的行动建议中，有一项是『${text}』。我该如何高效地执行这一项行动？你能为我提供一套具体的、可实操落地的计划和执行步骤吗？`;
+                    case "career_suggestions":
+                      return `我的 AI 职业顾问为我拟定了职业发展建议：『${text}』。能为我详细分析一下这对我中长期职业路径的意义吗？如果我想朝这个方向进阶，我该如何系统地建立核心竞争力和工作中的技术影响力？`;
+                    default:
+                      return `我想咨询关于『${text}』的相关建议。`;
+                  }
+                };
 
-                {/* Card 3: 推荐行动 */}
-                <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-amber-500/20 hover:scale-[1.01] transition-all duration-300">
-                  <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
-                    <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20 shrink-0">
-                      <span className="material-symbols-outlined text-base text-amber-500 animate-pulse">task_alt</span>
-                    </div>
-                    <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">推荐行动</span>
-                  </div>
-                  <div className="space-y-2 mt-1">
-                    {[
-                      "完成 3 次真题模拟面试",
-                      "优化 2 个核心项目描述",
-                      "补充架构师深度表达训练"
-                    ].map((text, i) => (
-                      <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
-                        <span className="material-symbols-outlined text-xs text-amber-500 shrink-0">play_circle</span>
-                        <span className="leading-snug">{text}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                const isGenerating = advisorInsights === null || advisorInsights.status === "generating";
 
-                {/* Card 4: 职业发展建议 */}
-                <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-tertiary/20 hover:scale-[1.01] transition-all duration-300">
-                  <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
-                    <div className="w-8 h-8 rounded-xl bg-tertiary/10 flex items-center justify-center border border-tertiary/20 shrink-0">
-                      <span className="material-symbols-outlined text-base text-tertiary animate-pulse">military_tech</span>
-                    </div>
-                    <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">职业发展建议</span>
-                  </div>
-                  <div className="space-y-2 mt-1">
-                    {[
-                      "建议向 Staff Engineer 方向准备",
-                      "提升技术影响力和领导力表达",
-                      "密切关注一线大厂架构能力变化"
-                    ].map((text, i) => (
-                      <div key={i} className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] border border-white/5 hover:border-white/10 hover:bg-white/[0.02] transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left">
-                        <span className="material-symbols-outlined text-xs text-tertiary shrink-0">explore</span>
-                        <span className="leading-snug">{text}</span>
+                if (isGenerating) {
+                  return (
+                    <div className="flex flex-col gap-6 w-full relative z-10">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                        {[
+                          { title: "本周重点提升", color: "primary" },
+                          { title: "近期面试趋势", color: "secondary" },
+                          { title: "推荐行动", color: "warning" },
+                          { title: "职业发展建议", color: "tertiary" },
+                        ].map((card, cardIdx) => (
+                          <div 
+                            key={cardIdx} 
+                            className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 animate-pulse"
+                          >
+                            <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
+                              <div className="w-8 h-8 rounded-xl bg-white/5 border border-white/10 shrink-0" />
+                              <span className="text-sm font-black text-white/50 font-label-mono uppercase tracking-wider block">
+                                {card.title}
+                              </span>
+                            </div>
+                            <div className="space-y-3 mt-2">
+                              {[1, 2, 3].map((itemIdx) => (
+                                <div 
+                                  key={itemIdx} 
+                                  className="h-11 w-full rounded-xl bg-white/[0.02] border border-white/5 flex items-center px-4"
+                                >
+                                  <div className="h-2.5 w-4/5 rounded bg-white/10" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
 
-              </div>
+                      {/* Guidance banner in loading state */}
+                      <div className="glass-panel py-3.5 px-6 rounded-2xl border-white/5 bg-white/[0.02] flex items-center justify-between gap-4 flex-wrap w-full">
+                        <div className="flex items-center gap-2.5 text-xs md:text-sm font-semibold text-on-surface-variant/60">
+                          <span className="material-symbols-outlined text-amber-500/80 text-lg animate-spin">sync</span>
+                          <span>AI 正在为您生成专属顾问建议，请稍候...</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                const focusAreas = advisorInsights?.focus_areas || [];
+                const interviewTrends = advisorInsights?.interview_trends || [];
+                const recommendedActions = advisorInsights?.recommended_actions || [];
+                const careerSuggestions = advisorInsights?.career_suggestions || [];
+
+                return (
+                  <div className="flex flex-col gap-6 w-full relative z-10">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                      
+                      {/* Card 1: 本周重点提升 */}
+                      <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-primary/20 hover:scale-[1.01] transition-all duration-300">
+                        <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
+                          <div className="w-8 h-8 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20 shrink-0">
+                            <span className="material-symbols-outlined text-base text-primary animate-pulse">rocket_launch</span>
+                          </div>
+                          <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">本周重点提升</span>
+                        </div>
+                        <div className="space-y-2 mt-1">
+                          {focusAreas.map((text, i) => (
+                            <div 
+                              key={i} 
+                              onClick={() => askAdvisor(getPrompt(text, "focus_areas"))}
+                              className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] hover:bg-white/[0.03] active:scale-[0.98] border border-white/5 hover:border-primary/25 hover:text-primary transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left cursor-pointer select-none group"
+                            >
+                              <span className="material-symbols-outlined text-xs text-primary shrink-0 transition-transform group-hover:translate-x-0.5">arrow_right_alt</span>
+                              <span className="leading-snug">{text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Card 2: 近期面试趋势 */}
+                      <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-secondary/20 hover:scale-[1.01] transition-all duration-300">
+                        <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
+                          <div className="w-8 h-8 rounded-xl bg-secondary/10 flex items-center justify-center border border-secondary/20 shrink-0">
+                            <span className="material-symbols-outlined text-base text-secondary animate-pulse">trending_up</span>
+                          </div>
+                          <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">近期面试趋势</span>
+                        </div>
+                        <div className="space-y-2 mt-1">
+                          {interviewTrends.map((text, i) => (
+                            <div 
+                              key={i} 
+                              onClick={() => askAdvisor(getPrompt(text, "interview_trends"))}
+                              className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] hover:bg-white/[0.03] active:scale-[0.98] border border-white/5 hover:border-secondary/25 hover:text-secondary transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left cursor-pointer select-none group"
+                            >
+                              <span className="material-symbols-outlined text-xs text-secondary shrink-0 transition-transform group-hover:scale-110">insights</span>
+                              <span className="leading-snug">{text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Card 3: 推荐行动 */}
+                      <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-amber-500/20 hover:scale-[1.01] transition-all duration-300">
+                        <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
+                          <div className="w-8 h-8 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20 shrink-0">
+                            <span className="material-symbols-outlined text-base text-amber-500 animate-pulse">task_alt</span>
+                          </div>
+                          <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">推荐行动</span>
+                        </div>
+                        <div className="space-y-2 mt-1">
+                          {recommendedActions.map((text, i) => (
+                            <div 
+                              key={i} 
+                              onClick={() => askAdvisor(getPrompt(text, "recommended_actions"))}
+                              className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] hover:bg-white/[0.03] active:scale-[0.98] border border-white/5 hover:border-amber-500/25 hover:text-amber-500 transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left cursor-pointer select-none group"
+                            >
+                              <span className="material-symbols-outlined text-xs text-amber-500 shrink-0 transition-transform group-hover:rotate-12">play_circle</span>
+                              <span className="leading-snug">{text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Card 4: 职业发展建议 */}
+                      <div className="glass-panel p-5.5 rounded-2xl border-white/10 flex flex-col gap-3 hover:border-tertiary/20 hover:scale-[1.01] transition-all duration-300">
+                        <div className="flex items-center gap-2.5 pb-2.5 border-b border-white/5">
+                          <div className="w-8 h-8 rounded-xl bg-tertiary/10 flex items-center justify-center border border-tertiary/20 shrink-0">
+                            <span className="material-symbols-outlined text-base text-tertiary animate-pulse">military_tech</span>
+                          </div>
+                          <span className="text-sm font-black text-white font-label-mono uppercase tracking-wider block">职业发展建议</span>
+                        </div>
+                        <div className="space-y-2 mt-1">
+                          {careerSuggestions.map((text, i) => (
+                            <div 
+                              key={i} 
+                              onClick={() => askAdvisor(getPrompt(text, "career_suggestions"))}
+                              className="flex items-center gap-3 py-2.5 px-3.5 rounded-xl bg-white/[0.01] hover:bg-white/[0.03] active:scale-[0.98] border border-white/5 hover:border-tertiary/25 hover:text-tertiary transition-all text-xs md:text-sm font-black text-on-surface-variant/90 text-left cursor-pointer select-none group"
+                            >
+                              <span className="material-symbols-outlined text-xs text-tertiary shrink-0 transition-transform group-hover:scale-110">explore</span>
+                              <span className="leading-snug">{text}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Fallback Guidance Banner */}
+                    {(advisorInsights === null || advisorInsights.is_customized === false) && (
+                      <div className="glass-panel py-3.5 px-6 rounded-2xl border-white/5 bg-white/[0.02] flex items-center justify-between gap-4 flex-wrap w-full animate-fade-in">
+                        <div className="flex items-center gap-2.5 text-xs md:text-sm font-semibold text-on-surface-variant/80">
+                          <span className="material-symbols-outlined text-amber-500 text-lg animate-pulse">lightbulb</span>
+                          <span>
+                            当前展示为【<span className="text-white font-bold">{advisorInsights?.target_role || (auth.user && auth.user.targetRole) || "高级工程师"}</span>】行业通用基准建议。只需{" "}
+                            <button 
+                              onClick={() => router.push("/debugger")} 
+                              className="text-primary hover:underline font-extrabold bg-transparent border-none p-0 cursor-pointer inline-block"
+                            >
+                              进行 1 次面试分析或简历分析
+                            </button>{" "}
+                            或{" "}
+                            <button 
+                              onClick={() => router.push("/training")} 
+                              className="text-primary hover:underline font-extrabold bg-transparent border-none p-0 cursor-pointer inline-block"
+                            >
+                              完成 1 次模拟面试
+                            </button>
+                            ，即可解锁 AI 定制化专属建议！
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 

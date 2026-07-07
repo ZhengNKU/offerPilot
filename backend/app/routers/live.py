@@ -665,6 +665,13 @@ async def _run_analysis_for_live(
             
             await db.commit()
             
+            # 异步触发 AI 职业顾问定制建议建议更新
+            if live_sess.user_id:
+                from app.services.advisor_generator import trigger_custom_advisor_insights
+                asyncio.create_task(
+                    trigger_custom_advisor_insights(live_sess.user_id)
+                )
+            
         logger.info(f"[live] analysis complete for live_id={live_id}")
     except Exception as e:
         logger.exception(f"[live] _run_analysis_for_live 失败 live_id={live_id}: {e}")

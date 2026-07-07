@@ -68,13 +68,22 @@ class InterviewSession(Base):
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
     audio_url: Mapped[str] = mapped_column(String, nullable=False)
     duration: Mapped[int] = mapped_column(Integer, default=0)
     file_size: Mapped[int] = mapped_column(BigInteger, default=0)
     status: Mapped[str] = mapped_column(String(50), default="uploaded") # uploaded, processing, completed, failed
     job_description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    
+
+    # ── 面试元数据（用户在 debugger / debugger/record 表单上填的）
+    # 公司 / 岗位 / 轮次 / 面试日期 / 级别 / 薪资
+    # 老数据没有这些列，回退到 title 字符串拼接；详见 routers/memory.py
+    company: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    role: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    round: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    date: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    grade: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    salary: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
     # Aggregated report score fields
     ipi_score: Mapped[int] = mapped_column(Integer, default=0)
     offer_probability: Mapped[int] = mapped_column(Integer, default=0)
@@ -565,3 +574,23 @@ class CounselorMessage(Base):
     session: Mapped["CounselorSession"] = relationship(
         "CounselorSession", back_populates="messages"
     )
+
+
+class UserAdvisorInsight(Base):
+    """
+    用户AI顾问意见缓存表（总览面板四栏建议）。
+    """
+    __tablename__ = "user_advisor_insights"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True, index=True
+    )
+    
+    # 结构化存储 4 个维度的建议: {focus_areas: [], interview_trends: [], recommended_actions: [], career_suggestions: [], is_customized: bool}
+    insights: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
+    
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

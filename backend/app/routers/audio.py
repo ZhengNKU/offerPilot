@@ -7,7 +7,6 @@ from pydantic import BaseModel
 import uuid
 import asyncio
 import time
-from datetime import datetime
 import logging
 
 from app import models, database
@@ -26,10 +25,16 @@ class AnalyzeRequest(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     file_url: str
-    title: Optional[str] = None
     file_id: Optional[int] = None
     file_size: Optional[int] = 0
     job_description: Optional[str] = None
+    # 用户在 debugger 落地页填的元数据（与 record 模式统一）
+    company: Optional[str] = None
+    role: Optional[str] = None
+    round: Optional[str] = None
+    date: Optional[str] = None
+    grade: Optional[str] = None
+    salary: Optional[str] = None
 
 @router.get("/check_limit")
 async def check_limit(
@@ -75,31 +80,34 @@ async def create_session(
                 detail="免费用户仅有一次体验机会，请升级至 PRO 会员解锁更多分析！"
             )
 
-    session_title = req.title or f"{datetime.now().strftime('%Y-%m-%d %H:%M')} 面试录音分析"
     session = models.InterviewSession(
         user_id=current_user.id if current_user else None,
-        title=session_title,
         audio_url=req.file_url,
         duration=0,
         file_size=req.file_size or 0,
         status="uploaded",
-        job_description=req.job_description
+        job_description=req.job_description,
+        # 结构化元数据(独立列)
+        company=req.company,
+        role=req.role,
+        round=req.round,
+        date=req.date,
+        grade=req.grade,
+        salary=req.salary,
     )
     db.add(session)
     await db.commit()
     await db.refresh(session)
     return {
         "session_id": session.id,
-        "title": session.title,
         "audio_url": session.audio_url,
-        "status": session.status
+        "status": session.status,
     }
 
 
 class CreateRecordSessionRequest(BaseModel):
     session_id: Optional[int] = None
     paste_text: str
-    title: Optional[str] = None
     company: Optional[str] = None
     role: Optional[str] = None
     round: Optional[str] = None
@@ -180,7 +188,6 @@ async def create_record_session(
         session = result.scalars().first()
         if session:
             # Update fields of the existing session
-            session.title = req.title or session.title
             session.company = req.company or session.company
             session.role = req.role or session.role
             session.round = req.round or session.round
@@ -240,15 +247,20 @@ async def create_record_session(
                     detail="免费用户仅有一次体验机会，请升级至 PRO 会员解锁更多分析！"
                 )
 
-        session_title = req.title or f"{datetime.now().strftime('%Y-%m-%d %H:%M')} 面试记录分析"
         session = models.InterviewSession(
             user_id=current_user.id if current_user else None,
-            title=session_title,
             audio_url="text_mode",
             duration=0,
             file_size=len(req.paste_text.encode('utf-8')),
             status="uploaded",
-            job_description=req.job_description
+            job_description=req.job_description,
+            # 结构化元数据(独立列)
+            company=req.company,
+            role=req.role,
+            round=req.round,
+            date=req.date,
+            grade=req.grade,
+            salary=req.salary,
         )
         db.add(session)
         await db.commit()
@@ -265,7 +277,6 @@ async def create_record_session(
 
     return {
         "session_id": session.id,
-        "title": session.title,
         "status": session.status
     }
 
@@ -785,13 +796,19 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
     _set_progress(100, "completed")
     logger.info(f"[task={task_id}] Analysis complete for session {session_id}")
 
+    # 异步触发 AI 职业顾问定制建议建议更新
+    if session.user_id:
+        from app.services.advisor_generator import trigger_custom_advisor_insights
+        asyncio.create_task(
+            trigger_custom_advisor_insights(session.user_id)
+        )
+
 
 
 
 @router.post("/upload")
 async def upload_audio(
     file: UploadFile = File(...),
-    title: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):
@@ -812,25 +829,21 @@ async def upload_audio(
             detail="上传失败，录音仅支持 WAV 或 MP3 格式"
         )
 
-    session_title = title or f"{datetime.now().strftime('%Y-%m-%d %H:%M')} 面试录音分析"
-    
     # Save the session with optional user association
     session = models.InterviewSession(
         user_id=current_user.id if current_user else None,
-        title=session_title,
         audio_url=f"http://localhost:8000/static/uploads/{uuid.uuid4()}_{file.filename}",
         duration=1822, # Simulated 30 mins
         file_size=file.size or 0,
         status="uploaded"
     )
-    
+
     db.add(session)
     await db.commit()
     await db.refresh(session)
-    
+
     return {
         "session_id": session.id,
-        "title": session.title,
         "audio_url": session.audio_url,
         "status": session.status,
         "duration": session.duration
@@ -1060,11 +1073,17 @@ async def get_session_report(id: int, db: AsyncSession = Depends(get_db)):
 
     return {
         "session_id": session.id,
-        "title": session.title,
         "audio_url": fresh_audio_url,
         "duration": session.duration,
         "status": session.status,
         "job_description": session.job_description,
+        "company": session.company or "",
+        "role": session.role or "",
+        "round": session.round or "",
+        "date": session.date or "",
+        "display_title": " · ".join(
+            x for x in [session.company, session.role, session.round] if x
+        ) or "未命名面试分析",
         "scores": {
             "ipi": ipi,
             "offer_probability": offer_prob,
@@ -1203,12 +1222,18 @@ async def list_sessions(
     return [
         {
             "id": s.id,
-            "title": s.title,
             "audio_url": s.audio_url,
             "duration": s.duration,
             "status": s.status,
             "ipi_score": s.ipi_score,
             "offer_probability": s.offer_probability,
+            "company": s.company or "",
+            "role": s.role or "",
+            "round": s.round or "",
+            "date": s.date or "",
+            "display_title": " · ".join(
+                x for x in [s.company, s.role, s.round] if x
+            ) or "未命名面试分析",
             "executive_summary": s.executive_summary or "",
             "created_at": s.created_at.isoformat() if s.created_at else None
         }

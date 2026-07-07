@@ -80,6 +80,13 @@ function InterviewTrainingPageContent() {
   // JD 字符上限：与面试调试器统一为 600 字（避免过长 JD 引发表单性能问题）
   const JD_MAX_LENGTH = 600;
 
+  // 同步用户资料中的目标岗位默认值
+  useEffect(() => {
+    if (auth.user?.targetRole) {
+      setTargetRole(auth.user.targetRole);
+    }
+  }, [auth.user?.targetRole]);
+
   // ---------- Live 状态 ----------
   const [liveSession, setLiveSession] = useState<LiveSession | null>(null);
   const [bootState, setBootState] = useState<"idle" | "loading" | "live" | "ending" | "analyzing" | "error" | "report">("idle");
@@ -176,11 +183,14 @@ function InterviewTrainingPageContent() {
 
     if (!liveId) {
       setBootState("idle");
+      const urlTargetRole = params.get("targetRole");
+      if (urlTargetRole) {
+        setTargetRole(urlTargetRole);
+      }
       const savedConfig = typeof window !== "undefined" ? localStorage.getItem("interviewVar_live_config") : null;
       if (savedConfig) {
         try {
           const cfg = JSON.parse(savedConfig);
-          if (cfg.targetRole) setTargetRole(cfg.targetRole);
           if (cfg.jobDescription) setJobDescription(cfg.jobDescription);
           if (cfg.interviewType) setInterviewType(cfg.interviewType);
           if (cfg.difficulty) setDifficulty(cfg.difficulty);

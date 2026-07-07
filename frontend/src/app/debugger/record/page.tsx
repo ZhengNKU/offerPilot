@@ -348,15 +348,15 @@ export default function InterviewRecordAnalysisPage() {
               jobDescription: report.job_description
             }));
           }
-          if (report.title) {
-            const parts = report.title.split(" · ");
-            if (parts.length >= 2) {
-              setMetadataForm(prev => ({
-                ...prev,
-                company: parts[0] || prev.company,
-                role: parts[1] || prev.role
-              }));
-            }
+          // 直接用后端结构化字段，不再解析 title
+          if (report.company || report.role || report.round || report.date) {
+            setMetadataForm(prev => ({
+              ...prev,
+              company: report.company || prev.company,
+              role:    report.role    || prev.role,
+              round:   report.round   || prev.round,
+              date:    report.date    || prev.date,
+            }));
           }
 
           const rawTranscript = report.transcript ?? [];
@@ -644,7 +644,7 @@ export default function InterviewRecordAnalysisPage() {
     const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
     if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
-    const sessionTitle = `${metadataForm.company || "面试记录"} · ${metadataForm.role || "岗位"} · ${metadataForm.date}`;
+    // title 仅为后端展示用，不参与结构化数据传递（结构化字段走独立列）
 
     try {
       // Step 1: Create InterviewSession from the pasted text
@@ -653,7 +653,6 @@ export default function InterviewRecordAnalysisPage() {
         headers: authHeaders,
         body: JSON.stringify({
           paste_text: pasteText,
-          title: sessionTitle,
           company: metadataForm.company,
           role: metadataForm.role,
           round: metadataForm.round,
@@ -1059,36 +1058,36 @@ export default function InterviewRecordAnalysisPage() {
                   <div className="flex justify-between items-center">
                     <span>是否在职</span>
                     <span className="px-2 py-0.5 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/20 text-xs font-extrabold">
-                      {metadataForm.isOnJob}
+                      {metadataForm.isOnJob || "—"}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>工作年限</span>
-                    <span className="text-white font-extrabold">{metadataForm.years}</span>
+                    <span className="text-white font-extrabold">{metadataForm.years || "—"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>面试公司</span>
-                    <span className="text-white font-extrabold">{metadataForm.company}</span>
+                    <span className="text-white font-extrabold">{metadataForm.company || "—"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>面试岗位</span>
-                    <span className="text-white font-extrabold">{metadataForm.role}</span>
+                    <span className="text-white font-extrabold">{metadataForm.role || "—"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>面试轮次</span>
-                    <span className="text-white font-extrabold">{metadataForm.round}</span>
+                    <span className="text-white font-extrabold">{metadataForm.round || "—"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>面试时间</span>
-                    <span className="text-white font-extrabold">{metadataForm.date}</span>
+                    <span className="text-white font-extrabold">{metadataForm.date || "—"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>岗位职级</span>
-                    <span className="text-white font-extrabold">{metadataForm.grade}</span>
+                    <span className="text-white font-extrabold">{metadataForm.grade || "—"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>期望薪资</span>
-                    <span className="text-white font-extrabold">{metadataForm.salary}</span>
+                    <span className="text-white font-extrabold">{metadataForm.salary || "—"}</span>
                   </div>
                 </div>
               </div>

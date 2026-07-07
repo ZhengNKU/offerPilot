@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
@@ -411,3 +411,88 @@ async def delete_session(
     await db.delete(sess)
     await db.commit()
     return {"message": "删除成功"}
+
+
+# ============================================================================
+# GET /advisor-insights - 获取 AI 顾问专属意见与冷启动基准
+# ============================================================================
+
+DEFAULT_BENCHMARK = {
+    "focus_areas": [
+        "架构表达框架建立",
+        "项目指标定量细化",
+        "系统设计 trade-off 表达"
+    ],
+    "interview_trends": [
+        "系统设计出现频率上升 23%",
+        "分布式相关问题增加明显",
+        "面试官更关注工程落地细节"
+    ],
+    "recommended_actions": [
+        "完成 3 次真题模拟面试",
+        "优化 2 个核心项目描述",
+        "补充架构师深度表达训练"
+    ],
+    "career_suggestions": [
+        "建议向 Staff Engineer 方向准备",
+        "提升技术影响力和领导力表达",
+        "密切关注一线大厂架构能力变化"
+    ],
+    "is_customized": False
+}
+
+@router.get("/advisor-insights")
+async def get_advisor_insights(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    """
+    获取当前用户的 AI 顾问意见建议（总览看板）。
+    如果不存在任何数据，则写入 generating 状态并异步触发行业通用建议生成。
+    """
+    stmt = select(models.UserAdvisorInsight).where(models.UserAdvisorInsight.user_id == current_user.id)
+    result = await db.execute(stmt)
+    insight = result.scalars().first()
+
+    # 已存在有效数据：直接返回
+    if insight and not (
+        isinstance(insight.insights, dict)
+        and insight.insights.get("status") == "generating"
+    ):
+        return {
+            **insight.insights,
+            "updated_at": insight.updated_at.isoformat() if insight.updated_at else None
+        }
+
+    # 获取用户求职目标岗位
+    profile_stmt = select(models.UserProfile).where(models.UserProfile.user_id == current_user.id)
+    profile_result = await db.execute(profile_stmt)
+    profile = profile_result.scalars().first()
+    target_role = (profile.target_role if profile else None) or "高级工程师"
+
+    # 自愈：写入 / 覆盖 generating 记录并触发后台异步生成任务
+    generating_insights = {"status": "generating", "target_role": target_role, "is_customized": False}
+    if insight:
+        insight.insights = generating_insights
+    else:
+        insight = models.UserAdvisorInsight(
+            user_id=current_user.id,
+            insights=generating_insights
+        )
+        db.add(insight)
+    await db.commit()
+
+    from app.services.advisor_generator import trigger_general_advisor_insights
+    background_tasks.add_task(
+        trigger_general_advisor_insights,
+        current_user.id,
+        target_role,
+    )
+
+    return {
+        "status": "generating",
+        "target_role": target_role,
+        "is_customized": False,
+        "updated_at": None
+    }

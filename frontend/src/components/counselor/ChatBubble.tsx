@@ -18,6 +18,28 @@ interface Props {
   } | null;
 }
 
+export function cleanCitations(text: string): string {
+  let cleaned = text;
+  
+  // 1. 移除被括号包裹的引用，如 ([cite:xxx]) 或 （[cite:xxx]）
+  cleaned = cleaned.replace(/\(\[cite:[^\]]+\]\)/g, "");
+  cleaned = cleaned.replace(/（\[cite:[^\]]+\]）/g, "");
+  
+  // 2. 移除单独一行或以列表形式出现的引用，如 - [cite:xxx] 或 ● [cite:xxx] 或 * [cite:xxx]
+  cleaned = cleaned.replace(/(?:^|\n)\s*[-*•●]\s*\[cite:[^\]]+\]\s*(?=\n|$)/g, "");
+  
+  // 3. 移除普通位置的引用
+  cleaned = cleaned.replace(/\[cite:[^\]]+\]/g, "");
+  
+  // 4. 清理连续的换行，避免移除行后留下多余的空行
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+  
+  // 5. 移除换行后面的逗号等标点，将其拉至前一行末尾
+  cleaned = cleaned.replace(/\n\s*([，,。；;、？?！!])/g, "$1");
+  
+  return cleaned;
+}
+
 // 简易 markdown：把 ###、**、换行等渲染出来
 function renderMarkdown(text: string, citations: Citation[]): React.ReactNode {
   // 先按 [cite:TYPE#ID#CHUNK] 拆段
@@ -88,7 +110,28 @@ function renderBasicMd(text: string, key: number): React.ReactNode {
     }
 
     // Check for headers
-    if (trimmed.startsWith("### ")) {
+    if (trimmed.startsWith("###### ")) {
+      flushList();
+      elements.push(
+        <h6 key={keyIdx++} className="text-xs font-bold text-on-surface mt-3 mb-1">
+          {renderInline(trimmed.slice(7))}
+        </h6>
+      );
+    } else if (trimmed.startsWith("##### ")) {
+      flushList();
+      elements.push(
+        <h5 key={keyIdx++} className="text-xs font-bold text-on-surface mt-3 mb-1">
+          {renderInline(trimmed.slice(6))}
+        </h5>
+      );
+    } else if (trimmed.startsWith("#### ")) {
+      flushList();
+      elements.push(
+        <h4 key={keyIdx++} className="text-sm font-bold text-on-surface mt-3.5 mb-1.5">
+          {renderInline(trimmed.slice(5))}
+        </h4>
+      );
+    } else if (trimmed.startsWith("### ")) {
       flushList();
       elements.push(
         <h3 key={keyIdx++} className="text-base font-bold text-on-surface mt-4 mb-2">
@@ -337,7 +380,7 @@ export default function ChatBubble({
               </div>
             ) : (
               <>
-                {renderMarkdown(actual, citations)}
+                {renderMarkdown(cleanCitations(actual), citations)}
                 {streaming && (
                   <span className="inline-block w-1.5 h-3.5 bg-primary ml-0.5 align-middle animate-pulse" />
                 )}
@@ -346,42 +389,7 @@ export default function ChatBubble({
           </div>
         </div>
 
-        {/* 上下文调试面板 */}
-        {(contextSummary || recalledChunks.length > 0) && (
-          <div className="mt-2 pl-1 select-none">
-            <button
-              onClick={() => setShowContext((s) => !s)}
-              className="text-xs text-on-surface-variant/50 hover:text-on-surface-variant font-label-mono uppercase tracking-widest cursor-pointer transition-colors"
-            >
-              {showContext ? "▴" : "▾"} 上下文 ({recalledChunks.length} 条引用)
-            </button>
-            {showContext && contextSummary && (
-              <div className="mt-1.5 px-3 py-2 bg-surface-container-low/40 border border-white/5 rounded-xl text-xs text-on-surface-variant space-y-1">
-                <div>· 项目记忆：{contextSummary.project_memories_shown}/{contextSummary.project_memories_count}</div>
-                <div>· 历史消息：{contextSummary.history_messages_count} 条{contextSummary.has_summary ? "（已压缩）" : ""}</div>
-              </div>
-            )}
-            {showContext && recalledChunks.length > 0 && (
-              <div className="mt-1.5 space-y-1.5">
-                {recalledChunks.map((c, i) => (
-                  <div
-                    key={i}
-                    className="px-3 py-2 bg-surface-container-low/40 border border-white/5 rounded-xl text-xs"
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-on-surface font-semibold">
-                        [{c.source_type}#{c.source_id}#{c.chunk_index}] {c.chunk_title}
-                      </span>
-                      <span className="text-tertiary font-label-mono">
-                        sim={c.similarity.toFixed(2)}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+
       </div>
     </div>
   );

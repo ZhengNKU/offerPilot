@@ -74,7 +74,10 @@ async def reindex_user(user_id: int, source_types: list[str], dry_run: bool) -> 
                 stats["interview_summary"] += 1
                 continue
             try:
-                chunks = chunk_interview_summary(sess.analysis_result, sess.title or f"面试{sess.id}")
+                chunks = chunk_interview_summary(
+                    sess.analysis_result,
+                    " · ".join(x for x in [sess.company, sess.role, sess.round] if x) or f"面试{sess.id}",
+                )
                 n = await _upsert_chunks(user_id, "interview_summary", sess.id, chunks)
                 stats["interview_summary"] += n
             except Exception as e:

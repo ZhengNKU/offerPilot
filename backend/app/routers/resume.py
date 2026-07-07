@@ -172,6 +172,13 @@ async def analyze_resume(
             "user_id": current_user.id,
             "resume_analysis_id": record.id,
         })
+        
+        # 异步触发 AI 职业顾问定制建议建议更新
+        from app.services.advisor_generator import trigger_custom_advisor_insights
+        import asyncio
+        asyncio.create_task(
+            trigger_custom_advisor_insights(current_user.id)
+        )
 
     return {
         "id": record.id,

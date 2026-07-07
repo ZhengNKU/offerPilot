@@ -443,7 +443,8 @@ async def _prepare_chunks_for_payload(payload: dict) -> Optional[tuple]:
                 sess = await db.get(models.InterviewSession, session_id)
                 if not sess or not sess.analysis_result:
                     return None
-                chunks = chunk_interview_summary(sess.analysis_result, sess.title or f"面试{session_id}")
+                title = " · ".join(x for x in [sess.company, sess.role, sess.round] if x) or f"面试{session_id}"
+                chunks = chunk_interview_summary(sess.analysis_result, title)
             return (user_id, "interview_summary", session_id, chunks) if chunks else None
 
         if kind == "resume_analysis":
@@ -625,7 +626,8 @@ async def _index_interview_summary(payload: dict) -> None:
         sess = await db.get(models.InterviewSession, session_id)
         if not sess or not sess.analysis_result:
             return
-        chunks = chunk_interview_summary(sess.analysis_result, sess.title or f"面试{session_id}")
+        title = " · ".join(x for x in [sess.company, sess.role, sess.round] if x) or f"面试{session_id}"
+        chunks = chunk_interview_summary(sess.analysis_result, title)
     if chunks:
         await _upsert_chunks(user_id, "interview_summary", session_id, chunks)
 

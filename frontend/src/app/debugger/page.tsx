@@ -359,7 +359,7 @@ function NewAnalysisDebuggerContent() {
       if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
       const audioUrl = localStorage.getItem("interviewVar_session_audio_url") || "";
-      const sessionTitle = `${audioForm.company || "面试"} · ${audioForm.role || "岗位"} · ${audioForm.date || getTodayString()}`;
+      // title 仅为后端展示，不参与结构化数据传递（结构化字段走独立列）
 
       try {
         // Step 1: Create InterviewSession from the already-uploaded COS file
@@ -368,10 +368,16 @@ function NewAnalysisDebuggerContent() {
           headers: authHeaders,
           body: JSON.stringify({
             file_url: audioUrl,
-            title: sessionTitle,
             file_id: uploadedFileId,
             file_size: selectedFile?.size || 0,
-            job_description: audioForm.jobDescription
+            job_description: audioForm.jobDescription,
+            // 结构化元数据走独立字段，title 字段不参与
+            company: audioForm.company,
+            role: audioForm.role,
+            round: audioForm.round,
+            date: audioForm.date,
+            grade: audioForm.grade,
+            salary: audioForm.salary,
           })
         });
         if (!sessionRes.ok) {
@@ -433,7 +439,7 @@ function NewAnalysisDebuggerContent() {
       const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
       if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
-      const sessionTitle = `${audioForm.company || "面试记录"} · ${audioForm.role || "岗位"} · ${audioForm.date || getTodayString()}`;
+      // title 仅为后端展示，不参与结构化数据传递
 
       try {
         setTaskStep("正在创建分析会话...");
@@ -444,7 +450,6 @@ function NewAnalysisDebuggerContent() {
           headers: authHeaders,
           body: JSON.stringify({
             paste_text: pasteText,
-            title: sessionTitle,
             company: audioForm.company,
             role: audioForm.role,
             round: audioForm.round,

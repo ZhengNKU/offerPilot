@@ -530,12 +530,20 @@ async def get_growth_curve(
             continue
         # 判断类型：audio_url == "text_mode" 为文本记录模式
         session_type = "text" if s.audio_url == "text_mode" else "audio"
+        # 直接读结构化列；display_title 由后端拼接给前端历史列表展示用
+        display_title = " · ".join(
+            x for x in [s.company, s.role, s.round] if x
+        ) or "未命名面试分析"
         points.append({
             "session_id": s.id,
-            "session_title": s.title or "",
+            "session_title": display_title,
             "type": session_type,
             "analysis_time": s.created_at.isoformat() if s.created_at else None,
             "scores": scores,
+            "company": s.company or "",
+            "role": s.role or "",
+            "round": s.round or "",
+            "date": s.date or "",
         })
 
     # 按 analysis_time 升序（已由 SQL 保证），分配 analysis_index
@@ -584,16 +592,10 @@ async def get_timeline(
         .order_by(models.InterviewSession.created_at.desc())
     )
     for s in audio_result.scalars().all():
-        # 解析 title 提取 company/role/round
-        if s.title and " · " in s.title:
-            parts = s.title.split(" · ")
-            company = parts[0] if len(parts) >= 1 else s.title
-            role = parts[1] if len(parts) >= 2 else "录音分析"
-            round_label = parts[2] if len(parts) >= 3 else "技术面试"
-        else:
-            company = s.title or "语音面试"
-            role = "录音分析"
-            round_label = "技术面试"
+        # 直接读结构化列，title 不参与数据解析
+        company = s.company or ""
+        role = s.role or ("面试记录" if s.audio_url == "text_mode" else "录音分析")
+        round_label = s.round or ""
 
         grade = "待提升候选人"
         if s.ipi_score >= 80:
@@ -604,12 +606,13 @@ async def get_timeline(
         items.append({
             "id": str(s.id),
             "type": "text" if s.audio_url == "text_mode" else "audio",
-            "title": s.title or "未命名面试分析",
+            "title": " · ".join(x for x in [company, role, round_label] if x) or "未命名面试分析",
             "score": s.ipi_score or 0,
             "grade": grade,
             "company": company,
             "role": role,
             "round": round_label,
+            "date": s.date or (s.created_at.date().isoformat() if s.created_at else None),
             "details": s.executive_summary or "",
             "created_at": s.created_at.isoformat() if s.created_at else None,
         })

@@ -1,7 +1,7 @@
 import random
 from datetime import timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -228,6 +228,7 @@ async def register_step1(
 @router.post("/register/complete", response_model=schemas.TokenResponse)
 async def register_complete(
     req: schemas.RegisterCompleteRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
@@ -328,6 +329,24 @@ async def register_complete(
     
     # Generate token
     token = create_access_token(data={"sub": str(new_user.id)})
+
+    # 异步为新注册用户生成基于目标岗位的行业基准建议
+    if new_profile and new_profile.target_role:
+        generating_insights = {"status": "generating", "target_role": new_profile.target_role, "is_customized": False}
+        insight = models.UserAdvisorInsight(
+            user_id=new_user.id,
+            insights=generating_insights
+        )
+        db.add(insight)
+        await db.commit()
+
+        from app.services.advisor_generator import trigger_general_advisor_insights
+        background_tasks.add_task(
+            trigger_general_advisor_insights,
+            new_user.id,
+            new_profile.target_role,
+        )
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -548,6 +567,7 @@ async def get_match_rate(
 @router.put("/profile/update", response_model=schemas.UserProfileResponse)
 async def profile_update(
     req: schemas.ProfileUpdateReq,
+    background_tasks: BackgroundTasks,
     current_user: models.User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -599,6 +619,7 @@ async def profile_update(
                 detail="最多只能选择三个目标城市"
             )
         p.target_cities = req.target_cities
+    role_changed = req.target_role is not None and req.target_role != p.target_role
     if req.target_company is not None: p.target_company = req.target_company
     if req.target_role is not None: p.target_role = req.target_role
     if req.target_grade is not None: p.target_grade = req.target_grade
@@ -614,4 +635,28 @@ async def profile_update(
 
     await db.commit()
     await db.refresh(current_user)
+
+    # 如果修改了目标岗位，重置缓存记录状态为 "generating"，并异步更新新的行业通用意见建议
+    if role_changed and p.target_role:
+        stmt = select(models.UserAdvisorInsight).where(models.UserAdvisorInsight.user_id == current_user.id)
+        result = await db.execute(stmt)
+        insight = result.scalars().first()
+        generating_insights = {"status": "generating", "target_role": p.target_role, "is_customized": False}
+        if insight:
+            insight.insights = generating_insights
+        else:
+            insight = models.UserAdvisorInsight(
+                user_id=current_user.id,
+                insights=generating_insights
+            )
+            db.add(insight)
+        await db.commit()
+
+        from app.services.advisor_generator import trigger_general_advisor_insights
+        background_tasks.add_task(
+            trigger_general_advisor_insights,
+            current_user.id,
+            p.target_role,
+        )
+
     return format_user_profile(current_user)
