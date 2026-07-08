@@ -594,3 +594,52 @@ class UserAdvisorInsight(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class KnowledgeCoreAbility(Base):
+    """知识库 — 核心能力板块（每用户 4 个）"""
+    __tablename__ = "knowledge_core_abilities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(32), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    generated_from_role: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    generated_from_years: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    generated_from_grade: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    sub_abilities: Mapped[List["KnowledgeSubAbility"]] = relationship(
+        "KnowledgeSubAbility", back_populates="core_ability",
+        cascade="all, delete-orphan", order_by="KnowledgeSubAbility.sort_order"
+    )
+
+
+class KnowledgeSubAbility(Base):
+    """知识库 — 细化能力子卡片（每核心能力 5 个，每用户共 20 个）"""
+    __tablename__ = "knowledge_sub_abilities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    core_ability_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("knowledge_core_abilities.id", ondelete="CASCADE"),
+        nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(32), nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    question_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    core_ability: Mapped["KnowledgeCoreAbility"] = relationship(
+        "KnowledgeCoreAbility", back_populates="sub_abilities"
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_user_sub_ability_name"),
+    )

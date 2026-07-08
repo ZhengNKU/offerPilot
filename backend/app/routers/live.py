@@ -671,6 +671,21 @@ async def _run_analysis_for_live(
                 asyncio.create_task(
                     trigger_custom_advisor_insights(live_sess.user_id)
                 )
+
+                # 异步匹配面试中的问题到知识库细化能力
+                if llm_result:
+                    questions = []
+                    for qd in (llm_result.get("question_deconstruction") or []):
+                        if isinstance(qd, dict) and qd.get("title"):
+                            questions.append({
+                                "label": qd["title"].strip(),
+                                "desc": qd.get("desc", ""),
+                            })
+                    if questions:
+                        from app.services.knowledge_ability_service import trigger_knowledge_match
+                        asyncio.create_task(
+                            trigger_knowledge_match(live_sess.user_id, questions)
+                        )
             
         logger.info(f"[live] analysis complete for live_id={live_id}")
     except Exception as e:

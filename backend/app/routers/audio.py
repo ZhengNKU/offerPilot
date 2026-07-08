@@ -803,6 +803,22 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             trigger_custom_advisor_insights(session.user_id)
         )
 
+        # 异步匹配面试中的问题到知识库细化能力
+        if llm_result:
+            # 从 question_deconstruction 提取真实的面试问题（不是弱点）
+            questions = []
+            for qd in (llm_result.get("question_deconstruction") or []):
+                if isinstance(qd, dict) and qd.get("title"):
+                    questions.append({
+                        "label": qd["title"].strip(),
+                        "desc": qd.get("desc", ""),
+                    })
+            if questions:
+                from app.services.knowledge_ability_service import trigger_knowledge_match
+                asyncio.create_task(
+                    trigger_knowledge_match(session.user_id, questions)
+                )
+
 
 
 

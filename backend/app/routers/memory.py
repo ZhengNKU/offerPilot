@@ -9,9 +9,10 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 
 from app import models, schemas
 from app.database import get_db
@@ -688,3 +689,156 @@ async def get_timeline(
 
     logger.info(f"[memory] timeline user_id={current_user.id} total={len(items)}")
     return {"items": items}
+
+
+# ── 知识库能力看板 ──────────────────────────────────────────
+
+@router.get("/knowledge/abilities")
+async def get_knowledge_abilities(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
+    """获取当前用户的知识库能力卡片列表。
+
+    返回 4 个核心能力（各含 5 个细化能力）+ 生成快照元数据。
+    未生成时返回空列表。
+    """
+    user = _require_user(current_user)
+
+    core_stmt = (
+        select(models.KnowledgeCoreAbility)
+        .where(models.KnowledgeCoreAbility.user_id == user.id)
+        .order_by(models.KnowledgeCoreAbility.sort_order)
+        .options(selectinload(models.KnowledgeCoreAbility.sub_abilities))
+    )
+    result = await db.execute(core_stmt)
+    cores = result.scalars().all()
+
+    if not cores:
+        return {
+            "abilities": [],
+            "generated_at": None,
+            "from_role": None,
+            "from_years": None,
+            "from_grade": None,
+        }
+
+    abilities = []
+    for ca in cores:
+        abilities.append({
+            "id": ca.id,
+            "name": ca.name,
+            "sort_order": ca.sort_order,
+            "sub_abilities": [
+                {
+                    "id": sa.id,
+                    "name": sa.name,
+                    "sort_order": sa.sort_order,
+                    "question_count": sa.question_count,
+                }
+                for sa in ca.sub_abilities
+            ],
+        })
+
+    first_core = cores[0]
+    return {
+        "abilities": abilities,
+        "generated_at": first_core.created_at.isoformat() if first_core.created_at else None,
+        "from_role": first_core.generated_from_role,
+        "from_years": first_core.generated_from_years,
+        "from_grade": first_core.generated_from_grade,
+    }
+
+
+@router.post("/knowledge/generate")
+async def generate_knowledge_abilities(
+    rematch: bool = Query(False, description="是否回填所有历史面试记录来重新计数"),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+):
+    """触发 LLM 生成/重新生成知识库能力卡片，返回最新数据。
+
+    从 user_profiles 读取目标岗位 / 年限 / 职级。
+    已有数据时会先清除再重新生成。
+
+    - rematch=false（默认）：清空所有计数，生成新能力，后续分析自然累加
+    - rematch=true：生成新能力后扫描所有历史面试记录回填计数
+    """
+    user = _require_user(current_user)
+
+    profile_stmt = select(models.UserProfile).where(
+        models.UserProfile.user_id == user.id
+    )
+    profile_result = await db.execute(profile_stmt)
+    profile = profile_result.scalars().first()
+
+    if not profile or not profile.target_role:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请先在职业驾驶舱设置目标岗位",
+        )
+
+    from app.services.knowledge_ability_service import KnowledgeAbilityService
+
+    await KnowledgeAbilityService.regenerate_for_user(db, user.id, rematch=rematch)
+
+    # 重新查询并返回最新数据
+    core_stmt = (
+        select(models.KnowledgeCoreAbility)
+        .where(models.KnowledgeCoreAbility.user_id == user.id)
+        .order_by(models.KnowledgeCoreAbility.sort_order)
+        .options(selectinload(models.KnowledgeCoreAbility.sub_abilities))
+    )
+    result = await db.execute(core_stmt)
+    cores = result.scalars().all()
+
+    abilities = []
+    for ca in cores:
+        abilities.append({
+            "id": ca.id,
+            "name": ca.name,
+            "sort_order": ca.sort_order,
+            "sub_abilities": [
+                {
+                    "id": sa.id,
+                    "name": sa.name,
+                    "sort_order": sa.sort_order,
+                    "question_count": sa.question_count,
+                }
+                for sa in ca.sub_abilities
+            ],
+        })
+
+    first_core = cores[0] if cores else None
+    return {
+        "abilities": abilities,
+        "generated_at": first_core.created_at.isoformat() if first_core and first_core.created_at else None,
+        "from_role": first_core.generated_from_role if first_core else None,
+        "from_years": first_core.generated_from_years if first_core else None,
+        "from_grade": first_core.generated_from_grade if first_core else None,
+    }
+
+
+@router.post("/knowledge/match-session")
+async def match_knowledge_session(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+):
+    """内部端点：将面试分析中发现的问题匹配到细化能力并递增计数。
+
+    由 audio.py / live.py 分析管道在完成后调用，不对外开放。
+    """
+    user_id = body.get("user_id")
+    session_id = body.get("session_id")
+    issues = body.get("issues", [])
+
+    if not user_id or not issues:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_id and issues are required",
+        )
+
+    from app.services.knowledge_ability_service import KnowledgeAbilityService
+
+    await KnowledgeAbilityService.match_session_issues(db, int(user_id), issues)
+    return {"matched": True, "session_id": session_id, "issues_count": len(issues)}

@@ -347,6 +347,13 @@ async def register_complete(
             new_profile.target_role,
         )
 
+        # 异步生成知识库能力卡片
+        from app.services.knowledge_ability_service import trigger_knowledge_generation
+        background_tasks.add_task(
+            trigger_knowledge_generation,
+            new_user.id,
+        )
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -657,6 +664,13 @@ async def profile_update(
             trigger_general_advisor_insights,
             current_user.id,
             p.target_role,
+        )
+
+        # 目标岗位变更时，异步重新生成知识库能力卡片
+        from app.services.knowledge_ability_service import trigger_knowledge_generation
+        background_tasks.add_task(
+            trigger_knowledge_generation,
+            current_user.id,
         )
 
     return format_user_profile(current_user)

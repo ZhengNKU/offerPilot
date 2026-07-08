@@ -56,6 +56,27 @@ interface ProjectMemoryItem {
   updated_at: string | null;
 }
 
+interface SubAbility {
+  id: number;
+  name: string;
+  sort_order: number;
+  question_count: number;
+}
+
+interface CoreAbility {
+  id: number;
+  name: string;
+  sort_order: number;
+  sub_abilities: SubAbility[];
+}
+
+interface KnowledgeMeta {
+  generated_at: string | null;
+  from_role: string | null;
+  from_years: string | null;
+  from_grade: string | null;
+}
+
 function formatRelativeTime(dateStr: string) {
   try {
     const d = new Date(dateStr);
@@ -647,6 +668,48 @@ export default function CareerMemoryDashboard() {
     setSelectedKnowledge(null);
     setKnowledgeLoading(false);
   }, []);
+
+  // Knowledge Base dynamic data from API
+  const [knowledgeAbilities, setKnowledgeAbilities] = useState<CoreAbility[]>([]);
+  const [knowledgeMeta, setKnowledgeMeta] = useState<KnowledgeMeta>({
+    generated_at: null,
+    from_role: null,
+    from_years: null,
+    from_grade: null,
+  });
+  const [isLoadingAbilities, setIsLoadingAbilities] = useState(false);
+
+  const fetchKnowledgeAbilities = useCallback(async () => {
+    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+    if (!auth.isLoggedIn || !token) return;
+    setIsLoadingAbilities(true);
+    try {
+      const res = await fetch("http://localhost:8001/api/memory/knowledge/abilities", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setKnowledgeAbilities(data.abilities || []);
+        setKnowledgeMeta({
+          generated_at: data.generated_at,
+          from_role: data.from_role,
+          from_years: data.from_years,
+          from_grade: data.from_grade,
+        });
+      }
+    } catch (e) {
+      console.error("fetch knowledge abilities failed:", e);
+    } finally {
+      setIsLoadingAbilities(false);
+    }
+  }, [auth.isLoggedIn]);
+
+  // Knowledge tab visible → fetch
+  useEffect(() => {
+    if (activeTab === "knowledge") {
+      fetchKnowledgeAbilities();
+    }
+  }, [activeTab, fetchKnowledgeAbilities]);
 
   // Project memory state
   const [projects, setProjects] = useState<ProjectMemoryItem[]>([]);
@@ -2019,33 +2082,45 @@ export default function CareerMemoryDashboard() {
                           <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">你专属的面试知识图谱</p>
                         </div>
 
-                        {/* Concept indicators list */}
+                        {/* Concept indicators list — dynamic from knowledge API */}
                         <div className="space-y-3.5">
-                          {[
-                            { name: "Redis", count: 8, pct: 78, color: "from-tertiary/20 to-tertiary/5 border-tertiary/30 text-tertiary" },
-                            { name: "分布式事务", count: 6, pct: 65, color: "from-primary/20 to-primary/5 border-primary/30 text-primary" },
-                            { name: "CAP 理论", count: 5, pct: 82, color: "from-secondary/20 to-secondary/5 border-secondary/30 text-secondary" }
-                          ].map((item, idx) => (
-                            <div key={idx} className="p-3 rounded-2xl bg-gradient-to-r from-white/[0.01] to-transparent border border-white/5 space-y-2">
-                              <div className="flex justify-between items-center">
-                                <span className="flex items-center gap-2 font-black text-sm text-white">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
-                                  {item.name}
-                                </span>
-                                <div className="flex items-center gap-2 text-xs font-bold text-on-surface-variant/50">
-                                  <span>被问 {item.count} 次</span>
-                                  <span className="w-1.5 h-1.5 rounded-full bg-white/10"></span>
-                                  <span>掌握度 <span className="text-white font-black font-label-mono">{item.pct}%</span></span>
+                          {(() => {
+                            const topSubs = knowledgeAbilities
+                              .flatMap((ca) =>
+                                ca.sub_abilities.map((sa) => ({
+                                  name: sa.name,
+                                  count: sa.question_count,
+                                  core: ca.name,
+                                }))
+                              )
+                              .sort((a, b) => b.count - a.count)
+                              .slice(0, 3);
+                            if (topSubs.length === 0) {
+                              return (
+                                <p className="text-xs text-on-surface-variant/40 text-center py-4">
+                                  暂无知识库数据
+                                </p>
+                              );
+                            }
+                            const colors = [
+                              "from-tertiary/20 to-tertiary/5 border-tertiary/30 text-tertiary",
+                              "from-primary/20 to-primary/5 border-primary/30 text-primary",
+                              "from-secondary/20 to-secondary/5 border-secondary/30 text-secondary",
+                            ];
+                            return topSubs.map((item, idx) => (
+                              <div key={idx} className="p-3 rounded-2xl bg-gradient-to-r from-white/[0.01] to-transparent border border-white/5 space-y-2">
+                                <div className="flex justify-between items-center">
+                                  <span className="flex items-center gap-2 font-black text-sm text-white">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                                    {item.name}
+                                  </span>
+                                  <div className="flex items-center gap-2 text-xs font-bold text-on-surface-variant/50">
+                                    <span>被问 {item.count} 次</span>
+                                  </div>
                                 </div>
                               </div>
-                              <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-gradient-to-r from-primary to-secondary rounded-full"
-                                  style={{ width: `${item.pct}%` }}
-                                ></div>
-                              </div>
-                            </div>
-                          ))}
+                            ));
+                          })()}
                         </div>
                       </div>
 
@@ -2697,46 +2772,63 @@ export default function CareerMemoryDashboard() {
                       <span className="material-symbols-outlined text-base text-primary">menu_book</span>
                       职业知识库及专业题谱
                     </h3>
-                    <span className="text-xs text-on-surface-variant/40 font-mono font-bold">4 个核心板块</span>
+                    <span className="text-xs text-on-surface-variant/40 font-mono font-bold">
+                      {knowledgeAbilities.length > 0 ? `${knowledgeAbilities.length} 个核心板块` : ""}
+                    </span>
                   </div>
 
-                  <div className="max-h-[580px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
-                      {[
-                        { cat: "缓存中间件", items: [{ n: "Redis 缓存穿透与击穿", c: 14, m: 85 }, { n: "Redis 分布式锁原理", c: 12, m: 80 }, { n: "AOF 与 RDB 混合持久化", c: 8, m: 92 }] },
-                        { cat: "系统架构与微服务", items: [{ n: "分布式事务 (Saga, TCC)", c: 17, m: 65 }, { n: "CAP 定理与 Base 理论", c: 10, m: 88 }, { n: "服务熔断与哨兵机制", c: 7, m: 75 }] },
-                        { cat: "高并发并发编程", items: [{ n: "线程池调优与阻塞队列", c: 11, m: 90 }, { n: "AQS 框架与重入锁原理", c: 8, m: 82 }, { n: "CAS 无锁自旋与 ABA 问题", c: 6, m: 78 }] },
-                        { cat: "数据库与索引工程", items: [{ n: "MySQL MVCC 多版本并发", c: 15, m: 72 }, { n: "B+ 树索引分裂与回表", c: 9, m: 85 }, { n: "慢查询解析与执行计划优化", c: 6, m: 80 }] }
-                      ].map((section, idx) => (
-                        <div key={idx} className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl space-y-4 text-left">
-                          <span className="text-xs md:text-[13px] font-label-mono text-primary font-bold uppercase tracking-wider block">
-                            {section.cat}
-                          </span>
-                          <div className="space-y-3.5">
-                            {section.items.map((item, i) => (
-                              <div
-                                key={i}
-                                onClick={() => openKnowledgeModal(section.cat, item.n, item.c, item.m)}
-                                className="p-3.5 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-primary/30 hover:bg-white/[0.03] active:scale-[0.985] transition-all duration-200 space-y-2.5 cursor-pointer group"
-                              >
-                                <div className="flex justify-between items-start gap-3">
-                                  <h5 className="text-xs md:text-sm font-black text-white group-hover:text-primary transition-colors leading-relaxed">{item.n}</h5>
-                                  <span className="text-[11px] font-semibold font-label-mono text-on-surface-variant/50 shrink-0">问 {item.c}次</span>
-                                </div>
-                                <div className="flex items-center justify-between text-[11px] font-semibold text-on-surface-variant/70">
-                                  <span>掌握度</span>
-                                  <span className="font-black text-white font-label-mono">{item.m}%</span>
-                                </div>
-                                <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
-                                  <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${item.m}%` }}></div>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))}
+                  {isLoadingAbilities ? (
+                    <div className="flex items-center justify-center py-20">
+                      <img src="/loading.gif" alt="loading" className="w-8 h-8" />
                     </div>
-                  </div>
+                  ) : knowledgeAbilities.length === 0 ? (
+                    <div className="text-center py-16 space-y-3">
+                      <span className="material-symbols-outlined text-4xl text-on-surface-variant/30">auto_stories</span>
+                      <p className="text-on-surface-variant/50 font-semibold">
+                        {auth.user?.targetRole
+                          ? "知识库生成中，请稍后刷新..."
+                          : "请先在职业驾驶舱完善目标岗位信息，以生成专属知识库"}
+                      </p>
+                      {!auth.user?.targetRole && (
+                        <button
+                          onClick={() => router.push("/home")}
+                          className="px-5 py-2 bg-primary/20 text-primary text-sm font-bold rounded-xl cursor-pointer hover:bg-primary/30 transition-colors"
+                        >
+                          前往完善
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="max-h-[580px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
+                        {knowledgeAbilities.map((core) => (
+                          <div key={core.id} className="bg-white/[0.02] border border-white/5 p-5 rounded-2xl space-y-4 text-left">
+                            <span className="text-xs md:text-[13px] font-label-mono text-primary font-bold uppercase tracking-wider block">
+                              {core.name}
+                            </span>
+                            <div className="space-y-3.5">
+                              {core.sub_abilities.map((sub) => (
+                                <div
+                                  key={sub.id}
+                                  onClick={() => openKnowledgeModal(core.name, sub.name, sub.question_count, 0)}
+                                  className="p-3.5 rounded-2xl bg-white/[0.01] border border-white/5 hover:border-primary/30 hover:bg-white/[0.03] active:scale-[0.985] transition-all duration-200 space-y-2.5 cursor-pointer group"
+                                >
+                                  <div className="flex justify-between items-start gap-3">
+                                    <h5 className="text-xs md:text-sm font-black text-white group-hover:text-primary transition-colors leading-relaxed">{sub.name}</h5>
+                                    <span className="text-[11px] font-semibold font-label-mono text-on-surface-variant/50 shrink-0">问 {sub.question_count}次</span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-[11px] font-semibold text-on-surface-variant/70">
+                                    <span>相关问题</span>
+                                    <span className="font-black text-white font-label-mono">{sub.question_count} 次</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3407,13 +3499,6 @@ export default function CareerMemoryDashboard() {
                     <h3 className="text-xl md:text-2xl font-black text-white flex items-center gap-2">
                       {selectedKnowledge.name}
                     </h3>
-                    <div className="flex items-center gap-3">
-                      <span className="text-xs font-semibold text-on-surface-variant/70">掌握度</span>
-                      <span className="text-xs font-black text-white font-label-mono">{selectedKnowledge.m}%</span>
-                      <div className="w-32 h-1.5 bg-white/5 rounded-full overflow-hidden">
-                        <div className="h-full bg-primary rounded-full" style={{ width: `${selectedKnowledge.m}%` }}></div>
-                      </div>
-                    </div>
                   </div>
                 </div>
 
