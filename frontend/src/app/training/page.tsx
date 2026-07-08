@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { useRealtimeSession } from "@/app/utils/useRealtimeSession";
 import { useRealtimeAudio } from "./hooks/useRealtimeAudio";
+import { API_BASE } from "@/lib/api";
 
 // ============================================================
 // 实时语音面试（PR5）
@@ -151,7 +152,7 @@ function InterviewTrainingPageContent() {
   const micMutedRef = useRef(micMuted);
   useEffect(() => { micMutedRef.current = micMuted; }, [micMuted]);
 
-  const apiBase = "http://localhost:8001";
+  const apiBase = API_BASE;
   const authHeaders = useCallback((): HeadersInit => {
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
     return token ? { Authorization: `Bearer ${token}` } : {};

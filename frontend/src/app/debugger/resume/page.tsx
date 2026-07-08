@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { API_BASE } from "@/lib/api";
 
 function ResumeAnalysisPageContent() {
   const router = useRouter();
@@ -99,7 +100,7 @@ function ResumeAnalysisPageContent() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(`http://localhost:8001/api/resume/analyses/${id}`, { headers });
+        const res = await fetch(`${API_BASE}/api/resume/analyses/${id}`, { headers });
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.detail || `加载历史报告失败 (${res.status})`);
@@ -148,7 +149,7 @@ function ResumeAnalysisPageContent() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       const res = await fetch(
-        `http://localhost:8001/api/resume/analyses/${analysisId}/download?view=optimized`,
+        `${API_BASE}/api/resume/analyses/${analysisId}/download?view=optimized`,
         { headers }
       );
 

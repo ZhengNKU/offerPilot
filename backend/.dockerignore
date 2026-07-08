@@ -1,0 +1,14 @@
+venv
+venv-*
+.venv
+.venv-*
+__pycache__
+*.pyc
+.git
+.gitignore
+.env
+logs
+uploads
+*.log
+.idea
+.vscode

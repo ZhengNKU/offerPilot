@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
+import { API_BASE } from "@/lib/api";
 
 // =========================================================================
 // INTERFACES & MOCK DATABASE (ALIGNING 100% TO NEW GPT DESIGN SCREENSHOT)
@@ -879,8 +880,8 @@ export default function InterviewVoiceAnalysisPage() {
 
         // Fetch both report and sections
         const [reportRes, sectionsRes] = await Promise.all([
-          fetch(`http://localhost:8001/api/audio/report/${sessionId}`, { headers }),
-          fetch(`http://localhost:8001/api/audio/session/${sessionId}/sections`, { headers })
+          fetch(`${API_BASE}/api/audio/report/${sessionId}`, { headers }),
+          fetch(`${API_BASE}/api/audio/session/${sessionId}/sections`, { headers })
         ]);
 
         if (!reportRes.ok) {
@@ -1296,7 +1297,7 @@ export default function InterviewVoiceAnalysisPage() {
       };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const res = await fetch(`http://localhost:8001/api/audio/section/${sectionId}/optimize`, {
+      const res = await fetch(`${API_BASE}/api/audio/section/${sectionId}/optimize`, {
         method: "POST",
         headers
       });

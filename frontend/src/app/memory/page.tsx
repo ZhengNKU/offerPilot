@@ -15,6 +15,7 @@ import {
   type MessageItem as CounselorMessageItem,
   type CounselorStats as CounselorStatsData,
 } from "@/lib/counselorClient";
+import { API_BASE } from "@/lib/api";
 
 interface SessionHistoryItem {
   id: string;
@@ -736,7 +737,7 @@ export default function CareerMemoryDashboard() {
       };
 
       // 1. Fetch audio sessions
-      const audioRes = await fetch("http://localhost:8001/api/audio/sessions", { headers });
+      const audioRes = await fetch(`${API_BASE}/api/audio/sessions`, { headers });
       let audioItems: any[] = [];
       if (audioRes.status === 401) {
         localStorage.removeItem("interviewVar_token");
@@ -748,7 +749,7 @@ export default function CareerMemoryDashboard() {
       }
 
       // 2. Fetch resume analyses
-      const resumeRes = await fetch("http://localhost:8001/api/resume/analyses", { headers });
+      const resumeRes = await fetch(`${API_BASE}/api/resume/analyses`, { headers });
       let resumeRawItems: any[] = [];
       if (resumeRes.ok) {
         const resumeData = await resumeRes.json();
@@ -756,7 +757,7 @@ export default function CareerMemoryDashboard() {
       }
 
       // 2.5 PR6: Fetch live sessions（模拟面试）
-      const liveRes = await fetch("http://localhost:8001/api/live/sessions-list/history", { headers });
+      const liveRes = await fetch(`${API_BASE}/api/live/sessions-list/history`, { headers });
       let liveRawItems: any[] = [];
       if (liveRes.ok) {
         liveRawItems = await liveRes.json();
@@ -909,7 +910,7 @@ export default function CareerMemoryDashboard() {
     }
     setIsLoadingGrowth(true);
     try {
-      const res = await fetch("http://localhost:8001/api/memory/growth-curve", {
+      const res = await fetch(`${API_BASE}/api/memory/growth-curve`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -958,7 +959,7 @@ export default function CareerMemoryDashboard() {
     }
     setIsLoadingOfferTrend(true);
     try {
-      const res = await fetch("http://localhost:8001/api/live/offer-trend", {
+      const res = await fetch(`${API_BASE}/api/live/offer-trend`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -991,7 +992,7 @@ export default function CareerMemoryDashboard() {
 
       // Fetch projects list (sorted by importance, up to 100)
       const res = await fetch(
-        "http://localhost:8001/api/memory/projects?sort=importance&limit=100&offset=0",
+        `${API_BASE}/api/memory/projects?sort=importance&limit=100&offset=0`,
         { headers }
       );
       if (res.status === 401) {
@@ -1009,7 +1010,7 @@ export default function CareerMemoryDashboard() {
 
       // Fetch tags (no auth required per backend)
       try {
-        const tagsRes = await fetch("http://localhost:8001/api/memory/projects/tags");
+        const tagsRes = await fetch(`${API_BASE}/api/memory/projects/tags`);
         if (tagsRes.ok) {
           const tagsData = await tagsRes.json();
           setProjectCategories([tagsData.categories || [], tagsData.sub_tags || []]);
@@ -1128,7 +1129,7 @@ export default function CareerMemoryDashboard() {
 
       if (deleteTarget && typeof deleteTarget === "string" && deleteTarget.startsWith("project-")) {
         const projId = parseInt(deleteTarget.replace("project-", ""), 10);
-        const res = await fetch(`http://localhost:8001/api/memory/projects/${projId}`, {
+        const res = await fetch(`${API_BASE}/api/memory/projects/${projId}`, {
           method: "DELETE",
           headers
         });
@@ -1161,7 +1162,7 @@ export default function CareerMemoryDashboard() {
 
         // Delete audio sessions in batch
         if (audioSessionIds.length > 0) {
-          const res = await fetch("http://localhost:8001/api/audio/sessions/batch-delete", {
+          const res = await fetch(`${API_BASE}/api/audio/sessions/batch-delete`, {
             method: "POST",
             headers,
             body: JSON.stringify({ session_ids: audioSessionIds })
@@ -1175,7 +1176,7 @@ export default function CareerMemoryDashboard() {
         // Delete resume sessions in parallel
         if (resumeAnalysisIds.length > 0) {
           const deletePromises = resumeAnalysisIds.map(id =>
-            fetch(`http://localhost:8001/api/resume/analyses/${id}`, {
+            fetch(`${API_BASE}/api/resume/analyses/${id}`, {
               method: "DELETE",
               headers
             })
@@ -1185,7 +1186,7 @@ export default function CareerMemoryDashboard() {
 
         // Delete live sessions in batch
         if (liveIds.length > 0) {
-          const res = await fetch("http://localhost:8001/api/live/sessions/batch-delete", {
+          const res = await fetch(`${API_BASE}/api/live/sessions/batch-delete`, {
             method: "POST",
             headers,
             body: JSON.stringify({ live_ids: liveIds })
@@ -1254,7 +1255,7 @@ export default function CareerMemoryDashboard() {
         const item = historyItems.find(x => x.id === deleteTarget);
         let deleteUrl: string;
         if (item?.type === "resume") {
-          deleteUrl = `http://localhost:8001/api/resume/analyses/${deleteTarget}`;
+          deleteUrl = `${API_BASE}/api/resume/analyses/${deleteTarget}`;
         } else if (item?.type === "live") {
           // PR6: 实时面试用 liveId 删（item.id 是 session_id，可能为空）
           if (!item.liveId) {
@@ -1263,9 +1264,9 @@ export default function CareerMemoryDashboard() {
             setDeleteTarget(null);
             return;
           }
-          deleteUrl = `http://localhost:8001/api/live/sessions/${item.liveId}`;
+          deleteUrl = `${API_BASE}/api/live/sessions/${item.liveId}`;
         } else {
-          deleteUrl = `http://localhost:8001/api/audio/session/${deleteTarget}`;
+          deleteUrl = `${API_BASE}/api/audio/session/${deleteTarget}`;
         }
 
         const res = await fetch(deleteUrl, {

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { API_BASE } from "@/lib/api";
 
 interface TimelineItem {
   id: string;
@@ -38,7 +39,7 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 async function fetchTimeline(token: string): Promise<TimelineItem[]> {
-  const res = await fetch("http://localhost:8001/api/memory/timeline", {
+  const res = await fetch(`${API_BASE}/api/memory/timeline`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) return [];
@@ -311,7 +312,7 @@ export default function CareerDashboard() {
       return;
     }
     try {
-      const res = await fetch("http://localhost:8001/api/auth/send-code", {
+      const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "email", target: securityForm.email })
@@ -339,7 +340,7 @@ export default function CareerDashboard() {
       return;
     }
     try {
-      const res = await fetch("http://localhost:8001/api/auth/send-code", {
+      const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "phone", target: securityForm.phone })
@@ -378,7 +379,7 @@ export default function CareerDashboard() {
     }
 
     try {
-      const res = await fetch("http://localhost:8001/api/auth/security/update", {
+      const res = await fetch(`${API_BASE}/api/auth/security/update`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
