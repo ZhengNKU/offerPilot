@@ -303,6 +303,10 @@ export default function CounselorPanel(props: Props) {
               };
             }
           });
+          requestAnimationFrame(() => {
+            const c = messagesContainerRef.current;
+            if (c) c.scrollTop = c.scrollHeight;
+          });
         } else if (ev.event === "done") {
           finalCitations = ev.data.citations;
           finalChunks = ev.data.recalled_chunks;
@@ -383,7 +387,7 @@ export default function CounselorPanel(props: Props) {
   // ── compact 模式：内嵌在 glass-panel 内部 ──
   if (variant === "compact") {
     return (
-      <div className="flex flex-col h-full relative text-left min-h-0">
+      <div className="flex flex-col h-full max-h-full relative text-left min-h-0">
         {/* 顶部工具栏 */}
         <div className="flex items-center justify-between pb-4 border-b border-white/5 mb-2.5 shrink-0">
           <div className="flex items-center gap-3">

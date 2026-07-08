@@ -1327,14 +1327,14 @@ export default function CareerMemoryDashboard() {
 
       {/* Main Workspace Frame */}
       <div className={`flex-1 max-w-container-max mx-auto w-full px-gutter py-8 grid grid-cols-1 md:grid-cols-12 gap-6 items-stretch relative z-10 ${
-        activeTab === "advisor" ? "h-[850px]" : ""
+        activeTab === "advisor" ? "h-[1080px] max-h-[1080px] overflow-hidden" : ""
       }`}>
         
         {/* ========================================================
             LEFT SIDEBAR: 职业记忆库 navigation
            ======================================================== */}
-        <div className="col-span-12 md:col-span-3 lg:col-span-2.5 flex flex-col justify-between gap-6">
-          <div className="glass-panel p-5 rounded-3xl border-white/10 flex flex-col gap-6 text-left h-full">
+        <div className="col-span-12 md:col-span-3 lg:col-span-2.5 flex flex-col justify-between gap-6 h-full min-h-0">
+          <div className="glass-panel p-5 rounded-3xl border-white/10 flex flex-col gap-6 text-left h-full min-h-0 overflow-hidden">
             <div>
               <span className="text-[10px] font-label-mono tracking-widest text-primary font-bold uppercase">
                 Career Memory
@@ -1430,7 +1430,7 @@ export default function CareerMemoryDashboard() {
                   </div>
                 )}
               </div>
-              <div className="overflow-y-auto h-[280px] pr-1 flex flex-col gap-1.5">
+              <div className="overflow-y-auto max-h-[280px] flex-1 min-h-0 pr-1 flex flex-col gap-1.5">
                 {counselorSessions.length === 0 ? (
                   <div className="text-center py-8 text-xs text-on-surface-variant/40">
                     暂无历史会话
@@ -1562,7 +1562,7 @@ export default function CareerMemoryDashboard() {
         {/* ========================================================
             RIGHT CONTAINER: Header + Grid Widgets + Footer
            ======================================================== */}
-        <div className="col-span-12 md:col-span-9 lg:col-span-9.5 flex flex-col gap-6 h-full">
+        <div className={`col-span-12 md:col-span-9 lg:col-span-9.5 flex flex-col gap-6 h-full max-h-full min-h-0 ${activeTab === "advisor" ? "overflow-hidden" : ""}`}>
 
           {/* ========================================================
               TOP PROFILE SUMMARY BAR
@@ -1678,7 +1678,7 @@ export default function CareerMemoryDashboard() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.2 }}
-              className={`w-full flex-1 min-h-0 ${activeTab === "advisor" ? "flex flex-col" : ""}`}
+              className={`w-full flex-1 min-h-0 ${activeTab === "advisor" ? "flex flex-col h-0 overflow-hidden" : ""}`}
             >
               {/* ========================================================
                   TAB PANEL 1: OVERVIEW DASHBOARD (总览看板)
@@ -2928,10 +2928,10 @@ export default function CareerMemoryDashboard() {
                   TAB PANEL 7: AI CAREER ADVISOR (交互顾问面板)
                  ======================================================== */}
               {activeTab === "advisor" && (
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 w-full text-left items-stretch h-[698px] max-h-[698px] flex-1 min-h-0">
+                <div className="flex flex-col md:flex-row gap-6 w-full text-left items-stretch flex-1 min-h-0 h-full overflow-hidden">
                   {/* Left chatbot panel — real interactive */}
-                  <div className="col-span-12 md:col-span-8 flex flex-col h-[698px] max-h-[698px] min-h-0">
-                    <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col h-[698px] max-h-[698px] w-full relative min-h-0">
+                  <div className="w-full md:flex-[8] flex flex-col flex-1 min-h-0">
+                    <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col flex-1 w-full relative min-h-0 overflow-hidden">
                       <CounselorPanel
                         key={counselorSessionKey}
                         variant="compact"
@@ -2961,7 +2961,7 @@ export default function CareerMemoryDashboard() {
                   </div>
 
                   {/* Right side strategies column */}
-                  <div className="col-span-12 md:col-span-4 flex flex-col gap-6 justify-between h-[698px] max-h-[698px] min-h-0">
+                  <div className="w-full md:flex-[4] flex flex-col gap-6 justify-between flex-1 min-h-0">
                     {/* Widget 1: 能力数据来源 */}
                     <div className="glass-panel p-5 rounded-3xl border-white/10 space-y-4 text-left flex-1 flex flex-col justify-center">
                       <div>
