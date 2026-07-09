@@ -456,11 +456,8 @@ export default function CareerDashboard() {
             <a onClick={() => router.push("/home")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
               职业驾驶舱
             </a>
-            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
-              面试副驾
-            </a>
-            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
-              案例
+            <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              体验反馈中心
             </a>
           </div>
 

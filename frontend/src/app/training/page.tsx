@@ -676,8 +676,7 @@ function InterviewTrainingPageContent() {
             <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">职业记忆看板</a>
             <a onClick={() => router.push("/training")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">面试训练场</a>
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">职业驾驶舱</a>
-            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">面试副驾</a>
-            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">案例</a>
+            <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">体验反馈中心</a>
           </div>
           <div className="flex items-center gap-4">
             <button onClick={() => router.push("/memory?tab=timeline")} className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer">

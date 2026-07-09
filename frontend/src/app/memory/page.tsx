@@ -1351,11 +1351,8 @@ export default function CareerMemoryDashboard() {
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
             </a>
-            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
-              面试副驾
-            </a>
-            <a onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
-              案例
+            <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              体验反馈中心
             </a>
           </div>
 

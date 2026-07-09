@@ -47,23 +47,23 @@ interface AuthContextType {
 }
 
 const defaultUser: UserProfile = {
-  name: "Dame Zheng",
-  avatar: "/debugger-2.jpg",
-  role: "后端开发工程师 · P6",
-  company: "字节跳动",
-  years: "5年",
-  status: "在职",
-  salary: "35K * 16",
-  targetCompany: "腾讯/美团等 (目标)",
-  targetRole: "高级后端专家",
-  targetGrade: "L8 / P7",
-  targetSalary: "35K-45K",
+  name: "",
+  avatar: "",
+  role: "",
+  company: "",
+  years: "",
+  status: "",
+  salary: "",
+  targetCompany: "",
+  targetRole: "",
+  targetGrade: "",
+  targetSalary: "",
   gender: "male",
-  age: "28",
-  school: "清华大学",
-  degree: "本科",
-  gradYear: "2018",
-  hasExp: true
+  age: "",
+  school: "",
+  degree: "",
+  gradYear: "",
+  hasExp: false
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -71,7 +71,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(true);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
   const [user, setUser] = useState<UserProfile>(defaultUser);
   const [showLogin, setShowLogin] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
@@ -84,12 +84,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (typeof window !== "undefined") {
       const storedLoggedIn = localStorage.getItem("interviewVar_isLoggedIn");
-      if (storedLoggedIn === "false") {
-        setIsLoggedIn(false);
-      } else {
+      const token = localStorage.getItem("interviewVar_token");
+      if (storedLoggedIn === "true" && token) {
         setIsLoggedIn(true);
+      } else {
+        setIsLoggedIn(false);
       }
-
+ 
       const storedUser = localStorage.getItem("interviewVar_user");
       if (storedUser) {
         try {
@@ -97,13 +98,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } catch (e) {
           setUser(defaultUser);
         }
-      } else {
-        localStorage.setItem("interviewVar_user", JSON.stringify(defaultUser));
       }
 
       // If we have a token, refresh user data from backend so fields
       // like phone / email (not stored in localStorage) are populated.
-      const token = localStorage.getItem("interviewVar_token");
       if (token) {
         fetch("http://localhost:8001/api/auth/me", {
           headers: { "Authorization": `Bearer ${token}` }
@@ -181,6 +179,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("interviewVar_token");
     setIsLoggedIn(false);
     localStorage.setItem("interviewVar_isLoggedIn", "false");
+    localStorage.removeItem("interviewVar_user");
+    setUser(defaultUser);
     setShowLogout(false);
     triggerToast("已安全退出登录！");
     router.push("/");

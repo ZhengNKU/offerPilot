@@ -142,3 +142,47 @@ class ProjectMemoryUpdate(BaseModel):
     duration: Optional[str] = Field(None, description="项目周期")
     mastery_level: Optional[int] = Field(None, ge=0, le=100, description="掌握度 0-100")
     importance: Optional[int] = Field(None, ge=0, le=100, description="重要度 0-100")
+
+
+# ── 体验反馈中心 ──
+
+class FeedbackCreate(BaseModel):
+    title: str = Field(..., max_length=200, description="反馈标题")
+    description: str = Field(..., max_length=300, description="反馈描述")
+    type: str = Field(..., description="反馈类型：问题反馈、功能建议、体验优化、其他")
+    module: Optional[str] = Field(None, description="关联功能模块")
+    screenshot_url: Optional[str] = Field(None, description="上传截图的 COS 地址")
+
+
+class CommentCreate(BaseModel):
+    content: str = Field(..., description="评论内容")
+
+
+class FeedbackCommentResponse(BaseModel):
+    author: str
+    avatar: Optional[str] = None
+    content: str
+    created_at: str
+
+
+class FeedbackResponse(BaseModel):
+    id: int
+    title: str
+    description: str
+    author: str
+    type: str
+    module: Optional[str] = None
+    screenshot_url: Optional[str] = None
+    status: str
+    upvotes: int
+    time: str
+    commentsCount: int
+    hasVoted: bool
+    comments: List[FeedbackCommentResponse]
+
+
+class FeedbackListResponse(BaseModel):
+    items: List[FeedbackResponse]
+    total: int
+    page: int
+    page_size: int

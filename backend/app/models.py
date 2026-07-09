@@ -643,3 +643,54 @@ class KnowledgeSubAbility(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "name", name="uq_user_sub_ability_name"),
     )
+
+
+class Feedback(Base):
+    """用户提交的体验反馈列表"""
+    __tablename__ = "feedbacks"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    author_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    type: Mapped[str] = mapped_column(String(50), nullable=False) # 问题反馈, 功能建议, 体验优化, 其他
+    module: Mapped[Optional[str]] = mapped_column(String(100), nullable=True) # 关联功能模块
+    screenshot_url: Mapped[Optional[str]] = mapped_column(String, nullable=True) # 上传截图的 COS 地址
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="处理中")
+    upvotes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+    
+    comments: Mapped[List["FeedbackComment"]] = relationship(
+        "FeedbackComment", back_populates="feedback", cascade="all, delete-orphan", order_by="FeedbackComment.created_at.desc()"
+    )
+    votes: Mapped[List["FeedbackVote"]] = relationship(
+        "FeedbackVote", back_populates="feedback", cascade="all, delete-orphan"
+    )
+
+
+class FeedbackComment(Base):
+    """反馈的讨论评论"""
+    __tablename__ = "feedback_comments"
+    
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feedback_id: Mapped[int] = mapped_column(Integer, ForeignKey("feedbacks.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    author_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    author_avatar: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    
+    feedback: Mapped["Feedback"] = relationship("Feedback", back_populates="comments")
+
+
+class FeedbackVote(Base):
+    """反馈的点赞记录"""
+    __tablename__ = "feedback_votes"
+    
+    feedback_id: Mapped[int] = mapped_column(Integer, ForeignKey("feedbacks.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    
+    feedback: Mapped["Feedback"] = relationship("Feedback", back_populates="votes")
