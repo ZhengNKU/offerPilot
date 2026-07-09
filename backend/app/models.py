@@ -657,7 +657,6 @@ class Feedback(Base):
     type: Mapped[str] = mapped_column(String(50), nullable=False) # 问题反馈, 功能建议, 体验优化, 其他
     module: Mapped[Optional[str]] = mapped_column(String(100), nullable=True) # 关联功能模块
     screenshot_url: Mapped[Optional[str]] = mapped_column(String, nullable=True) # 上传截图的 COS 地址
-    status: Mapped[str] = mapped_column(String(50), nullable=False, default="处理中")
     upvotes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

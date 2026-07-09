@@ -173,7 +173,6 @@ class FeedbackResponse(BaseModel):
     type: str
     module: Optional[str] = None
     screenshot_url: Optional[str] = None
-    status: str
     upvotes: int
     time: str
     commentsCount: int

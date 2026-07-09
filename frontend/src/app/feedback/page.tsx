@@ -29,7 +29,6 @@ interface FeedbackItem {
   description: string;
   author: string;
   type: "问题反馈" | "功能建议" | "体验优化" | "其他";
-  status: "已采纳" | "处理中" | "已计划";
   upvotes: number;
   time: string;
   commentsCount: number;
@@ -46,7 +45,6 @@ const initialFeedbacks: FeedbackItem[] = [
     description: "在模拟面试时，可以根据求职者的经验和目标岗位选择初级、中级、高级难度",
     author: "张同学",
     type: "功能建议",
-    status: "已采纳",
     upvotes: 128,
     time: "2小时前",
     commentsCount: 12,
@@ -62,7 +60,6 @@ const initialFeedbacks: FeedbackItem[] = [
     description: "在分析我的回答时，有些技术点没有识别出来，希望优化识别算法",
     author: "李同学",
     type: "问题反馈",
-    status: "处理中",
     upvotes: 96,
     time: "5小时前",
     commentsCount: 8,
@@ -77,7 +74,6 @@ const initialFeedbacks: FeedbackItem[] = [
     description: "目前主要是互联网行业，希望增加金融、制造业等行业的题库",
     author: "王同学",
     type: "功能建议",
-    status: "已计划",
     upvotes: 78,
     time: "1天前",
     commentsCount: 15,
@@ -92,7 +88,6 @@ const initialFeedbacks: FeedbackItem[] = [
     description: "部分页面信息有点多，希望可以优化布局，突出重点内容",
     author: "陈同学",
     type: "体验优化",
-    status: "处理中",
     upvotes: 65,
     time: "1天前",
     commentsCount: 6,
@@ -107,7 +102,6 @@ const initialFeedbacks: FeedbackItem[] = [
     description: "简历分析结果太笼统，希望能给出更具体的优化建议",
     author: "赵同学",
     type: "功能建议",
-    status: "已采纳",
     upvotes: 42,
     time: "2天前",
     commentsCount: 9,
@@ -126,8 +120,6 @@ export default function FeedbackPage() {
   const [feedbacks, setFeedbacks] = useState<FeedbackItem[]>([]);
   const [activeTab, setActiveTab] = useState<string>("全部");
   const [sortBy, setSortBy] = useState<"latest" | "popular">("latest");
-  const [filterStatuses, setFilterStatuses] = useState<string[]>(["已采纳", "处理中", "已计划"]);
-  const [showFilterModal, setShowFilterModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [totalItems, setTotalItems] = useState(0);
@@ -761,7 +753,7 @@ export default function FeedbackPage() {
                     onChange={(e) => setContent(e.target.value.slice(0, 300))}
                     maxLength={300}
                     placeholder="请详细描述你的问题或建议..."
-                    className="w-full flex-1 p-4 bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary-container/30 transition-all rounded-xl text-sm text-on-surface placeholder-on-surface-variant/35 resize-none focus:outline-none scrollbar-thin"
+                    className="w-full flex-1 p-4 bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary-container/30 transition-all rounded-xl text-sm text-on-surface placeholder-on-surface-variant/35 resize-none focus:outline-none custom-scrollbar"
                   />
                 </div>
 
@@ -936,7 +928,7 @@ export default function FeedbackPage() {
               )}
 
               {/* Feed items list container */}
-              <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin flex flex-col gap-4 text-left min-h-0">
+              <div className="flex-1 overflow-y-auto pr-1 custom-scrollbar flex flex-col gap-4 text-left min-h-0">
                 <AnimatePresence mode="popLayout">
                   {filteredFeedbacks.length === 0 ? (
                     <motion.div
@@ -1139,53 +1131,6 @@ export default function FeedbackPage() {
         )}
       </AnimatePresence>
 
-      {/* Filter Options Modal */}
-      <AnimatePresence>
-        {showFilterModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowFilterModal(false)}>
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              onClick={(e) => e.stopPropagation()}
-              className="glass-panel p-6 rounded-3xl max-w-xs w-full mx-4 border-white/10 shadow-2xl"
-            >
-              <h3 className="text-sm font-bold text-on-surface mb-4">按状态筛选</h3>
-              
-              <div className="flex flex-col gap-3.5 mb-6 text-left">
-                {["已采纳", "处理中", "已计划"].map((st) => {
-                  const isChecked = filterStatuses.includes(st);
-                  return (
-                    <label key={st} className="flex items-center gap-3.5 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => {
-                          if (isChecked) {
-                            setFilterStatuses(prev => prev.filter(x => x !== st));
-                          } else {
-                            setFilterStatuses(prev => [...prev, st]);
-                          }
-                        }}
-                        className="rounded border-white/10 text-primary-container focus:ring-0 focus:ring-offset-0 bg-white/5 w-4 h-4 cursor-pointer"
-                      />
-                      <span className="text-xs text-on-surface font-medium">{st}</span>
-                    </label>
-                  );
-                })}
-              </div>
-
-              <button
-                onClick={() => setShowFilterModal(false)}
-                className="w-full py-2.5 bg-gradient-to-r from-primary-container to-[#b3b4ff] transition-all rounded-xl text-xs font-bold text-on-primary cursor-pointer shadow-[0_4px_15px_rgba(128,131,255,0.2)] text-center"
-              >
-                确定
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       {/* Details & Comments Modal */}
       <AnimatePresence>
         {selectedFeedback && (
@@ -1225,7 +1170,7 @@ export default function FeedbackPage() {
               </div>
 
               {/* Body Content */}
-              <div className="flex-1 overflow-y-auto p-6 scrollbar-thin text-left">
+              <div className="flex-1 overflow-y-auto p-6 custom-scrollbar text-left">
                 
                 {/* Description details */}
                 <div className="mb-5 shrink-0">
@@ -1250,13 +1195,13 @@ export default function FeedbackPage() {
                 <div className="border-t border-white/5 pt-5 flex flex-col">
                   <h4 className="text-base font-bold text-on-surface mb-3 flex items-center gap-1.5 shrink-0">
                     <span>探讨与评论</span>
-                    <span className="text-[10px] bg-white/5 px-1.5 py-0.5 rounded font-normal text-on-surface-variant/50">
+                    <span className="text-sm bg-white/5 px-1.5 py-0.5 rounded font-normal text-on-surface-variant/50">
                       {selectedFeedback.commentsCount}
                     </span>
                   </h4>
                   
                   {/* Comments Card Wrapper - scrollable card */}
-                  <div className="glass-panel p-4 rounded-2xl border-white/5 bg-white/[0.01] min-h-[400px] max-h-[480px] overflow-y-auto scrollbar-thin flex flex-col gap-3 mb-2">
+                  <div className="glass-panel p-4 rounded-2xl border-white/5 bg-white/[0.01] min-h-[400px] max-h-[480px] overflow-y-auto custom-scrollbar flex flex-col gap-3 mb-2">
                     {selectedFeedback.comments.length === 0 ? (
                       <p className="text-base text-on-surface-variant/40 py-4 text-center my-auto">暂无探讨评论，来发表你的想法吧</p>
                     ) : (

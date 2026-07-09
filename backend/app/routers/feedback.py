@@ -48,7 +48,6 @@ async def check_and_seed_feedbacks(db: AsyncSession):
             "description": "在模拟面试时，可以根据求职者的经验和目标岗位选择初级、中级、高级难度",
             "author_name": "张同学",
             "type": "功能建议",
-            "status": "已采纳",
             "upvotes": 128,
             "comments": [
                 {"author_name": "张同学", "avatar": "/debugger-2.jpg", "content": "同感，目前直接给的难度有些时候太难了。"},
@@ -61,7 +60,6 @@ async def check_and_seed_feedbacks(db: AsyncSession):
             "description": "在分析我的回答时，有些技术点没有识别出来，希望优化识别算法",
             "author_name": "李同学",
             "type": "问题反馈",
-            "status": "处理中",
             "upvotes": 96,
             "comments": [
                 {"author_name": "周同学", "avatar": "/debugger-1.jpg", "content": "对的，特别是涉及特定冷门技术框架时，AI会解释偏。"},
@@ -73,7 +71,6 @@ async def check_and_seed_feedbacks(db: AsyncSession):
             "description": "目前主要是互联网行业，希望增加金融、制造业等行业的题库",
             "author_name": "王同学",
             "type": "功能建议",
-            "status": "已计划",
             "upvotes": 78,
             "comments": [
                 {"author_name": "郑同学", "avatar": "/debugger-2.jpg", "content": "想看金融量化分析岗位的面试题！"},
@@ -85,11 +82,10 @@ async def check_and_seed_feedbacks(db: AsyncSession):
             "description": "部分页面信息有点多，希望可以优化布局，突出重点内容",
             "author_name": "陈同学",
             "type": "体验优化",
-            "status": "处理中",
             "upvotes": 65,
             "comments": [
                 {"author_name": "胡同学", "avatar": "/debugger-1.jpg", "content": "确实，第一次用稍微找了一下入口。"},
-                {"author_name": "林同学", "avatar": "/debugger-2.jpg", "content": "总览看板的视觉可以做得更有科技感、呼吸感一些。"}
+                {"author_name": "林同学", "avatar": "/debugger-2.jpg", "content": "总览看板 of 视觉可以做得更有科技感、呼吸感一些。"}
             ]
         },
         {
@@ -97,7 +93,6 @@ async def check_and_seed_feedbacks(db: AsyncSession):
             "description": "简历分析结果太笼统，希望能给出更具体的优化建议",
             "author_name": "赵同学",
             "type": "功能建议",
-            "status": "已采纳",
             "upvotes": 42,
             "comments": [
                 {"author_name": "马同学", "avatar": "/debugger-2.jpg", "content": "非常赞同，现在的修改建议偏话术，缺具体的技术项目提炼。"},
@@ -112,7 +107,6 @@ async def check_and_seed_feedbacks(db: AsyncSession):
             description=item["description"],
             author_name=item["author_name"],
             type=item["type"],
-            status=item["status"],
             upvotes=item["upvotes"]
         )
         db.add(fb)
@@ -222,7 +216,6 @@ async def list_feedbacks(
                 type=fb.type,
                 module=fb.module,
                 screenshot_url=fb.screenshot_url,
-                status=fb.status,
                 upvotes=fb.upvotes,
                 time=get_relative_time_str(fb.created_at),
                 commentsCount=len(fb.comments),
@@ -254,7 +247,6 @@ async def create_feedback(
         type=req.type,
         module=req.module,
         screenshot_url=req.screenshot_url,
-        status="处理中",
         upvotes=0
     )
     db.add(fb)
@@ -268,7 +260,6 @@ async def create_feedback(
         type=fb.type,
         module=fb.module,
         screenshot_url=fb.screenshot_url,
-        status=fb.status,
         upvotes=0,
         time="刚刚",
         commentsCount=0,
