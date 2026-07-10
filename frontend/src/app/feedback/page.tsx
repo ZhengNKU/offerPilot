@@ -1606,7 +1606,7 @@ export default function FeedbackPage() {
                                              <span className="material-symbols-outlined text-[14px]">delete</span>
                                            </button>
                                          )}
-                                         {auth.user?.name === "admin" && (
+                                         {auth.user?.name === "admin" ? (
                                            <button
                                              type="button"
                                              onClick={() => handleToggleCommentPin(comment.id!, !comment.is_pinned)}
@@ -1615,6 +1615,12 @@ export default function FeedbackPage() {
                                            >
                                              <span className={`material-symbols-outlined text-[13px] ${comment.is_pinned ? "fill-current" : ""}`}>push_pin</span>
                                            </button>
+                                         ) : (
+                                           comment.is_pinned && (
+                                             <span className="text-red-400 flex items-center justify-center shrink-0 p-0.5" title="置顶评论">
+                                               <span className="material-symbols-outlined text-[13px] fill-current">push_pin</span>
+                                             </span>
+                                           )
                                          )}
                                        </div>
                                      </div>
