@@ -230,23 +230,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.gender !== undefined) body.gender = data.gender;
         if (data.age !== undefined) body.age = parseInt(data.age) || 0;
         if (data.status !== undefined) {
-          body.job_status = data.status === "在职" ? "active" : data.status === "离职" ? "resigned" : "student";
+          body.job_status = 
+            data.status === "在职" ? "active" : 
+            data.status === "离职" ? "resigned" : 
+            (data.status === "应届" || data.status === "应届生") ? "fresh_grad" : 
+            "student";
         }
         if (data.avatar !== undefined) body.avatar_url = data.avatar;
 
         if (data.years !== undefined) {
-          const matched = data.years.match(/^(\d+年)?(\d+个月)?/);
-          body.experience_years = matched?.[1] || "在校/应届";
-          body.experience_months = matched?.[2] || "0个月";
+          if (data.years.startsWith("在校")) {
+            body.experience_years = "在校";
+            body.experience_months = "0个月";
+          } else if (data.years.startsWith("应届")) {
+            body.experience_years = "应届";
+            body.experience_months = "0个月";
+          } else {
+            const matchedY = data.years.match(/(\d+年)/);
+            const matchedM = data.years.match(/(\d+个月)/);
+            body.experience_years = matchedY ? matchedY[1] : "在校";
+            body.experience_months = matchedM ? matchedM[1] : "0个月";
+          }
         }
         if (data.company !== undefined) body.company_name = data.company;
         if (data.role !== undefined) body.role_name = data.role;
 
         if (data.salary !== undefined) {
-          const salMatch = data.salary.match(/(\d+)K\s*-\s*(\d+)K/i);
+          const salMatch = data.salary ? data.salary.match(/(\d+)K\s*-\s*(\d+)K/i) : null;
           if (salMatch) {
             body.salary_min = parseInt(salMatch[1]);
             body.salary_max = parseInt(salMatch[2]);
+          } else {
+            body.salary_min = null;
+            body.salary_max = null;
           }
         }
         if (data.school !== undefined) body.school = data.school;
@@ -256,12 +272,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (data.targetCompany !== undefined) body.target_company = data.targetCompany;
         if (data.targetRole !== undefined) body.target_role = data.targetRole;
         if (data.targetGrade !== undefined) body.target_grade = data.targetGrade;
-        if (data.targetCity !== undefined) body.target_cities = [data.targetCity];
+        if (data.targetCity !== undefined) {
+          body.target_cities = data.targetCity ? data.targetCity.split(/[、,，]/).map(c => c.trim()).filter(Boolean) : [];
+        }
         if (data.targetSalary !== undefined) {
-          const salMatch = data.targetSalary.match(/(\d+)K\s*-\s*(\d+)K/i);
+          const salMatch = data.targetSalary ? data.targetSalary.match(/(\d+)K\s*-\s*(\d+)K/i) : null;
           if (salMatch) {
             body.target_salary_min = parseInt(salMatch[1]);
             body.target_salary_max = parseInt(salMatch[2]);
+          } else {
+            body.target_salary_min = null;
+            body.target_salary_max = null;
           }
         }
 
@@ -275,9 +296,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         if (res.ok) {
           const backendData = await res.json();
-          // 使用后端算法计算出的真实 matchRate
+          // 使用后端算法计算出的真实 matchRate（0 也是有效值，不能跳过）
           const realMatchRate: number | null = backendData.matchRate ?? null;
-          if (realMatchRate !== null) {
+          if (realMatchRate !== null && realMatchRate !== undefined) {
             const updatedUser = { ...newUser, matchRate: realMatchRate };
             setUser(updatedUser);
             localStorage.setItem("interviewVar_user", JSON.stringify(updatedUser));

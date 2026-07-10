@@ -113,8 +113,8 @@ async def analyze_resume(
         p = current_user.profile
         profile_data = {
             "name": current_user.username,
-            "status": "在职" if p.job_status == "active" else "离职" if p.job_status == "resigned" else "在校生",
-            "experience_years": f"{p.experience_years or '在校/应届'}{p.experience_months or '0个月'}",
+            "status": "在职" if p.job_status == "active" else "离职" if p.job_status == "resigned" else "应届生" if p.job_status == "fresh_grad" else "在校生",
+            "experience_years": f"{p.experience_years or '在校'}{p.experience_months or '0个月'}",
             "company_name": p.company_name or "暂无",
             "role_name": p.role_name or "暂无",
             "salary": f"{p.salary_min or 0}K - {p.salary_max or 0}K",

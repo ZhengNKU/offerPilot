@@ -291,6 +291,106 @@ async def analyze_interview_dialogue(
     return {}
 
 
+async def generate_match_rate_via_llm(
+    profile_payload: dict,
+) -> int:
+    """
+    调用 DeepSeek 综合评估候选人与求职目标的匹配度，返回 0-100 整数。
+
+    Args:
+        profile_payload: 候选人当前画像 + 求职目标画像，结构如下：
+            {
+                "current": {
+                    "experience_years": "3年", "role_name": "前端工程师",
+                    "company_name": "字节跳动", "salary_min": 30000, "salary_max": 45000,
+                    "school": "清华大学", "degree": "本科", "age": 26,
+                    "job_status": "active",
+                },
+                "target": {
+                    "target_company": "腾讯", "target_role": "高级前端工程师",
+                    "target_grade": "P7", "target_salary_min": 50000, "target_salary_max": 70000,
+                },
+            }
+
+    Returns:
+        0-100 的整数。规则：
+            - target_company 为空 → 直接返回 0（与 match_scorer.compute_match_rate 短路保持一致）
+            - LLM 调用失败 / JSON 解析失败 → 返回 None（调用方决定 fallback）
+    """
+    target = profile_payload.get("target") or {}
+    target_company = (target.get("target_company") or "").strip()
+    if not target_company:
+        # 与后端规则算法保持一致的短路：目标公司为空 → 0
+        logger.info("[match_rate_llm] target_company is empty, short-circuit to 0")
+        return 0
+
+    system_prompt = (
+        "你是一位资深的 AI 求职匹配度评估专家，"
+        "擅长基于候选人的当前画像与求职目标，综合评估其跳槽/转岗的匹配度。\n"
+        "你必须以 JSON 格式返回评估结果，不要返回 Markdown 或前后导言。\n"
+        "\n"
+        "## 评分维度（请综合考虑，不必逐项打分）\n"
+        "1. **学校背景**：985/211/C9/双一流/海外名校显著加分；普通本科中性；无学校名轻度扣分。\n"
+        "2. **学历**：博士 > 硕士 > 本科 > 专科 > 其他。\n"
+        "3. **年龄**：与目标职级匹配度（如 28 岁冲 P7 略显年轻，40+ 申请 P5 偏保守）。\n"
+        "4. **求职状态**：在职加分（说明市场价值仍在）；离职略减；应届/在校中性。\n"
+        "5. **公司梯队跃迁**：跨级跳（跳 2 级以上）难度大扣分；平级/降级保守合理加分。\n"
+        "6. **岗位相似度**：当前岗位与目标岗位领域一致（如都是前端）大幅加分；跨领域降分。\n"
+        "7. **薪资涨幅预期**：目标薪资相对当前涨幅 15-30% 最佳；涨 50%+ 不现实扣分；几乎不涨动力不足。\n"
+        "8. **经验年限 vs 目标职级**：经验足够支撑目标职级为最佳；差距过大或保守申请都应中性。\n"
+        "\n"
+        "## 输出格式\n"
+        "严格返回以下 JSON 对象：\n"
+        "{\n"
+        '  "match_rate": 72,\n'
+        '  "reason": "简短一句话说明主要扣加分原因（30-80字）"\n'
+        "}\n"
+        "\n"
+        "## 关键约束\n"
+        "1. match_rate 必须是 0-100 的整数。\n"
+        "2. 即使各维度都很好，最高也不要超过 95；最低不要低于 5（除非画像极差）。\n"
+        "3. 不要编造候选人没提供的字段。\n"
+    )
+
+    user_content = (
+        "以下是候选人当前画像与求职目标，请综合评估匹配度：\n"
+        f"{json.dumps(profile_payload, ensure_ascii=False, indent=2)}\n"
+    )
+
+    payload = {
+        "model": settings.DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.3,
+        "max_tokens": 512,
+    }
+
+    try:
+        res_data = await asyncio.to_thread(call_llm_sync, payload)
+        content = res_data["choices"][0]["message"]["content"]
+        content_clean = _strip_codeblock(content)
+        parsed = _safe_json_parse(content_clean, log_label="match_rate_llm")
+        if not isinstance(parsed, dict):
+            logger.error("[match_rate_llm] DeepSeek returned non-dict JSON")
+            return None
+        rate = parsed.get("match_rate")
+        if not isinstance(rate, (int, float)):
+            logger.error(f"[match_rate_llm] invalid match_rate type: {type(rate).__name__}")
+            return None
+        rate_int = int(round(rate))
+        rate_int = max(0, min(100, rate_int))
+        logger.info(
+            f"[match_rate_llm] rate={rate_int} reason={parsed.get('reason', '')[:60]!r}"
+        )
+        return rate_int
+    except Exception as e:
+        logger.error(f"[match_rate_llm] DeepSeek call failed: {e}")
+        return None
+
+
 async def extract_mentioned_projects(
     dialogue_text: str,
     existing_projects: Optional[list[dict]] = None,

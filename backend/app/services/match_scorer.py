@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import re
+import asyncio
 import logging
 from typing import Optional
 
@@ -369,7 +370,16 @@ def compute_match_rate(
     计算求职目标匹配度，返回 [30, 97] 的整数。
 
     所有必需字段由 UserProfile 提供，以 keyword args 显式传入避免隐式耦合。
+
+    短路规则：
+        - 目标公司为空（None / 空白字符串）→ 直接返回 0。
+          没有目标公司无法判断梯队跃迁维度，整个匹配度没有意义。
     """
+    # ── 短路：目标公司为空 → 0 分 ──
+    if not target_company or not str(target_company).strip():
+        logger.info("match_rate short-circuit: target_company is empty, returning 0")
+        return 0
+
     d1 = _dim1_experience_vs_grade(experience_years, target_grade)
     d2 = _dim2_salary_vs_target(salary_min, salary_max, target_salary_min, target_salary_max)
     d3 = _dim3_role_similarity(role_name, target_role)
@@ -397,7 +407,7 @@ def compute_match_rate(
 
 def compute_match_rate_from_profile(profile) -> int:
     """
-    便捷函数：直接从 UserProfile ORM 对象计算匹配度。
+    便捷函数：直接从 UserProfile ORM 对象计算匹配度（规则算法版）。
 
     调用 compute_match_rate(...)，解构 profile 字段为 keyword args。
     """
@@ -417,3 +427,126 @@ def compute_match_rate_from_profile(profile) -> int:
         age=profile.age,
         job_status=profile.job_status,
     )
+
+
+async def compute_match_rate_from_profile_llm(profile) -> Optional[int]:
+    """
+    便捷函数：调用 LLM 综合评估匹配度（异步）。
+
+    综合考虑学校、学历、年龄、求职状态、公司梯队、岗位相似度、
+    薪资涨幅、经验-职级匹配等维度。
+
+    Returns:
+        - 0：当 target_company 为空（与规则算法短路一致）
+        - 0-100 整数：LLM 生成的分数
+        - None：LLM 调用失败，调用方决定 fallback（保留旧值）
+    """
+    from app.utils.llm import generate_match_rate_via_llm
+
+    payload = {
+        "current": {
+            "experience_years": profile.experience_years,
+            "role_name": profile.role_name,
+            "company_name": profile.company_name,
+            "salary_min": profile.salary_min,
+            "salary_max": profile.salary_max,
+            "school": profile.school,
+            "degree": profile.degree,
+            "age": profile.age,
+            "job_status": profile.job_status,
+        },
+        "target": {
+            "target_company": profile.target_company,
+            "target_role": profile.target_role,
+            "target_grade": profile.target_grade,
+            "target_salary_min": profile.target_salary_min,
+            "target_salary_max": profile.target_salary_max,
+        },
+    }
+    return await generate_match_rate_via_llm(payload)
+
+
+async def _regen_match_rate_task(profile_pk: int, initial_payload: dict) -> None:
+    """
+    后台任务：拉一份最新的 profile，再调 LLM 写入 match_rate。
+
+    兜底策略：
+        1. LLM 调用设 25s 超时（asyncio.wait_for）→ 超时后用规则算法
+        2. LLM 返回 None 或抛异常 → 用规则算法
+        3. 任何路径下 pending 都会被清掉，前端轮询一定能拿到 match_rate
+
+    注意：必须重新从 DB 读一次 profile，而不是用调用方传进来的 profile 对象，
+    因为请求结束后请求级 DB session 已经关闭，profile 关联的字段可能已 detach。
+
+    Args:
+        profile_pk: UserProfile 的主键值（UserProfile 表的主键是 user_id，不是 id）
+    """
+    from app.database import AsyncSessionLocal
+
+    # LLM 调用的硬超时：比前端轮询 30s 略短，保证如果 LLM 真挂了我们能先 fallback
+    LLM_TIMEOUT_S = 25.0
+
+    async with AsyncSessionLocal() as db:
+        # 重新读 profile（UserProfile 主键是 user_id）
+        from sqlalchemy import select
+        from app import models
+        stmt = select(models.UserProfile).where(models.UserProfile.user_id == profile_pk)
+        result = await db.execute(stmt)
+        p = result.scalars().first()
+        if not p:
+            logger.warning(f"[match_rate regen] profile_pk={profile_pk} not found, skip")
+            return
+
+        rate: Optional[int] = None
+        fallback_reason: Optional[str] = None
+        try:
+            try:
+                rate = await asyncio.wait_for(
+                    compute_match_rate_from_profile_llm(p),
+                    timeout=LLM_TIMEOUT_S,
+                )
+            except asyncio.TimeoutError:
+                fallback_reason = f"LLM timeout after {LLM_TIMEOUT_S}s"
+                logger.warning(f"[match_rate regen] profile_pk={profile_pk} {fallback_reason}, fallback to rules")
+            except Exception as e:
+                fallback_reason = f"LLM error: {e}"
+                logger.error(f"[match_rate regen] profile_pk={profile_pk} {fallback_reason}, fallback to rules")
+
+            if rate is None:
+                # LLM 失败 / 超时 / 返回 None → 用规则算法兜底
+                rate = compute_match_rate_from_profile(p)
+                if fallback_reason is None:
+                    fallback_reason = "LLM returned None"
+                logger.info(f"[match_rate regen] profile_pk={profile_pk} fallback_reason={fallback_reason}")
+            p.match_rate = rate
+        except Exception as e:
+            logger.error(f"[match_rate regen] rules fallback also failed for profile_pk={profile_pk}: {e}")
+            # 最后兜底也炸了，pending 仍要清掉，前端能停止轮询
+        finally:
+            p.match_rate_pending = False
+            try:
+                await db.commit()
+                logger.info(f"[match_rate regen] done profile_pk={profile_pk} rate={p.match_rate}")
+            except Exception as e:
+                logger.error(f"[match_rate regen] commit failed for profile_pk={profile_pk}: {e}")
+
+
+def trigger_match_rate_regen(profile) -> None:
+    """
+    Fire-and-forget 异步触发匹配度重算。
+
+    设置 match_rate_pending=True 立即可见；用 asyncio.create_task 把 LLM 调用丢到后台。
+    接口可立即返回（不等 LLM 完成），前端轮询 /match-rate 直到 pending=False。
+    """
+    # UserProfile 主键是 user_id（不是 id）
+    profile_pk = profile.user_id
+    # 先标记 pending=True；这次 commit 由调用方负责（在 profile_update 里统一 commit）
+    profile.match_rate_pending = True
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_regen_match_rate_task(profile_pk, {}))
+    except RuntimeError:
+        # 没有 running loop（极少见）→ 退化为同步
+        logger.warning("[match_rate regen] no running event loop, fall back to sync call")
+        # 不在 fire-and-forget 路径处理；让上层直接 await
+        raise

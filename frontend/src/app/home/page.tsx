@@ -92,6 +92,9 @@ export default function CareerDashboard() {
     matchRate: 72
   });
 
+  // 目标匹配度正在由后端 LLM 综合生成（通常 3-10s），期间圆环中央显示 spinner
+  const [isMatchRateLoading, setIsMatchRateLoading] = useState(false);
+
   const [accountSecurity, setAccountSecurity] = useState({
     email: "未绑定",
     phone: "未绑定",
@@ -121,7 +124,12 @@ export default function CareerDashboard() {
 
   // ── Modal open handlers (reset form state from current data) ──
   const handleOpenProfileModal = () => {
-    setProfileForm({ ...profile, tagsString: profile.tags.join(", ") });
+    setProfileForm({
+      ...profile,
+      company: profile.company === "暂无公司" ? "" : profile.company,
+      school: profile.school === "暂无学校" ? "" : profile.school,
+      tagsString: profile.tags.join(", ")
+    });
     setAvatarError(false);
     setShowEditProfileModal(true);
   };
@@ -190,25 +198,66 @@ export default function CareerDashboard() {
     if (!auth.isLoggedIn || !auth.user) return;
     setAvatarError(false);
     setProfile(prev => {
-      const yrsMatch = auth.user.years?.match(/(\d+)年/);
-      const mthsMatch = auth.user.years?.match(/(\d+)个月/);
-      const salMatch = auth.user.salary?.match(/(\d+)\s*K/i);
-      const salMatchMax = auth.user.salary?.match(/[-~—–]\s*(\d+)\s*K/i);
+      let expYearsVal = prev.experienceYears;
+      let expMonthsVal = prev.experienceMonths;
+      if (auth.user.years) {
+        if (auth.user.years.includes("在校")) {
+          expYearsVal = "在校";
+        } else if (auth.user.years.includes("应届")) {
+          expYearsVal = "应届";
+        } else {
+          const yrsMatch = auth.user.years.match(/(\d+)年/);
+          if (yrsMatch) {
+            expYearsVal = yrsMatch[1] + "年";
+          }
+        }
+        const mthsMatch = auth.user.years.match(/(\d+)个月/);
+        if (mthsMatch) {
+          expMonthsVal = mthsMatch[1] + "个月";
+        }
+      }
+
+      const curSalStr = auth.user.salary || "";
+      const curSalMatch = curSalStr ? curSalStr.match(/(\d+)\s*K/i) : null;
+      const curSalMatchMax = curSalStr ? curSalStr.match(/[-~—–]\s*(\d+)\s*K/i) : null;
+
+      let cleanRole = "";
+      let cleanLevel = "";
+      let displayTitle = "—";
+      if (auth.user.role) {
+        const parts = auth.user.role.split(" · ");
+        cleanRole = parts[0]?.trim() || "";
+        cleanLevel = parts[1]?.trim() || "";
+        if (cleanRole && cleanLevel) {
+          displayTitle = `${cleanRole} · ${cleanLevel}`;
+        } else if (cleanRole) {
+          displayTitle = cleanRole;
+        } else if (cleanLevel) {
+          displayTitle = cleanLevel;
+        }
+      }
+
+      let cleanCompany = auth.user.company || "";
+      if (cleanCompany === "暂无公司") cleanCompany = "";
+
+      let cleanSchool = auth.user.school || "";
+      if (cleanSchool === "暂无学校") cleanSchool = "";
+
       return {
         ...prev,
         name: auth.user.name,
         status: auth.user.status || prev.status,
-        title: auth.user.role || prev.title,
-        experienceYears: yrsMatch ? yrsMatch[1] + "年" : prev.experienceYears,
-        experienceMonths: mthsMatch ? mthsMatch[1] + "个月" : prev.experienceMonths,
-        company: auth.user.company || prev.company,
-        role: auth.user.role ? auth.user.role.split(" · ")[0] : prev.role,
-        level: auth.user.role ? auth.user.role.split(" · ")[1] || prev.level : prev.level,
-        salaryMin: salMatch ? parseInt(salMatch[1]) : prev.salaryMin,
-        salaryMax: salMatchMax ? parseInt(salMatchMax[1]) : prev.salaryMax,
+        title: displayTitle,
+        experienceYears: expYearsVal,
+        experienceMonths: expMonthsVal,
+        company: cleanCompany,
+        role: cleanRole,
+        level: cleanLevel,
+        salaryMin: curSalMatch ? parseInt(curSalMatch[1]) : 0,
+        salaryMax: curSalMatchMax ? parseInt(curSalMatchMax[1]) : 0,
         gender: auth.user.gender || prev.gender,
         age: auth.user.age || prev.age,
-        school: auth.user.school || prev.school,
+        school: cleanSchool,
         degree: auth.user.degree || prev.degree,
         gradYear: auth.user.gradYear || prev.gradYear,
         joinDays: auth.user.createdAt
@@ -218,21 +267,21 @@ export default function CareerDashboard() {
     });
     setCareerGoal(prev => {
       const next: any = {
-        role: auth.user.targetRole || prev.role,
-        level: auth.user.targetGrade || prev.level,
-        company: auth.user.targetCompany || prev.company,
-        city: auth.user.targetCity || prev.city,
+        role: auth.user.targetRole !== undefined ? (auth.user.targetRole || "") : prev.role,
+        level: auth.user.targetGrade !== undefined ? (auth.user.targetGrade || "") : prev.level,
+        company: auth.user.targetCompany !== undefined ? (auth.user.targetCompany || "") : prev.company,
+        city: auth.user.targetCity !== undefined ? (auth.user.targetCity || "") : prev.city,
         matchRate: auth.user.matchRate ?? prev.matchRate
       };
       const salStr = auth.user.targetSalary || "";
-      const salMatch = salStr.match(/(\d+)\s*K/i);
-      const salMatchMax = salStr.match(/[-~—–]\s*(\d+)\s*K/i);
+      const salMatch = salStr ? salStr.match(/(\d+)\s*K/i) : null;
+      const salMatchMax = salStr ? salStr.match(/[-~—–]\s*(\d+)\s*K/i) : null;
       if (salMatch && salMatchMax) {
         next.salaryMin = parseInt(salMatch[1]);
         next.salaryMax = parseInt(salMatchMax[1]);
       } else {
-        next.salaryMin = prev.salaryMin;
-        next.salaryMax = prev.salaryMax;
+        next.salaryMin = 0;
+        next.salaryMax = 0;
       }
       return next;
     });
@@ -243,36 +292,162 @@ export default function CareerDashboard() {
     }));
   }, [auth.isLoggedIn, auth.user]);
 
+  // ── 通用：拉一次 /match-rate，把最新值写回 localStorage + storage 事件，
+  //     同时返回新值（用于轮询判定）。
+  // ⚠️ 关键：必须从 localStorage 读最新 user 再 spread，**不能用闭包里的 auth.user**！
+  //    setInterval 启动时闭包的 auth.user 是保存瞬间的旧值，如果直接 spread 会
+  //    把 degree / target_company 等用户刚刚修改的字段一并回滚到旧值。
+  const fetchAndSyncMatchRate = async (): Promise<{ rate: number | null; pending: boolean }> => {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+      if (!token) return { rate: null, pending: false };
+      const res = await fetch("http://localhost:8001/api/auth/match-rate", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return { rate: null, pending: false };
+      const data = await res.json();
+      const realRate = typeof data?.matchRate === "number" ? data.matchRate : null;
+      if (realRate !== null && typeof window !== "undefined") {
+        // 从 localStorage 读最新 user → 只覆盖 matchRate，其他字段（如刚改的 degree/学历）不被回滚
+        const stored = localStorage.getItem("interviewVar_user");
+        if (stored) {
+          try {
+            const currentUser = JSON.parse(stored);
+            const updatedUser = { ...currentUser, matchRate: realRate };
+            localStorage.setItem("interviewVar_user", JSON.stringify(updatedUser));
+            window.dispatchEvent(new Event("storage"));
+          } catch {
+            // JSON parse 失败则跳过
+          }
+        }
+      }
+      return { rate: realRate, pending: Boolean(data?.pending) };
+    } catch {
+      return { rate: null, pending: false };
+    }
+  };
+
+  // 轮询：每 1.5s 拉一次，直到 pending=false 且 rate 与 oldRate 不同，或超时 30s
+  // 30s 超时后主动调 /match-rate?force_rules=true 兜底（用规则算法），确保用户不会长时间看到 loading
+  const startMatchRatePolling = (oldRate: number | null | undefined) => {
+    setIsMatchRateLoading(true);
+    const startedAt = Date.now();
+    const TIMEOUT_MS = 30000;
+    let stopped = false;
+    const intervalId = window.setInterval(async () => {
+      if (stopped) return;
+      if (Date.now() - startedAt > TIMEOUT_MS) {
+        // 超时兜底：主动调一次强制规则算法的接口
+        window.clearInterval(intervalId);
+        stopped = true;
+        try {
+          const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+          if (token) {
+            await fetch("http://localhost:8001/api/auth/match-rate?force_rules=true", {
+              method: "GET",
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            // 触发一次同步，把新值（规则算法兜底值）写回本地
+            await fetchAndSyncMatchRate();
+          }
+        } catch {
+          // 兜底也失败，静默
+        } finally {
+          setIsMatchRateLoading(false);
+        }
+        return;
+      }
+      const { rate, pending } = await fetchAndSyncMatchRate();
+      // 拿到新值（与保存前不同）就停
+      if (!pending && rate !== null && rate !== oldRate) {
+        window.clearInterval(intervalId);
+        stopped = true;
+        setIsMatchRateLoading(false);
+      }
+    }, 3000);
+  };
+
+  // 首次进入职业驾驶舱时，如果匹配度还未生成（老用户或后端规则改版后空值），
+  // 自动触发一次 LLM 生成；返回后 AuthProvider 更新 user，整个页面通过上面的 useEffect 自动刷新展示。
+  useEffect(() => {
+    if (!auth.isLoggedIn || !auth.user) return;
+    if (auth.user.matchRate !== null && auth.user.matchRate !== undefined) return;
+    let cancelled = false;
+    (async () => {
+      setIsMatchRateLoading(true);
+      await fetchAndSyncMatchRate();
+      if (!cancelled) setIsMatchRateLoading(false);
+    })();
+    return () => { cancelled = true; };
+    // 仅在用户登录态变化时触发一次，避免循环
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.isLoggedIn]);
+
   // Handlers for Save actions
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    const cleanRoleVal = (profileForm.role && profileForm.level)
+      ? `${profileForm.role} · ${profileForm.level}`
+      : (profileForm.role || profileForm.level || "");
+
+    // ── 无修改检测：避免无意义的 LLM 重算（每次 3-10s）──
+    // 注意：handleOpenProfileModal 会把 profile 中的 "暂无公司"/"暂无学校" 转为 ""，
+    // 所以这里把 profile 的字段归一化到同样的语义后再对比。
+    const normCompany = (v: string) => (v === "暂无公司" ? "" : v);
+    const normSchool = (v: string) => (v === "暂无学校" ? "" : v);
+    const profileUnchanged =
+      profileForm.name === profile.name &&
+      profileForm.status === profile.status &&
+      profileForm.experienceYears === profile.experienceYears &&
+      profileForm.experienceMonths === profile.experienceMonths &&
+      profileForm.role === profile.role &&
+      profileForm.level === profile.level &&
+      profileForm.company === normCompany(profile.company) &&
+      profileForm.salaryMin === profile.salaryMin &&
+      profileForm.salaryMax === profile.salaryMax &&
+      profileForm.gender === profile.gender &&
+      profileForm.age === profile.age &&
+      profileForm.school === normSchool(profile.school) &&
+      profileForm.degree === profile.degree &&
+      profileForm.gradYear === profile.gradYear &&
+      profileForm.tagsString === profile.tags.join(", ");
+    if (profileUnchanged) {
+      // 未做任何修改 → 直接关闭弹窗，不调用 updateUser 触发 LLM 重算
+      setShowEditProfileModal(false);
+      return;
+    }
+
     const updatedProfile = {
       ...profileForm,
-      title: `${profileForm.role} · ${profileForm.level || "高级"}`,
+      title: cleanRoleVal || "—",
       tags: profileForm.tagsString.split(",").map(t => t.trim()).filter(Boolean)
     };
     setProfile(updatedProfile);
-    
-    await auth.updateUser({
+
+    const realMatchRate = await auth.updateUser({
       name: profileForm.name,
       status: profileForm.status,
       years: `${profileForm.experienceYears}${profileForm.experienceMonths}`,
       company: profileForm.company,
-      role: `${profileForm.role} · ${profileForm.level || "高级"}`,
-      salary: `${profileForm.salaryMin}K - ${profileForm.salaryMax}K`,
+      role: cleanRoleVal,
+      salary: (profileForm.salaryMin > 0 && profileForm.salaryMax > 0) ? `${profileForm.salaryMin}K - ${profileForm.salaryMax}K` : "",
       gender: profileForm.gender,
       age: profileForm.age,
       school: profileForm.school,
       degree: profileForm.degree,
       gradYear: profileForm.gradYear
     });
+    // 立即关闭弹窗（不等 LLM）；后端已 fire-and-forget 触发匹配度重算
     setShowEditProfileModal(false);
+    // 轮询直到后端生成完新的匹配度（pending=false 且值变化）
+    startMatchRatePolling(careerGoal.matchRate);
   };
 
   const handleSaveGoal = async (e: React.FormEvent) => {
     e.preventDefault();
-    // 校验期望薪资：最低不能高于最高
-    if (goalForm.salaryMin > goalForm.salaryMax) {
+    // 校验期望薪资：最低不能高于最高 (只有在两者都存在的时候校验)
+    if (goalForm.salaryMin > 0 && goalForm.salaryMax > 0 && goalForm.salaryMin > goalForm.salaryMax) {
       auth.triggerToast("最低薪资不能高于最高薪资，请重新输入！");
       setGoalForm({ ...goalForm, salaryMin: careerGoal.salaryMin, salaryMax: careerGoal.salaryMax });
       return;
@@ -284,20 +459,38 @@ export default function CareerDashboard() {
       setGoalForm({ ...goalForm, city: careerGoal.city });
       return;
     }
-    // 先同步目标到后端，后端会自动计算真实的 matchRate 并返回
-    const realMatchRate = await auth.updateUser({
+    // 如果没有填写期望薪资，则传入空字符串以更新为空
+    const targetSalaryVal = (goalForm.salaryMin > 0 && goalForm.salaryMax > 0)
+      ? `${goalForm.salaryMin}K - ${goalForm.salaryMax}K`
+      : "";
+
+    // ── 无修改检测：避免无意义的 LLM 重算（每次 3-10s）──
+    // 对比 goalForm 与 careerGoal 已存值；只有当所有字段都没动才跳过。
+    const goalUnchanged =
+      goalForm.role === careerGoal.role &&
+      goalForm.level === careerGoal.level &&
+      goalForm.salaryMin === careerGoal.salaryMin &&
+      goalForm.salaryMax === careerGoal.salaryMax &&
+      goalForm.city === careerGoal.city &&
+      goalForm.company === careerGoal.company;
+    if (goalUnchanged) {
+      setShowEditGoalModal(false);
+      return;
+    }
+
+    // 先把目标值写到本地 careerGoal（让弹窗关闭后卡片立刻显示新内容）
+    setCareerGoal({ ...goalForm });
+    setShowEditGoalModal(false);
+    // 后端 fire-and-forget：不等 LLM，立即关弹窗
+    auth.updateUser({
       targetRole: goalForm.role,
       targetGrade: goalForm.level,
-      targetSalary: `${goalForm.salaryMin}K - ${goalForm.salaryMax}K`,
+      targetSalary: targetSalaryVal,
       targetCompany: goalForm.company,
       targetCity: goalForm.city
-    });
-    // 使用后端算法计算出的真实匹配度（如果后端未返回则保留当前值）
-    setCareerGoal({
-      ...goalForm,
-      matchRate: realMatchRate ?? careerGoal.matchRate
-    });
-    setShowEditGoalModal(false);
+    }).catch(() => { /* 网络错误时静默处理，loading 由轮询超时关闭 */ });
+    // 轮询直到后端生成完新的匹配度
+    startMatchRatePolling(careerGoal.matchRate);
   };
 
   const handleGetSecurityEmailCode = async () => {
@@ -513,9 +706,14 @@ export default function CareerDashboard() {
             </div>
             
             <div className="flex items-center gap-4 font-semibold text-xs md:text-sm">
-              <span className="text-on-surface-variant/55 hover:text-white transition-colors cursor-pointer flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => window.open("/helper", "_blank", "noopener,noreferrer")}
+                className="text-on-surface-variant/55 hover:text-white transition-colors cursor-pointer flex items-center gap-1 bg-transparent border-0 p-0"
+                aria-label="在新窗口打开帮助中心"
+              >
                 <span className="material-symbols-outlined text-sm">help</span>帮助中心
-              </span>
+              </button>
             </div>
           </div>
 
@@ -596,17 +794,19 @@ export default function CareerDashboard() {
               <div className="flex gap-6 px-5 py-4 rounded-2xl bg-white/[0.02] border border-white/5 shrink-0 w-full sm:w-auto justify-between sm:justify-start">
                 <div className="text-left whitespace-nowrap min-w-0">
                   <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold mt-[-2px] block">当前公司</span>
-                  <span className="text-sm font-black text-white block whitespace-nowrap">{profile.company}</span>
+                  <span className="text-sm font-black text-white block whitespace-nowrap">
+                    {(profile.company && profile.company !== "暂无公司") ? profile.company : "—"}
+                  </span>
                 </div>
                 <div className="w-px bg-white/10 self-stretch my-1 shrink-0" />
                 <div className="text-left whitespace-nowrap min-w-0">
                   <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold mt-[-2px] block">当前岗位</span>
-                  <span className="text-sm font-black text-white block whitespace-nowrap">{profile.role}</span>
+                  <span className="text-sm font-black text-white block whitespace-nowrap">{profile.role || "—"}</span>
                 </div>
                 <div className="w-px bg-white/10 self-stretch my-1 shrink-0" />
                 <div className="text-left whitespace-nowrap min-w-0">
                   <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold mt-[-2px] block">当前职级</span>
-                  <span className="text-sm font-black text-tertiary block whitespace-nowrap">{profile.level}</span>
+                  <span className="text-sm font-black text-tertiary block whitespace-nowrap">{profile.level || "—"}</span>
                 </div>
               </div>
 
@@ -637,15 +837,17 @@ export default function CareerDashboard() {
                   <div className="space-y-3.5 text-left">
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标岗位</span>
-                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.role}</span>
+                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.role || "—"}</span>
                     </div>
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标职级</span>
-                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.level}</span>
+                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.level || "—"}</span>
                     </div>
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标薪资</span>
-                      <span className="text-base font-black text-tertiary block mt-0.5 whitespace-nowrap">{careerGoal.salaryMin}K - {careerGoal.salaryMax}K</span>
+                      <span className="text-base font-black text-tertiary block mt-0.5 whitespace-nowrap">
+                        {(careerGoal.salaryMin > 0 && careerGoal.salaryMax > 0) ? `${careerGoal.salaryMin}K - ${careerGoal.salaryMax}K` : "—"}
+                      </span>
                     </div>
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标城市</span>
@@ -667,6 +869,7 @@ export default function CareerDashboard() {
                           strokeDasharray={2 * Math.PI * 48}
                           strokeDashoffset={2 * Math.PI * 48 * (1 - careerGoal.matchRate / 100)}
                           strokeLinecap="round"
+                          className={isMatchRateLoading ? "animate-pulse opacity-40 transition-opacity duration-300" : "transition-opacity duration-300"}
                         />
                         <defs>
                           <linearGradient id="goal-circle-gradient" x1="0" y1="0" x2="1" y2="1">
@@ -676,11 +879,20 @@ export default function CareerDashboard() {
                         </defs>
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-2xl font-black text-white font-label-mono">{careerGoal.matchRate}%</span>
-                        <span className="text-xs text-on-surface-variant/50 font-bold block scale-90">目标匹配度</span>
+                        {isMatchRateLoading ? (
+                          <>
+                            <span className="material-symbols-outlined text-3xl text-primary animate-spin">progress_activity</span>
+                            <span className="text-[10px] text-on-surface-variant/60 font-bold mt-1 tracking-wider">AI 评估中...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-2xl font-black text-white font-label-mono">{careerGoal.matchRate}%</span>
+                            <span className="text-xs text-on-surface-variant/50 font-bold block scale-90">目标匹配度</span>
+                          </>
+                        )}
                       </div>
                     </div>
-                    <span className="text-xs text-on-surface-variant/40 font-bold block tracking-wider mt-2.5">基于 AI 架构师画像分析</span>
+                    <span className="text-xs text-on-surface-variant/40 font-bold block tracking-wider mt-2.5">基于个人画像分析</span>
                   </div>
                 </div>
               </div>
@@ -1125,6 +1337,7 @@ export default function CareerDashboard() {
                       <option className="bg-[#0e1626]" value="在职">在职</option>
                       <option className="bg-[#0e1626]" value="离职">离职</option>
                       <option className="bg-[#0e1626]" value="在校生">在校生</option>
+                      <option className="bg-[#0e1626]" value="应届生">应届生</option>
                     </select>
                   </div>
                 </div>
@@ -1159,30 +1372,27 @@ export default function CareerDashboard() {
 
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">当前公司</label>
+                    <label className="text-on-surface-variant/60 font-bold block">当前公司 (选填)</label>
                     <input
                       type="text"
-                      required
                       value={profileForm.company}
                       onChange={(e) => setProfileForm({ ...profileForm, company: e.target.value })}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">当前岗位</label>
+                    <label className="text-on-surface-variant/60 font-bold block">当前岗位 (选填)</label>
                     <input
                       type="text"
-                      required
                       value={profileForm.role}
                       onChange={(e) => setProfileForm({ ...profileForm, role: e.target.value })}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">当前职级</label>
+                    <label className="text-on-surface-variant/60 font-bold block">当前职级 (选填)</label>
                     <input
                       type="text"
-                      required
                       value={profileForm.level}
                       onChange={(e) => setProfileForm({ ...profileForm, level: e.target.value })}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
@@ -1190,36 +1400,34 @@ export default function CareerDashboard() {
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">当前月薪范围</label>
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        required
-                        value={profileForm.salaryMin || ""}
-                        onChange={(e) => setProfileForm({ ...profileForm, salaryMin: parseInt(e.target.value) || 0 })}
-                        className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
-                    </div>
-                    <span className="text-white/30 font-bold text-sm shrink-0">-</span>
-                    <div className="relative flex-1">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        required
-                        value={profileForm.salaryMax || ""}
-                        onChange={(e) => setProfileForm({ ...profileForm, salaryMax: parseInt(e.target.value) || 0 })}
-                        className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-on-surface-variant/60 font-bold block">当前月薪范围</label>
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={profileForm.salaryMin || ""}
+                          onChange={(e) => setProfileForm({ ...profileForm, salaryMin: parseInt(e.target.value) || 0 })}
+                          className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                      </div>
+                      <span className="text-white/30 font-bold text-sm shrink-0">-</span>
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={profileForm.salaryMax || ""}
+                          onChange={(e) => setProfileForm({ ...profileForm, salaryMax: parseInt(e.target.value) || 0 })}
+                          className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                      </div>
                     </div>
                   </div>
-                </div>
 
-                <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
                     <label className="text-on-surface-variant/60 font-bold block">工作年限</label>
                     <div className="flex gap-2">
@@ -1228,7 +1436,7 @@ export default function CareerDashboard() {
                         onChange={(e) => setProfileForm({ ...profileForm, experienceYears: e.target.value })}
                         className="flex-1 px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-primary/40 text-sm appearance-none hero-select"
                       >
-                        {["在校/应届", "1年", "2年", "3年", "4年", "5年", "6年", "7年", "8年", "9年", "10年以上"].map((y) => (
+                        {["在校", "应届", "1年", "2年", "3年", "4年", "5年", "6年", "7年", "8年", "9年", "10年以上"].map((y) => (
                           <option key={y} className="bg-[#0e1626] text-white">{y}</option>
                         ))}
                       </select>
@@ -1243,21 +1451,11 @@ export default function CareerDashboard() {
                       </select>
                     </div>
                   </div>
-                  <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">职业头衔</label>
-                    <input
-                      type="text"
-                      required
-                      value={profileForm.title}
-                      onChange={(e) => setProfileForm({ ...profileForm, title: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
-                    />
-                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">学校名称</label>
+                    <label className="text-on-surface-variant/60 font-bold block">学校名称 (选填)</label>
                     <input
                       type="text"
                       placeholder="例如：清华大学"
@@ -1267,13 +1465,13 @@ export default function CareerDashboard() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">学历</label>
+                    <label className="text-on-surface-variant/60 font-bold block">学历 (选填)</label>
                     <select
                       value={profileForm.degree || "本科"}
                       onChange={(e) => setProfileForm({ ...profileForm, degree: e.target.value })}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white appearance-none hero-select"
                     >
-                      {["大专", "本科", "硕士", "博士", "其他"].map((d) => (
+                      {["专科", "本科", "硕士", "博士", "其他"].map((d) => (
                         <option key={d} className="bg-[#0e1626]" value={d}>{d}</option>
                       ))}
                     </select>
@@ -1333,20 +1531,18 @@ export default function CareerDashboard() {
               <form onSubmit={handleSaveGoal} className="space-y-4 text-sm font-semibold text-white">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block h-5">目标岗位</label>
+                    <label className="text-on-surface-variant/60 font-bold block h-5">目标岗位 (选填)</label>
                     <input
                       type="text"
-                      required
                       value={goalForm.role}
                       onChange={(e) => setGoalForm({ ...goalForm, role: e.target.value })}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block h-5">目标职级</label>
+                    <label className="text-on-surface-variant/60 font-bold block h-5">目标职级 (选填)</label>
                     <input
                       type="text"
-                      required
                       value={goalForm.level}
                       onChange={(e) => setGoalForm({ ...goalForm, level: e.target.value })}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
@@ -1394,7 +1590,6 @@ export default function CareerDashboard() {
                         <input
                           type="text"
                           inputMode="numeric"
-                          required
                           value={goalForm.salaryMin || ""}
                           onChange={(e) => setGoalForm({ ...goalForm, salaryMin: parseInt(e.target.value) || 0 })}
                           className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
@@ -1406,7 +1601,6 @@ export default function CareerDashboard() {
                         <input
                           type="text"
                           inputMode="numeric"
-                          required
                           value={goalForm.salaryMax || ""}
                           onChange={(e) => setGoalForm({ ...goalForm, salaryMax: parseInt(e.target.value) || 0 })}
                           className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"

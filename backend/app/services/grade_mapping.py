@@ -28,7 +28,8 @@ def parse_work_years(experience_years: Optional[str]) -> float:
     将 experience_years 字符串解析为浮点年数。
 
     示例:
-        "在校/应届"  → 0.0
+        "在校"  → 0.0
+        "应届"  → 0.0
         "< 1 年"     → 0.5
         "3年"        → 3.0
         "3.5年"      → 3.5

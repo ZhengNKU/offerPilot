@@ -25,6 +25,7 @@ function ResumeAnalysisPageContent() {
     targetRole: "高级后端开发工程师",
     targetGrade: "P7",
     targetSalary: "45K * 16",
+    school: "清华大学",
     version: "v3",
     uploadTime: "2026-06-01 14:30"
   });
@@ -549,8 +550,8 @@ function ResumeAnalysisPageContent() {
 
     const targetRole = profile.targetRole || "架构师";
     const targetGrade = profile.targetGrade || "高级";
-    const company = profile.company || "当前公司";
-    const school = profile.school || "教育背景";
+    const company = (profile.company && profile.company !== "暂无公司") ? profile.company : "当前公司";
+    const school = (profile.school && profile.school !== "暂无学校") ? profile.school : "教育背景";
 
     const sectionsInfo = [
       {

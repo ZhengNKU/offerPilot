@@ -283,6 +283,7 @@ export default function RegisterPage() {
   const [roleName, setRoleName] = useState("后端开发工程师");
   const [salaryMin, setSalaryMin] = useState(2);
   const [salaryMax, setSalaryMax] = useState(35);
+  const [isSalaryUnspecified, setIsSalaryUnspecified] = useState(false);
   const [school, setSchool] = useState("清华大学");
   const [degree, setDegree] = useState("本科");
   const [gradYear, setGradYear] = useState("2018");
@@ -372,6 +373,7 @@ export default function RegisterPage() {
   const [targetGrade, setTargetGrade] = useState("高级");
   const [targetSalaryMin, setTargetSalaryMin] = useState(2);
   const [targetSalaryMax, setTargetSalaryMax] = useState(35);
+  const [isTargetSalaryUnspecified, setIsTargetSalaryUnspecified] = useState(false);
   
   // Other Preferences
   const [prefIndustry, setPrefIndustry] = useState("");
@@ -494,8 +496,8 @@ export default function RegisterPage() {
         experience_months: expMonths,
         company_name: companyName,
         role_name: roleName,
-        salary_min: salaryMin,
-        salary_max: salaryMax,
+        salary_min: isSalaryUnspecified ? null : salaryMin,
+        salary_max: isSalaryUnspecified ? null : salaryMax,
         school,
         degree,
         has_experience: hasExp
@@ -505,8 +507,8 @@ export default function RegisterPage() {
         target_company: targetCompany,
         target_role: targetRole,
         target_grade: targetGrade,
-        target_salary_min: targetSalaryMin,
-        target_salary_max: targetSalaryMax
+        target_salary_min: isTargetSalaryUnspecified ? null : targetSalaryMin,
+        target_salary_max: isTargetSalaryUnspecified ? null : targetSalaryMax
       }
     };
 
@@ -975,7 +977,7 @@ export default function RegisterPage() {
                         <div className="pt-6 w-full">
                           <button
                             onClick={handleNextToStep2}
-                            className="w-full py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] text-base rounded-xl font-black text-base md:text-sm hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center shadow-lg shadow-[#AFA7FF]/15 group"
+                            className="w-full py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] !text-base rounded-xl font-black text-base md:text-sm hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center shadow-lg shadow-[#AFA7FF]/15 group"
                           >
                             下一步：完善职业信息
                             <span className="material-symbols-outlined text-lg leading-none transform transition-transform duration-200 group-hover:translate-x-0.5 select-none">
@@ -1196,7 +1198,8 @@ export default function RegisterPage() {
                               {[
                                 { id: "active", label: "在职" },
                                 { id: "resigned", label: "离职" },
-                                { id: "student", label: "在校生" }
+                                { id: "student", label: "在校生" },
+                                { id: "fresh_grad", label: "应届生" }
                               ].map((item) => (
                                 <button
                                   key={item.id}
@@ -1222,7 +1225,7 @@ export default function RegisterPage() {
                                 onChange={(e) => setExpYears(e.target.value)}
                                 className="flex-1 py-3 px-3 bg-[#060e20] border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold"
                               >
-                                {["在校/应届", "1年", "2年", "3年", "4年", "5年", "6年", "7年", "8年", "9年", "10年以上"].map((y) => (
+                                {["在校", "应届", "1年", "2年", "3年", "4年", "5年", "6年", "7年", "8年", "9年", "10年以上"].map((y) => (
                                   <option key={y} className="bg-[#0e1626] text-white">{y}</option>
                                 ))}
                               </select>
@@ -1263,26 +1266,45 @@ export default function RegisterPage() {
                           <div className="col-span-12 md:col-span-6">
                             <div className="flex justify-between items-center mb-1.5 text-sm">
                               <label className="block font-bold">当前月薪范围 (选填)</label>
-                              <span className="font-mono text-[#AFA7FF] font-black">{salaryMin}K - {salaryMax}K</span>
+                              <label className="flex items-center gap-1.5 text-sm text-white/50 cursor-pointer font-semibold select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={isSalaryUnspecified}
+                                  onChange={(e) => setIsSalaryUnspecified(e.target.checked)}
+                                  className="rounded border-white/10 bg-white/5 text-primary focus:ring-0 w-3.5 h-3.5"
+                                />
+                                <span>暂不透露</span>
+                              </label>
                             </div>
-                            <div className="flex items-center gap-3.5 py-1">
-                              <input
-                                type="range"
-                                min="1"
-                                max="50"
-                                value={salaryMin}
-                                onChange={(e) => setSalaryMin(Math.min(salaryMax - 2, parseInt(e.target.value)))}
-                                className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
-                              />
-                              <input
-                                type="range"
-                                min="1"
-                                max="50"
-                                value={salaryMax}
-                                onChange={(e) => setSalaryMax(Math.max(salaryMin + 2, parseInt(e.target.value)))}
-                                className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
-                              />
-                            </div>
+                            {!isSalaryUnspecified ? (
+                              <>
+                                <div className="flex justify-end text-sm font-mono text-[#AFA7FF] font-black mb-1">
+                                  {salaryMin >= 100 ? "100K+" : salaryMax >= 100 ? `${salaryMin}K - 100K+` : `${salaryMin}K - ${salaryMax}K`}
+                                </div>
+                                <div className="flex items-center gap-3.5 py-1">
+                                  <input
+                                    type="range"
+                                    min="1"
+                                    max="100"
+                                    value={salaryMin}
+                                    onChange={(e) => setSalaryMin(Math.min(salaryMax - 2, parseInt(e.target.value)))}
+                                    className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
+                                  />
+                                  <input
+                                    type="range"
+                                    min="1"
+                                    max="100"
+                                    value={salaryMax}
+                                    onChange={(e) => setSalaryMax(Math.max(salaryMin + 2, parseInt(e.target.value)))}
+                                    className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              <div className="py-3 px-4 bg-white/[0.02] border border-white/5 rounded-xl text-center text-sm text-white/30 font-bold">
+                                已选择暂不透露当前月薪
+                              </div>
+                            )}
                           </div>
 
                           <div className="col-span-12 md:col-span-6">
@@ -1300,7 +1322,7 @@ export default function RegisterPage() {
                                 onChange={(e) => setDegree(e.target.value)}
                                 className="py-3 px-2.5 bg-[#060e20] border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold shrink-0"
                               >
-                                {["大专", "本科", "硕士", "博士", "其他"].map((d) => (
+                                {["专科", "本科", "硕士", "博士", "其他"].map((d) => (
                                   <option key={d}>{d}</option>
                                 ))}
                               </select>
@@ -1354,7 +1376,7 @@ export default function RegisterPage() {
                         </button>
                         <button
                           onClick={handleNextToStep3}
-                          className="flex-1 py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] rounded-xl hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex text-base items-center justify-center gap-1.5 text-center shadow-lg shadow-[#AFA7FF]/15 group"
+                          className="flex-1 py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] rounded-xl hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex !text-base items-center justify-center gap-1.5 text-center shadow-lg shadow-[#AFA7FF]/15 group"
                         >
                           下一步：设定求职目标
                           <span className="material-symbols-outlined text-lg leading-none transform transition-transform duration-200 group-hover:translate-x-0.5 select-none">
@@ -1483,7 +1505,7 @@ export default function RegisterPage() {
                                   key={tag}
                                   type="button"
                                   onClick={() => setTargetCompany(tag)}
-                                  className="px-2.5 py-1.5 bg-white/5 border border-white/5 hover:bg-white/10 rounded-md text-[10px] md:text-xs font-bold text-white/40 hover:text-white transition-all cursor-pointer"
+                                  className="px-2.5 py-1.5 bg-white/5 border border-white/5 hover:bg-white/10 rounded-md text-[10px] md:text-sm font-bold text-white/40 hover:text-white transition-all cursor-pointer"
                                 >
                                   {tag}
                                 </button>
@@ -1502,12 +1524,12 @@ export default function RegisterPage() {
                               className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm font-semibold"
                             />
                             <div className="flex flex-wrap gap-1.5 select-none pt-0.5">
-                              {["后端开发工程师", "高级后端开发工程师", "架构师", "技术专家"].map((tag) => (
+                              {["后端开发工程师", "架构师", "产品经理", "售前工程师"].map((tag) => (
                                 <button
                                   key={tag}
                                   type="button"
                                   onClick={() => setTargetRole(tag)}
-                                  className="px-2.5 py-1.5 bg-white/5 border border-white/5 hover:bg-white/10 rounded-md text-[10px] md:text-xs font-bold text-white/40 hover:text-white transition-all cursor-pointer"
+                                  className="px-2.5 py-1.5 bg-white/5 border border-white/5 hover:bg-white/10 rounded-md text-[10px] md:text-sm font-bold text-white/40 hover:text-white transition-all cursor-pointer"
                                 >
                                   {tag}
                                 </button>
@@ -1516,55 +1538,73 @@ export default function RegisterPage() {
                           </div>
 
                           {/* Target grade level */}
-                          <div className="col-span-12 md:col-span-6 select-none space-y-2">
+                          <div className="col-span-12 md:col-span-6 space-y-2">
                             <label className="block text-xs md:text-sm font-bold">目标职级 (选填)</label>
-                            <div className="flex flex-wrap gap-2.5 py-1">
-                              {["初级", "中级", "高级", "资深", "专家", "架构师", "技术负责人"].map((tag) => {
-                                const active = targetGrade === tag;
-                                return (
-                                  <button
-                                    key={tag}
-                                    type="button"
-                                    onClick={() => setTargetGrade(tag)}
-                                    className={`px-3.5 py-2 rounded-lg text-xs md:text-sm font-black transition-all cursor-pointer border ${
-                                      active
-                                        ? "bg-[#AFA7FF]/15 text-[#AFA7FF] border-[#AFA7FF]/20"
-                                        : "bg-white/5 text-white/40 border-transparent hover:bg-white/10"
-                                    }`}
-                                  >
-                                    {tag}
-                                  </button>
-                                );
-                              })}
+                            <input
+                              type="text"
+                              placeholder="输入或选择目标职级"
+                              value={targetGrade}
+                              onChange={(e) => setTargetGrade(e.target.value)}
+                              className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm font-semibold"
+                            />
+                            <div className="flex flex-wrap gap-1.5 select-none pt-0.5">
+                              {["初级", "中级", "高级", "资深", "专家", "架构师", "技术负责人"].map((tag) => (
+                                <button
+                                  key={tag}
+                                  type="button"
+                                  onClick={() => setTargetGrade(tag)}
+                                  className="px-2.5 py-1.5 bg-white/5 border border-white/5 hover:bg-white/10 rounded-md text-[10px] md:text-sm font-bold text-white/40 hover:text-white transition-all cursor-pointer"
+                                >
+                                  {tag}
+                                </button>
+                              ))}
                             </div>
-                            <span className="text-[10px] md:text-xs text-white/30 font-bold block">选择你期望达到的职级层级</span>
+                            <span className="text-[10px] md:text-xs text-white/30 font-bold block mt-1">输入自定义职级，或选择上方推荐标签</span>
                           </div>
 
                           {/* Target salary ranges */}
                           <div className="col-span-12 md:col-span-6">
                             <div className="flex justify-between items-center mb-1.5 text-xs md:text-sm">
-                              <label className="block font-bold">目标薪资 (月薪, 税前, 选填)</label>
-                              <span className="font-mono text-[#AFA7FF] font-black">{targetSalaryMin}K - {targetSalaryMax}K</span>
+                              <label className="block font-bold">目标月薪范围 (选填)</label>
+                              <label className="flex items-center gap-1.5 text-sm text-white/50 cursor-pointer font-semibold select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={isTargetSalaryUnspecified}
+                                  onChange={(e) => setIsTargetSalaryUnspecified(e.target.checked)}
+                                  className="rounded border-white/10 bg-white/5 text-primary focus:ring-0 w-3.5 h-3.5"
+                                />
+                                <span>暂不透露</span>
+                              </label>
                             </div>
-                            <div className="flex items-center gap-3.5 py-1.5">
-                              <input
-                                type="range"
-                                min="1"
-                                max="50"
-                                value={targetSalaryMin}
-                                onChange={(e) => setTargetSalaryMin(Math.min(targetSalaryMax - 2, parseInt(e.target.value)))}
-                                className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
-                              />
-                              <input
-                                type="range"
-                                min="1"
-                                max="50"
-                                value={targetSalaryMax}
-                                onChange={(e) => setTargetSalaryMax(Math.max(targetSalaryMin + 2, parseInt(e.target.value)))}
-                                className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
-                              />
-                            </div>
-                            <span className="text-[10px] md:text-xs text-white/30 font-bold block mt-1">选择你期望的月薪范围</span>
+                            {!isTargetSalaryUnspecified ? (
+                              <>
+                                <div className="flex justify-end text-sm font-mono text-[#AFA7FF] font-black mb-1">
+                                  {targetSalaryMin >= 100 ? "100K+" : targetSalaryMax >= 100 ? `${targetSalaryMin}K - 100K+` : `${targetSalaryMin}K - ${targetSalaryMax}K`}
+                                </div>
+                                <div className="flex items-center gap-3.5 py-1.5">
+                                  <input
+                                    type="range"
+                                    min="1"
+                                    max="100"
+                                    value={targetSalaryMin}
+                                    onChange={(e) => setTargetSalaryMin(Math.min(targetSalaryMax - 2, parseInt(e.target.value)))}
+                                    className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
+                                  />
+                                  <input
+                                    type="range"
+                                    min="1"
+                                    max="100"
+                                    value={targetSalaryMax}
+                                    onChange={(e) => setTargetSalaryMax(Math.max(targetSalaryMin + 2, parseInt(e.target.value)))}
+                                    className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              <div className="py-3 px-4 bg-white/[0.02] border border-white/5 rounded-xl text-center text-sm text-white/30 font-bold">
+                                已选择暂不透露目标薪资
+                              </div>
+                            )}
                           </div>
 
                           {/* Other preferences grid */}
@@ -1616,7 +1656,7 @@ export default function RegisterPage() {
                                 <option value="">选择性质</option>
                                 <option>全职</option>
                                 <option>兼职/自由职业</option>
-                                <option>实习/应届</option>
+                                <option>实习</option>
                               </select>
                             </div>
                             <div className="col-span-2 md:col-span-1">

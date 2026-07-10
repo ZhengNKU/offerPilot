@@ -916,7 +916,7 @@ export default function Home() {
           <div className="space-y-4">
             <h4 className="font-extrabold text-on-surface">支持</h4>
             <ul className="space-y-2 text-sm text-on-surface-variant font-semibold">
-              <li><a className="hover:text-primary transition-colors cursor-pointer" href="#">使用指南</a></li>
+              <li><a href="/helper" target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors cursor-pointer">使用指南</a></li>
               <li><a onClick={() => router.push("/feedback")} className="hover:text-primary transition-colors cursor-pointer">常见问题</a></li>
               <li><a onClick={() => setShowContactModal(true)} className="hover:text-primary transition-colors cursor-pointer">联系我们</a></li>
             </ul>

@@ -1,4 +1,6 @@
 import random
+import asyncio
+import logging
 from datetime import timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -9,7 +11,11 @@ from sqlalchemy.orm import selectinload
 import redis.asyncio as aioredis
 
 from app import models, schemas
-from app.services.match_scorer import compute_match_rate_from_profile
+from app.services.match_scorer import (
+    compute_match_rate_from_profile,
+    compute_match_rate_from_profile_llm,
+    trigger_match_rate_regen,
+)
 from app.database import get_db, get_redis
 from app.utils.security import (
     get_password_hash,
@@ -35,7 +41,7 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
             avatar=None,
             role="系统管理员" if user.username == "admin" else "用户",
             company="暂无公司",
-            years="在校/应届0个月",
+            years="应届0个月",
             status="在职",
             salary="0K - 0K",
             targetCompany="大厂公司 (目标)",
@@ -58,15 +64,15 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
     return schemas.UserProfileResponse(
         name=user.username,
         avatar=p.avatar_url,
-        role=p.role_name or "后端开发工程师",
-        company=p.company_name or "暂无公司",
-        years=f"{p.experience_years or '在校/应届'}{p.experience_months or '0个月'}",
-        status="在职" if p.job_status == "active" else "离职" if p.job_status == "resigned" else "在校生",
-        salary=f"{p.salary_min or 0}K - {p.salary_max or 0}K",
-        targetCompany=p.target_company or "大厂公司 (目标)",
-        targetRole=p.target_role or "高级工程师",
-        targetGrade=p.target_grade or "高级",
-        targetSalary=f"{p.target_salary_min or 0}K - {p.target_salary_max or 0}K",
+        role=p.role_name or "",
+        company=p.company_name or "",
+        years=f"{p.experience_years or '在校'}{p.experience_months or '0个月'}",
+        status="在职" if p.job_status == "active" else "离职" if p.job_status == "resigned" else "应届生" if p.job_status == "fresh_grad" else "在校生",
+        salary=f"{p.salary_min}K - {p.salary_max}K" if (p.salary_min is not None and p.salary_max is not None and (p.salary_min > 0 or p.salary_max > 0)) else "",
+        targetCompany=p.target_company or "",
+        targetRole=p.target_role or "",
+        targetGrade=p.target_grade or "",
+        targetSalary=f"{p.target_salary_min}K - {p.target_salary_max}K" if (p.target_salary_min and p.target_salary_max) else "",
         gender=p.gender,
         age=str(p.age),
         school=p.school or "暂无学校",
@@ -581,12 +587,17 @@ async def get_me(
 async def get_match_rate(
     current_user: models.User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    force_rules: bool = False,
 ):
     """
     实时计算并返回当前用户的求职目标匹配度。
 
     前端在「职业驾驶舱」页面加载、编辑个人职业资料成功后、
     求职目标编辑成功后调用此接口，获取最新的匹配度分数。
+
+    Query:
+        force_rules (bool): 强制走规则算法（不走 LLM）。
+            用途：前端轮询 30s 超时后的兜底，避免用户长时间看到 loading。
     """
     p = current_user.profile
     if not p:
@@ -595,14 +606,41 @@ async def get_match_rate(
             detail="用户档案不存在"
         )
     try:
-        rate = compute_match_rate_from_profile(p)
-        # 持久化缓存到数据库
-        p.match_rate = rate
-        await db.commit()
+        if force_rules:
+            # 前端主动要求兜底（轮询超时场景）：跳过 LLM，直接规则算法
+            rate = compute_match_rate_from_profile(p)
+            p.match_rate = rate
+            p.match_rate_pending = False
+            await db.commit()
+            logging.info(f"[match-rate] force_rules=true, rate={rate}")
+        elif p.match_rate is None and not p.match_rate_pending:
+            # 首次进入（match_rate 从未生成过且无后台任务在跑）→ 主动调 LLM 生成一次
+            # 注意：这是唯一会触发主动重算的场景，避免前端轮询死循环
+            try:
+                rate = await asyncio.wait_for(
+                    compute_match_rate_from_profile_llm(p),
+                    timeout=25.0,
+                )
+            except asyncio.TimeoutError:
+                logging.warning("[match-rate] LLM timeout 25s, fallback to rules")
+                rate = None
+            if rate is None:
+                rate = compute_match_rate_from_profile(p)
+            p.match_rate = rate
+            await db.commit()
+            logging.info(f"[match-rate] first-time generation, rate={rate}")
+        else:
+            # pending=true（后台异步任务还在跑）或 match_rate 已有值
+            # → 只读不重算，避免前端轮询触发死循环
+            rate = p.match_rate
+            if p.match_rate_pending:
+                logging.info(f"[match-rate] pending=true, return cached rate={rate}")
+            else:
+                logging.info(f"[match-rate] cache hit, rate={rate}")
     except Exception as e:
         logging.error(f"match_rate compute failed: {e}")
         rate = p.match_rate  # fallback to cached value
-    return {"matchRate": rate}
+    return {"matchRate": rate, "pending": bool(p.match_rate_pending)}
 
 
 @router.put("/profile/update", response_model=schemas.UserProfileResponse)
@@ -637,9 +675,9 @@ async def profile_update(
     if req.experience_years is not None: p.experience_years = req.experience_years
     if req.experience_months is not None: p.experience_months = req.experience_months
     if req.company_name is not None: p.company_name = req.company_name
-    if req.role_name is not None: p.role_name = req.role_name
-    if req.salary_min is not None: p.salary_min = req.salary_min
-    if req.salary_max is not None: p.salary_max = req.salary_max
+    if req.role_name is not None: p.role_name = req.role_name  # empty string clears
+    if req.salary_min is not None: p.salary_min = req.salary_min if req.salary_min > 0 else None
+    if req.salary_max is not None: p.salary_max = req.salary_max if req.salary_max > 0 else None
     if req.school is not None: p.school = req.school
     if req.degree is not None: p.degree = req.degree
     if req.has_experience is not None: p.has_experience = req.has_experience
@@ -664,15 +702,28 @@ async def profile_update(
     if req.target_company is not None: p.target_company = req.target_company
     if req.target_role is not None: p.target_role = req.target_role
     if req.target_grade is not None: p.target_grade = req.target_grade
-    if req.target_salary_min is not None: p.target_salary_min = req.target_salary_min
-    if req.target_salary_max is not None: p.target_salary_max = req.target_salary_max
+    if req.target_salary_min is not None:
+        p.target_salary_min = req.target_salary_min if req.target_salary_min > 0 else None
+    if req.target_salary_max is not None:
+        p.target_salary_max = req.target_salary_max if req.target_salary_max > 0 else None
 
     # 重新计算求职目标匹配度（职业档案或求职目标变更后自动触发）
+    # 改为异步：标记 match_rate_pending=True + 用 asyncio.create_task 把 LLM 丢到后台，
+    # 接口立即返回。前端轮询 /match-rate 直到 pending=false。
     try:
-        p.match_rate = compute_match_rate_from_profile(p)
-    except Exception as e:
-        logging.warning(f"match_rate compute failed on profile update: {e}")
-        p.match_rate = None
+        trigger_match_rate_regen(p)
+    except RuntimeError:
+        # 没有 running loop（理论上不会发生）→ 退化为同步
+        logging.warning("[profile_update] no event loop, fall back to sync match_rate")
+        try:
+            new_rate = await compute_match_rate_from_profile_llm(p)
+            if new_rate is None:
+                new_rate = compute_match_rate_from_profile(p)
+            p.match_rate = new_rate
+            p.match_rate_pending = False
+        except Exception as e:
+            logging.warning(f"match_rate compute failed on profile update: {e}")
+            p.match_rate = None
 
     await db.commit()
     await db.refresh(current_user)

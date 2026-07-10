@@ -232,7 +232,7 @@ async def _seed_admin_account():
                     age=0,
                     job_status="active",
                     avatar_url="/register.jpg",
-                    experience_years="在校/应届",
+                    experience_years="应届",
                     experience_months="0个月",
                     company_name="暂无公司",
                     role_name="后端开发工程师",

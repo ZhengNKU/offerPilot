@@ -57,6 +57,8 @@ class UserProfile(Base):
 
     # 求职目标匹配度（30-97，由 match_scorer 算法计算）
     match_rate: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    # LLM 是否正在异步生成匹配度（True 表示后台任务还在跑；前端轮询时可短路不重算）
+    match_rate_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 

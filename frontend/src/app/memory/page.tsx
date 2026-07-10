@@ -1663,11 +1663,11 @@ export default function CareerMemoryDashboard() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-on-surface-variant/60 font-semibold font-label-mono">
-                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">apartment</span>{auth.user.company || "腾讯科技"}</span>
-                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">work</span>{auth.user.role ? auth.user.role.split(" · ")[0] : "后端开发工程师"}</span>
-                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">military_tech</span>{auth.user.role ? auth.user.role.split(" · ")[1] || "P6" : "P6"}</span>
+                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">apartment</span>{auth.user.company && auth.user.company !== "暂无公司" ? auth.user.company : "—"}</span>
+                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">work</span>{auth.user.role ? auth.user.role.split(" · ")[0]?.trim() || "—" : "—"}</span>
+                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">military_tech</span>{auth.user.role ? auth.user.role.split(" · ")[1]?.trim() || "—" : "—"}</span>
                   <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">pin_drop</span>{auth.user.targetCity || "—"}</span>
-                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">schedule</span>{auth.user.years || "6年经验"}</span>
+                  <span className="flex items-center gap-1 whitespace-nowrap"><span className="material-symbols-outlined text-xs text-primary">schedule</span>{auth.user.years || "—"}</span>
                 </div>
               </div>
             </div>

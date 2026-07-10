@@ -70,8 +70,8 @@ function InterviewTrainingPageContent() {
   const auth = useAuth();
 
   // ---------- 配置状态 ----------
-  // targetRole 默认从 auth.user.targetRole 拿（如"高级后端专家"），缺省"后端开发工程师"
-  const [targetRole, setTargetRole] = useState<string>(auth.user?.targetRole || "后端开发工程师");
+  // targetRole 默认从 auth.user.targetRole 拿（如"高级后端专家"）
+  const [targetRole, setTargetRole] = useState<string>(auth.user?.targetRole || "");
   const [jobDescription, setJobDescription] = useState<string>("");
   const [interviewType, setInterviewType] = useState<InterviewType>(INTERVIEW_TYPES[0].value);
   const [difficulty, setDifficulty] = useState<Difficulty>(DIFFICULTIES[0].value);

@@ -33,6 +33,9 @@ export default function CareerDashboard() {
     matchRate: 72
   });
 
+  // 目标匹配度正在由后端 LLM 综合生成（通常 3-10s），期间圆环中央显示 spinner
+  const [isMatchRateLoading, setIsMatchRateLoading] = useState(false);
+
   const [accountSecurity, setAccountSecurity] = useState({
     email: "未绑定",
     phone: "未绑定",
@@ -94,6 +97,77 @@ export default function CareerDashboard() {
     }
   }, [auth.isLoggedIn, auth.user]);
 
+  // 轮询匹配度：拉一次 /match-rate，把最新值写回 localStorage + storage 事件，
+  // 同时返回新值（用于轮询判定）。
+  // ⚠️ 关键：必须从 localStorage 读最新 user 再 spread，**不能用闭包里的 auth.user**！
+  //    setInterval 启动时闭包的 auth.user 是保存瞬间的旧值，如果直接 spread 会
+  //    把 degree / target_company 等用户刚刚修改的字段一并回滚到旧值。
+  const fetchAndSyncMatchRate = async (): Promise<{ rate: number | null; pending: boolean }> => {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+      if (!token) return { rate: null, pending: false };
+      const res = await fetch("http://localhost:8001/api/auth/match-rate", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) return { rate: null, pending: false };
+      const data = await res.json();
+      const realRate = typeof data?.matchRate === "number" ? data.matchRate : null;
+      if (realRate !== null && typeof window !== "undefined") {
+        const stored = localStorage.getItem("interviewVar_user");
+        if (stored) {
+          try {
+            const currentUser = JSON.parse(stored);
+            const updatedUser = { ...currentUser, matchRate: realRate };
+            localStorage.setItem("interviewVar_user", JSON.stringify(updatedUser));
+            window.dispatchEvent(new Event("storage"));
+          } catch {
+            // JSON parse 失败则跳过
+          }
+        }
+      }
+      return { rate: realRate, pending: Boolean(data?.pending) };
+    } catch {
+      return { rate: null, pending: false };
+    }
+  };
+
+  const startMatchRatePolling = (oldRate: number | null | undefined) => {
+    setIsMatchRateLoading(true);
+    const startedAt = Date.now();
+    const TIMEOUT_MS = 30000;
+    let stopped = false;
+    const intervalId = window.setInterval(async () => {
+      if (stopped) return;
+      if (Date.now() - startedAt > TIMEOUT_MS) {
+        // 超时兜底：主动调一次强制规则算法的接口
+        window.clearInterval(intervalId);
+        stopped = true;
+        try {
+          const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+          if (token) {
+            await fetch("http://localhost:8001/api/auth/match-rate?force_rules=true", {
+              method: "GET",
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            await fetchAndSyncMatchRate();
+          }
+        } catch {
+          // 静默
+        } finally {
+          setIsMatchRateLoading(false);
+        }
+        return;
+      }
+      const { rate, pending } = await fetchAndSyncMatchRate();
+      if (!pending && rate !== null && rate !== oldRate) {
+        window.clearInterval(intervalId);
+        stopped = true;
+        setIsMatchRateLoading(false);
+      }
+    }, 3000);
+  };
+
   // Handlers for Save actions
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -109,18 +183,30 @@ export default function CareerDashboard() {
     // 解析薪资格式 "50K - 70K" → salMin, salMax
     const salMatch = goalForm.salary.match(/(\d+)K\s*-\s*(\d+)K/i);
     const targetSalaryStr = goalForm.salary || "50K - 70K";
-    // 同步目标到后端，后端会自动计算真实的 matchRate 并返回
-    const realMatchRate = await auth.updateUser({
+
+    // ── 无修改检测：避免无意义的 LLM 重算（每次 3-10s）──
+    const goalUnchanged =
+      goalForm.role === careerGoal.role &&
+      goalForm.level === careerGoal.level &&
+      goalForm.salary === careerGoal.salary &&
+      goalForm.city === careerGoal.city;
+    if (goalUnchanged) {
+      setShowEditGoalModal(false);
+      return;
+    }
+
+    // 先把目标值写到本地 careerGoal（弹窗关闭后卡片立刻显示新内容）
+    setCareerGoal({ ...goalForm });
+    setShowEditGoalModal(false);
+    // 后端 fire-and-forget：不等 LLM，立即关弹窗
+    auth.updateUser({
       targetRole: goalForm.role,
       targetGrade: goalForm.level,
       targetSalary: targetSalaryStr,
       targetCity: goalForm.city
-    });
-    setCareerGoal({
-      ...goalForm,
-      matchRate: realMatchRate ?? careerGoal.matchRate
-    });
-    setShowEditGoalModal(false);
+    }).catch(() => { /* 静默；loading 由轮询超时关闭 */ });
+    // 轮询直到后端生成完新的匹配度
+    startMatchRatePolling(careerGoal.matchRate);
   };
 
   const handleSaveSecurity = (e: React.FormEvent) => {
@@ -387,6 +473,7 @@ export default function CareerDashboard() {
                           strokeDasharray={2 * Math.PI * 48}
                           strokeDashoffset={2 * Math.PI * 48 * (1 - careerGoal.matchRate / 100)}
                           strokeLinecap="round"
+                          className={isMatchRateLoading ? "animate-pulse opacity-40 transition-opacity duration-300" : "transition-opacity duration-300"}
                         />
                         <defs>
                           <linearGradient id="goal-circle-gradient" x1="0" y1="0" x2="1" y2="1">
@@ -396,8 +483,17 @@ export default function CareerDashboard() {
                         </defs>
                       </svg>
                       <div className="absolute inset-0 flex flex-col items-center justify-center">
-                        <span className="text-2xl font-black text-white font-label-mono">{careerGoal.matchRate}%</span>
-                        <span className="text-xs text-on-surface-variant/50 font-bold block scale-90">目标匹配度</span>
+                        {isMatchRateLoading ? (
+                          <>
+                            <span className="material-symbols-outlined text-3xl text-primary animate-spin">progress_activity</span>
+                            <span className="text-[10px] text-on-surface-variant/60 font-bold mt-1 tracking-wider">AI 评估中...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-2xl font-black text-white font-label-mono">{careerGoal.matchRate}%</span>
+                            <span className="text-xs text-on-surface-variant/50 font-bold block scale-90">目标匹配度</span>
+                          </>
+                        )}
                       </div>
                     </div>
                     <span className="text-xs text-on-surface-variant/40 font-bold block tracking-wider mt-2.5">基于 AI 架构师画像分析</span>
