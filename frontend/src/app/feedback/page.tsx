@@ -594,8 +594,19 @@ export default function FeedbackPage() {
             TOP BANNER: Header Title + Mockup image decoration
            ======================================================== */}
         <div className="glass-panel p-6 md:p-8 rounded-3xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between border-white/10 shadow-[0_4px_30px_rgba(0,0,0,0.2)] h-[220px] shrink-0">
+          {/* Semi-transparent background image cover */}
+          <div className="absolute inset-0 w-full h-full select-none pointer-events-none z-0">
+            <img 
+              src="/feedback.jpg" 
+              alt="Feedback Background" 
+              className="w-full h-full object-cover object-right opacity-80" 
+            />
+            {/* Dark overlay gradient to ensure text readability on the left while keeping the image clear on the right */}
+            <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f19] via-[#0b0f19]/45 to-transparent" />
+          </div>
+
           {/* Decorative purple glows inside header */}
-          <div className="absolute top-0 right-1/4 w-[150px] h-[150px] bg-primary/20 rounded-full blur-[80px]" />
+          <div className="absolute top-0 right-1/4 w-[150px] h-[150px] bg-primary/20 rounded-full blur-[80px] z-0" />
           
           <div className="flex items-center gap-5 relative z-10">
             <img 
@@ -609,14 +620,6 @@ export default function FeedbackPage() {
                 你的反馈是我们前进的动力，帮助我们打造更好的面试VAR
               </p>
             </div>
-          </div>
-          
-          <div className="hidden md:block relative h-full w-[240px] md:w-[320px] select-none pointer-events-none">
-            <img 
-              src="/feedback.jpg" 
-              alt="Feedback Illustration" 
-              className="absolute right-0 top-1/2 -translate-y-1/2 h-[190px] w-auto object-contain rounded-2xl" 
-            />
           </div>
         </div>
 
