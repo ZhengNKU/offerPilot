@@ -155,14 +155,16 @@ class FeedbackCreate(BaseModel):
 
 
 class CommentCreate(BaseModel):
-    content: str = Field(..., description="评论内容")
+    content: str = Field(..., max_length=300, description="评论内容")
 
 
 class FeedbackCommentResponse(BaseModel):
+    id: Optional[int] = None
     author: str
     avatar: Optional[str] = None
     content: str
     created_at: str
+    is_pinned: bool = False
 
 
 class FeedbackResponse(BaseModel):

@@ -528,7 +528,7 @@ export default function CareerDashboard() {
                 <div className="w-20 h-20 rounded-full border border-primary/30 overflow-hidden bg-slate-900 flex items-center justify-center shadow-2xl relative z-10">
                   {!avatarError ? (
                     <img
-                      src={auth.user.avatar}
+                      src={auth.user.avatar || "/register.jpg"}
                       alt={profile.name}
                       className="w-full h-full object-cover"
                       onError={() => setAvatarError(true)}
@@ -1731,7 +1731,7 @@ export default function CareerDashboard() {
 
             <div className="relative space-y-5">
               <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/15 border border-primary/30 flex items-center justify-center shadow-[0_0_30px_rgba(192,193,255,0.2)]">
-                <span className="material-symbols-outlined text-3xl text-primary">lock</span>
+                <span className="material-symbols-outlined !text-3xl text-primary">lock</span>
               </div>
 
               <div className="space-y-2">

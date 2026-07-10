@@ -1736,7 +1736,7 @@ function InterviewTrainingPageContent() {
 
             <div className="relative space-y-5">
               <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/15 border border-primary/30 flex items-center justify-center shadow-[0_0_30px_rgba(192,193,255,0.2)]">
-                <span className="material-symbols-outlined text-3xl text-primary">lock</span>
+                <span className="material-symbols-outlined !text-3xl text-primary">lock</span>
               </div>
 
               <div className="space-y-2">

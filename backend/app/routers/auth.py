@@ -27,6 +27,34 @@ security_optional = HTTPBearer(auto_error=False)
 # Helper function to format UserProfile to Frontend expected structure
 def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
     p = user.profile
+    # 防御性兜底：脏数据 / 种子账号导致 profile 为 None 时，用一组合理默认值构造响应，
+    # 避免登录等接口因 AttributeError 直接 500（曾导致 admin 账号无法登录）。
+    if p is None:
+        return schemas.UserProfileResponse(
+            name=user.username,
+            avatar=None,
+            role="系统管理员" if user.username == "admin" else "用户",
+            company="暂无公司",
+            years="在校/应届0个月",
+            status="在职",
+            salary="0K - 0K",
+            targetCompany="大厂公司 (目标)",
+            targetRole="高级工程师",
+            targetGrade="高级",
+            targetSalary="0K - 0K",
+            gender="male",
+            age="0",
+            school="暂无学校",
+            degree="本科",
+            hasExp=False,
+            is_online=user.is_online,
+            membership=user.membership,
+            phone=user.phone,
+            email=user.email,
+            targetCity=None,
+            createdAt=user.created_at.isoformat() if user.created_at else None,
+            matchRate=None,
+        )
     return schemas.UserProfileResponse(
         name=user.username,
         avatar=p.avatar_url,
@@ -244,6 +272,12 @@ async def register_complete(
         )
         
     # Check existence
+    if acc.username.lower() == "admin":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="账户名已被占用"
+        )
+
     exist_check = await db.execute(
         select(models.User).where(
             (models.User.username == acc.username) | 

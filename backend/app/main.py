@@ -121,6 +121,8 @@ async def startup_event():
     asyncio.create_task(run_periodic_cleanup())
     # 启动标签字典种子数据初始化
     asyncio.create_task(_seed_project_tags())
+    # 启动管理员账号初始化
+    asyncio.create_task(_seed_admin_account())
 
 
 @app.on_event("shutdown")
@@ -184,6 +186,72 @@ async def _seed_project_tags():
             ))
         await db.commit()
     logging.info("[seed] 项目标签字典初始化完成: 8 categories + 10 sub-tags")
+
+
+async def _seed_admin_account():
+    """初始化预置管理员账号 (admin / offerPilot@2026)"""
+    from app.database import async_session
+    from app import models
+    from app.utils.security import get_password_hash
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.orm import selectinload
+
+    async with async_session() as db:
+        try:
+            hashed_pwd = get_password_hash("offerPilot@2026")
+            result = await db.execute(
+                sa_select(models.User)
+                .options(selectinload(models.User.profile))
+                .where(models.User.username == "admin")
+            )
+            admin = result.scalars().first()
+            # 记录是否需要创建默认档案：新账号必然缺档案；
+            # 已存在账号通过 selectinload 预加载的 profile 判断，避免异步懒加载触发 greenlet 错误。
+            need_profile = False
+            if not admin:
+                admin = models.User(
+                    username="admin",
+                    password_hash=hashed_pwd,
+                    membership="max",
+                    is_online=False
+                )
+                db.add(admin)
+                await db.flush()
+                need_profile = True
+                logging.info("[seed] 预置管理员账号初始化成功: admin / offerPilot@2026")
+            else:
+                # 幂等重置预置密码，保证 admin 始终为 offerPilot@2026
+                admin.password_hash = hashed_pwd
+                need_profile = admin.profile is None
+
+            # 为 admin 补齐默认档案（全部默认值，头像使用 /register.jpg）
+            if need_profile:
+                db.add(models.UserProfile(
+                    user_id=admin.id,
+                    gender="male",
+                    age=0,
+                    job_status="active",
+                    avatar_url="/register.jpg",
+                    experience_years="在校/应届",
+                    experience_months="0个月",
+                    company_name="暂无公司",
+                    role_name="后端开发工程师",
+                    salary_min=0,
+                    salary_max=0,
+                    school="暂无学校",
+                    degree="本科",
+                    has_experience=False,
+                    target_cities=[],
+                    target_company="大厂公司 (目标)",
+                    target_role="高级工程师",
+                    target_grade="高级",
+                    target_salary_min=0,
+                    target_salary_max=0,
+                ))
+
+            await db.commit()
+        except Exception as e:
+            logging.error(f"[seed] 预置管理员账号初始化失败: {e}")
 
 
 if __name__ == "__main__":

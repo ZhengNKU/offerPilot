@@ -200,10 +200,12 @@ async def list_feedbacks(
         for c in fb.comments:
             comments_list.append(
                 schemas.FeedbackCommentResponse(
+                    id=c.id,
                     author=truncate_name(c.author_name),  # Truncate user name to 10 chars if exceeded
                     avatar=c.author_avatar or "/debugger-2.jpg",
                     content=c.content,
-                    created_at=get_relative_time_str(c.created_at)
+                    created_at=get_relative_time_str(c.created_at),
+                    is_pinned=c.is_pinned
                 )
             )
 
@@ -324,21 +326,26 @@ async def add_comment(
     # Truncate user name to 10 chars if exceeded (backend level safety)
     comment_author = truncate_name(current_user.username)
 
+    is_admin = (current_user.username == "admin")
     comment = models.FeedbackComment(
         feedback_id=id,
         user_id=current_user.id,
         author_name=current_user.username,  # Store original username, but truncate when displayed
         author_avatar=avatar_url,
-        content=req.content
+        content=req.content,
+        is_pinned=is_admin
     )
     db.add(comment)
     await db.commit()
+    await db.refresh(comment)
 
     return schemas.FeedbackCommentResponse(
+        id=comment.id,
         author=comment_author,
         avatar=avatar_url or "/debugger-2.jpg",
         content=comment.content,
-        created_at="刚刚"
+        created_at="刚刚",
+        is_pinned=comment.is_pinned
     )
 
 
@@ -421,3 +428,68 @@ async def batch_delete_feedbacks(
     
     await db.commit()
     return {"message": f"成功删除 {len(matched_ids)} 条反馈", "deleted_ids": matched_ids}
+
+
+@router.put("/comment/{comment_id}/pin")
+async def toggle_comment_pin(
+    comment_id: int,
+    is_pinned: bool,
+    current_user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    if current_user.username != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以置顶或取消置顶评论")
+
+    res = await db.execute(select(models.FeedbackComment).where(models.FeedbackComment.id == comment_id))
+    comment = res.scalars().first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="评论不存在")
+
+    comment.is_pinned = is_pinned
+    await db.commit()
+    return {"success": True, "comment_id": comment_id, "is_pinned": comment.is_pinned}
+
+
+class CommentBatchDeleteRequest(BaseModel):
+    ids: List[int]
+
+
+@router.delete("/comment/batch")
+async def batch_delete_comments(
+    req: CommentBatchDeleteRequest,
+    current_user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(models.FeedbackComment).where(models.FeedbackComment.id.in_(req.ids)))
+    comments = res.scalars().all()
+    if len(comments) != len(req.ids):
+        raise HTTPException(status_code=404, detail="部分评论未找到")
+
+    for comment in comments:
+        if comment.author_name != current_user.username and current_user.username != "admin":
+            raise HTTPException(status_code=403, detail="没有权限删除部分评论")
+
+    for comment in comments:
+        await db.delete(comment)
+
+    await db.commit()
+    return {"success": True, "deleted_ids": req.ids}
+
+
+@router.delete("/comment/{comment_id}")
+async def delete_comment(
+    comment_id: int,
+    current_user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(models.FeedbackComment).where(models.FeedbackComment.id == comment_id))
+    comment = res.scalars().first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="评论不存在")
+
+    if comment.author_name != current_user.username and current_user.username != "admin":
+        raise HTTPException(status_code=403, detail="没有权限删除此评论")
+
+    await db.delete(comment)
+    await db.commit()
+    return {"success": True, "comment_id": comment_id}

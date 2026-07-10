@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-from sqlalchemy import ForeignKey, String, Integer, Boolean, DateTime, func, ARRAY, Float, BigInteger, UniqueConstraint, Index, text, Text
+from sqlalchemy import ForeignKey, String, Integer, Boolean, DateTime, func, ARRAY, Float, BigInteger, UniqueConstraint, Index, text, Text, desc
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pgvector.sqlalchemy import Vector
@@ -662,7 +662,7 @@ class Feedback(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
     
     comments: Mapped[List["FeedbackComment"]] = relationship(
-        "FeedbackComment", back_populates="feedback", cascade="all, delete-orphan", order_by="FeedbackComment.created_at.desc()"
+        "FeedbackComment", back_populates="feedback", cascade="all, delete-orphan", order_by="desc(FeedbackComment.is_pinned), desc(FeedbackComment.created_at)"
     )
     votes: Mapped[List["FeedbackVote"]] = relationship(
         "FeedbackVote", back_populates="feedback", cascade="all, delete-orphan"
@@ -679,6 +679,7 @@ class FeedbackComment(Base):
     author_name: Mapped[str] = mapped_column(String(100), nullable=False)
     author_avatar: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     
     feedback: Mapped["Feedback"] = relationship("Feedback", back_populates="comments")

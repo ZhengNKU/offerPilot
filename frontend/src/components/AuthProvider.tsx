@@ -976,7 +976,7 @@ function AuthModals() {
             className="bg-[#0e1626]/95 border border-white/10 rounded-3xl p-8 max-w-md w-full text-center relative z-10 space-y-6 shadow-2xl"
           >
             <div className="w-16 h-16 rounded-full bg-[#FF7A95]/10 text-[#FF7A95] flex items-center justify-center mx-auto">
-              <span className="material-symbols-outlined text-4xl">logout</span>
+              <span className="material-symbols-outlined !text-4xl">logout</span>
             </div>
             
             <div className="space-y-2 text-center">
@@ -1062,7 +1062,7 @@ export function UserMenu() {
         className="flex items-center gap-1.5 border-l border-white/10 pl-3.5 cursor-pointer select-none group"
       >
         <div className="w-8 h-8 rounded-full bg-slate-900 border border-white/10 overflow-hidden shrink-0 group-hover:border-[#AFA7FF]/40 transition-colors">
-          <img src={auth.user.avatar} alt={auth.user.name} className="w-full h-full object-cover" />
+          <img src={auth.user.avatar || "/register.jpg"} alt={auth.user.name} className="w-full h-full object-cover" />
         </div>
         <span className="text-on-surface font-extrabold text-sm whitespace-nowrap hidden sm:block group-hover:text-white transition-colors">
           {auth.user.name}

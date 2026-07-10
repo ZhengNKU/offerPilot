@@ -18,9 +18,11 @@ const buildPageList = (cur: number, total: number): (number | "…")[] => {
 };
 
 interface CommentItem {
+  id?: number;
   author: string;
   avatar: string;
   content: string;
+  is_pinned?: boolean;
 }
 
 interface FeedbackItem {
@@ -151,6 +153,11 @@ export default function FeedbackPage() {
   // Comment Modal States
   const [selectedFeedback, setSelectedFeedback] = useState<FeedbackItem | null>(null);
   const [newCommentText, setNewCommentText] = useState("");
+  const [onlyShowMyComments, setOnlyShowMyComments] = useState(false);
+  const [selectedCommentIds, setSelectedCommentIds] = useState<Set<number>>(new Set());
+  const [showCommentDeleteConfirm, setShowCommentDeleteConfirm] = useState(false);
+  const [commentToDelete, setCommentToDelete] = useState<number | null>(null);
+  const [isDeletingComment, setIsDeletingComment] = useState(false);
 
   // Select Options
   const typeOptions = ["问题反馈", "功能建议", "体验优化", "其他"];
@@ -202,8 +209,10 @@ export default function FeedbackPage() {
   };
 
   useEffect(() => {
-    fetchFeedbacks();
-  }, [activeTab, sortBy, currentPage, searchQuery]);
+    if (auth.isLoggedIn) {
+      fetchFeedbacks();
+    }
+  }, [activeTab, sortBy, currentPage, searchQuery, auth.isLoggedIn]);
 
   // Reset page to 1 on tab or sort or search query change
   useEffect(() => {
@@ -466,6 +475,10 @@ export default function FeedbackPage() {
       return;
     }
     if (!newCommentText.trim() || !selectedFeedback) return;
+    if (newCommentText.trim().length > 300) {
+      auth.triggerToast("评论不能超过300字符");
+      return;
+    }
 
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
@@ -485,20 +498,34 @@ export default function FeedbackPage() {
         setFeedbacks(prev => prev.map(item => {
           if (item.id === selectedFeedback.id) {
             const updatedComments = [...item.comments, newCommentObj];
+            const sortedComments = [...updatedComments].sort((a, b) => {
+              if (a.is_pinned && !b.is_pinned) return -1;
+              if (!a.is_pinned && b.is_pinned) return 1;
+              return 0;
+            });
             return {
               ...item,
-              comments: updatedComments,
-              commentsCount: updatedComments.length
+              comments: sortedComments,
+              commentsCount: sortedComments.length
             };
           }
           return item;
         }));
         // Update selectedFeedback details
-        setSelectedFeedback(prev => prev ? {
-          ...prev,
-          comments: [...prev.comments, newCommentObj],
-          commentsCount: prev.commentsCount + 1
-        } : null);
+        setSelectedFeedback(prev => {
+          if (!prev) return null;
+          const updatedComments = [...prev.comments, newCommentObj];
+          const sortedComments = [...updatedComments].sort((a, b) => {
+            if (a.is_pinned && !b.is_pinned) return -1;
+            if (!a.is_pinned && b.is_pinned) return 1;
+            return 0;
+          });
+          return {
+            ...prev,
+            comments: sortedComments,
+            commentsCount: prev.commentsCount + 1
+          };
+        });
         setNewCommentText("");
       } else {
         const errorData = await res.json();
@@ -507,6 +534,267 @@ export default function FeedbackPage() {
     } catch (err) {
       console.error("Failed to add comment:", err);
       auth.triggerToast("发表评论失败，请检查网络！");
+    }
+  };
+
+  // Toggle Comment Pin (Admin Only)
+  const handleToggleCommentPin = async (commentId: number, isPinned: boolean) => {
+    if (!selectedFeedback) return;
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+      const res = await fetch(`http://localhost:8001/api/feedback/comment/${commentId}/pin?is_pinned=${isPinned}`, {
+        method: "PUT",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        // Update selectedFeedback details
+        setSelectedFeedback(prev => {
+          if (!prev) return null;
+          const updatedComments = prev.comments.map(c => 
+            c.id === commentId ? { ...c, is_pinned: isPinned } : c
+          );
+          const sortedComments = [...updatedComments].sort((a, b) => {
+            if (a.is_pinned && !b.is_pinned) return -1;
+            if (!a.is_pinned && b.is_pinned) return 1;
+            return 0;
+          });
+          return {
+            ...prev,
+            comments: sortedComments
+          };
+        });
+        
+        // Update feedbacks list
+        setFeedbacks(prev => prev.map(item => {
+          if (item.id === selectedFeedback.id) {
+            const updatedComments = item.comments.map(c => 
+              c.id === commentId ? { ...c, is_pinned: isPinned } : c
+            );
+            const sortedComments = [...updatedComments].sort((a, b) => {
+              if (a.is_pinned && !b.is_pinned) return -1;
+              if (!a.is_pinned && b.is_pinned) return 1;
+              return 0;
+            });
+            return {
+              ...item,
+              comments: sortedComments
+            };
+          }
+          return item;
+        }));
+
+        auth.triggerToast(isPinned ? "评论已置顶！" : "评论已取消置顶。");
+      } else {
+        const errorData = await res.json();
+        auth.triggerToast(errorData.detail || "操作失败");
+      }
+    } catch (err) {
+      console.error("Failed to pin/unpin comment:", err);
+      auth.triggerToast("网络错误，操作失败");
+    }
+  };
+
+  // Post Quick Comment (Admin Only)
+  const postQuickComment = async (content: string) => {
+    if (!auth.isLoggedIn) {
+      auth.triggerToast("请先登录再发表评论！");
+      return;
+    }
+    if (!selectedFeedback) return;
+
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+      const res = await fetch(`http://localhost:8001/api/feedback/${selectedFeedback.id}/comment`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          content: content
+        })
+      });
+      if (res.ok) {
+        const newCommentObj = await res.json();
+        // Update feedbacks list
+        setFeedbacks(prev => prev.map(item => {
+          if (item.id === selectedFeedback.id) {
+            const updatedComments = [...item.comments, newCommentObj];
+            const sortedComments = [...updatedComments].sort((a, b) => {
+              if (a.is_pinned && !b.is_pinned) return -1;
+              if (!a.is_pinned && b.is_pinned) return 1;
+              return 0;
+            });
+            return {
+              ...item,
+              comments: sortedComments,
+              commentsCount: sortedComments.length
+            };
+          }
+          return item;
+        }));
+        // Update selectedFeedback details
+        setSelectedFeedback(prev => {
+          if (!prev) return null;
+          const updatedComments = [...prev.comments, newCommentObj];
+          const sortedComments = [...updatedComments].sort((a, b) => {
+            if (a.is_pinned && !b.is_pinned) return -1;
+            if (!a.is_pinned && b.is_pinned) return 1;
+            return 0;
+          });
+          return {
+            ...prev,
+            comments: sortedComments,
+            commentsCount: prev.commentsCount + 1
+          };
+        });
+        auth.triggerToast("快捷回复成功！");
+      } else {
+        const errorData = await res.json();
+        auth.triggerToast(errorData.detail || "发表评论失败，请重试！");
+      }
+    } catch (err) {
+      console.error("Failed to add comment:", err);
+      auth.triggerToast("发表评论失败，请检查网络！");
+    }
+  };
+
+  // Toggle Select All filtered comments (admin can select all, normal user selects own)
+  const toggleSelectAllComments = () => {
+    if (!selectedFeedback) return;
+    if (auth.user?.name === "admin") {
+      const allCommentIds = selectedFeedback.comments.map(c => c.id!).filter(id => id !== undefined);
+      if (selectedCommentIds.size === allCommentIds.length) {
+        setSelectedCommentIds(new Set());
+      } else {
+        setSelectedCommentIds(new Set(allCommentIds));
+      }
+    } else {
+      const myComments = selectedFeedback.comments.filter(c => c.author === auth.user?.name);
+      const myCommentIds = myComments.map(c => c.id!).filter(id => id !== undefined);
+      if (selectedCommentIds.size === myCommentIds.length) {
+        setSelectedCommentIds(new Set());
+      } else {
+        setSelectedCommentIds(new Set(myCommentIds));
+      }
+    }
+  };
+
+  // Delete Single Comment
+  const handleDeleteComment = async (commentId: number) => {
+    if (!selectedFeedback) return;
+    setIsDeletingComment(true);
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+      const res = await fetch(`http://localhost:8001/api/feedback/comment/${commentId}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        // Update selectedFeedback details
+        setSelectedFeedback(prev => {
+          if (!prev) return null;
+          const updatedComments = prev.comments.filter(c => c.id !== commentId);
+          return {
+            ...prev,
+            comments: updatedComments,
+            commentsCount: Math.max(0, prev.commentsCount - 1)
+          };
+        });
+
+        // Update feedbacks list
+        setFeedbacks(prev => prev.map(item => {
+          if (item.id === selectedFeedback.id) {
+            const updatedComments = item.comments.filter(c => c.id !== commentId);
+            return {
+              ...item,
+              comments: updatedComments,
+              commentsCount: Math.max(0, item.commentsCount - 1)
+            };
+          }
+          return item;
+        }));
+
+        // Remove from selectedCommentIds if present
+        setSelectedCommentIds(prev => {
+          const next = new Set(prev);
+          next.delete(commentId);
+          return next;
+        });
+
+        auth.triggerToast("评论已成功删除！");
+      } else {
+        const errorData = await res.json();
+        auth.triggerToast(errorData.detail || "删除评论失败，请重试！");
+      }
+    } catch (err) {
+      console.error("Failed to delete comment:", err);
+      auth.triggerToast("网络错误，操作失败");
+    } finally {
+      setIsDeletingComment(false);
+      setShowCommentDeleteConfirm(false);
+      setCommentToDelete(null);
+    }
+  };
+
+  // Delete Selected Comments in Batch
+  const handleBatchDeleteComments = async () => {
+    if (!selectedFeedback || selectedCommentIds.size === 0) return;
+    setIsDeletingComment(true);
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
+      const idsArray = Array.from(selectedCommentIds);
+      const res = await fetch(`http://localhost:8001/api/feedback/comment/batch`, {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ids: idsArray
+        })
+      });
+      if (res.ok) {
+        // Update selectedFeedback details
+        setSelectedFeedback(prev => {
+          if (!prev) return null;
+          const updatedComments = prev.comments.filter(c => !selectedCommentIds.has(c.id!));
+          return {
+            ...prev,
+            comments: updatedComments,
+            commentsCount: Math.max(0, prev.commentsCount - idsArray.length)
+          };
+        });
+
+        // Update feedbacks list
+        setFeedbacks(prev => prev.map(item => {
+          if (item.id === selectedFeedback.id) {
+            const updatedComments = item.comments.filter(c => !selectedCommentIds.has(c.id!));
+            return {
+              ...item,
+              comments: updatedComments,
+              commentsCount: Math.max(0, item.commentsCount - idsArray.length)
+            };
+          }
+          return item;
+        }));
+
+        setSelectedCommentIds(new Set());
+        auth.triggerToast(`成功删除 ${idsArray.length} 条评论！`);
+      } else {
+        const errorData = await res.json();
+        auth.triggerToast(errorData.detail || "批量删除失败，请重试！");
+      }
+    } catch (err) {
+      console.error("Failed to batch delete comments:", err);
+      auth.triggerToast("网络错误，操作失败");
+    } finally {
+      setIsDeletingComment(false);
+      setShowCommentDeleteConfirm(false);
     }
   };
 
@@ -521,7 +809,7 @@ export default function FeedbackPage() {
       <div className="absolute bottom-[-10%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-secondary/5 blur-[120px] pointer-events-none" />
 
       {/* NAV BAR */}
-      <nav className="relative z-20 border-b border-white/5 backdrop-blur-md bg-[#0b1326]/60">
+      <nav className="relative z-40 border-b border-white/5 backdrop-blur-md bg-[#0b1326]/60">
         <div className="max-w-container-max mx-auto px-gutter h-20 flex items-center justify-between">
           <div
             onClick={() => router.push("/")}
@@ -1115,7 +1403,7 @@ export default function FeedbackPage() {
               <div className="absolute top-0 left-1/2 -translate-x-1/2 w-40 h-40 bg-primary/20 rounded-full blur-[50px] pointer-events-none" />
               
               <div className="w-16 h-16 bg-emerald-400/10 border border-emerald-400/20 text-emerald-300 rounded-full flex items-center justify-center mx-auto mb-5 shadow-[0_0_20px_rgba(52,211,153,0.15)]">
-                <span className="material-symbols-outlined text-xl">check_circle</span>
+                <span className="material-symbols-outlined !text-4xl">check_circle</span>
               </div>
 
               <h3 className="text-xl font-bold text-on-surface mb-2">感谢您的反馈！</h3>
@@ -1184,7 +1472,7 @@ export default function FeedbackPage() {
                   <div className="text-sm text-on-surface-variant/40 font-medium mt-3.5">
                     来自用户 <span className="text-on-surface-variant/60 font-semibold">{selectedFeedback.author}</span> · {selectedFeedback.time}
                   </div>
-                  {selectedFeedback.screenshot_url && (
+                  {selectedFeedback.screenshot_url && selectedFeedback.screenshot_url.trim() !== "" && (
                     <div className="mt-4 pt-4 border-t border-white/5">
                       <h4 className="text-xs font-bold text-on-surface-variant/40 mb-2">相关截图</h4>
                       <a href={selectedFeedback.screenshot_url} target="_blank" rel="noreferrer" className="inline-block max-w-full overflow-hidden rounded-xl border border-white/10 hover:border-primary/30 transition-colors">
@@ -1196,60 +1484,200 @@ export default function FeedbackPage() {
 
                 {/* Comments area */}
                 <div className="border-t border-white/5 pt-5 flex flex-col">
-                  <h4 className="text-base font-bold text-on-surface mb-3 flex items-center gap-1.5 shrink-0">
-                    <span>探讨与评论</span>
-                    <span className="text-sm bg-white/5 px-1.5 py-0.5 rounded font-normal text-on-surface-variant/50">
-                      {selectedFeedback.commentsCount}
-                    </span>
-                  </h4>
-                  
-                  {/* Comments Card Wrapper - scrollable card */}
-                  <div className="glass-panel p-4 rounded-2xl border-white/5 bg-white/[0.01] min-h-[400px] max-h-[480px] overflow-y-auto custom-scrollbar flex flex-col gap-3 mb-2">
-                    {selectedFeedback.comments.length === 0 ? (
-                      <p className="text-base text-on-surface-variant/40 py-4 text-center my-auto">暂无探讨评论，来发表你的想法吧</p>
-                    ) : (
-                      selectedFeedback.comments.map((comment, index) => (
-                        <div key={index} className="bg-white/[0.015] border border-white/[0.04] p-3 rounded-xl flex items-start gap-2.5">
-                          <img 
-                            src={comment.avatar || "/debugger-2.jpg"} 
-                            alt={comment.author} 
-                            className="w-7 h-7 rounded-full object-cover shrink-0 border border-white/10" 
-                          />
-                          <div className="min-w-0 flex-1">
-                             <div className="flex items-center justify-between gap-2 mb-0.5">
-                               <span className="text-[10px] font-bold text-on-surface-variant/75">
-                                 {comment.author.length > 10 ? comment.author.slice(0, 10) + "..." : comment.author}
-                               </span>
-                             </div>
-                             <p className="text-xs text-on-surface font-medium leading-relaxed">
-                               {comment.content}
-                             </p>
-                          </div>
+                  {(() => {
+                    const myComments = selectedFeedback.comments.filter(c => c.author === auth.user?.name);
+                    const myCommentsCount = myComments.length;
+                    const displayedComments = onlyShowMyComments ? myComments : selectedFeedback.comments;
+                    
+                    return (
+                      <>
+                        <div className="flex items-center justify-between gap-2 shrink-0 mb-3">
+                          <h4 className="text-base font-bold text-on-surface flex items-center gap-1.5">
+                            <span>探讨与评论</span>
+                            <span className="text-sm bg-white/5 px-1.5 py-0.5 rounded font-normal text-on-surface-variant/50">
+                              {selectedFeedback.commentsCount}
+                            </span>
+                          </h4>
+                          {auth.isLoggedIn && (
+                            <div className="flex items-center gap-3">
+                              {((onlyShowMyComments && myCommentsCount > 0) || (auth.user?.name === "admin" && selectedFeedback.comments.length > 0)) && (
+                                <button
+                                  type="button"
+                                  onClick={toggleSelectAllComments}
+                                  className="text-xs text-[#AFA7FF] hover:text-white font-bold transition-colors cursor-pointer"
+                                >
+                                  {auth.user?.name === "admin"
+                                    ? (selectedCommentIds.size === selectedFeedback.comments.length ? "取消全选" : "全选")
+                                    : (selectedCommentIds.size === myCommentsCount ? "取消全选" : "全选")
+                                  }
+                                </button>
+                              )}
+                              {((onlyShowMyComments && selectedCommentIds.size > 0) || (auth.user?.name === "admin" && selectedCommentIds.size > 0)) && (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowCommentDeleteConfirm(true)}
+                                  className="text-xs text-red-400 hover:text-red-300 font-bold transition-colors cursor-pointer flex items-center gap-0.5"
+                                >
+                                  <span className="material-symbols-outlined text-xs">delete</span>
+                                  <span>批量删除 ({selectedCommentIds.size})</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setOnlyShowMyComments(!onlyShowMyComments);
+                                  setSelectedCommentIds(new Set());
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer border flex items-center gap-1 ${
+                                  onlyShowMyComments
+                                    ? "bg-[#AFA7FF]/10 border-[#AFA7FF] text-[#AFA7FF]"
+                                    : "bg-white/5 border-white/10 text-on-surface-variant/70 hover:bg-white/10"
+                                }`}
+                              >
+                                <span className="material-symbols-outlined text-[12px]">person</span>
+                                <span>只看我的</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
-                      ))
-                    )}
-                  </div>
+
+                        {/* Comments Card Wrapper - scrollable card */}
+                        <div className="glass-panel p-4 rounded-2xl border-white/5 bg-white/[0.01] min-h-[400px] max-h-[480px] overflow-y-auto custom-scrollbar flex flex-col gap-3 mb-2">
+                          {displayedComments.length === 0 ? (
+                            <p className="text-base text-on-surface-variant/40 py-4 text-center my-auto">
+                              {onlyShowMyComments ? "没有找到您的评论" : "暂无探讨评论，来发表你的想法吧"}
+                            </p>
+                          ) : (
+                            displayedComments.map((comment, index) => {
+                              const isChecked = selectedCommentIds.has(comment.id!);
+                              const handleCheckboxChange = () => {
+                                setSelectedCommentIds(prev => {
+                                  const next = new Set(prev);
+                                  if (next.has(comment.id!)) {
+                                    next.delete(comment.id!);
+                                  } else {
+                                    next.add(comment.id!);
+                                  }
+                                  return next;
+                                });
+                              };
+
+                              return (
+                                <div key={index} className={`border p-3 rounded-xl flex items-start gap-2.5 transition-all ${
+                                  comment.is_pinned 
+                                    ? "bg-red-500/[0.02] border-red-500/40 shadow-[0_0_15px_rgba(239,68,68,0.05)]" 
+                                    : "bg-white/[0.015] border-white/[0.04]"
+                                }`}>
+                                  {(auth.user?.name === "admin" || (onlyShowMyComments && comment.author === auth.user?.name)) && (
+                                    <div 
+                                      onClick={handleCheckboxChange}
+                                      className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 cursor-pointer select-none transition-all mt-1.5 ${
+                                        isChecked 
+                                          ? "bg-red-500 border-red-500 text-white" 
+                                          : "border-white/20 hover:border-white/40"
+                                      }`}
+                                    >
+                                      {isChecked && <span className="material-symbols-outlined text-[10px] font-black">check</span>}
+                                    </div>
+                                  )}
+                                  <img 
+                                    src={comment.avatar || "/debugger-2.jpg"} 
+                                    alt={comment.author} 
+                                    className="w-7 h-7 rounded-full object-cover shrink-0 border border-white/10" 
+                                  />
+                                  <div className="min-w-0 flex-1">
+                                     <div className="flex items-center justify-between gap-2 mb-0.5">
+                                       <div className="flex items-center gap-1.5 min-w-0">
+                                         <span className="text-xs font-bold text-on-surface-variant/75 truncate">
+                                           {comment.author.length > 10 ? comment.author.slice(0, 10) + "..." : comment.author}
+                                         </span>
+                                       </div>
+                                       <div className="flex items-center gap-1 shrink-0">
+                                         {(comment.author === auth.user?.name || auth.user?.name === "admin") && (
+                                           <button
+                                             type="button"
+                                             onClick={() => {
+                                               setCommentToDelete(comment.id!);
+                                               setShowCommentDeleteConfirm(true);
+                                             }}
+                                             className="text-white/30 hover:text-red-400 transition-colors cursor-pointer p-0.5 rounded hover:bg-white/5 flex items-center justify-center shrink-0"
+                                             title="删除评论"
+                                           >
+                                             <span className="material-symbols-outlined text-[14px]">delete</span>
+                                           </button>
+                                         )}
+                                         {auth.user?.name === "admin" && (
+                                           <button
+                                             type="button"
+                                             onClick={() => handleToggleCommentPin(comment.id!, !comment.is_pinned)}
+                                             className={`transition-colors cursor-pointer p-0.5 rounded hover:bg-white/5 flex items-center justify-center shrink-0 ${comment.is_pinned ? "text-red-400" : "text-white/30 hover:text-red-400"}`}
+                                             title={comment.is_pinned ? "取消置顶" : "置顶评论"}
+                                           >
+                                             <span className={`material-symbols-outlined text-[13px] ${comment.is_pinned ? "fill-current" : ""}`}>push_pin</span>
+                                           </button>
+                                         )}
+                                       </div>
+                                     </div>
+                                     <p className="text-xs text-on-surface font-medium leading-relaxed break-words">
+                                       {comment.content}
+                                     </p>
+                                  </div>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
               </div>
 
-              {/* Add comment form - pinned at bottom */}
-              <form onSubmit={handleAddComment} className="p-6 border-t border-white/5 bg-[#0f1422]/60 backdrop-blur-md flex gap-2 relative shrink-0 rounded-b-3xl">
-                <input
-                  type="text"
-                  value={newCommentText}
-                  onChange={(e) => setNewCommentText(e.target.value)}
-                  placeholder="写下你的想法，一起交流讨论..."
-                  className="flex-1 bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary-container/30 transition-all px-4 py-2.5 rounded-xl text-xs text-on-surface placeholder-on-surface-variant/30 focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={!newCommentText.trim()}
-                  className="bg-primary text-on-primary font-bold px-4 rounded-xl text-sm hover:opacity-90 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
-                >
-                  发布
-                </button>
-              </form>
+              {/* Add comment form - pinned at bottom with admin quick replies */}
+              <div className="p-6 border-t border-white/5 bg-[#0f1422]/60 backdrop-blur-md flex flex-col gap-3 relative shrink-0 rounded-b-3xl">
+                {auth.user?.name === "admin" && (
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="text-on-surface-variant/40 font-bold">快捷回复:</span>
+                    <button
+                      type="button"
+                      onClick={() => postQuickComment("感谢您的反馈！此建议非常棒，我们已确认此需求，并已将其排入后续开发计划中，会尽快予以优化和实现。再次感谢您对 面试VAR 的支持！")}
+                      className="px-2 py-0.5 bg-primary/10 border border-primary/20 text-[#AFA7FF] rounded hover:bg-primary/20 transition-all font-bold cursor-pointer"
+                    >
+                      接受建议
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => postQuickComment("非常感谢您的用心反馈！经内部评估，由于现阶段产品定位差异，此建议暂不便排入近期版本规划。我们会持续记录并关注您的提议，感谢理解！")}
+                      className="px-2 py-0.5 bg-white/5 border border-white/10 text-white/70 rounded hover:bg-white/10 transition-all font-bold cursor-pointer"
+                    >
+                      委婉拒绝
+                    </button>
+                  </div>
+                )}
+                <form onSubmit={handleAddComment} className="flex gap-2 w-full">
+                  <div className="relative flex-1 flex items-center">
+                    <input
+                      type="text"
+                      value={newCommentText}
+                      onChange={(e) => setNewCommentText(e.target.value)}
+                      maxLength={300}
+                      placeholder="写下你的想法，一起交流讨论..."
+                      className="w-full bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary-container/30 transition-all pl-4 pr-16 py-2.5 rounded-xl text-xs text-on-surface placeholder-on-surface-variant/30 focus:outline-none"
+                    />
+                    <span className="absolute right-3 text-[10px] font-bold text-on-surface-variant/40 select-none">
+                      {newCommentText.length}/300
+                    </span>
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={!newCommentText.trim() || newCommentText.length > 300}
+                    className="bg-primary text-on-primary font-bold px-4 rounded-xl text-sm hover:opacity-90 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                  >
+                    发布
+                  </button>
+                </form>
+              </div>
 
             </motion.div>
           </div>
@@ -1326,6 +1754,135 @@ export default function FeedbackPage() {
                 ) : (
                   <span>确认删除</span>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Comment Delete Confirmation Modal */}
+      {showCommentDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4 select-none">
+          <div
+            onClick={() => {
+              if (!isDeletingComment) {
+                setShowCommentDeleteConfirm(false);
+                setCommentToDelete(null);
+              }
+            }}
+            className="absolute inset-0 bg-[#050B1A]/85 backdrop-blur-md transition-opacity duration-300"
+          />
+
+          <div className="relative glass-panel max-w-sm w-full p-6 rounded-3xl border-white/10 shadow-2xl space-y-6 text-center z-10 bg-[#0A0F1D]/90">
+            <div className="flex justify-between items-center border-b border-white/5 pb-3">
+              <span className="font-label-mono text-[10px] text-red-400 tracking-widest uppercase font-bold">
+                Danger Zone
+              </span>
+              <button
+                onClick={() => {
+                  setShowCommentDeleteConfirm(false);
+                  setCommentToDelete(null);
+                }}
+                disabled={isDeletingComment}
+                className="text-on-surface-variant hover:text-white transition-colors disabled:opacity-30 disabled:pointer-events-none"
+              >
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              <div className="w-16 h-16 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2">
+                <span className="material-symbols-outlined" style={{ fontSize: "40px" }}>warning</span>
+              </div>
+              <h3 className="font-extrabold text-white text-2xl">确认要删除评论吗？</h3>
+              <p className="text-on-surface-variant text-sm leading-relaxed max-w-xs mx-auto font-semibold">
+                {commentToDelete === null
+                  ? `您已选择批量删除 ${selectedCommentIds.size} 条评论记录，此操作将永久从数据库中删除，且不可撤销。`
+                  : "此操作将永久删除该评论记录，且不可撤销。"}
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => {
+                  setShowCommentDeleteConfirm(false);
+                  setCommentToDelete(null);
+                }}
+                disabled={isDeletingComment}
+                className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-base font-bold hover:bg-white/10 transition-all cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (commentToDelete !== null) {
+                    handleDeleteComment(commentToDelete);
+                  } else {
+                    handleBatchDeleteComments();
+                  }
+                }}
+                disabled={isDeletingComment}
+                className="flex-1 py-3 rounded-xl bg-red-500 text-white text-base font-bold hover:bg-red-600 transition-all cursor-pointer shadow-lg shadow-red-500/15 disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-2"
+              >
+                {isDeletingComment ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>删除中...</span>
+                  </>
+                ) : (
+                  <span>确认删除</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* UNAUTHENTICATED OVERLAY */}
+      {!auth.isLoggedIn && (
+        <div className="fixed inset-0 z-30 bg-[#050B1A]/80 backdrop-blur-md flex items-center justify-center px-4">
+          <div className="glass-panel relative rounded-3xl border border-white/10 p-8 sm:p-10 max-w-md w-full text-center space-y-6 shadow-[0_20px_60px_rgba(0,0,0,0.4)] overflow-hidden bg-[#0A0F1D]/90">
+            <div className="absolute -top-16 -right-16 w-40 h-40 bg-primary/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-secondary/15 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative space-y-5">
+              <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/15 border border-primary/30 flex items-center justify-center shadow-[0_0_30px_rgba(192,193,255,0.2)]">
+                <span className="material-symbols-outlined !text-3xl text-primary">lock</span>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-[10px] font-label-mono tracking-widest text-primary font-bold uppercase block">
+                  Feedback Center
+                </span>
+                <h3 className="text-2xl font-black text-white leading-tight">登录解锁体验反馈中心</h3>
+                <p className="text-sm text-on-surface-variant/70 font-semibold leading-relaxed">
+                  您的反馈是我们前进的动力，登录后可提交您的反馈与建议，参与其他用户的交流与讨论，共同打造更好的面试VAR。
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="flex-1 py-3 bg-primary text-on-primary font-black rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_24px_rgba(192,193,255,0.35)] cursor-pointer"
+                >
+                  立即登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="flex-1 py-3 bg-white/5 border border-white/10 text-white font-black rounded-xl hover:bg-white/10 transition-all cursor-pointer"
+                >
+                  免费注册
+                </button>
+              </div>
+
+              <button
+                onClick={() => router.push("/")}
+                className="text-base font-bold text-on-surface-variant/50 hover:text-on-surface-variant transition-colors cursor-pointer"
+              >
+                返回首页
               </button>
             </div>
           </div>
