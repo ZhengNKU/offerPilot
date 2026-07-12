@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
+import { API_BASE } from "@/lib/api";
 
 interface DialogueItem {
   sender: "interviewer" | "user";
@@ -249,7 +250,7 @@ export default function InterviewRecordAnalysisPage() {
       };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const res = await fetch(`http://localhost:8001/api/audio/section/${dbSectionId}/optimize`, {
+      const res = await fetch(`${API_BASE}/api/audio/section/${dbSectionId}/optimize`, {
         method: "POST",
         headers
       });
@@ -334,8 +335,8 @@ export default function InterviewRecordAnalysisPage() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       Promise.all([
-        fetch(`http://localhost:8001/api/audio/report/${sessionId}`, { headers }),
-        fetch(`http://localhost:8001/api/audio/session/${sessionId}/sections`, { headers })
+        fetch(`${API_BASE}/api/audio/report/${sessionId}`, { headers }),
+        fetch(`${API_BASE}/api/audio/session/${sessionId}/sections`, { headers })
       ]).then(async ([reportRes, sectionsRes]) => {
         if (reportRes.ok && sectionsRes.ok) {
           const report = await reportRes.json();
@@ -598,7 +599,7 @@ export default function InterviewRecordAnalysisPage() {
       // Check registered free user limit via backend
       const token = localStorage.getItem("interviewVar_token");
       try {
-        const checkRes = await fetch("http://localhost:8001/api/audio/check_limit", {
+        const checkRes = await fetch(`${API_BASE}/api/audio/check_limit`, {
           headers: token ? { "Authorization": `Bearer ${token}` } : {}
         });
         if (!checkRes.ok) {
@@ -648,7 +649,7 @@ export default function InterviewRecordAnalysisPage() {
 
     try {
       // Step 1: Create InterviewSession from the pasted text
-      const sessionRes = await fetch("http://localhost:8001/api/audio/create_record_session", {
+      const sessionRes = await fetch(`${API_BASE}/api/audio/create_record_session`, {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({
@@ -671,7 +672,7 @@ export default function InterviewRecordAnalysisPage() {
       const sessionId: number = sessionData.session_id;
 
       // Step 2: Trigger background analysis task
-      const analyzeRes = await fetch("http://localhost:8001/api/audio/analyze", {
+      const analyzeRes = await fetch(`${API_BASE}/api/audio/analyze`, {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ session_id: sessionId })

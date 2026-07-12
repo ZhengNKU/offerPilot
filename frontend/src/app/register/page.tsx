@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
+import { API_BASE } from "@/lib/api";
 
 const agreementMarkdown = `欢迎您使用 面试VAR AI 面试教练系统（以下简称“本服务”）。本协议由您与 面试VAR 运营团队共同缔结。在注册或开始使用本服务前，请您务必仔细阅读并理解本《用户服务协议》。
 
@@ -149,7 +150,7 @@ export default function RegisterPage() {
 
     setIsSendingCode(true);
     try {
-      const res = await fetch("http://localhost:8001/api/auth/send-code", {
+      const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
@@ -246,7 +247,7 @@ export default function RegisterPage() {
     }
 
     try {
-      const res = await fetch("http://localhost:8001/api/auth/register/step1", {
+      const res = await fetch(`${API_BASE}/api/auth/register/step1`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -513,7 +514,7 @@ export default function RegisterPage() {
     };
 
     try {
-      const response = await fetch("http://localhost:8001/api/auth/register/complete", {
+      const response = await fetch(`${API_BASE}/api/auth/register/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
