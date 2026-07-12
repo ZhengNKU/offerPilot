@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { PricingModal } from "@/components/PricingModal";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
 
 const getTodayString = () => {
@@ -36,6 +37,15 @@ function NewAnalysisDebuggerContent() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const [remainingCount, setRemainingCount] = useState<number | "unlimited" | null>(null);
+
+  // 底部 PRO/MAX 会员弹窗控制（highlight 用于预设目标档卡片的高亮）
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgradeHighlight, setUpgradeHighlight] = useState<"pro" | "max">("pro");
+  const openUpgradeModal = (target: "pro" | "max") => {
+    setUpgradeHighlight(target);
+    setShowUpgradeModal(true);
+  };
+  const closeUpgradeModal = () => setShowUpgradeModal(false);
 
   const checkRemainingLimit = async () => {
     if (!auth.isLoggedIn) {
@@ -1037,11 +1047,10 @@ function NewAnalysisDebuggerContent() {
         <div className="col-span-12 mt-6 relative overflow-hidden rounded-3xl border border-white/10 bg-surface-container-low/60 backdrop-blur-xl p-6 md:py-8 md:px-10 flex flex-col md:flex-row justify-between items-center gap-6 shadow-2xl group min-h-[110px]">
           {/* Background Image Layer */}
           <div
-            className="absolute inset-0 bg-cover bg-center opacity-35 pointer-events-none transition-all duration-500 group-hover:scale-105 animate-fade-in"
+            className="absolute inset-0 bg-cover bg-center opacity-50 pointer-events-none transition-all duration-500 group-hover:scale-105 animate-fade-in"
             style={{
               backgroundImage: "url('/debugger-1.jpg')",
               backgroundPosition: "center 75%",
-              mixBlendMode: "overlay"
             }}
           />
           {/* Dark Gradient Overlay */}
@@ -1053,23 +1062,46 @@ function NewAnalysisDebuggerContent() {
               准备好开启下一次面试了吗？
             </h4>
             <p className="text-xs md:text-sm text-on-surface-variant/70 leading-relaxed font-semibold">
-              升级为 Pro 专家版，即可解除所有限制，解锁完整无限次音频分析、高级表达重塑配套逻辑图以及完整的面试成长轨迹档案。
+              {!auth.isLoggedIn
+                ? "登录后即可把本次面试分析记录安全保存到云端，并解锁完整会员特权持续追踪每一次成长。"
+                : auth.user?.membership === "max"
+                ? "续费 Max 专家版，继续享有无限次面试分析和简历分析、高级表达重塑配套逻辑图以及完整的面试成长轨迹档案。"
+                : auth.user?.membership === "pro"
+                ? "升级为 Max 专家版，即可解除所有限制，解锁完整无限次面试分析和简历分析、高级表达重塑配套逻辑图以及完整的面试成长轨迹档案。"
+                : "升级为 Pro 专家版，即可解除所有限制，解锁完整 10 次面试分析和简历分析、高级表达重塑配套逻辑图以及完整的面试成长轨迹档案。"}
             </p>
           </div>
 
           <div className="relative z-10 flex gap-4 w-full md:w-auto">
-            <button
-              onClick={handleInterceptAction}
-              className="flex-1 md:flex-none px-5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white font-extrabold text-xs md:text-sm hover:bg-white/10 active:scale-95 transition-all whitespace-nowrap cursor-pointer"
-            >
-              免费注册保存分析
-            </button>
-            <button
-              onClick={handleInterceptAction}
-              className="flex-1 md:flex-none px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-on-primary font-black text-xs md:text-sm rounded-xl hover:scale-[1.02] active:scale-98 transition-all whitespace-nowrap shadow-[0_0_20px_rgba(192,193,255,0.35)] cursor-pointer"
-            >
-              升级 Pro 会员 (¥39/月)
-            </button>
+            {!auth.isLoggedIn ? (
+              <button
+                onClick={handleInterceptAction}
+                className="w-full md:w-auto px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-on-primary font-black text-xs md:text-sm rounded-xl hover:scale-[1.02] active:scale-98 transition-all whitespace-nowrap shadow-[0_0_20px_rgba(192,193,255,0.35)] cursor-pointer"
+              >
+                登录保存分析结果
+              </button>
+            ) : auth.user?.membership === "pro" ? (
+              <button
+                onClick={() => openUpgradeModal("max")}
+                className="w-full md:w-auto px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-on-primary font-black text-xs md:text-sm rounded-xl hover:scale-[1.02] active:scale-98 transition-all whitespace-nowrap shadow-[0_0_20px_rgba(192,193,255,0.35)] cursor-pointer"
+              >
+                升级 Max 会员
+              </button>
+            ) : auth.user?.membership === "max" ? (
+              <button
+                onClick={() => openUpgradeModal("max")}
+                className="w-full md:w-auto px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-on-primary font-black text-xs md:text-sm rounded-xl hover:scale-[1.02] active:scale-98 transition-all whitespace-nowrap shadow-[0_0_20px_rgba(192,193,255,0.35)] cursor-pointer"
+              >
+                续费 Max 会员
+              </button>
+            ) : (
+              <button
+                onClick={() => openUpgradeModal("pro")}
+                className="w-full md:w-auto px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-on-primary font-black text-xs md:text-sm rounded-xl hover:scale-[1.02] active:scale-98 transition-all whitespace-nowrap shadow-[0_0_20px_rgba(192,193,255,0.35)] cursor-pointer"
+              >
+                升级 Pro 会员
+              </button>
+            )}
           </div>
         </div>
 
@@ -1097,6 +1129,12 @@ function NewAnalysisDebuggerContent() {
         </div>
       </footer>
 
+      {/* 会员计划对比弹窗（点击"升级 Pro/Max 会员"按钮触发） */}
+      <PricingModal
+        open={showUpgradeModal}
+        onClose={closeUpgradeModal}
+        highlight={upgradeHighlight}
+      />
     </main>
   );
 }

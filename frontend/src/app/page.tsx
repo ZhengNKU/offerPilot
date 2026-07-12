@@ -610,7 +610,7 @@ export default function Home() {
       <section className="py-section-padding bg-surface-container-low/50 px-gutter overflow-hidden relative w-full block">
         {/* z-0 Background Image with transparent gradient overlay */}
         <div 
-          className="absolute inset-0 opacity-15 pointer-events-none z-0"
+          className="absolute inset-0 opacity-50 pointer-events-none z-0"  // 改为 40%
           style={{
             backgroundImage: `linear-gradient(to bottom, rgba(11, 19, 38, 0.95) 0%, rgba(11, 19, 38, 0.4) 40%, rgba(11, 19, 38, 0.95) 100%), url('/home-hand.jpg')`,
             backgroundSize: 'cover',
@@ -861,7 +861,7 @@ export default function Home() {
         >
           {/* -z-10 Background Image with transparent gradient overlay */}
           <div 
-            className="absolute inset-0 opacity-15 group-hover:opacity-30 transition-opacity duration-500 pointer-events-none -z-10"
+            className="absolute inset-0 opacity-15 group-hover:opacity-50 transition-opacity duration-500 pointer-events-none -z-10"
             style={{
               backgroundImage: `linear-gradient(to bottom, rgba(11, 19, 38, 0.2) 0%, rgba(11, 19, 38, 0.95) 100%), url('/home-start.jpg')`,
               backgroundSize: 'cover',
@@ -880,9 +880,6 @@ export default function Home() {
           <div className="flex flex-wrap justify-center gap-4 relative z-10 w-full">
             <button onClick={() => router.push("/debugger")} className="px-12 py-4 bg-primary text-on-primary font-black rounded-xl shadow-2xl hover:scale-105 active:scale-95 transition-all cursor-pointer">
               立即免费分析
-            </button>
-            <button className="px-12 py-4 border border-white/10 hover:bg-white/5 active:scale-95 text-on-surface font-bold rounded-xl transition-all cursor-pointer">
-              预约产品演示
             </button>
           </div>
         </TiltCard>
