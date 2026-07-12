@@ -9,19 +9,53 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+import redis.asyncio as aioredis
+
 from app import models, schemas
-from app.database import get_db
+from app.config import settings
+from app.database import get_db, get_redis
 from app.routers.auth import get_current_user_optional
+from app.services.embedding import embed_for_query
 from app.services.embedding_indexer import schedule_index, delete_source_embeddings
+from app.utils.llm import call_llm_stream, _strip_codeblock, _safe_json_parse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/memory", tags=["Project Memory"])
+
+
+# ============================================================================
+# Knowledge Questions Schemas
+# ============================================================================
+
+class KnowledgeQuestionsRequest(BaseModel):
+    sub_ability_name: str
+    core_ability_name: str
+
+
+class AIAnswerSchema(BaseModel):
+    core: str
+    s: str
+    t: str
+    a: list[str]
+    r: str
+    keyPoints: list[str]
+    followUps: list[str]
+
+
+class KnowledgeQuestionItem(BaseModel):
+    title: str
+    freq: int
+    aiAnswer: AIAnswerSchema
+
+
+class KnowledgeQuestionsResponse(BaseModel):
+    questions: list[KnowledgeQuestionItem]
 
 
 # ============================================================================
@@ -842,3 +876,146 @@ async def match_knowledge_session(
 
     await KnowledgeAbilityService.match_session_issues(db, int(user_id), issues)
     return {"matched": True, "session_id": session_id, "issues_count": len(issues)}
+
+
+@router.post("/knowledge/questions", response_model=KnowledgeQuestionsResponse)
+async def get_knowledge_questions(
+    body: KnowledgeQuestionsRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_optional),
+    redis_client: aioredis.Redis = Depends(get_redis),
+):
+    """根据细化能力知识点，结合用户画像和向量检索生成 10 道个性化面试题。
+
+    每道题包含 AI 推荐回答（core）和 STAR 参考回答（s/t/a/r/keyPoints/followUps）。
+    结果缓存 6 小时（同用户 + 同知识点）。
+    """
+    user = _require_user(current_user)
+    profile = user.profile
+    if not profile:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请先在职业驾驶舱设置目标岗位信息",
+        )
+
+    # ── 0. 检查 Redis 缓存 ───────────────────────────────────────────
+    cache_key = f"knowledge:questions:{user.id}:{body.sub_ability_name}"
+    try:
+        cached = await redis_client.get(cache_key)
+        if cached:
+            logger.info(f"[knowledge/questions] cache hit for user={user.id}")
+            return KnowledgeQuestionsResponse.model_validate_json(cached)
+    except Exception:
+        pass  # Redis 不可用时降级
+
+    target_role = profile.target_role or ""
+    target_grade = profile.target_grade or ""
+    experience_years = profile.experience_years or "1-3年"
+
+    # ── 1. 向量召回（后台执行，不阻塞主流程）─────────────────────────
+    query_text = (
+        f"面试知识点：{body.sub_ability_name}。"
+        f"目标岗位{target_role}，职级{target_grade}，经验{experience_years}。"
+    )
+    recall_result: dict = {"text": ""}
+
+    async def _do_recall():
+        try:
+            q_vec = await embed_for_query(query_text)
+            qvec_str = "[" + ",".join(f"{v:.6f}" for v in q_vec) + "]"
+            sql = text("""
+                SELECT content, chunk_title, source_type,
+                       1 - (embedding <=> CAST(:qvec AS vector)) AS similarity
+                FROM user_analysis_embeddings
+                WHERE user_id = :uid
+                ORDER BY embedding <=> CAST(:qvec AS vector)
+                LIMIT 6
+            """)
+            result = await db.execute(sql, {"qvec": qvec_str, "uid": user.id, "k": 6})
+            chunks = []
+            for row in result:
+                if row.similarity >= 0.35:
+                    chunks.append(f"[{row.chunk_title}]({row.source_type}) {row.content}")
+            if chunks:
+                t = "\n---\n".join(chunks)
+                recall_result["text"] = t[:2000] + ("\n...(truncated)" if len(t) > 2000 else "")
+        except Exception as e:
+            logger.debug(f"[knowledge/questions] recall skipped: {e}")
+
+    # 启动后台召回任务（不 await）
+    recall_task = asyncio.create_task(_do_recall())
+
+    # ── 2. 构建 LLM prompt（等待召回结果最多 3s）────────────────────
+    # 给召回任务一个短暂的时间窗口完成
+    try:
+        await asyncio.wait_for(recall_task, timeout=3.0)
+    except (asyncio.TimeoutError, Exception):
+        pass  # 超时或失败都不阻塞主流程
+    recalled_text = recall_result["text"] or "（暂无历史分析数据）"
+
+    system_prompt = (
+        "你是资深AI面试教练。针对指定知识点，生成10道个性化面试题，难度匹配用户职级和年限。\n"
+        "返回严格JSON（不含Markdown标记）：\n"
+        '{"questions":[{"title":"题目标题(15-30字)","freq":14,"aiAnswer":{'
+        '"core":"核心策略(40-60字)","s":"场景(20-40字)","t":"任务(20-40字)",'
+        '"a":["步骤1(15-30字)","步骤2(15-30字)","步骤3(15-30字)"],'
+        '"r":"结果(20-40字)","keyPoints":["要点1","要点2"],"followUps":["追问1","追问2"]'
+        '}},...]}\n'
+        "每道题总字数控制在200字以内。freq从14递减到5。a恰好3条。followUps恰好2条。"
+    )
+
+    user_content = (
+        f"知识点：{body.core_ability_name} → {body.sub_ability_name}\n"
+        f"目标：{target_role} | {target_grade} | {experience_years}\n"
+        f"上下文：{recalled_text}\n\n"
+        f"生成10道紧扣「{body.sub_ability_name}」的面试题，每题200字以内。"
+    )
+
+    # ── 3. 调用 LLM（快速模型 + 严格控制输出长度）────────────────────
+    payload = {
+        "model": settings.DEEPSEEK_MODEL_FAST,  # deepseek-chat 快 3-5x
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.4,
+        "max_tokens": 3000,  # 10题×200字≈2000 tokens，给30%冗余
+    }
+
+    try:
+        res_data = await asyncio.to_thread(call_llm_stream, payload, 180.0)
+        content = res_data["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.error(f"[knowledge/questions] LLM call failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI 生成面试题失败，请稍后重试",
+        )
+
+    content_clean = _strip_codeblock(content)
+    parsed = _safe_json_parse(content_clean, log_label="knowledge_questions")
+    if not parsed or "questions" not in parsed:
+        logger.error(f"[knowledge/questions] LLM returned invalid JSON: {content_clean[:500]}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="AI 返回数据异常，请稍后重试",
+        )
+
+    questions = parsed["questions"]
+    if len(questions) > 10:
+        questions = questions[:10]
+
+    result = KnowledgeQuestionsResponse(questions=questions)
+
+    # ── 4. 写入缓存（6 小时 TTL）─────────────────────────────────────
+    try:
+        await redis_client.set(
+            cache_key,
+            result.model_dump_json(),
+            ex=21600,  # 6 hours
+        )
+    except Exception:
+        pass
+
+    return result

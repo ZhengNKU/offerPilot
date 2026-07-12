@@ -415,6 +415,8 @@ export default function CareerMemoryDashboard() {
 
   // Active tab management: overview, timeline, projects, knowledge, weaknesses, growth, advisor
   const [activeTab, setActiveTab] = useState("overview");
+  // TODO: 弱点分析 tab 暂时隐藏，保留代码，后续需要时改回 true 即可
+  const SHOW_WEAKNESSES_TAB = false;
 
   // AI 职业顾问 (Counselor) Lifted State
   const [counselorSessions, setCounselorSessions] = useState<CounselorSessionListItem[]>([]);
@@ -655,18 +657,61 @@ export default function CareerMemoryDashboard() {
   const [knowledgeLoading, setKnowledgeLoading] = useState(false);
   const [selectedQuestionIdx, setSelectedQuestionIdx] = useState(0);
 
-  const openKnowledgeModal = useCallback((cat: string, name: string, c: number, m: number) => {
+  // API-fetched questions (replaces getQuestionsForKnowledge)
+  interface KnowledgeQuestion {
+    title: string; freq: number;
+    aiAnswer: { core: string; s: string; t: string; a: string[]; r: string; keyPoints: string[]; followUps: string[]; }
+  }
+  const [knowledgeQuestions, setKnowledgeQuestions] = useState<KnowledgeQuestion[]>([]);
+  const [knowledgeQuestionsError, setKnowledgeQuestionsError] = useState<string | null>(null);
+
+  const openKnowledgeModal = useCallback(async (cat: string, name: string, c: number, m: number) => {
     setSelectedKnowledge({ cat, name, c, m });
     setKnowledgeLoading(true);
     setSelectedQuestionIdx(0);
-    setTimeout(() => {
+    setKnowledgeQuestionsError(null);
+    setKnowledgeQuestions([]);
+
+    const token = localStorage.getItem("interviewVar_token");
+    if (!token) {
       setKnowledgeLoading(false);
-    }, 600);
+      setKnowledgeQuestionsError("请先登录");
+      return;
+    }
+
+    try {
+      const res = await fetch("http://localhost:8001/api/memory/knowledge/questions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          sub_ability_name: name,
+          core_ability_name: cat,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "获取面试题失败");
+      }
+
+      const data = await res.json();
+      setKnowledgeQuestions(data.questions || []);
+    } catch (e: any) {
+      console.error("fetch knowledge questions failed:", e);
+      setKnowledgeQuestionsError(e.message || "获取面试题失败，请稍后重试");
+    } finally {
+      setKnowledgeLoading(false);
+    }
   }, []);
 
   const closeKnowledgeModal = useCallback(() => {
     setSelectedKnowledge(null);
     setKnowledgeLoading(false);
+    setKnowledgeQuestions([]);
+    setKnowledgeQuestionsError(null);
   }, []);
 
   // Knowledge Base dynamic data from API
@@ -1409,7 +1454,7 @@ export default function CareerMemoryDashboard() {
                 { id: "timeline", label: "分析时间轴", icon: "schedule" },
                 { id: "projects", label: "项目记忆库", icon: "folder_shared" },
                 { id: "knowledge", label: "知识库", icon: "auto_stories" },
-                { id: "weaknesses", label: "弱点分析", icon: "analytics" },
+                ...(SHOW_WEAKNESSES_TAB ? [{ id: "weaknesses", label: "弱点分析" as const, icon: "analytics" }] : []),
                 { id: "growth", label: "成长轨迹", icon: "trending_up" },
                 { id: "advisor", label: "AI 职业顾问", icon: "support_agent" }
               ].map((tab) => {
@@ -1850,7 +1895,7 @@ export default function CareerMemoryDashboard() {
                   </div>
 
                   {/* CARD 2: 能力成长曲线 (Capability Growth Curve) */}
-                  <div className="col-span-12 md:col-span-5 flex flex-col">
+                  <div className="col-span-12 md:col-span-4 flex flex-col">
                     <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-4">
                       <div className="space-y-4 flex-1">
                         <div>
@@ -1928,61 +1973,66 @@ export default function CareerMemoryDashboard() {
                     </div>
                   </div>
 
-                  {/* CARD 3: 长期弱点分析 (Long-term Weakness Analysis) */}
-                  <div className="col-span-12 md:col-span-3 flex flex-col">
-                    <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-4">
+                  {/* CARD 3: 知识库 (Knowledge Base) */}
+                  <div className="col-span-12 md:col-span-4 flex flex-col">
+                    <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-5">
                       <div className="space-y-4 flex-1">
                         <div>
                           <h4 className="text-base font-black text-white flex items-center gap-2">
-                            <span className="material-symbols-outlined text-base text-secondary">trending_down</span>
-                            长期弱点分析
+                            <span className="material-symbols-outlined text-base text-primary">auto_stories</span>
+                            知识库 <span className="text-xs text-on-surface-variant/40 font-semibold font-label-mono">(面试题库)</span>
                           </h4>
-                          <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">基于最近 30 次分析统计频次</p>
+                          <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">你专属的面试知识图谱</p>
                         </div>
 
-                        {/* Weakness Bars */}
-                        <div className="space-y-3">
-                          {[
-                            { name: "系统设计表达", count: 17, max: 20, color: "bg-primary" },
-                            { name: "Trade-off 分析", count: 14, max: 20, color: "bg-secondary" },
-                            { name: "项目量化指标", count: 12, max: 20, color: "bg-amber-500" },
-                            { name: "架构选型理由", count: 10, max: 20, color: "bg-tertiary" },
-                            { name: "领导力案例", count: 8, max: 20, color: "bg-indigo-500" }
-                          ].map((item, idx) => (
-                            <div key={idx} className="space-y-1">
-                              <div className="flex justify-between text-xs font-bold text-on-surface-variant/80">
-                                <span>{item.name}</span>
-                                <span>{item.count} 次</span>
+                        {/* Concept indicators list — dynamic from knowledge API */}
+                        <div className="space-y-3.5">
+                          {(() => {
+                            const topSubs = knowledgeAbilities
+                              .flatMap((ca) =>
+                                ca.sub_abilities.map((sa) => ({
+                                  name: sa.name,
+                                  count: sa.question_count,
+                                  core: ca.name,
+                                }))
+                              )
+                              .sort((a, b) => b.count - a.count)
+                              .slice(0, 3);
+                            if (topSubs.length === 0) {
+                              return (
+                                <p className="text-xs text-on-surface-variant/40 text-center py-4">
+                                  暂无知识库数据
+                                </p>
+                              );
+                            }
+                            const colors = [
+                              "from-tertiary/20 to-tertiary/5 border-tertiary/30 text-tertiary",
+                              "from-primary/20 to-primary/5 border-primary/30 text-primary",
+                              "from-secondary/20 to-secondary/5 border-secondary/30 text-secondary",
+                            ];
+                            return topSubs.map((item, idx) => (
+                              <div key={idx} className="p-3 rounded-2xl bg-gradient-to-r from-white/[0.01] to-transparent border border-white/5 space-y-2">
+                                <div className="flex justify-between items-center">
+                                  <span className="flex items-center gap-2 font-black text-sm text-white">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                                    {item.name}
+                                  </span>
+                                  <div className="flex items-center gap-2 text-xs font-bold text-on-surface-variant/50">
+                                    <span>被问 {item.count} 次</span>
+                                  </div>
+                                </div>
                               </div>
-                              <div className="w-full h-1.5 rounded-full bg-white/5 overflow-hidden">
-                                <div
-                                  className={`h-full rounded-full ${item.color}`}
-                                  style={{ width: `${(item.count / item.max) * 100}%` }}
-                                ></div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* AI Insight Box */}
-                        <div className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 space-y-1.5 mt-2">
-                          <div className="flex items-center gap-1.5 text-[14.5px] font-black text-primary">
-                            <span className="material-symbols-outlined text-[17px] animate-pulse">
-                              psychology
-                            </span>
-                            AI 洞察
-                          </div>
-                          <p className="text-xs text-on-surface-variant/80 leading-relaxed font-bold">
-                            你的核心问题在于"架构对比和方案折中分析能力"不足，而非单纯技术深度不够。
-                          </p>
-                          <a
-                            onClick={() => handleTabChange("weaknesses")}
-                            className="text-sm font-black text-primary hover:text-white transition-colors flex items-center gap-1 cursor-pointer pt-0.5"
-                          >
-                            查看优化建议 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
-                          </a>
+                            ));
+                          })()}
                         </div>
                       </div>
+
+                      <button
+                        onClick={() => handleTabChange("knowledge")}
+                        className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        查看全部知识点 (36) <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
+                      </button>
                     </div>
                   </div>
 
@@ -2067,66 +2117,63 @@ export default function CareerMemoryDashboard() {
                     </div>
                   </div>
 
-                  {/* CARD 5: 知识库 (Knowledge Base) */}
+                  {/* CARD 5: 长期弱点分析 (Long-term Weakness Analysis) */}
                   <div className="col-span-12 md:col-span-4 flex flex-col">
-                    <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-5">
+                    <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-4">
                       <div className="space-y-4 flex-1">
                         <div>
                           <h4 className="text-base font-black text-white flex items-center gap-2">
-                            <span className="material-symbols-outlined text-base text-primary">auto_stories</span>
-                            知识库 <span className="text-xs text-on-surface-variant/40 font-semibold font-label-mono">(面试题库)</span>
+                            <span className="material-symbols-outlined text-base text-secondary">trending_down</span>
+                            长期弱点分析
                           </h4>
-                          <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">你专属的面试知识图谱</p>
+                          <p className="text-xs text-on-surface-variant/40 font-semibold mt-0.5">基于最近 30 次分析统计频次</p>
                         </div>
 
-                        {/* Concept indicators list — dynamic from knowledge API */}
-                        <div className="space-y-3.5">
-                          {(() => {
-                            const topSubs = knowledgeAbilities
-                              .flatMap((ca) =>
-                                ca.sub_abilities.map((sa) => ({
-                                  name: sa.name,
-                                  count: sa.question_count,
-                                  core: ca.name,
-                                }))
-                              )
-                              .sort((a, b) => b.count - a.count)
-                              .slice(0, 3);
-                            if (topSubs.length === 0) {
-                              return (
-                                <p className="text-xs text-on-surface-variant/40 text-center py-4">
-                                  暂无知识库数据
-                                </p>
-                              );
-                            }
-                            const colors = [
-                              "from-tertiary/20 to-tertiary/5 border-tertiary/30 text-tertiary",
-                              "from-primary/20 to-primary/5 border-primary/30 text-primary",
-                              "from-secondary/20 to-secondary/5 border-secondary/30 text-secondary",
-                            ];
-                            return topSubs.map((item, idx) => (
-                              <div key={idx} className="p-3 rounded-2xl bg-gradient-to-r from-white/[0.01] to-transparent border border-white/5 space-y-2">
-                                <div className="flex justify-between items-center">
-                                  <span className="flex items-center gap-2 font-black text-sm text-white">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
-                                    {item.name}
-                                  </span>
-                                  <div className="flex items-center gap-2 text-xs font-bold text-on-surface-variant/50">
-                                    <span>被问 {item.count} 次</span>
-                                  </div>
-                                </div>
+                        {/* Weakness Bars */}
+                        <div className="space-y-3">
+                          {[
+                            { name: "系统设计表达", count: 17, max: 20, color: "bg-primary" },
+                            { name: "Trade-off 分析", count: 14, max: 20, color: "bg-secondary" },
+                            { name: "项目量化指标", count: 12, max: 20, color: "bg-amber-500" },
+                            { name: "架构选型理由", count: 10, max: 20, color: "bg-tertiary" },
+                            { name: "领导力案例", count: 8, max: 20, color: "bg-indigo-500" }
+                          ].map((item, idx) => (
+                            <div key={idx} className="space-y-1">
+                              <div className="flex justify-between text-xs font-bold text-on-surface-variant/80">
+                                <span>{item.name}</span>
+                                <span>{item.count} 次</span>
                               </div>
-                            ));
-                          })()}
+                              <div className="w-full h-1.5 rounded-full bg-white/5 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full ${item.color}`}
+                                  style={{ width: `${(item.count / item.max) * 100}%` }}
+                                ></div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* AI Insight Box */}
+                        <div className="p-3 rounded-2xl bg-white/[0.02] border border-white/5 space-y-1.5 mt-2">
+                          <div className="flex items-center gap-1.5 text-[14.5px] font-black text-primary">
+                            <span className="material-symbols-outlined text-[17px] animate-pulse">
+                              psychology
+                            </span>
+                            AI 洞察
+                          </div>
+                          <p className="text-xs text-on-surface-variant/80 leading-relaxed font-bold">
+                            你的核心问题在于"架构对比和方案折中分析能力"不足，而非单纯技术深度不够。
+                          </p>
+                          {SHOW_WEAKNESSES_TAB && (
+                          <a
+                            onClick={() => handleTabChange("weaknesses")}
+                            className="text-sm font-black text-primary hover:text-white transition-colors flex items-center gap-1 cursor-pointer pt-0.5"
+                          >
+                            查看优化建议 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
+                          </a>
+                          )}
                         </div>
                       </div>
-
-                      <button
-                        onClick={() => handleTabChange("knowledge")}
-                        className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        查看全部知识点 (36) <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
-                      </button>
                     </div>
                   </div>
 
@@ -3484,6 +3531,22 @@ export default function CareerMemoryDashboard() {
                   AI 正在深度检索该知识点的 Top10 面试高频问题与解析...
                 </p>
               </div>
+            ) : knowledgeQuestionsError ? (
+              /* Error view */
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
+                <span className="material-symbols-outlined text-4xl text-red-400/70">error_outline</span>
+                <p className="text-sm text-red-400/80 font-semibold">{knowledgeQuestionsError}</p>
+                <button
+                  onClick={() => {
+                    if (selectedKnowledge) {
+                      openKnowledgeModal(selectedKnowledge.cat, selectedKnowledge.name, selectedKnowledge.c, selectedKnowledge.m);
+                    }
+                  }}
+                  className="px-4 py-2 mt-2 rounded-xl bg-primary/10 border border-primary/30 text-primary text-sm font-bold hover:bg-primary/20 transition-all cursor-pointer"
+                >
+                  重试
+                </button>
+              </div>
             ) : (
               /* Details view */
               <>
@@ -3508,7 +3571,15 @@ export default function CareerMemoryDashboard() {
 
                 {/* Main Split Grid container */}
                 {(() => {
-                  const questions = getQuestionsForKnowledge(selectedKnowledge.name);
+                  const questions = knowledgeQuestions;
+                  if (questions.length === 0) {
+                    return (
+                      <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
+                        <span className="material-symbols-outlined text-4xl text-on-surface-variant/30">quiz</span>
+                        <p className="text-sm text-on-surface-variant/50 font-semibold">暂无问题数据</p>
+                      </div>
+                    );
+                  }
                   const activeQuestion = questions[selectedQuestionIdx] || questions[0];
                   
                   return (
