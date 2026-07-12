@@ -647,6 +647,31 @@ class KnowledgeSubAbility(Base):
     )
 
 
+class KnowledgeQuestionCache(Base):
+    """细化能力面试题预生成缓存。
+
+    每个用户每个细化能力存储恰好 10 道 LLM 生成的个性化面试题。
+    能力标签生成/更新时异步触发生成，定时任务 6 小时增量刷新。
+    """
+    __tablename__ = "knowledge_question_cache"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    sub_ability_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    core_ability_name: Mapped[str] = mapped_column(String(64), nullable=False)
+    questions: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "sub_ability_name", name="uq_user_question_cache"),
+    )
+
+
 class Feedback(Base):
     """用户提交的体验反馈列表"""
     __tablename__ = "feedbacks"

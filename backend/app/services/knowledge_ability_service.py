@@ -302,6 +302,83 @@ class KnowledgeAbilityService:
         return reloaded
 
     @staticmethod
+    async def generate_abilities_data(
+        target_role: str,
+        experience_years: str,
+        target_grade: str,
+        user_id: int = 0,
+    ) -> list[dict]:
+        """调用 LLM 生成能力标签原始数据（不写 DB）。
+
+        返回 [{"core": "核心能力名", "subs": ["细化1", "细化2", ...]}, ...]
+        用于面试题先生成后入库的流程。
+        """
+        logger.info(
+            f"Generating abilities data (no DB) for user {user_id}: "
+            f"role={target_role}, years={experience_years}, grade={target_grade}"
+        )
+
+        prompt = f"""你是一位资深的职业规划顾问。根据以下用户信息，为其生成"知识库能力看板"：
+
+【用户画像】
+- 目标岗位：{target_role}
+- 工作年限：{experience_years}
+- 目标职级：{target_grade}
+
+【生成要求】
+1. 输出 4 个"核心能力板块"，覆盖该岗位面试中最关键的能力维度
+2. 每个核心能力下生成 5 个"细化能力子项"，具体到可考察的知识点或技能点
+3. 细化能力必须与目标岗位高度相关，避免泛泛而谈
+4. 命名简洁精准（2-6字），便于前端卡片展示
+
+【输出格式 - 严格 JSON】
+{{
+  "core_abilities": [
+    {{
+      "name": "核心能力名称",
+      "sub_abilities": ["细化1", "细化2", "细化3", "细化4", "细化5"]
+    }}
+  ]
+}}
+
+你必须且只能返回严格符合以上结构的 JSON 字符串，不要包含任何 markdown 块或导言。"""
+
+        payload = {
+            "model": settings.DEEPSEEK_MODEL,
+            "messages": [
+                {"role": "system", "content": "You are a senior career advisor. Output raw JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.3,
+            "response_format": {"type": "json_object"},
+        }
+
+        parsed = await _call_llm_with_retry(payload)
+        core_abilities_data = parsed.get("core_abilities", [])
+        if not isinstance(core_abilities_data, list) or len(core_abilities_data) == 0:
+            raise ValueError("LLM returned empty core_abilities")
+
+        # 转换为统一格式 [{"core": "...", "subs": ["...", ...]}, ...]
+        result = []
+        for ca in core_abilities_data[:4]:
+            subs = ca.get("sub_abilities", [])
+            if not isinstance(subs, list):
+                subs = []
+            subs = [str(s)[:32] for s in subs[:5]]
+            while len(subs) < 5:
+                subs.append(f"技能点{len(subs) + 1}")
+            result.append({
+                "core": str(ca.get("name", ""))[:32],
+                "subs": subs,
+            })
+
+        logger.info(
+            f"Generated abilities data for user {user_id}: "
+            f"{len(result)} cores, {sum(len(r['subs']) for r in result)} subs"
+        )
+        return result
+
+    @staticmethod
     async def _generate_fallback(
         db: AsyncSession,
         user_id: int,
@@ -398,6 +475,58 @@ class KnowledgeAbilityService:
 
         logger.info(f"Fallback generation complete for user {user_id}: {len(reloaded)} core abilities")
         return reloaded
+
+    @staticmethod
+    async def save_abilities_to_db(
+        db: AsyncSession,
+        user_id: int,
+        abilities_data: list[dict],
+        target_role: str = "",
+        experience_years: str = "",
+        target_grade: str = "",
+    ):
+        """将预生成的能力标签数据写入 DB（先删后插）。
+
+        abilities_data 格式: [{"core": "核心能力名", "subs": ["细化1", ...]}, ...]
+        """
+        # 删除旧数据
+        await db.execute(
+            delete(models.KnowledgeSubAbility).where(
+                models.KnowledgeSubAbility.user_id == user_id
+            )
+        )
+        await db.execute(
+            delete(models.KnowledgeCoreAbility).where(
+                models.KnowledgeCoreAbility.user_id == user_id
+            )
+        )
+        await db.flush()
+
+        for ca_idx, ca_data in enumerate(abilities_data):
+            core = models.KnowledgeCoreAbility(
+                user_id=user_id,
+                name=ca_data["core"][:32],
+                sort_order=ca_idx + 1,
+                generated_from_role=target_role,
+                generated_from_years=experience_years,
+                generated_from_grade=target_grade,
+            )
+            db.add(core)
+            await db.flush()
+
+            for sa_idx, sa_name in enumerate(ca_data.get("subs", [])[:5]):
+                db.add(models.KnowledgeSubAbility(
+                    core_ability_id=core.id,
+                    user_id=user_id,
+                    name=str(sa_name)[:32],
+                    sort_order=sa_idx + 1,
+                ))
+
+        await db.commit()
+        logger.info(
+            f"Saved abilities to DB for user {user_id}: "
+            f"{len(abilities_data)} cores"
+        )
 
     @staticmethod
     async def regenerate_for_user(db: AsyncSession, user_id: int, *, rematch: bool = False):
@@ -668,24 +797,93 @@ class KnowledgeAbilityService:
 
 
 async def trigger_knowledge_generation(user_id: int):
-    """后台任务：重新生成用户知识库。
+    """后台任务：生成能力标签 → 生成面试题 → 一起入库。
 
-    使用独立的 async_session()，不依赖请求上下文中的 db 会话。
+    流程：
+    1. LLM 生成能力标签（不写 DB）
+    2. LLM 批量生成所有标签的面试题
+    3. 面试题成功后 → 能力标签入库 + 面试题写 Redis&PG
+    失败重试 3 次（指数退避）。
     """
     from app.database import async_session
 
     async with async_session() as db:
+        # 读取用户画像
+        profile_result = await db.execute(
+            select(models.UserProfile).where(models.UserProfile.user_id == user_id)
+        )
+        profile = profile_result.scalars().first()
+        if not profile or not profile.target_role:
+            logger.info(f"[trigger_knowledge_generation] user={user_id} no target_role, skip")
+            return
+
+        target_role = profile.target_role or ""
+        experience_years = profile.experience_years or "1-3年"
+        target_grade = profile.target_grade or ""
+
+        # 连接 Redis
+        import redis.asyncio as aioredis
+        from app.config import settings
+        redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+
         try:
-            await KnowledgeAbilityService.regenerate_for_user(db, user_id)
-        except Exception as e:
-            logger.error(
-                f"Background knowledge generation failed for user {user_id}: {e}",
-                exc_info=True,
-            )
+            for attempt in range(1, 4):
+                try:
+                    logger.info(
+                        f"[trigger_knowledge_generation] START user={user_id} attempt={attempt}"
+                    )
+
+                    # ① LLM 生成能力标签（不写 DB）
+                    abilities_data = await KnowledgeAbilityService.generate_abilities_data(
+                        target_role, experience_years, target_grade, user_id
+                    )
+                    if not abilities_data:
+                        raise ValueError("abilities_data is empty")
+
+                    # ② 展开为 question_generator 需要的格式
+                    sa_list = []
+                    for ca in abilities_data:
+                        for sub in ca["subs"]:
+                            sa_list.append({"core": ca["core"], "sub": sub})
+
+                    # ③ LLM 批量生成面试题 + 写 Redis + PG
+                    from app.services.question_generator import (
+                        generate_and_cache_with_abilities,
+                    )
+                    result = await generate_and_cache_with_abilities(
+                        db, user_id, sa_list,
+                        target_role, target_grade, experience_years,
+                        redis_client,
+                    )
+                    if not result:
+                        raise ValueError("question generation returned empty")
+
+                    # ④ 面试题成功后 → 能力标签入库
+                    await KnowledgeAbilityService.save_abilities_to_db(
+                        db, user_id, abilities_data,
+                        target_role, experience_years, target_grade,
+                    )
+
+                    logger.info(
+                        f"[trigger_knowledge_generation] DONE user={user_id} "
+                        f"abilities={len(abilities_data)} questions_abilities={len(result)}"
+                    )
+                    return  # 成功
+
+                except Exception as e:
+                    logger.error(
+                        f"[trigger_knowledge_generation] attempt {attempt}/3 FAILED "
+                        f"user={user_id}: {e}", exc_info=True
+                    )
+                    if attempt < 3:
+                        delay = 2 ** attempt
+                        await asyncio.sleep(delay)
+        finally:
+            await redis_client.aclose()
 
 
 async def trigger_knowledge_match(user_id: int, issues: list[dict]):
-    """后台任务：匹配面试分析结果中的问题到知识库细化能力。
+    """后台任务：匹配面试分析结果中的问题到知识库细化能力 + 刷新面试题。
 
     使用独立的 async_session()，不依赖请求上下文中的 db 会话。
     """
@@ -696,9 +894,42 @@ async def trigger_knowledge_match(user_id: int, issues: list[dict]):
 
     async with async_session() as db:
         try:
+            logger.info(
+                f"[trigger_knowledge_match] START user={user_id} issues={len(issues)}"
+            )
             await KnowledgeAbilityService.match_session_issues(db, user_id, issues)
+            logger.info(
+                f"[trigger_knowledge_match] match OK user={user_id}"
+            )
         except Exception as e:
             logger.error(
-                f"Background knowledge match failed for user {user_id}: {e}",
+                f"[trigger_knowledge_match] match FAILED user={user_id}: {e}",
+                exc_info=True,
+            )
+            return
+
+        # 匹配完成后批量刷新面试题（写 Redis + PG）
+        try:
+            import redis.asyncio as aioredis
+            from app.config import settings
+            redis_client = aioredis.from_url(
+                settings.REDIS_URL, decode_responses=True
+            )
+            try:
+                from app.services.question_generator import (
+                    invalidate_and_regenerate,
+                )
+                logger.info(
+                    f"[trigger_knowledge_match] batch question refresh START user={user_id}"
+                )
+                await invalidate_and_regenerate(db, user_id, redis_client)
+                logger.info(
+                    f"[trigger_knowledge_match] batch question refresh DONE user={user_id}"
+                )
+            finally:
+                await redis_client.aclose()
+        except Exception as e:
+            logger.error(
+                f"[trigger_knowledge_match] batch question refresh FAILED user={user_id}: {e}",
                 exc_info=True,
             )

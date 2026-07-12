@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
@@ -665,18 +665,23 @@ export default function CareerMemoryDashboard() {
   const [knowledgeQuestions, setKnowledgeQuestions] = useState<KnowledgeQuestion[]>([]);
   const [knowledgeQuestionsError, setKnowledgeQuestionsError] = useState<string | null>(null);
 
-  const openKnowledgeModal = useCallback(async (cat: string, name: string, c: number, m: number) => {
-    setSelectedKnowledge({ cat, name, c, m });
-    setKnowledgeLoading(true);
-    setSelectedQuestionIdx(0);
-    setKnowledgeQuestionsError(null);
-    setKnowledgeQuestions([]);
+  // 轮询定时器引用（关闭 Modal 时清理）
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 用 ref 跟踪 error 状态，避免轮询回调中的闭包过期问题
+  const errorRef = useRef<string | null>(null);
+
+  // 发起单次面试题查询，返回 { hasData, hasError }
+  const fetchKnowledgeQuestions = useCallback(async (
+    cat: string, name: string, isPoll: boolean
+  ): Promise<{ hasData: boolean; hasError: boolean }> => {
+    if (!isPoll) setKnowledgeLoading(true);
 
     const token = localStorage.getItem("interviewVar_token");
     if (!token) {
       setKnowledgeLoading(false);
       setKnowledgeQuestionsError("请先登录");
-      return;
+      errorRef.current = "请先登录";
+      return { hasData: false, hasError: true };
     }
 
     try {
@@ -686,10 +691,7 @@ export default function CareerMemoryDashboard() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          sub_ability_name: name,
-          core_ability_name: cat,
-        }),
+        body: JSON.stringify({ sub_ability_name: name, core_ability_name: cat }),
       });
 
       if (!res.ok) {
@@ -698,20 +700,63 @@ export default function CareerMemoryDashboard() {
       }
 
       const data = await res.json();
-      setKnowledgeQuestions(data.questions || []);
+      const questions = data.questions || [];
+      if (questions.length > 0) {
+        setKnowledgeQuestions(questions);
+        setKnowledgeLoading(false);
+        setKnowledgeQuestionsError(null);
+        errorRef.current = null;
+        return { hasData: true, hasError: false };
+      }
+      // 空数据：后台任务尚未生成完成
+      if (!isPoll) setKnowledgeLoading(false);
+      return { hasData: false, hasError: false };
     } catch (e: any) {
       console.error("fetch knowledge questions failed:", e);
-      setKnowledgeQuestionsError(e.message || "获取面试题失败，请稍后重试");
-    } finally {
+      const msg = e.message || "获取面试题失败";
+      setKnowledgeQuestionsError(msg);
+      errorRef.current = msg;
       setKnowledgeLoading(false);
+      return { hasData: false, hasError: true };
     }
   }, []);
 
+  const openKnowledgeModal = useCallback(async (cat: string, name: string, c: number, m: number) => {
+    // 清理旧轮询
+    if (pollTimerRef.current) { clearInterval(pollTimerRef.current); pollTimerRef.current = null; }
+
+    setSelectedKnowledge({ cat, name, c, m });
+    setSelectedQuestionIdx(0);
+    setKnowledgeQuestionsError(null);
+    setKnowledgeQuestions([]);
+    errorRef.current = null;
+
+    // 第一次查询
+    const result = await fetchKnowledgeQuestions(cat, name, false);
+
+    // 无数据且无错误 → 后台任务尚未生成完成，启动 2s 轮询
+    if (!result.hasData && !result.hasError) {
+      setKnowledgeLoading(true);  // 保持 loading 态
+      pollTimerRef.current = setInterval(async () => {
+        const r = await fetchKnowledgeQuestions(cat, name, true);
+        if ((r.hasData || r.hasError) && pollTimerRef.current) {
+          clearInterval(pollTimerRef.current);
+          pollTimerRef.current = null;
+        }
+      }, 2000);
+    }
+  }, [fetchKnowledgeQuestions]);
+
   const closeKnowledgeModal = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
     setSelectedKnowledge(null);
     setKnowledgeLoading(false);
     setKnowledgeQuestions([]);
     setKnowledgeQuestionsError(null);
+    errorRef.current = null;
   }, []);
 
   // Knowledge Base dynamic data from API
