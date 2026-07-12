@@ -16,6 +16,8 @@
  *   - skips ticks while the previous fetch is still pending (no overlap)
  */
 
+import { API_BASE } from "@/lib/api";
+
 const TERMINAL_STATUSES = new Set(["completed", "failed"]);
 
 export interface PollOptions {
@@ -45,7 +47,7 @@ export async function pollTaskUntilDone(
   const baseUrl =
     typeof window !== "undefined" && (window as unknown as { __API_BASE__?: string }).__API_BASE__
       ? (window as unknown as { __API_BASE__: string }).__API_BASE__
-      : "http://localhost:8001";
+      : API_BASE;
 
   return new Promise((resolve, reject) => {
     let stopped = false;

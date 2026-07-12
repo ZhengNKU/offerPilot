@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { API_BASE } from "@/lib/api";
 
 export type AiState = "idle" | "listening" | "thinking" | "speaking";
 export type SessionStatus = "idle" | "connecting" | "live" | "ending" | "ended" | "error";
@@ -205,7 +206,7 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
       const wasLive = statusRef.current === "live";
       const liveId = optsRef.current?.liveId;
       const token = optsRef.current?.token;
-      const apiBase = optsRef.current?.apiBase || "http://localhost:8001";
+      const apiBase = optsRef.current?.apiBase || API_BASE;
       if (wasLive && liveId && token) {
         // 标记一次性：避免 onAutoEnd 二次触发同一逻辑
         endInitiatedRef.current = true;
@@ -293,7 +294,7 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
   // ---------- 连接 ----------
 
   const connect = useCallback(async (opts: StartOpts) => {
-    const { wsPath, token, apiBase = "http://localhost:8001" } = opts;
+    const { wsPath, token, apiBase = API_BASE } = opts;
     setStatus("connecting");
     setError(null);
     setWsUrl(wsPath);

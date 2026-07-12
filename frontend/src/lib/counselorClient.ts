@@ -7,7 +7,7 @@
 //     if (event.event === "done") onComplete(event.data);
 //   }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8001";
+import { API_BASE } from "@/lib/api";
 
 export type CounselorEvent =
   | { event: "meta"; data: { session_id: number; user_message_id: number; message_count: number; remaining_quota: number } }

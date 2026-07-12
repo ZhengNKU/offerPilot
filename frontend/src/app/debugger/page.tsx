@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { PricingModal } from "@/components/PricingModal";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
+import { API_BASE } from "@/lib/api";
 
 const getTodayString = () => {
   const d = new Date();
@@ -65,7 +66,7 @@ function NewAnalysisDebuggerContent() {
 
     const token = localStorage.getItem("interviewVar_token");
     try {
-      const checkRes = await fetch("http://localhost:8001/api/audio/check_limit", {
+      const checkRes = await fetch(`${API_BASE}/api/audio/check_limit`, {
         headers: token ? { "Authorization": `Bearer ${token}` } : {}
       });
       if (checkRes.ok) {
@@ -172,7 +173,7 @@ function NewAnalysisDebuggerContent() {
     }
 
     try {
-      const res = await fetch("http://localhost:8001/api/file/upload", {
+      const res = await fetch(`${API_BASE}/api/file/upload`, {
         method: "POST",
         headers,
         body: formData
@@ -242,7 +243,7 @@ function NewAnalysisDebuggerContent() {
       }
 
       try {
-        const res = await fetch(`http://localhost:8001/api/file/delete?file_id=${uploadedFileId}`, {
+        const res = await fetch(`${API_BASE}/api/file/delete?file_id=${uploadedFileId}`, {
           method: "DELETE",
           headers
         });
@@ -294,7 +295,7 @@ function NewAnalysisDebuggerContent() {
       // Check registered free user limit via backend
       const token = localStorage.getItem("interviewVar_token");
       try {
-        const checkRes = await fetch("http://localhost:8001/api/audio/check_limit", {
+        const checkRes = await fetch(`${API_BASE}/api/audio/check_limit`, {
           headers: token ? { "Authorization": `Bearer ${token}` } : {}
         });
         if (!checkRes.ok) {
@@ -373,7 +374,7 @@ function NewAnalysisDebuggerContent() {
 
       try {
         // Step 1: Create InterviewSession from the already-uploaded COS file
-        const sessionRes = await fetch("http://localhost:8001/api/audio/create_session", {
+        const sessionRes = await fetch(`${API_BASE}/api/audio/create_session`, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({
@@ -402,7 +403,7 @@ function NewAnalysisDebuggerContent() {
         localStorage.setItem("interviewVar_analyzed_audio", "true");
 
         // Step 2: Trigger background analysis task
-        const analyzeRes = await fetch("http://localhost:8001/api/audio/analyze", {
+        const analyzeRes = await fetch(`${API_BASE}/api/audio/analyze`, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ session_id: sessionId })
@@ -455,7 +456,7 @@ function NewAnalysisDebuggerContent() {
         setTaskStep("正在创建分析会话...");
         setTaskProgress(10);
         // Step 1: Create InterviewSession from the pasted text
-        const sessionRes = await fetch("http://localhost:8001/api/audio/create_record_session", {
+        const sessionRes = await fetch(`${API_BASE}/api/audio/create_record_session`, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({
@@ -483,7 +484,7 @@ function NewAnalysisDebuggerContent() {
         // Step 2: Trigger background analysis task
         setTaskStep("正在发起智能评测分析...");
         setTaskProgress(30);
-        const analyzeRes = await fetch("http://localhost:8001/api/audio/analyze", {
+        const analyzeRes = await fetch(`${API_BASE}/api/audio/analyze`, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ session_id: sessionId })
@@ -566,7 +567,7 @@ function NewAnalysisDebuggerContent() {
       }, 1000);
 
       try {
-        const analyzeRes = await fetch("http://localhost:8001/api/resume/analyze", {
+        const analyzeRes = await fetch(`${API_BASE}/api/resume/analyze`, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ file_id: uploadedFileId })
@@ -723,7 +724,7 @@ function NewAnalysisDebuggerContent() {
                           const token = localStorage.getItem("interviewVar_token");
                           const headers: Record<string, string> = {};
                           if (token) headers["Authorization"] = `Bearer ${token}`;
-                          fetch(`http://localhost:8001/api/file/delete?file_id=${uploadedFileId}`, {
+                          fetch(`${API_BASE}/api/file/delete?file_id=${uploadedFileId}`, {
                             method: "DELETE",
                             headers
                           }).catch(() => {});
