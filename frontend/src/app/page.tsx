@@ -1074,11 +1074,11 @@ export default function Home() {
 
                 <div className="flex items-center justify-center gap-2 py-2">
                   <span className="text-lg font-bold text-white select-all">
-                    interviewVar@163.com
+                    interviewvar@163.com
                   </span>
                   <button
                     onClick={() => {
-                      navigator.clipboard.writeText("interviewVar@163.com");
+                      navigator.clipboard.writeText("interviewvar@163.com");
                       auth.triggerToast("产品联系邮箱已复制到剪贴板！");
                     }}
                     className="text-[#AFA7FF] hover:text-white transition-colors cursor-pointer flex items-center justify-center p-1.5 rounded-lg hover:bg-white/5 active:scale-95"
