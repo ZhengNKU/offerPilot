@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { API_BASE } from "@/lib/api";
+import { getQuotaStatus } from "@/lib/quotaClient";
 
 interface TimelineItem {
   id: string;
@@ -55,12 +56,34 @@ export default function CareerDashboard() {
   // STATE MANAGEMENT
   // =========================================================================
   const [recentActivity, setRecentActivity] = useState<TimelineItem[]>([]);
+  const [quotaStatus, setQuotaStatus] = useState<any>(null);
+  const [liveQuota, setLiveQuota] = useState<any>(null);
 
-  // 最近活动：从分析时间轴数据源获取
+  // 获取下月1号重置日期
+  const getNextMonthFirstDay = () => {
+    const d = new Date();
+    const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1);
+    const y = nextMonth.getFullYear();
+    const m = String(nextMonth.getMonth() + 1).padStart(2, '0');
+    const r = String(nextMonth.getDate()).padStart(2, '0');
+    return `${y}-${m}-${r}`;
+  };
+
+  // 最近活动 & 资源配额获取
   useEffect(() => {
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
     if (!auth.isLoggedIn || !token) return;
     fetchTimeline(token).then(items => setRecentActivity(items));
+
+    // 获取分析配额
+    getQuotaStatus().then(status => setQuotaStatus(status));
+
+    // 获取模拟面试配额
+    const headers = { Authorization: `Bearer ${token}` };
+    fetch(`${API_BASE}/api/live/quota`, { headers })
+      .then(r => r.ok ? r.json() : null)
+      .then(q => { if (q) setLiveQuota(q); })
+      .catch(() => {});
   }, [auth.isLoggedIn]);
   const [profile, setProfile] = useState({
     name: "张三",
@@ -972,7 +995,7 @@ export default function CareerDashboard() {
                     资源额度
                   </h4>
                   <span 
-                    onClick={() => setShowUpgradeModal(true)}
+                    onClick={() => router.push("/memory?tab=timeline")}
                     className="text-sm text-tertiary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
                   >
                     使用记录 →
@@ -981,53 +1004,68 @@ export default function CareerDashboard() {
 
                 {/* Circular Quota meters in 2x2 grids */}
                 <div className="grid grid-cols-2 gap-3.5 flex-1 items-center">
-                  {[
-                    { label: "录音分析", used: 8, total: 10, color: "stroke-[#4edea3]", textStyle: "text-[#4edea3]", icon: "graphic_eq" },
-                    { label: "面试记录分析", used: 6, total: 10, color: "stroke-[#60a5fa]", textStyle: "text-[#60a5fa]", icon: "description" },
-                    { label: "简历分析", used: 2, total: 5, color: "stroke-[#a78bfa]", textStyle: "text-[#a78bfa]", icon: "article" },
-                    { label: "模拟面试", used: 3, total: 5, color: "stroke-amber-400", textStyle: "text-amber-400", icon: "videocam" }
-                  ].map((quota, i) => {
-                    const percent = quota.used / quota.total;
-                    const strokeOffset = 2 * Math.PI * 18 * (1 - percent);
-                    return (
-                      <div key={i} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center gap-3 w-full">
-                        <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
-                          <svg className="w-full h-full -rotate-90">
-                            <circle cx="24" cy="24" r="21" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="3.5" />
-                            <circle
-                              cx="24"
-                              cy="24"
-                              r="21"
-                              fill="transparent"
-                              className={quota.color}
-                              strokeWidth="3.5"
-                              strokeDasharray={2 * Math.PI * 21}
-                              strokeDashoffset={2 * Math.PI * 21 * (1 - percent)}
-                              strokeLinecap="round"
-                            />
-                          </svg>
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <span className={`material-symbols-outlined text-[17px] ${quota.textStyle}`}>
-                              {quota.icon}
+                  {(() => {
+                    const audioRemaining = quotaStatus?.audio?.remaining ?? (auth.isLoggedIn ? 0 : 1);
+                    const audioTotal = quotaStatus?.audio?.max ?? (auth.isLoggedIn ? 0 : 1);
+
+                    const recordRemaining = quotaStatus?.record?.remaining ?? (auth.isLoggedIn ? 0 : 1);
+                    const recordTotal = quotaStatus?.record?.max ?? (auth.isLoggedIn ? 0 : 1);
+
+                    const resumeRemaining = quotaStatus?.resume?.remaining ?? (auth.isLoggedIn ? 0 : 1);
+                    const resumeTotal = quotaStatus?.resume?.max ?? (auth.isLoggedIn ? 0 : 1);
+
+                    const liveRemaining = liveQuota?.remaining_min ?? 0;
+                    const liveTotal = liveQuota?.limit_min ?? 0;
+
+                    const quotas = [
+                      { label: "录音分析", remaining: audioRemaining, total: audioTotal, unit: "次", color: "stroke-[#4edea3]", textStyle: "text-[#4edea3]", icon: "graphic_eq" },
+                      { label: "面试记录分析", remaining: recordRemaining, total: recordTotal, unit: "次", color: "stroke-[#60a5fa]", textStyle: "text-[#60a5fa]", icon: "description" },
+                      { label: "简历分析", remaining: resumeRemaining, total: resumeTotal, unit: "次", color: "stroke-[#a78bfa]", textStyle: "text-[#a78bfa]", icon: "article" },
+                      { label: "模拟面试", remaining: liveRemaining, total: liveTotal, unit: "分钟", color: "stroke-amber-400", textStyle: "text-amber-400", icon: "videocam" }
+                    ];
+
+                    return quotas.map((quota, i) => {
+                      const percent = quota.total > 0 ? (quota.remaining / quota.total) : 0;
+                      return (
+                        <div key={i} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center gap-3 w-full">
+                          <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
+                            <svg className="w-full h-full -rotate-90">
+                              <circle cx="24" cy="24" r="21" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="3.5" />
+                              <circle
+                                cx="24"
+                                cy="24"
+                                r="21"
+                                fill="transparent"
+                                className={quota.color}
+                                strokeWidth="3.5"
+                                strokeDasharray={2 * Math.PI * 21}
+                                strokeDashoffset={2 * Math.PI * 21 * (1 - percent)}
+                                strokeLinecap="round"
+                              />
+                            </svg>
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <span className={`material-symbols-outlined text-[17px] ${quota.textStyle}`}>
+                                {quota.icon}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-left min-w-0 flex-1">
+                            <span className="text-[12px] text-white font-black block truncate leading-none">{quota.label}</span>
+                            <span className="text-[10px] text-on-surface-variant/30 font-bold block mt-1 scale-90 -ml-1">剩余额度</span>
+                            <span className="text-[13.5px] font-black text-white block mt-0.5 font-label-mono whitespace-nowrap">
+                              {quota.remaining} <span className="text-on-surface-variant/35 font-normal text-[10px]">/ {quota.total}{quota.unit}</span>
                             </span>
                           </div>
                         </div>
-                        <div className="text-left min-w-0 flex-1">
-                          <span className="text-[12px] text-white font-black block truncate leading-none">{quota.label}</span>
-                          <span className="text-[10px] text-on-surface-variant/30 font-bold block mt-1 scale-90 -ml-1">剩余次数</span>
-                          <span className="text-[13.5px] font-black text-white block mt-0.5 font-label-mono whitespace-nowrap">
-                            {quota.used} <span className="text-on-surface-variant/35 font-normal text-[10px]">/ {quota.total}次</span>
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    });
+                  })()}
                 </div>
 
                 <div className="border-t border-white/5 pt-3.5 flex justify-between items-center text-xs text-on-surface-variant/40 font-extrabold font-label-mono">
                   <span className="flex items-center gap-1">
                     <span className="material-symbols-outlined text-xs">info</span>
-                    额度重置日期: 2026-06-01
+                    额度重置日期: {getNextMonthFirstDay()}
                   </span>
                 </div>
 

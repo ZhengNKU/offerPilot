@@ -835,8 +835,10 @@ function NewAnalysisDebuggerContent() {
                       : "bg-primary/10 border border-primary/20 text-primary animate-pulse"
                   }`}>
                     {remainingCount === "unlimited"
-                      ? (auth.user?.membership === "max" ? "MAX会员：无限体验" : "PRO会员：30天配额")
-                      : `免费体验剩余：${remainingCount}次`}
+                      ? "MAX会员：无限体验"
+                      : (auth.user?.membership === "pro"
+                          ? `PRO会员 · 剩余体验：${remainingCount}次`
+                          : `免费体验剩余：${remainingCount}次`)}
                   </div>
                 )}
               </div>

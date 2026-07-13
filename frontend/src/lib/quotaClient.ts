@@ -48,7 +48,7 @@ export function toDisplayRemaining(
   feature: Feature,
 ): number | "unlimited" {
   if (!status) return 1; // 网络失败默认乐观显示 1 次
-  if (status.membership === "pro" || status.membership === "max") {
+  if (status.membership === "max") {
     return "unlimited";
   }
   return status[feature]?.remaining ?? 0;

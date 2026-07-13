@@ -2459,13 +2459,6 @@ export default function CareerMemoryDashboard() {
                           </p>
                         </div>
                       </div>
-
-                      <button
-                        onClick={() => handleTabChange("growth")}
-                        className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        查看提升路径 <span className="material-symbols-outlined text-xs">trending_up</span>
-                      </button>
                     </div>
                   </div>
 
