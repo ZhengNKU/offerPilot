@@ -672,6 +672,36 @@ class KnowledgeQuestionCache(Base):
     )
 
 
+class UserQuotaUsage(Base):
+    """记录每个用户每次使用某功能的时刻，用于 30 天滚动窗口配额计算。
+
+    写入时机：用户每次成功发起一次"面试录音分析 / 面试记录分析 / 简历分析"时。
+    查询逻辑：SELECT COUNT(*) WHERE used_at >= now() - interval '30 days'。
+
+    为什么不用 User 表上的计数器字段：
+      - 删除 InterviewSession / ResumeAnalysis 等业务记录不该重置配额
+        （这是本次修复的核心 bug）
+      - 时间戳天然支持 30 天滚动窗口，无需复杂的"过期"判断
+    """
+    __tablename__ = "user_quota_usage"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # 功能标识: "audio"（录音分析） | "record"（记录/文本分析） | "resume"（简历分析）
+    feature: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    # 使用时刻（UTC，server 端写入）
+    used_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), nullable=False, index=True
+    )
+
+    __table_args__ = (
+        # 配额 helper 查询窗口内次数的高频路径：(user_id, feature, used_at) 三元组
+        Index("ix_user_quota_user_feature_time", "user_id", "feature", "used_at"),
+    )
+
+
 class Feedback(Base):
     """用户提交的体验反馈列表"""
     __tablename__ = "feedbacks"

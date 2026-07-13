@@ -7,6 +7,7 @@ import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { PricingModal } from "@/components/PricingModal";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
 import { API_BASE } from "@/lib/api";
+import { getQuotaStatus, toDisplayRemaining, type Feature } from "@/lib/quotaClient";
 
 const getTodayString = () => {
   const d = new Date();
@@ -49,6 +50,7 @@ function NewAnalysisDebuggerContent() {
   const closeUpgradeModal = () => setShowUpgradeModal(false);
 
   const checkRemainingLimit = async () => {
+    // ── 未登录用户：仅本地占位（实际限制在后端，前端只是友好提示） ──
     if (!auth.isLoggedIn) {
       const hasAnalyzedKey = `interviewVar_analyzed_${activeMode}`;
       if (localStorage.getItem(hasAnalyzedKey) === "true") {
@@ -59,24 +61,19 @@ function NewAnalysisDebuggerContent() {
       return;
     }
 
-    if (auth.user?.membership === "pro" || auth.user?.membership === "max") {
-      setRemainingCount("unlimited");
-      return;
-    }
-
-    const token = localStorage.getItem("interviewVar_token");
-    try {
-      const checkRes = await fetch(`${API_BASE}/api/audio/check_limit`, {
-        headers: token ? { "Authorization": `Bearer ${token}` } : {}
-      });
-      if (checkRes.ok) {
-        setRemainingCount(1);
-      } else {
-        setRemainingCount(0);
-      }
-    } catch (err) {
-      setRemainingCount(1);
-    }
+    // ── 登录用户：走后端 /api/audio/quota/status 的真实配额 ──
+    // 替代旧的 /api/audio/check_limit（那接口只回答"非会员是否还能免费 1 次"），
+    // 新接口按 audio/record/resume 三个维度返回 {used, max, remaining}。
+    // 注意 activeMode 取值与 quota feature 的映射：
+    //   "audio" / "text" → audio / record   "resume" → resume
+    const featureMap: Record<string, Feature> = {
+      audio: "audio",
+      text: "record",
+      resume: "resume",
+    };
+    const feature: Feature = featureMap[activeMode] ?? "audio";
+    const status = await getQuotaStatus();
+    setRemainingCount(toDisplayRemaining(status, feature));
   };
 
   useEffect(() => {
@@ -148,11 +145,11 @@ function NewAnalysisDebuggerContent() {
       }
     }
 
-    const maxLimit = activeMode === "resume" ? 5 * 1024 * 1024 : 20 * 1024 * 1024;
+    const maxLimit = activeMode === "resume" ? 5 * 1024 * 1024 : 50 * 1024 * 1024;
     if (file.size > maxLimit) {
       auth.triggerToast(
         activeMode === "audio"
-          ? "上传失败：录音文件大小不能超过 20MB！"
+          ? "上传失败：录音文件大小不能超过 50MB！"
           : "上传失败：简历文件大小不能超过 5MB！"
       );
       if (fileInputRef.current) {
@@ -292,15 +289,31 @@ function NewAnalysisDebuggerContent() {
         return;
       }
     } else {
-      // Check registered free user limit via backend
-      const token = localStorage.getItem("interviewVar_token");
+      // ── 登录用户：走后端 /api/audio/quota/status 的真实配额 ──
+      // 替代旧的 /api/audio/check_limit（只覆盖 audio 维度）。
+      // 新逻辑按 activeMode 区分 audio / record / resume，匹配后端配额。
+      const featureMap: Record<string, Feature> = {
+        audio: "audio",
+        text: "record",
+        resume: "resume",
+      };
+      const feature: Feature = featureMap[activeMode] ?? "audio";
       try {
-        const checkRes = await fetch(`${API_BASE}/api/audio/check_limit`, {
-          headers: token ? { "Authorization": `Bearer ${token}` } : {}
-        });
-        if (!checkRes.ok) {
-          const errData = await checkRes.json();
-          auth.triggerToast(errData.detail || "您的该项分析免费体验次数已达上限，请升级至 PRO 会员解锁更多分析！");
+        const status = await getQuotaStatus();
+        if (!status) {
+          auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！");
+          return;
+        }
+        const isPaid = status.membership === "pro" || status.membership === "max";
+        if (!isPaid && status[feature].remaining <= 0) {
+          const featureLabel =
+            feature === "audio" ? "面试录音分析" :
+            feature === "record" ? "面试记录分析" : "简历分析";
+          const isFreeUser = status.membership === "free";
+          const detail = isFreeUser
+            ? `您已使用过${featureLabel}的免费体验（永久 1 次），请升级至 PRO 会员解锁更多！`
+            : `30 天内${featureLabel}体验次数已用完（${status[feature].used}/${status[feature].max}），请升级会员或等待额度重置！`;
+          auth.triggerToast(detail);
           return;
         }
       } catch (err) {
@@ -523,7 +536,6 @@ function NewAnalysisDebuggerContent() {
         // target page reads from URL truth (avoids the localStorage handoff
         // race that exists when sessionId lives only in storage).
         await checkRemainingLimit();
-        setIsAnalyzing(false);
         router.push(`/debugger/record?sessionId=${sessionId}`);
 
       } catch (e: any) {
@@ -598,7 +610,6 @@ function NewAnalysisDebuggerContent() {
       } catch (e: any) {
         clearInterval(progressInterval);
         auth.triggerToast(e.message || "分析简历失败，请重试！");
-      } finally {
         setIsAnalyzing(false);
       }
     }
@@ -824,7 +835,7 @@ function NewAnalysisDebuggerContent() {
                       : "bg-primary/10 border border-primary/20 text-primary animate-pulse"
                   }`}>
                     {remainingCount === "unlimited"
-                      ? "PRO会员：无限体验"
+                      ? (auth.user?.membership === "max" ? "MAX会员：无限体验" : "PRO会员：30天配额")
                       : `免费体验剩余：${remainingCount}次`}
                   </div>
                 )}
@@ -909,7 +920,7 @@ function NewAnalysisDebuggerContent() {
                         {activeMode === "audio" ? "拖拽录音文件到此处，或点击浏览上传" : "拖拽简历文档到此处，或点击浏览上传"}
                       </h4>
                       <p className="text-xs md:text-sm text-on-surface-variant/60">
-                        {activeMode === "audio" ? "支持 wav, mp3 格式，最大 20MB (时长限10分钟)" : "支持 PDF, DOCX 格式，最大 5MB"}
+                        {activeMode === "audio" ? "支持 wav, mp3 格式，最大 50MB (时长限30分钟)" : "支持 PDF, DOCX 格式，最大 5MB"}
                       </p>
                     </>
                   )}

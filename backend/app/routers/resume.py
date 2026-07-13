@@ -20,6 +20,7 @@ from app.services.embedding_indexer import schedule_index
 from app.utils.llm import analyze_resume_text
 from app.utils.docx_resume_writer import rewrite_resume_docx, BulletMatchError
 from app.utils.pdf_to_docx import convert_pdf_to_docx
+from app.services.quota import FEATURE_RESUME, check_and_consume
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,13 @@ async def analyze_resume(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="该文件不是简历文件"
         )
+
+    # 1.5 配额检查（30 天滚动窗口，按会员等级 FREE=1 / PRO=10 / MAX=30）
+    # 旧代码此处完全没有免费次数判断，所有用户（包括非会员）都能无限分析。
+    # 新逻辑：check_and_consume 会写一条 user_quota_usage，删除历史 ResumeAnalysis
+    # 不会重置配额。仅"自己的简历"扣配额，跨用户访问由下面的 ownership 检查兜底。
+    if current_user and db_file.user_id == current_user.id:
+        await check_and_consume(db, current_user, FEATURE_RESUME)
 
     # 2. Permission check: if file belongs to a user, check ownership
     if db_file.user_id is not None:

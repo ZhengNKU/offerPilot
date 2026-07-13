@@ -15,6 +15,13 @@ from app.routers.auth import get_current_user_optional
 from app.utils.llm import analyze_interview_dialogue, sectionize_transcript, generate_transcript_highlights, generate_section_optimization_advice, extract_mentioned_projects
 from app.utils.asr import call_volc_asr
 from app.services.embedding_indexer import schedule_index
+from app.services.quota import (
+    FEATURE_AUDIO,
+    FEATURE_RECORD,
+    check_and_consume,
+    get_remaining,
+    get_status,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,15 +51,13 @@ async def check_limit(
     """
     Check if a free user has reached their trial limit of 1 session.
     """
+    # 旧逻辑：用 InterviewSession.count() 判断，用户删除记录即可绕过。
+    # 新逻辑：基于 user_quota_usage 表的 30 天滚动窗口，无法通过删除业务记录绕过。
     if current_user and current_user.membership is None:
-        result = await db.execute(
-            select(models.InterviewSession).where(models.InterviewSession.user_id == current_user.id)
-        )
-        existing_sessions = result.scalars().all()
-        if len(existing_sessions) >= 1:
+        if await get_remaining(db, current_user, FEATURE_AUDIO) <= 0:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="免费用户仅有一次体验机会，请升级至 PRO 会员解锁更多分析！"
+                detail="免费用户 30 天内仅可使用 1 次面试录音分析，请升级至 PRO 会员解锁更多！"
             )
     return {"status": "ok"}
 
@@ -68,17 +73,12 @@ async def create_session(
     This avoids re-uploading the file binary — the frontend calls /api/file/upload
     first, then calls this endpoint with the returned file_url.
     """
-    # ── CHECK: Free User experience limit (only 1 opportunity) ──
-    if current_user and current_user.membership is None:
-        result = await db.execute(
-            select(models.InterviewSession).where(models.InterviewSession.user_id == current_user.id)
-        )
-        existing_sessions = result.scalars().all()
-        if len(existing_sessions) >= 1:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="免费用户仅有一次体验机会，请升级至 PRO 会员解锁更多分析！"
-            )
+    # ── CHECK: 配额（30 天滚动窗口） ──
+    # 旧实现仅对非会员（membership is None）做 1 次免费限制；新实现按会员等级
+    # 差异化配额（FREE=1 / PRO=10 / MAX=30）。check_and_consume 内部会写入
+    # user_quota_usage，删除 InterviewSession 不会重置配额。
+    if current_user:
+        await check_and_consume(db, current_user, FEATURE_AUDIO)
 
     session = models.InterviewSession(
         user_id=current_user.id if current_user else None,
@@ -187,6 +187,12 @@ async def create_record_session(
         )
         session = result.scalars().first()
         if session:
+            # ── 配额检查（重分析分支） ──
+            # 旧代码此处完全没有免费次数判断 → 任何免费用户拿到任意 session_id
+            # 都能无限重跑分析。这是比"删除绕过"更严重的漏洞，本次一并修。
+            # 只对"自己的 session"扣配额；越权访问由后续 ownership 检查兜底。
+            if current_user and session.user_id == current_user.id:
+                await check_and_consume(db, current_user, FEATURE_RECORD)
             # Update fields of the existing session
             session.company = req.company or session.company
             session.role = req.role or session.role
@@ -236,16 +242,10 @@ async def create_record_session(
 
     if not session:
         # Create a new session
-        if current_user and current_user.membership is None:
-            result = await db.execute(
-                select(models.InterviewSession).where(models.InterviewSession.user_id == current_user.id)
-            )
-            existing_sessions = result.scalars().all()
-            if len(existing_sessions) >= 1:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="免费用户仅有一次体验机会，请升级至 PRO 会员解锁更多分析！"
-                )
+        # 配额检查：30 天滚动窗口，按会员等级差异化（FREE=1 / PRO=10 / MAX=30）。
+        # 与 create_session 一致；check_and_consume 会在检查通过后写入 user_quota_usage。
+        if current_user:
+            await check_and_consume(db, current_user, FEATURE_RECORD)
 
         session = models.InterviewSession(
             user_id=current_user.id if current_user else None,
@@ -340,11 +340,32 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
         )
     else:
         logger.info(f"[task={task_id}] Starting ASR for session {session_id}, url={audio_url}")
+        # ── ASR 是阻塞调用（典型 30-60s），期间前端只能看到 15% 卡住。
+        #    在后台开一个"虚拟进度"协程，每隔几秒推一点进度（不超过 45%），
+        #    ASR 真正完成后取消它，立刻 _set_progress(45)。
+        async def _fake_asr_progress():
+            try:
+                checkpoints = [(20, 4), (27, 5), (33, 5), (39, 5)]  # (pct, delay_sec)
+                for pct, delay in checkpoints:
+                    await asyncio.sleep(delay)
+                    _set_progress(pct, "processing")
+            except asyncio.CancelledError:
+                pass
+
+        fake_progress_task = asyncio.create_task(_fake_asr_progress())
         try:
-            raw_segments = await asyncio.to_thread(call_volc_asr, audio_url)
-            logger.info(f"[task={task_id}] ASR returned {len(raw_segments)} segments")
-        except Exception as e:
-            logger.warning(f"[task={task_id}] ASR failed, will use mock transcript: {e}")
+            try:
+                raw_segments = await asyncio.to_thread(call_volc_asr, audio_url)
+                logger.info(f"[task={task_id}] ASR returned {len(raw_segments)} segments")
+            except Exception as e:
+                logger.warning(f"[task={task_id}] ASR failed, will use mock transcript: {e}")
+                raw_segments = []
+        finally:
+            fake_progress_task.cancel()
+            try:
+                await fake_progress_task
+            except asyncio.CancelledError:
+                pass
 
     _set_progress(45, "processing")
 
@@ -500,12 +521,33 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             f"[task={task_id}] Calling 4 LLMs in parallel: "
             f"highlights + sectionize + dialogue_eval + extract_mentions for {len(raw_segments)} segments"
         )
-        highlights, sections, llm_result, mentioned_projects = await asyncio.gather(
-            _safe_highlights(),
-            _safe_sectionize(),
-            _safe_dialogue_eval(),
-            _safe_extract_mentions(),
-        )
+
+        # ── LLM 是 30-90s 阻塞操作，期间前端看不到中间进度 ──
+        #    同样开 fake_progress 协程模拟（从 45 → 60），gather 完成时取消它。
+        async def _fake_llm_progress():
+            try:
+                # 15s 内推到 53%，再 10s 推到 57%，给前端可感知的"在动"信号
+                checkpoints = [(48, 4), (52, 5), (55, 6), (58, 8)]
+                for pct, delay in checkpoints:
+                    await asyncio.sleep(delay)
+                    _set_progress(pct, "processing")
+            except asyncio.CancelledError:
+                pass
+
+        llm_fake_task = asyncio.create_task(_fake_llm_progress())
+        try:
+            highlights, sections, llm_result, mentioned_projects = await asyncio.gather(
+                _safe_highlights(),
+                _safe_sectionize(),
+                _safe_dialogue_eval(),
+                _safe_extract_mentions(),
+            )
+        finally:
+            llm_fake_task.cancel()
+            try:
+                await llm_fake_task
+            except asyncio.CancelledError:
+                pass
 
         logger.info(
             f"[task={task_id}] ⏱️  4-LLM parallel block total = "
@@ -828,12 +870,12 @@ async def upload_audio(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):
-    # Enforce file size limit of 20MB
-    max_size_bytes = 20 * 1024 * 1024
+    # Enforce file size limit of 50MB
+    max_size_bytes = 50 * 1024 * 1024
     if file.size and file.size > max_size_bytes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="上传的录音文件大小不能超过 20MB"
+            detail="上传的录音文件大小不能超过 50MB"
         )
 
     # Enforce format constraints
@@ -878,23 +920,7 @@ async def analyze_audio(
     session = result.scalars().first()
     if not session:
         raise HTTPException(status_code=404, detail="面试会话不存在")
-        
-    # ── CHECK: Free User experience limit (only 1 opportunity) ──
-    if current_user and current_user.membership is None:
-        other_res = await db.execute(
-            select(models.InterviewSession)
-            .where(
-                (models.InterviewSession.user_id == current_user.id) & 
-                (models.InterviewSession.id != session_id)
-            )
-        )
-        other_sessions = other_res.scalars().all()
-        if len(other_sessions) >= 1:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="免费用户仅有一次体验机会，请升级至 PRO 会员解锁更多分析！"
-            )
-        
+
     task_id = str(uuid.uuid4())
     task_store[task_id] = {
         "session_id": session_id,
@@ -1219,6 +1245,27 @@ async def get_session_improvements(id: int, db: AsyncSession = Depends(get_db)):
             "optimized_answer": imp.optimized_answer
         } for imp in improvements
     ]
+
+
+@router.get("/quota/status")
+async def quota_status(
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional)
+):
+    """
+    返回当前用户的各功能配额使用情况，用于前端显示"剩余次数 + 升级提示"。
+
+    返回结构：
+      {
+        "membership": "free" | "pro" | "max",
+        "audio":   {"used": N, "max": N, "remaining": N},
+        "record":  {"used": N, "max": N, "remaining": N},
+        "resume":  {"used": N, "max": N, "remaining": N}
+      }
+
+    未登录用户：membership="free"，所有 used=0，remaining=max。
+    """
+    return await get_status(db, current_user)
 
 
 @router.get("/sessions")

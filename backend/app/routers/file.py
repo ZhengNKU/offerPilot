@@ -91,13 +91,13 @@ async def upload_file(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):
-    # Enforce size limits: 5MB for resume/screenshot, 20MB for audio
+    # Enforce size limits: 5MB for resume/screenshot, 50MB for audio
     if file_type in ("resume", "screenshot"):
         max_size_bytes = 5 * 1024 * 1024
     else:
-        max_size_bytes = 20 * 1024 * 1024
+        max_size_bytes = 50 * 1024 * 1024
     if file.size and file.size > max_size_bytes:
-        limit_desc = "5MB" if file_type in ("resume", "screenshot") else "20MB"
+        limit_desc = "5MB" if file_type in ("resume", "screenshot") else "50MB"
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"上传的文件大小不能超过 {limit_desc}"

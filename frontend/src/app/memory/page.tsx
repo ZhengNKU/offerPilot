@@ -1537,7 +1537,7 @@ export default function CareerMemoryDashboard() {
               className="w-full py-2.5 bg-gradient-to-r from-primary/20 to-secondary/20 hover:from-primary/30 hover:to-secondary/30 text-base font-black text-white rounded-xl border border-primary/30 hover:border-primary/50 transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-primary/5"
             >
               <span className="material-symbols-outlined text-sm font-bold">add</span>
-              新建会话
+              开启专属定制咨询
             </button>
 
             {/* History Session List */}
@@ -3619,12 +3619,6 @@ export default function CareerMemoryDashboard() {
                   </div>
                 </div>
 
-                {/* Tab layout section */}
-                <div className="flex border-b border-white/5 pb-2 shrink-0">
-                  <button className="px-4 py-2 border-b-2 border-primary text-sm font-bold text-white flex items-center gap-1.5 cursor-pointer">
-                    面试高频问题 Top10
-                  </button>
-                </div>
 
                 {/* Main Split Grid container */}
                 {(() => {
@@ -3643,8 +3637,8 @@ export default function CareerMemoryDashboard() {
                     <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 gap-6 overflow-hidden">
                       {/* Left list pane: questions list */}
                       <div className="col-span-12 md:col-span-5 flex flex-col gap-3 h-full overflow-hidden">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-on-surface-variant/50 uppercase tracking-widest shrink-0">
-                          <span className="material-symbols-outlined text-sm text-primary">star</span>
+                        <div className="flex items-center gap-1.5 text-base font-bold text-on-surface-variant/50 uppercase tracking-widest shrink-0">
+                          <span className="material-symbols-outlined text-base text-amber-400">star</span>
                           面试高频问题 Top10
                         </div>
                         <div className="flex-1 overflow-y-auto pr-2 space-y-2 scrollbar-thin scrollbar-thumb-white/10">
@@ -3674,8 +3668,8 @@ export default function CareerMemoryDashboard() {
                       {/* Right details pane: AI recommended answer */}
                       <div className="col-span-12 md:col-span-7 flex flex-col gap-3 h-full overflow-hidden">
                         <div className="flex items-center justify-between shrink-0">
-                          <div className="flex items-center gap-1.5 text-xs font-bold text-on-surface-variant/50 uppercase tracking-widest">
-                            <span className="material-symbols-outlined text-sm text-primary">psychology</span>
+                          <div className="flex items-center gap-1.5 text-base font-bold text-on-surface-variant/50 uppercase tracking-widest">
+                            <span className="material-symbols-outlined text-base text-violet-400">psychology</span>
                             AI 推荐回答
                           </div>
                         </div>
@@ -3685,7 +3679,7 @@ export default function CareerMemoryDashboard() {
                           {/* Core Answer Strategy */}
                           <div className="p-4.5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
                             <h4 className="text-xs md:text-sm font-black text-white flex items-center gap-1.5">
-                              <span className="material-symbols-outlined text-sm text-primary">lightbulb</span>
+                              <span className="material-symbols-outlined text-sm text-amber-400">lightbulb</span>
                               核心回答思路
                             </h4>
                             <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
@@ -3696,7 +3690,7 @@ export default function CareerMemoryDashboard() {
                           {/* Reference Answer - STAR structure */}
                           <div className="p-4.5 rounded-2xl bg-white/[0.01] border border-white/5 space-y-4">
                             <h4 className="text-xs md:text-sm font-black text-white flex items-center gap-1.5 border-b border-white/5 pb-2">
-                              <span className="material-symbols-outlined text-sm text-primary">layers</span>
+                              <span className="material-symbols-outlined text-sm text-cyan-400">layers</span>
                               参考回答（STAR 结构）
                             </h4>
                             

@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
 import { API_BASE } from "@/lib/api";
+import { getQuotaStatus } from "@/lib/quotaClient";
 
 interface DialogueItem {
   sender: "interviewer" | "user";
@@ -596,15 +597,23 @@ export default function InterviewRecordAnalysisPage() {
         return;
       }
     } else {
-      // Check registered free user limit via backend
-      const token = localStorage.getItem("interviewVar_token");
+      // ── 登录用户：走后端 /api/audio/quota/status 的真实配额 ──
+      // 替代旧的 /api/audio/check_limit（那接口只回答"非会员是否还有 1 次免费"，
+      // 不能区分 audio/record/resume 三个功能）。record 页面是"面试记录分析"，
+      // 对应 feature="record"。
       try {
-        const checkRes = await fetch(`${API_BASE}/api/audio/check_limit`, {
-          headers: token ? { "Authorization": `Bearer ${token}` } : {}
-        });
-        if (!checkRes.ok) {
-          const errData = await checkRes.json();
-          auth.triggerToast(errData.detail || "您的该项分析免费体验次数已达上限，请升级至 PRO 会员解锁更多分析！");
+        const status = await getQuotaStatus();
+        if (!status) {
+          auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！");
+          return;
+        }
+        // PRO/MAX 视为无限，不卡这里
+        const isPaid = status.membership === "pro" || status.membership === "max";
+        if (!isPaid && status.record.remaining <= 0) {
+          const detail = status.membership === "free"
+            ? "您已使用过面试记录分析的免费体验（永久 1 次），请升级至 PRO 会员解锁更多！"
+            : `30 天内面试记录分析体验次数已用完（${status.record.used}/${status.record.max}），请升级会员或等待额度重置！`;
+          auth.triggerToast(detail);
           return;
         }
       } catch (err) {

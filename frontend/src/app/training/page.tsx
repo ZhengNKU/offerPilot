@@ -38,12 +38,12 @@ interface TranscriptLine {
   t1: number;
 }
 
-const INTERVIEW_TYPES: Array<{ value: InterviewType; label: string; persona: string }> = [
-  { value: "tech_8gu", label: "技术面·八股为主", persona: "书本型面试官" },
-  { value: "tech_project", label: "技术面·深挖项目", persona: "刨根问底型" },
-  { value: "tech_scenario", label: "技术面·场景题", persona: "架构师型" },
-  { value: "non_tech", label: "非技术面·业务能力", persona: "资深业务面试官" },
-  { value: "hr_comprehensive", label: "HR面·综合能力", persona: "资深 HR 型" },
+const INTERVIEW_TYPES: Array<{ value: InterviewType; label: string; persona: string; avatar: string }> = [
+  { value: "tech_8gu", label: "技术面·八股为主", persona: "书本型面试官", avatar: "/interviewer-book.png" },
+  { value: "tech_project", label: "技术面·深挖项目", persona: "刨根问底型", avatar: "/interviewer-project.png" },
+  { value: "tech_scenario", label: "技术面·场景题", persona: "架构师型", avatar: "/interviewer-architect.png" },
+  { value: "non_tech", label: "非技术面·业务能力", persona: "资深业务面试官", avatar: "/interviewer-nonTech.png" },
+  { value: "hr_comprehensive", label: "HR面·综合能力", persona: "资深 HR 型", avatar: "/interviewer-hr.png" },
 ];
 
 const DIFFICULTIES: Array<{ value: Difficulty; label: string; speed: string }> = [
@@ -380,6 +380,7 @@ function InterviewTrainingPageContent() {
       setCountdownNum(i);
       await new Promise((r) => setTimeout(r, 1000));
     }
+    setBootState("loading"); // 倒计时结束，立刻进入加载状态，防止创建会话的网络请求期间闪现“配置完成，准备就绪”页面
     setIsCountingDown(false);
 
     // POST /api/live/sessions
@@ -409,6 +410,7 @@ function InterviewTrainingPageContent() {
         } else {
           auth.triggerToast(err.detail || "创建面试失败");
         }
+        setBootState("idle");
         return;
       }
       const sess: LiveSession = await res.json();
@@ -448,6 +450,7 @@ function InterviewTrainingPageContent() {
       }
     } catch (e) {
       auth.triggerToast("无法连接到后端服务");
+      setBootState("idle");
     }
   };
 
@@ -680,9 +683,21 @@ function InterviewTrainingPageContent() {
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">体验反馈中心</a>
           </div>
           <div className="flex items-center gap-4">
-            <button onClick={() => router.push("/memory?tab=timeline")} className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer">
-              <span className="material-symbols-outlined text-base">history</span>历史面试
-            </button>
+            {bootState === "report" ? (
+              <button
+                onClick={() => window.location.href = "/training"}
+                className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-base">add</span>新建面试
+              </button>
+            ) : (
+              <button
+                onClick={() => router.push("/memory?tab=timeline")}
+                className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-base">history</span>历史记录
+              </button>
+            )}
             {auth.isLoggedIn ? <UserMenu /> : (
               <>
                 <button onClick={() => auth.setShowLogin(true)} className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer">登录</button>
@@ -716,9 +731,9 @@ function InterviewTrainingPageContent() {
               </div>
               <button
                 onClick={handleReset}
-                className="px-5 py-2.5 bg-gradient-to-r from-secondary to-primary hover:scale-[1.02] active:scale-98 text-on-primary text-xs font-black rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer shrink-0"
+                className="px-5 py-2.5 bg-gradient-to-r from-secondary to-primary hover:scale-[1.02] active:scale-98 text-on-primary text-base font-black rounded-xl transition-all shadow-md flex items-center gap-1.5 cursor-pointer shrink-0"
               >
-                <span className="material-symbols-outlined text-sm">replay</span>
+                <span className="material-symbols-outlined text-base">replay</span>
                 重新开始面试
               </button>
             </div>
@@ -1102,7 +1117,7 @@ function InterviewTrainingPageContent() {
                   <button
                     disabled={bootState !== "idle" || isCountingDown}
                     onClick={handleStartTraining}
-                    className="w-full py-3.5 bg-gradient-to-r from-secondary to-primary text-on-primary text-sm font-black rounded-xl hover:scale-[1.01] active:scale-98 disabled:opacity-50 disabled:scale-100 transition-all shadow-lg shadow-secondary/20 cursor-pointer flex items-center justify-center gap-2 group"
+                    className="w-full py-3.5 bg-gradient-to-r from-secondary to-primary text-on-primary text-base font-black rounded-xl hover:scale-[1.01] active:scale-98 disabled:opacity-50 disabled:scale-100 transition-all shadow-lg shadow-secondary/20 cursor-pointer flex items-center justify-center gap-2 group"
                   >
                     <span className="material-symbols-outlined text-base animate-pulse">play_arrow</span>
                     {isLive ? "正在进行模拟面试" : "开始模拟面试"}
@@ -1181,6 +1196,19 @@ function InterviewTrainingPageContent() {
                   </div>
                 )}
 
+                {/* 正在连接/加载中 */}
+                {bootState === "loading" && (
+                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-6">
+                    <img src="/loading.gif" alt="loading" className="w-10 h-10 object-contain" />
+                    <div className="space-y-2">
+                      <h3 className="text-lg font-black text-white animate-pulse">正在连接 AI 面试官...</h3>
+                      <p className="text-xs text-on-surface-variant/50 font-semibold">
+                        正在初始化双向音频流通道，请确保麦克风权限已授予。
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {/* OFFLINE 预览 */}
                 {bootState === "idle" && !isCountingDown && (
                   <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-6 z-10 select-none">
@@ -1230,7 +1258,7 @@ function InterviewTrainingPageContent() {
                     <div className="grid grid-cols-2 gap-4 shrink-0 py-1">
                       {/* AI 面试官画面 */}
                       <div className="relative aspect-video w-full rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl group">
-                        <img src="/debugger-1.jpg" alt="AI Interviewer" className="w-full h-full object-cover select-none pointer-events-none" />
+                        <img src={INTERVIEW_TYPES.find(t => t.value === interviewType)?.avatar || "/interviewer-nonTech.png"} alt="AI Interviewer" className="w-full h-full object-cover select-none pointer-events-none" />
                         {aiState === "speaking" && <div className="absolute inset-0 bg-primary/5 pointer-events-none border border-primary/20 animate-pulse" />}
                         <span className="absolute left-3.5 top-3 px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md text-[10px] text-white/90 font-bold border border-white/5 z-10 flex items-center gap-1">
                           <span className="w-1.5 h-1.5 bg-primary rounded-full animate-ping" />
@@ -1399,7 +1427,7 @@ function InterviewTrainingPageContent() {
                 </div>
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-full border border-tertiary/20 overflow-hidden bg-slate-900 shrink-0">
-                    <img src="/debugger-1.jpg" className="w-full h-full object-cover" />
+                    <img src={INTERVIEW_TYPES.find(t => t.value === interviewType)?.avatar || "/interviewer-nonTech.png"} className="w-full h-full object-cover" />
                   </div>
                   <div className="space-y-0.5 min-w-0">
                     <div className="text-base font-black text-white">{INTERVIEW_TYPES.find(t => t.value === interviewType)?.persona}</div>
@@ -1587,7 +1615,7 @@ function InterviewTrainingPageContent() {
                     2. 数据采集与隐私保护
                   </h4>
                   <ul className="list-disc pl-5 space-y-1.5">
-                    <li>面试中浏览器采集的<strong className="text-white">麦克风音频仅在本地加密传输到火山引擎</strong>用于实时识别，<strong className="text-white">不会上传到 OfferPilot 服务器</strong>。</li>
+                    <li>面试中浏览器采集的<strong className="text-white">麦克风音频仅在本地加密传输到火山引擎</strong>用于实时识别，<strong className="text-white">不会上传到服务器</strong>。</li>
                     <li>面试结束<strong className="text-white">仅在分析完成后</strong>，识别出的<strong className="text-white">文字</strong>会被持久化到数据库，用于生成报告。</li>
                     <li>原始音频 PCM 流<strong className="text-white">不会被录制</strong>、不会被保存。</li>
                     <li>所有数据按会员等级对应的<strong className="text-white">保留期</strong>自动清理（免费 7 天 / PRO 30 天 / MAX 120 天）。</li>
@@ -1647,7 +1675,7 @@ function InterviewTrainingPageContent() {
                   <p>
                     付费会员开通后<strong className="text-white">7 天内未使用实时模拟面试</strong>（用量为 0 分钟）可申请全额退款；
                     已使用部分按 PRO 0.5 元/分钟、MAX 0.3 元/分钟扣除。技术问题请联系
-                    <a className="text-primary hover:underline ml-1" href="mailto:support@interviewvar.com">interviewVar@163.com</a>。
+                    <a className="text-primary hover:underline ml-1" href="mailto:support@interviewvar.com">interviewvvar@163.com</a>。
                   </p>
                 </section>
 

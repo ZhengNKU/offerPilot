@@ -84,6 +84,20 @@ class Settings(BaseSettings):
     # 过期文件清理任务运行周期，单位：小时
     FILE_CLEANUP_INTERVAL_HOURS: int = 24
 
+    # ── 分析功能配额（30 天滚动窗口内最大次数） ─────────────────────
+    # 修复"用户删除历史记录 → 又可免费使用"的 bug：
+    #   旧实现用 SELECT COUNT(*) FROM interview_sessions WHERE user_id=? 判断，
+    #   用户删除记录后即可绕过。新实现每次发起分析写一条 UserQuotaUsage，
+    #   30 天窗口按 used_at 过滤；删除业务记录不会影响配额计数。
+    # feature 字符串与 UserQuotaUsage.feature 字段对齐：
+    #   "audio"   —— 面试录音分析（上传 wav/mp3 后 LLM 分析）
+    #   "record"  —— 面试记录分析（粘贴文本或重跑已有 session）
+    #   "resume"  —— 简历分析
+    QUOTA_WINDOW_DAYS: int = 30
+    QUOTA_FREE: dict = {"audio": 1, "record": 1, "resume": 1}
+    QUOTA_PRO:  dict = {"audio": 10, "record": 10, "resume": 10}
+    QUOTA_MAX:  dict = {"audio": 30, "record": 30, "resume": 30}
+
     # Aliyun Bailian DASHSCOPE_API_KEY
     DASHSCOPE_API_KEY: str = ""
     

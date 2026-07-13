@@ -105,6 +105,48 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
   const playQueueRef = useRef<ArrayBuffer[]>([]);
   const playingRef = useRef(false);
 
+  // 内部辅助：启动 Web Speech API 识别
+  const startRecognition = useCallback(() => {
+    if (!sttActiveRef.current || !onSttRef.current || recognitionRef.current) return;
+    const Ctor = getSpeechRecognitionCtor();
+    if (!Ctor) return;
+    try {
+      const r = new Ctor();
+      r.lang = "zh-CN";
+      r.continuous = true;
+      r.interimResults = true;
+      r.onresult = (ev) => {
+        // AI 正在说话（网络层判定）或扬声器正在播音（本地播放队列未完）时，直接丢弃结果，防止回音
+        if (aiSpeakingRef.current || playingRef.current) return;
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const res = ev.results[i];
+          if (!res || res.length === 0) continue;
+          const text = (res[0] as { transcript: string }).transcript || "";
+          if (!text) continue;
+          onSttRef.current?.(text, !!res.isFinal);
+        }
+      };
+      r.onend = () => {
+        // 重启条件：服务未关闭 且 AI 没在发音 且 本地扬声器已播音结束
+        if (sttActiveRef.current && !aiSpeakingRef.current && !playingRef.current) {
+          try { r.start(); } catch { /* ignore */ }
+        }
+      };
+      r.start();
+      recognitionRef.current = r;
+    } catch (e: any) {
+      console.warn("[audio] startRecognition failed:", e?.message);
+    }
+  }, []);
+
+  // 内部辅助：强行终止/释放 Web Speech API 识别
+  const stopRecognition = useCallback(() => {
+    if (recognitionRef.current) {
+      try { recognitionRef.current.abort(); } catch { /* ignore */ }
+      recognitionRef.current = null;
+    }
+  }, []);
+
   const start = useCallback(async (
     onAudioFrame: (pcm16: ArrayBuffer) => void,
     onSttResult?: (text: string, isFinal: boolean) => void,
@@ -163,56 +205,19 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
     source.connect(worklet);
 
     // 4. 启动浏览器 Web Speech API（候选人 STT 旁路）
-    //    火山 realtime 不回推 ASR，所以靠浏览器内置 STT 补齐候选人文本
     if (onSttResult) {
-      const Ctor = getSpeechRecognitionCtor();
-      if (Ctor) {
-        try {
-          const r = new Ctor();
-          r.lang = "zh-CN";
-          r.continuous = true;
-          r.interimResults = true;
-          r.onresult = (ev) => {
-            // AI 说话期间（TTS 在播）直接丢弃结果，避免回声被当候选人字幕
-            if (aiSpeakingRef.current) return;
-            // 只看最新一条结果；interim 时会被同一 final 覆盖
-            for (let i = ev.resultIndex; i < ev.results.length; i++) {
-              const res = ev.results[i];
-              if (!res || res.length === 0) continue;
-              const text = (res[0] as { transcript: string }).transcript || "";
-              if (!text) continue;
-              onSttRef.current?.(text, !!res.isFinal);
-            }
-          };
-          r.onend = () => {
-            // 浏览器在静音一段时间后会自动 onend；会话还活着且 AI 没在说话就重启，
-            // 保证连续识别。AI 说话期间的 onend（来自 abort）不重启，由 setAiSpeaking(false) 手动起。
-            if (sttActiveRef.current && !aiSpeakingRef.current) {
-              try { r.start(); } catch { /* ignore */ }
-            }
-          };
-          r.start();
-          recognitionRef.current = r;
-          sttActiveRef.current = true;
-        } catch (e: any) {
-          console.warn("[audio] Web Speech API 启动失败:", e?.message);
-        }
-      } else {
-        console.warn("[audio] 当前浏览器不支持 Web Speech API（仅 Chrome 系可用）");
-      }
+      sttActiveRef.current = true;
+      startRecognition();
     }
 
     setState({ active: true, hasPermission: true, error: null });
     return true;
-  }, []);
+  }, [startRecognition]);
 
   const stop = useCallback(() => {
     // 1. 先停 STT（onend 重启依赖 sttActiveRef，先置 false）
     sttActiveRef.current = false;
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch { /* ignore */ }
-      recognitionRef.current = null;
-    }
+    stopRecognition();
     onSttRef.current = null;
     try {
       if (workletRef.current) workletRef.current.disconnect();
@@ -234,7 +239,7 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
     playQueueRef.current = [];
     playingRef.current = false;
     setState((s) => ({ ...s, active: false }));
-  }, []);
+  }, [stopRecognition]);
 
   const mute = useCallback((muted: boolean) => {
     mutedRef.current = muted;
@@ -245,43 +250,15 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
     aiSpeakingRef.current = speaking;
     if (was === speaking) return;
     if (speaking) {
-      // AI 开始说话：abort 当前 recognition，让 onend 不重启（onend 已检查 aiSpeakingRef）
-      if (recognitionRef.current) {
-        try { recognitionRef.current.abort(); } catch { /* ignore */ }
-        recognitionRef.current = null;
-      }
+      // AI 开始说话：立即终止识别
+      stopRecognition();
     } else {
-      // AI 说完：重启 recognition（如果 onSttRef 还在，说明要继续识别候选人）
-      if (sttActiveRef.current && onSttRef.current && !recognitionRef.current) {
-        const Ctor = getSpeechRecognitionCtor();
-        if (Ctor) {
-          try {
-            const r = new Ctor();
-            r.lang = "zh-CN";
-            r.continuous = true;
-            r.interimResults = true;
-            r.onresult = (ev) => {
-              if (aiSpeakingRef.current) return;
-              for (let i = ev.resultIndex; i < ev.results.length; i++) {
-                const res = ev.results[i];
-                if (!res || res.length === 0) continue;
-                const text = (res[0] as { transcript: string }).transcript || "";
-                if (!text) continue;
-                onSttRef.current?.(text, !!res.isFinal);
-              }
-            };
-            r.onend = () => {
-              if (sttActiveRef.current && !aiSpeakingRef.current) {
-                try { r.start(); } catch { /* ignore */ }
-              }
-            };
-            r.start();
-            recognitionRef.current = r;
-          } catch { /* ignore */ }
-        }
+      // AI 停止说话（网络状态）：如果本地音轨也已播放完毕，则允许重新开启识别
+      if (!playingRef.current) {
+        startRecognition();
       }
     }
-  }, []);
+  }, [startRecognition, stopRecognition]);
 
   // 内部：把 PCM16 ArrayBuffer 转 Float32Array，喂给 AudioContext
   const playNext = useCallback(() => {
@@ -292,6 +269,10 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
     }
     if (playQueueRef.current.length === 0) {
       playingRef.current = false;
+      // 本地音频播放队列清空：如果网络层也已进入非说话态，则立即重新恢复识别
+      if (!aiSpeakingRef.current) {
+        startRecognition();
+      }
       return;
     }
     const ab = playQueueRef.current.shift()!;
@@ -316,20 +297,22 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
       console.error("[audio] play chunk failed:", e);
       playNext();
     }
-  }, []);
+  }, [startRecognition]);
 
   const play = useCallback((pcm16: ArrayBuffer, sampleRate: number = PLAY_SAMPLE_RATE) => {
     if (!audioCtxRef.current) {
       console.warn("[audio] play ignored: AudioContext not ready");
       return;
     }
-    // 注：sampleRate 参数目前固定 24kHz（与 AudioContext 内部重采样兼容）
+
     playQueueRef.current.push(pcm16);
     if (!playingRef.current) {
+      // 收到第一块要播放的音频且扬声器当前闲置时，终止一次识别。避免高频流包（50次/秒）触发重复 abort 重载浏览器。
+      stopRecognition();
       playingRef.current = true;
       playNext();
     }
-  }, [playNext]);
+  }, [playNext, stopRecognition]);
 
   // 卸载清理
   useEffect(() => {

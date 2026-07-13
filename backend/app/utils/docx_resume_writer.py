@@ -16,6 +16,7 @@
 """
 import io
 import logging
+import re
 from typing import Any, Dict, List, Tuple
 
 from docx import Document
@@ -25,6 +26,42 @@ logger = logging.getLogger(__name__)
 
 # 替换率 < 80% 视为识别失败，触发 PDF 兜底
 MATCH_RATE_THRESHOLD = 0.8
+
+# 零宽 / 不可见字符集合——PDF→DOCX（pdf2docx）会在每段段尾追加 ​ 等。
+# bullet 的 originalText 是从 PDF 文本抽取得到的，不带这些字符；
+# 直接比较必然失败，必须在比对前归一化。
+_INVISIBLE_CHARS = "​‌‍﻿"
+_INVISIBLE_RE = re.compile(f"[{re.escape(_INVISIBLE_CHARS)}]")
+_WHITESPACE_RE = re.compile(r"\s+")
+# 段首常见列表符号（bullet / 圆点 / 方块 / 横线 / 星号）。PDF→DOCX 的段落几乎都
+# 在开头加 "• " 或 "·" 之类的项目符号，而 bullet 的 originalText 已被 LLM 抽取时
+# 去掉了这个符号，所以比较时也要把 para 段首的列表符剥掉才能命中前缀。
+_LEADING_BULLET_RE = re.compile(r"^[•·●○▪▫■□\-*]+\s*")
+
+
+def _norm_text(s: str) -> str:
+    """bullet / 段落 文本的归一化：
+
+    - 去掉 PDF→DOCX 转换时插入的零宽字符（U+200B / U+200C / U+200D / U+FEFF）
+    - 把任意多种空白（含换行、全角空格、制表符）折叠成单个半角空格并 strip
+    - 去掉段首常见列表符号（• · ● ○ ■ □ - *）
+    """
+    if not s:
+        return ""
+    s = _INVISIBLE_RE.sub("", s)
+    s = _WHITESPACE_RE.sub(" ", s).strip()
+    s = _LEADING_BULLET_RE.sub("", s)
+    return s
+
+
+def _strip_ws(s: str) -> str:
+    """去掉所有空白后的字符串，用作 bullet / 段落的最终比对键。
+
+    PDF→DOCX 把同一 bullet 拆段后，第一段尾 / 第二段首可能多出零宽、空格或换行；
+    拼接时无论加不加空格都会与原 orig 中的字符排列产生差异，所以最终比较键
+    必须"忽略所有空白"，容忍任何位置上的空白差异。
+    """
+    return re.sub(r"\s+", "", s or "")
 
 
 class BulletMatchError(Exception):
@@ -108,7 +145,9 @@ def rewrite_resume_docx(content_bytes: bytes, analysis_data: Dict[str, Any]) -> 
         raise BulletMatchError("analysis_data 中没有可替换的 bullet 配对")
 
     doc = Document(io.BytesIO(content_bytes))
-    pending = list(pairs)
+    # pending 里每个元素 = (orig, opt, key)
+    # key = 去掉所有空白后的 orig，用于跨段拼接时无视各段空格的微小差异。
+    pending = [(orig, opt, _strip_ws(_norm_text(orig))) for (orig, opt) in pairs]
     replaced_count = 0
 
     all_paras = list(_iter_all_paragraphs(doc))
@@ -124,15 +163,15 @@ def rewrite_resume_docx(content_bytes: bytes, analysis_data: Dict[str, Any]) -> 
             p_idx += 1
             continue
 
-        para_text = para.text.strip()
-        if not para_text:
+        para_key = _strip_ws(_norm_text(para.text))
+        if not para_key:
             p_idx += 1
             continue
 
         matched = False
-        for i, (orig, opt) in enumerate(pending):
-            # 1. 尝试单段完全匹配
-            if orig == para_text:
+        for i, (orig, opt, key) in enumerate(pending):
+            # 1. 尝试单段完全匹配（用 stripped 比较键）
+            if para_key == key:
                 _replace_paragraph_text(para, opt)
                 pending.pop(i)
                 replaced_count += 1
@@ -140,49 +179,44 @@ def rewrite_resume_docx(content_bytes: bytes, analysis_data: Dict[str, Any]) -> 
                 matched = True
                 break
 
-            # 2. 尝试多段合并匹配（解决由于 PDF 转换或换行导致的段落截断问题）
-            if orig.startswith(para_text):
-                accumulated_text = para_text
+            # 2. 尝试多段合并匹配（解决 PDF 转换或换行导致的段落截断问题）
+            #    用 stripped 字符串前缀拼接——这样无论原段间是否真的有空格，
+            #    以及我们拼接时是否插入空格，比较键都一致。
+            if key.startswith(para_key):
+                accumulated = para_key
                 match_paras = [para]
                 next_idx = p_idx + 1
-                
-                while next_idx < total_paras and len(accumulated_text) < len(orig):
+
+                while next_idx < total_paras and len(accumulated) < len(key):
                     next_para = all_paras[next_idx]
                     if next_para._element in deleted_elements:
                         next_idx += 1
                         continue
-                    next_text = next_para.text.strip()
-                    if not next_text:
+                    next_key = _strip_ws(_norm_text(next_para.text))
+                    if not next_key:
                         next_idx += 1
                         continue
-                    
-                    combined_direct = accumulated_text + next_text
-                    combined_space = accumulated_text + " " + next_text
-                    
-                    if orig.startswith(combined_direct):
-                        accumulated_text = combined_direct
-                        match_paras.append(next_para)
-                        next_idx += 1
-                    elif orig.startswith(combined_space):
-                        accumulated_text = combined_space
+
+                    if key.startswith(accumulated + next_key):
+                        accumulated = accumulated + next_key
                         match_paras.append(next_para)
                         next_idx += 1
                     else:
                         break
-                
-                if accumulated_text == orig:
+
+                if accumulated == key:
                     # 匹配成功！将优化后的文本填入首个段落，并删除后续的多余段落
                     _replace_paragraph_text(match_paras[0], opt)
                     for extra_para in match_paras[1:]:
                         _delete_paragraph(extra_para)
                         deleted_elements.add(extra_para._element)
-                    
+
                     pending.pop(i)
                     replaced_count += 1
                     p_idx = next_idx
                     matched = True
                     break
-        
+
         if not matched:
             p_idx += 1
 

@@ -74,11 +74,15 @@ export function PricingModal({ open, onClose, highlight }: PricingModalProps) {
                   <ul className="space-y-2 border-t border-white/5 pt-4 text-on-surface-variant/75">
                     <li className="flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>
-                      每月 2 次面试录音分析
+                      1 次面试录音分析（永久）
                     </li>
                     <li className="flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>
-                      每月 1 次简历基础诊断
+                      1 次面试记录分析（永久）
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>
+                      1 次简历基础诊断（永久）
                     </li>
                     <li className="flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-xs text-on-surface-variant/30">cancel</span>
@@ -123,15 +127,19 @@ export function PricingModal({ open, onClose, highlight }: PricingModalProps) {
                   <ul className="space-y-2 border-t border-white/5 pt-4 text-on-surface-variant/75">
                     <li className="flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>
-                      每月 10 次面试录音分析
+                      30 天内 10 次面试录音分析
                     </li>
                     <li className="flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>
-                      每月 5 次简历深度优化
+                      30 天内 10 次面试记录分析
                     </li>
                     <li className="flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>
-                      每月 5 次 AI 模拟面试演练
+                      30 天内 10 次简历深度优化
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>
+                      5 次 AI 模拟面试演练
                     </li>
                     <li className="flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>

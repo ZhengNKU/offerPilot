@@ -46,44 +46,59 @@ function ResumeAnalysisPageContent() {
 
   const [analysisResult, setAnalysisResult] = useState<any>(null);
 
+  // Hydration gate: keep full-screen spinner overlay up until the report
+  // data is actually available. Without this, the page first renders with
+  // hardcoded fallback values (score=84, ats=92, ...) — the "initial page"
+  // flash — until useEffect catches up.
+  const [isHydrating, setIsHydrating] = useState(true);
+
   // Download button state machine
   const [downloadState, setDownloadState] = useState<"idle" | "loading" | "success" | "error">("idle");
 
   // Prefill metadata from localStorage if available
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const storedResult = localStorage.getItem("interviewVar_resume_analysis_result");
-      if (storedResult) {
-        try {
-          const parsed = JSON.parse(storedResult);
-          setAnalysisResult(parsed);
-          if (parsed.profile) {
-            setProfile((prev) => ({ ...prev, ...parsed.profile }));
-          }
-        } catch (e) {
-          console.error("Failed to parse resume analysis result:", e);
+    if (typeof window === "undefined") return;
+    const storedResult = localStorage.getItem("interviewVar_resume_analysis_result");
+    if (storedResult) {
+      try {
+        const parsed = JSON.parse(storedResult);
+        setAnalysisResult(parsed);
+        if (parsed.profile) {
+          setProfile((prev) => ({ ...prev, ...parsed.profile }));
         }
-      } else {
-        const storedCompany = localStorage.getItem("interviewVar_session_company");
-        const storedRole = localStorage.getItem("interviewVar_session_role");
-        const storedGrade = localStorage.getItem("interviewVar_session_grade");
-        const storedSalary = localStorage.getItem("interviewVar_session_salary");
-        const storedYears = localStorage.getItem("interviewVar_session_years");
-        const storedDate = localStorage.getItem("interviewVar_session_date");
+        // Got data synchronously — clear the overlay now.
+        setIsHydrating(false);
+        return;
+      } catch (e) {
+        console.error("Failed to parse resume analysis result:", e);
+      }
+    } else {
+      const storedCompany = localStorage.getItem("interviewVar_session_company");
+      const storedRole = localStorage.getItem("interviewVar_session_role");
+      const storedGrade = localStorage.getItem("interviewVar_session_grade");
+      const storedSalary = localStorage.getItem("interviewVar_session_salary");
+      const storedYears = localStorage.getItem("interviewVar_session_years");
+      const storedDate = localStorage.getItem("interviewVar_session_date");
 
-        if (storedCompany || storedRole || storedGrade || storedSalary) {
-          setProfile((prev) => ({
-            ...prev,
-            targetCompany: storedCompany || prev.targetCompany,
-            targetRole: storedRole || prev.targetRole,
-            targetGrade: storedGrade || prev.targetGrade,
-            targetSalary: storedSalary || prev.targetSalary,
-            years: storedYears ? `${storedYears}` : prev.years,
-            uploadTime: storedDate ? `${storedDate} 14:30` : prev.uploadTime
-          }));
-        }
+      if (storedCompany || storedRole || storedGrade || storedSalary) {
+        setProfile((prev) => ({
+          ...prev,
+          targetCompany: storedCompany || prev.targetCompany,
+          targetRole: storedRole || prev.targetRole,
+          targetGrade: storedGrade || prev.targetGrade,
+          targetSalary: storedSalary || prev.targetSalary,
+          years: storedYears ? `${storedYears}` : prev.years,
+          uploadTime: storedDate ? `${storedDate} 14:30` : prev.uploadTime
+        }));
       }
     }
+
+    // No cached result. If we're navigating to a shared ?id= link, keep
+    // isHydrating=true so the second useEffect can fetch from API; only
+    // the second effect should unblock in that case. Otherwise (cold load
+    // with no id) unblock now so we don't strand the page on a spinner.
+    const hasIdInUrl = new URLSearchParams(window.location.search).get("id");
+    if (!hasIdInUrl) setIsHydrating(false);
   }, []);
 
   // If URL has ?id=<analysis_id>, fetch that historical analysis from backend
@@ -114,10 +129,13 @@ function ResumeAnalysisPageContent() {
         if (data.profile) {
           setProfile((prev) => ({ ...prev, ...data.profile }));
         }
+        setIsHydrating(false);
       } catch (e: any) {
         if (cancelled) return;
         console.error("Failed to load historical resume analysis:", e);
         auth.triggerToast(e?.message || "加载历史报告失败");
+        // Failure path: also unblock so the user isn't stuck on the spinner.
+        setIsHydrating(false);
       }
     })();
 
@@ -637,6 +655,42 @@ function ResumeAnalysisPageContent() {
 
   return (
     <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden pt-20">
+      {/* ========================================================
+          HYDRATING OVERLAY — blocks the report UI until
+          analysisResult is populated (matches the loading overlay
+          used in /debugger/voice and /debugger/record). Without
+          this, the page first renders with hardcoded fallback
+          values (score=84, ats=92, ...) for ~2s before real data
+          lands, producing the "initial page" flash.
+         ======================================================== */}
+      <AnimatePresence>
+        {isHydrating && (
+          <motion.div
+            key="resume-hydrating"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            className="fixed inset-0 z-[60] bg-[#050B1A]/95 backdrop-blur-xl flex flex-col justify-center items-center gap-6 px-8"
+          >
+            {/* Dual-ring spinner — same vibe as voice/record overlays */}
+            <div className="relative w-16 h-16">
+              <div className="absolute inset-0 rounded-full border-4 border-[#00D4FF]/20 border-t-[#00D4FF] animate-spin" />
+              <div className="absolute inset-2 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.1s" }} />
+            </div>
+
+            <div className="text-center space-y-3">
+              <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">
+                正在加载简历诊断报告...
+              </h3>
+              <p className="text-base md:text-lg text-white/70 font-semibold">
+                即将呈现 8 维度结构化诊断与岗位匹配分析
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Background visual grid elements */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />
       <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-[#AFA7FF]/5 rounded-full blur-[160px] pointer-events-none z-0" />
