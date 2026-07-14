@@ -2,8 +2,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     PROJECT_VERSION: str = "V0.0.0"
-    DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/offerpilot"
-    REDIS_URL: str = "redis://localhost:6379/0"
+    DATABASE_URL: str = "postgresql+asyncpg://offerpilot:offerPilot%402026@localhost:5432/offerpilot"
+    REDIS_URL: str = "redis://:offerPilot%402026@localhost:6379/0"
     
     JWT_SECRET: str = "super-secret-key-change-me"
     JWT_ALGORITHM: str = "HS256"

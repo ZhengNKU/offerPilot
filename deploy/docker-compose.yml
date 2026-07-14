@@ -4,8 +4,10 @@ services:
     container_name: offerpilot-postgres
     environment:
       POSTGRES_USER: offerpilot
-      POSTGRES_PASSWORD: offerpilot123
+      POSTGRES_PASSWORD: offerPilot@2026
       POSTGRES_DB: offerpilot
+    ports:
+      - "5432:5432"
     volumes:
       - /data/postgres:/var/lib/postgresql/data
     restart: unless-stopped
@@ -14,19 +16,38 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # PG 内存参数适配 384MB 容器上限
+    command: >
+      postgres
+      -c shared_buffers=64MB
+      -c effective_cache_size=192MB
+      -c maintenance_work_mem=32MB
+      -c work_mem=4MB
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 384M
 
   redis:
     image: redis:7-alpine
     container_name: offerpilot-redis
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 100mb --maxmemory-policy allkeys-lru --requirepass offerPilot@2026
+    ports:
+      - "6379:6379"
     volumes:
       - /data/redis:/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "--no-auth-warning", "-a", "offerPilot@2026", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.15'
+          memory: 128M
 
   backend:
     image: offerpilot-backend:${PROJECT_VERSION:-latest}
@@ -39,12 +60,19 @@ services:
       - /data/logs:/app/logs
     env_file:
       - ../backend/.env
+    environment:
+      - PYTHONUNBUFFERED=1
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1200M
 
   frontend:
     image: offerpilot-frontend:${PROJECT_VERSION:-latest}
@@ -56,6 +84,11 @@ services:
         PROJECT_VERSION: ${PROJECT_VERSION:-V0.0.0}
     container_name: offerpilot-frontend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 384M
 
   nginx:
     image: nginx:alpine
@@ -68,3 +101,8 @@ services:
       - backend
       - frontend
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '0.1'
+          memory: 64M
