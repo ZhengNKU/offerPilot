@@ -10,6 +10,7 @@ if sys.platform == "win32":
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from app.config import settings
 from app.database import engine, Base
 from app.routers import auth, audio, file, resume, live, counselor, feedback
 
@@ -57,7 +58,7 @@ logging.getLogger("watchfiles").setLevel(logging.WARNING)
 app = FastAPI(
     title="面试VAR - Backend Services",
     description="Backend user authentication, profiles management, LangGraph APIs, and AI Career Counselor.",
-    version="1.1.0"
+    version=settings.PROJECT_VERSION
 )
 
 @app.middleware("http")
