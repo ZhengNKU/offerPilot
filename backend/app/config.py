@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    PROJECT_VERSION: str = "V0.0.0"
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/offerpilot"
     REDIS_URL: str = "redis://localhost:6379/0"
     

@@ -46,6 +46,16 @@ if [[ ! -d "$DEPLOY_DIR" ]]; then
 fi
 cd "$DEPLOY_DIR"
 
+# ── 读取项目版本号 ──
+PROJECT_VERSION=$(grep '^PROJECT_VERSION=' ../backend/.env | cut -d'=' -f2)
+if [[ -z "$PROJECT_VERSION" ]]; then
+    echo -e "${RED}错误: 未在 ../backend/.env 中找到 PROJECT_VERSION${NC}"
+    exit 1
+fi
+export PROJECT_VERSION
+echo -e "${CYAN}项目版本: $PROJECT_VERSION${NC}"
+echo ""
+
 # ── 加载并替换 ──
 swap_backend() {
     local tar_file="$PACKAGES_DIR/backend.tar"
@@ -55,7 +65,11 @@ swap_backend() {
     fi
 
     echo -e "${YELLOW}[1/3] 加载 backend 镜像...${NC}"
-    docker load -i "$tar_file"
+    local loaded=$(docker load -i "$tar_file" | tee /dev/stderr | grep 'Loaded image' | sed 's/.*: //')
+    if [[ -n "$loaded" && "$loaded" != "offerpilot-backend:$PROJECT_VERSION" ]]; then
+        echo -e "${YELLOW}       → retag $loaded → offerpilot-backend:$PROJECT_VERSION${NC}"
+        docker tag "$loaded" "offerpilot-backend:$PROJECT_VERSION"
+    fi
 
     echo -e "${YELLOW}[2/3] 重启 backend 容器...${NC}"
     docker compose up -d backend
@@ -74,7 +88,11 @@ swap_frontend() {
     fi
 
     echo -e "${YELLOW}[1/3] 加载 frontend 镜像...${NC}"
-    docker load -i "$tar_file"
+    local loaded=$(docker load -i "$tar_file" | tee /dev/stderr | grep 'Loaded image' | sed 's/.*: //')
+    if [[ -n "$loaded" && "$loaded" != "offerpilot-frontend:$PROJECT_VERSION" ]]; then
+        echo -e "${YELLOW}       → retag $loaded → offerpilot-frontend:$PROJECT_VERSION${NC}"
+        docker tag "$loaded" "offerpilot-frontend:$PROJECT_VERSION"
+    fi
 
     echo -e "${YELLOW}[2/3] 重启 frontend 容器...${NC}"
     docker compose up -d frontend

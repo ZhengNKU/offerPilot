@@ -29,7 +29,7 @@ services:
       retries: 5
 
   backend:
-    image: offerpilot-backend:latest
+    image: offerpilot-backend:${PROJECT_VERSION:-latest}
     build:
       context: ../backend
       dockerfile: Dockerfile
@@ -47,12 +47,13 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: offerpilot-frontend:latest
+    image: offerpilot-frontend:${PROJECT_VERSION:-latest}
     build:
       context: ../frontend
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_BASE: ""
+        PROJECT_VERSION: ${PROJECT_VERSION:-V0.0.0}
     container_name: offerpilot-frontend
     restart: unless-stopped
 
