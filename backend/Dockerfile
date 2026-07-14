@@ -3,7 +3,9 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # 安装系统依赖（asyncpg 需要 libpq）
-RUN apt update && apt install -y --no-install-recommends libpq-dev gcc \
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpq-dev gcc \
+    || apt-get install -y --no-install-recommends --fix-missing libpq-dev gcc \
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 Python 依赖
