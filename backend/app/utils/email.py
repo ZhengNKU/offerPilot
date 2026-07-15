@@ -1,12 +1,10 @@
 import logging
-import smtplib
 import html
 import re
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.header import Header
-from email.utils import formataddr
 from app.config import settings
+from tencentcloud.common import credential
+from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
+from tencentcloud.ses.v20201002 import ses_client, models
 
 logger = logging.getLogger(__name__)
 
@@ -15,25 +13,36 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 class EmailHelper:
+    """
+    验证码邮件发送器：基于腾讯云 SES（邮件推送）SendEmail 接口。
+    SDK: tencentcloud-sdk-python ≥ 3.x，包含 tencentcloud.ses.v20201002 子模块。
+    复用全局 TENCENT_SECRET_ID / TENCENT_SECRET_KEY（与 SMS 同源）。
+    文档：https://cloud.tencent.com/document/api/1288/51034
+    """
+
     def __init__(self):
-        self.host = settings.SMTP_HOST
-        self.port = settings.SMTP_PORT
-        self.user = settings.SMTP_USER
-        self.password = settings.SMTP_PASSWORD
-        self.sender = settings.SMTP_SENDER or settings.SMTP_USER
-        self.use_ssl = settings.SMTP_USE_SSL
+        self.secret_id = settings.TENCENT_SECRET_ID
+        self.secret_key = settings.TENCENT_SECRET_KEY
+        self.region = settings.TENCENT_SES_REGION or "ap-hongkong"
+        self.from_email = settings.TENCENT_SES_FROM_EMAIL
+        self.from_name = settings.TENCENT_SES_FROM_NAME or "面试VAR"
+        self.reply_to = settings.TENCENT_SES_REPLY_TO
 
     def send_verification_code(self, email: str, code: str) -> bool:
         """
-        发送验证码邮件。如果 SMTP 配置缺失，则进行本地模拟发送并打印至控制台。
+        发送验证码邮件。如果 SES 配置缺失，则进行本地模拟发送并打印至控制台。
         """
         if not email or not _EMAIL_RE.match(email):
             logger.warning(f"邮箱格式无效，跳过发送: {email!r}")
             return False
 
-        if not all([self.host, self.port, self.user, self.password]):
-            # SMTP 配置不完整时，本地开发进行模拟，打印到日志，方便本地调试
-            logger.warning(f"[DEVELOPMENT MODE] 邮箱 SMTP 配置缺失。模拟发送验证码: 邮箱: {email}, 验证码: {code}")
+        # 判定 SES 是否已就绪：秘钥 + 发件地址 必须齐全
+        if not all([self.secret_id, self.secret_key, self.from_email]):
+            # 配置不完整时本地开发模拟发送，打印到日志，方便本地调试
+            logger.warning(
+                f"[DEVELOPMENT MODE] 腾讯云 SES 配置缺失。模拟发送验证码: "
+                f"邮箱: {email}, 验证码: {code}"
+            )
             print(
                 f"\n========================================\n"
                 f"[EMAIL DEV SIMULATION] 邮箱验证码已发送\n"
@@ -135,14 +144,6 @@ class EmailHelper:
         </html>
         """
 
-        # RFC 2046: multipart/alternative 中纯文本必须排在 HTML 前面
-        message = MIMEMultipart("alternative")
-        # 关键修复：用 formataddr 只对显示名做 RFC 2047 编码，地址保持原样，
-        # 之前用 Header 包整段会把 <> 和地址一起编码，导致 QQ 退信。
-        message["From"] = formataddr(("面试VAR", self.sender))
-        message["To"] = email
-        message["Subject"] = Header(subject, "utf-8") # type: ignore
-
         plain_text = (
             f"面试VAR 验证码\n\n"
             f"您好！感谢您选择 面试VAR。\n"
@@ -153,30 +154,37 @@ class EmailHelper:
             f"© 2026 面试VAR AI. All rights reserved.\n"
             f"让每一次面试都成为下一次 Offer 的养料。"
         )
-        message.attach(MIMEText(plain_text, "plain", "utf-8"))
-        message.attach(MIMEText(content, "html", "utf-8"))
 
-        server = None
         try:
-            if self.use_ssl:
-                server = smtplib.SMTP_SSL(self.host, self.port, timeout=10)
-            else:
-                server = smtplib.SMTP(self.host, self.port, timeout=10)
-                server.starttls()
+            cred = credential.Credential(self.secret_id, self.secret_key)
+            client = ses_client.SesClient(cred, self.region)
 
-            server.login(self.user, self.password)
-            server.sendmail(self.sender, [email], message.as_string())
-            logger.info(f"邮件成功发送至 {email}")
+            req = models.SendEmailRequest()
+            # SES 要求 FromEmailAddress 必须是"已验证发信地址 / 发信域名"列表中的地址
+            req.FromEmailAddress = self.from_email
+            req.Destination.ToAddresses = [email]
+            req.Subject = subject
+            req.Content = content      # HTML 正文
+            req.Simple = plain_text    # 纯文本 fallback（部分客户端会用到）
+
+            # 网易 / QQ / Outlook 主流邮箱对 SES 的代发没有强 SPF 问题，
+            # 但仍建议配置 reply-to 以便收件人回复。
+            if self.reply_to:
+                req.ReplyToAddresses = self.reply_to
+
+            resp = client.SendEmail(req)
+            # SendEmail 成功时返回 MessageId；失败时抛 TencentCloudSDKException
+            logger.info(
+                f"邮件已通过腾讯云 SES 投递至 {email}, MessageId: {resp.MessageId}, RequestId: {resp.RequestId}"
+            )
             return True
-        except Exception as e:
-            logger.exception("调用 SMTP 发送邮件时发生异常")
+
+        except TencentCloudSDKException as e:
+            logger.exception(f"调用腾讯云 SES 发送邮件失败: code={e.code}, message={e.message}")
             return False
-        finally:
-            if server is not None:
-                try:
-                    server.quit()
-                except Exception:
-                    pass
+        except Exception as e:
+            logger.exception("调用腾讯云 SES 发送邮件时发生未预期异常")
+            return False
 
 
 email_helper = EmailHelper()

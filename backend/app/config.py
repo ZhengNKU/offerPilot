@@ -15,13 +15,13 @@ class Settings(BaseSettings):
     TENCENT_SMS_SIGN_NAME: str = ""
     TENCENT_SMS_TEMPLATE_ID: str = ""
     
-    # SMTP Email configuration
-    SMTP_HOST: str = ""
-    SMTP_PORT: int = 465
-    SMTP_USER: str = ""
-    SMTP_PASSWORD: str = ""
-    SMTP_SENDER: str = ""
-    SMTP_USE_SSL: bool = True
+    # Tencent Cloud SES（邮件推送）configuration
+    # 复用上方已有的 TENCENT_SECRET_ID / TENCENT_SECRET_KEY
+    # SES 控制台：https://console.cloud.tencent.com/ses
+    TENCENT_SES_REGION: str = "ap-guangzhou"    # SES API 地域，如 ap-guangzhou / ap-hongkong / ap-singapore
+    TENCENT_SES_FROM_EMAIL: str = ""            # 已验证的发件地址，例如 noreply@interviewvar.com
+    TENCENT_SES_FROM_NAME: str = "面试VAR"       # 收件方看到的发件人显示名
+    TENCENT_SES_REPLY_TO: str = ""              # 可选：回信地址
     
     # 文本生成 LLM：DeepSeek（OpenAI-compatible）
     DEEPSEEK_API_KEY: str = ""
