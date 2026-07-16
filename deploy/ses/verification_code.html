@@ -1,0 +1,68 @@
+<!--
+  腾讯云 SES 发信模板 · 验证码邮件
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  上传位置 : 腾讯云 SES 控制台 → 发信模板 → 创建模板
+  模板名称 : verification_code
+  模板主题 : 面试VAR 验证码
+  邮件摘要 : 您的验证码 5 分钟内有效，请勿泄露给他人。
+  模板类型 : HTML
+  使用方式 : 把下方 <body> 内的内容完整复制 → 粘贴到 SES 控制台模板内容框
+  变量说明 : {{code}} 会在发送时由 backend/app/utils/email.py
+            的 TemplateData = {"code": "888888"} 自动替换
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+-->
+<html>
+<body style="margin:0;padding:0;background-color:#050B1A;-webkit-text-size-adjust:none;text-size-adjust:none;">
+<table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color:#050B1A;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;padding:40px 20px;">
+<tr><td align="center" style="vertical-align:top;">
+<table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width:500px;background:linear-gradient(135deg,#09132C 0%,#060E20 100%);border:1px solid rgba(175,167,255,0.15);border-radius:24px;padding:32px;text-align:left;box-shadow:0 20px 40px rgba(0,0,0,0.5);">
+  <tr><td style="padding-bottom:20px;">
+    <table border="0" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="vertical-align:middle;padding-right:12px;width:40px;height:40px;">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="display:block;">
+            <path d="M12 2L20 7V17L12 22L4 17V7L12 2ZM12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill-rule="evenodd" clip-rule="evenodd" fill="url(#nav-brand-logo-email)" />
+            <defs>
+              <linearGradient id="nav-brand-logo-email" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0%" stop-color="#c0c1ff" />
+                <stop offset="100%" stop-color="#ffb2b7" />
+              </linearGradient>
+            </defs>
+          </svg>
+        </td>
+        <td style="vertical-align:middle;">
+          <span style="font-size:22px;font-weight:800;color:#FFFFFF;letter-spacing:-0.5px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;display:block;line-height:1.1;">面试VAR</span>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+  <tr><td style="height:1px;background:linear-gradient(90deg,rgba(175,167,255,0.25) 0%,rgba(175,167,255,0) 100%);padding:0;"></td></tr>
+  <tr><td style="padding-top:24px;padding-bottom:16px;">
+    <h3 style="font-size:18px;font-weight:800;color:#FFFFFF;margin:0 0 12px 0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">验证您的邮箱地址</h3>
+    <p style="font-size:14px;color:#A4B3E6;line-height:1.6;margin:0 0 24px 0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+      您好！感谢您选择 <strong>面试VAR</strong>。您正在进行账号的安全验证操作，请在验证输入框中填写以下验证码：
+    </p>
+  </td></tr>
+  <tr><td style="padding-bottom:24px;">
+    <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background:rgba(175,167,255,0.06);border:1px dashed rgba(175,167,255,0.25);border-radius:16px;padding:20px;text-align:center;">
+      <tr><td>
+        <span style="display:block;font-size:12px;color:#AFA7FF;font-weight:bold;text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">验证码 (5分钟内有效)</span>
+        <span style="font-family:'Courier New',Courier,monospace;font-size:32px;font-weight:900;color:#FFFFFF;letter-spacing:6px;text-shadow:0 0 10px rgba(175,167,255,0.3);">{{code}}</span>
+      </td></tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding-bottom:24px;">
+    <p style="font-size:12px;color:#64748B;line-height:1.6;margin:0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+      如果您本人未发起此项申请，请忽略此邮件。为了您的账号安全，请勿将验证码泄露给他人。
+    </p>
+  </td></tr>
+  <tr><td style="height:1px;background:rgba(255,255,255,0.06);padding:0;"></td></tr>
+  <tr><td style="padding-top:20px;text-align:center;">
+    <p style="font-size:11px;color:#475569;margin:0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">© 2026 面试VAR AI. All rights reserved.</p>
+    <p style="font-size:11px;color:#475569;margin:4px 0 0 0;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">让每一次面试都成为下一次 Offer 的养料。</p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>

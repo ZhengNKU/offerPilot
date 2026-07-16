@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     TENCENT_SES_FROM_EMAIL: str = ""            # 已验证的发件地址，例如 noreply@interviewvar.com
     TENCENT_SES_FROM_NAME: str = "面试VAR"       # 收件方看到的发件人显示名
     TENCENT_SES_REPLY_TO: str = ""              # 可选：回信地址
+    TENCENT_SES_TEMPLATE_ID: int = 0            # SES 控制台创建的模板 ID（数字），普通账户仅支持模板发送
     
     # 文本生成 LLM：DeepSeek（OpenAI-compatible）
     DEEPSEEK_API_KEY: str = ""
