@@ -109,8 +109,6 @@ const parseSearchPages = (resultText: any): SearchPage[] => {
   return pages;
 };
 
-const GLOBE_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`;
-
 // 简易 markdown：把 ###、**、换行等渲染出来
 function renderMarkdown(text: string, citations: Citation[]): React.ReactNode {
   // 先按 [cite:TYPE#ID#CHUNK] 拆段
@@ -520,11 +518,14 @@ export default function ChatBubble({
                             try {
                               domain = new URL(p.url).hostname;
                             } catch (e) {}
+                            const initialSrc = p.hostlogo || (domain ? `https://${domain}/favicon.ico` : "/search-logo.svg");
                             return (
                               <img
                                 key={pIdx}
-                                className="inline-block h-4 w-4 rounded-full ring-1 ring-surface-container bg-white object-contain"
-                                src={p.hostlogo || (domain ? `https://${domain}/favicon.ico` : GLOBE_SVG)}
+                                className={`inline-block h-4 w-4 rounded-full overflow-hidden ring-1 ring-surface-container object-cover ${
+                                  initialSrc === "/search-logo.svg" ? "" : "bg-white"
+                                }`}
+                                src={initialSrc}
                                 onError={(e) => {
                                   const img = e.currentTarget;
                                   img.onerror = null;
@@ -532,10 +533,12 @@ export default function ChatBubble({
                                     img.src = `https://${domain}/favicon.ico`;
                                     img.onerror = () => {
                                       img.onerror = null;
-                                      img.src = GLOBE_SVG;
+                                      img.src = "/search-logo.svg";
+                                      img.classList.remove("bg-white");
                                     };
                                   } else {
-                                    img.src = GLOBE_SVG;
+                                    img.src = "/search-logo.svg";
+                                    img.classList.remove("bg-white");
                                   }
                                 }}
                                 alt=""
@@ -557,6 +560,7 @@ export default function ChatBubble({
                           try {
                             domain = new URL(p.url).hostname;
                           } catch (e) {}
+                          const initialSrc = p.hostlogo || (domain ? `https://${domain}/favicon.ico` : "/search-logo.svg");
                           return (
                             <a
                               key={pIdx}
@@ -568,8 +572,10 @@ export default function ChatBubble({
                               <div className="flex items-center gap-2 truncate">
                                 <span className="text-white/20 font-mono text-[10px] w-4 shrink-0">{pIdx + 1}</span>
                                 <img
-                                  className="h-3.5 w-3.5 object-contain bg-white rounded-full p-0.5"
-                                  src={p.hostlogo || (domain ? `https://${domain}/favicon.ico` : GLOBE_SVG)}
+                                  className={`h-3.5 w-3.5 object-cover rounded-full overflow-hidden ${
+                                    initialSrc === "/search-logo.svg" ? "" : "bg-white p-0.5"
+                                  }`}
+                                  src={initialSrc}
                                   onError={(e) => {
                                     const img = e.currentTarget;
                                     img.onerror = null;
@@ -577,10 +583,14 @@ export default function ChatBubble({
                                       img.src = `https://${domain}/favicon.ico`;
                                       img.onerror = () => {
                                         img.onerror = null;
-                                        img.src = GLOBE_SVG;
+                                        img.src = "/search-logo.svg";
+                                        img.classList.remove("bg-white");
+                                        img.classList.remove("p-0.5");
                                       };
                                     } else {
-                                      img.src = GLOBE_SVG;
+                                      img.src = "/search-logo.svg";
+                                      img.classList.remove("bg-white");
+                                      img.classList.remove("p-0.5");
                                     }
                                   }}
                                   alt=""

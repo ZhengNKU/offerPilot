@@ -192,46 +192,20 @@ export default function CounselorPanel(props: Props) {
     ctrl.abort();
   }, [currentSessionId]);
 
-  // 页面离开 / tab 切换 / 组件卸载：自动 abort 在飞流
+  // 页面关闭时，自动 abort 正在进行的流以释放资源
   useEffect(() => {
-    if (abortTimeoutId) {
-      clearTimeout(abortTimeoutId);
-      abortTimeoutId = null;
-    }
-
     const onBeforeUnload = () => {
       if (abortControllerRef.current) {
-        // 关闭 SSE → 触发后端 CancelledError → 后端落 partial
-        abortControllerRef.current.abort();
-      }
-    };
-    const onVisibilityChange = () => {
-      if (
-        typeof document !== "undefined" &&
-        document.visibilityState === "hidden" &&
-        abortControllerRef.current
-      ) {
-        if (currentSessionId != null) {
-          stopSession(currentSessionId).catch(() => { /* swallow */ });
-        }
         abortControllerRef.current.abort();
       }
     };
     if (typeof window !== "undefined") {
       window.addEventListener("beforeunload", onBeforeUnload);
-      document.addEventListener("visibilitychange", onVisibilityChange);
     }
     return () => {
       if (typeof window !== "undefined") {
         window.removeEventListener("beforeunload", onBeforeUnload);
-        document.removeEventListener("visibilitychange", onVisibilityChange);
       }
-      // 组件卸载（路由跳转）也 abort (延时 50ms 以防 StrictMode remount 误杀)
-      abortTimeoutId = setTimeout(() => {
-        if (activeAbortController) {
-          activeAbortController.abort();
-        }
-      }, 50);
     };
     // 只在挂载时注册一次；stopStreaming 通过 ref.current 闭包访问
     // eslint-disable-next-line react-hooks/exhaustive-deps
