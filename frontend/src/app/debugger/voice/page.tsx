@@ -2633,15 +2633,6 @@ export default function InterviewVoiceAnalysisPage() {
                   </div>
                 )}
               </div>
-
-              <div className="flex justify-end pt-2 shrink-0 border-t border-white/5 select-none">
-                <button
-                  onClick={() => setShowRisksModal(false)}
-                  className="px-5 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white text-xs font-black rounded-xl transition-all cursor-pointer"
-                >
-                  关闭
-                </button>
-              </div>
             </motion.div>
           </div>
         )}

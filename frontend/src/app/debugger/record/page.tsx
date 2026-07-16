@@ -68,6 +68,7 @@ export default function InterviewRecordAnalysisPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [optimizingSections, setOptimizingSections] = useState<Record<number, boolean>>({});
   const [reportData, setReportData] = useState<any>(null);
+  const [isInitialPolling, setIsInitialPolling] = useState(false);
   const [taskProgress, setTaskProgress] = useState(0);
   const [taskStep, setTaskStep] = useState("面试VAR AI 正在分析中...");
   const [showAllWeaknesses, setShowAllWeaknesses] = useState(false);
@@ -439,6 +440,12 @@ export default function InterviewRecordAnalysisPage() {
     }
   }, []);
 
+  useEffect(() => {
+    if (sections.length > 0 && !sections.some(s => s.optimizationAdvice)) {
+      setIsInitialPolling(false);
+    }
+  }, [sections.length]);
+
   // Tech term highlighter for beautiful styling matching mockups
   const renderHighlightedText = (text: string) => {
     if (!text) return null;
@@ -757,6 +764,7 @@ export default function InterviewRecordAnalysisPage() {
 
   const activeSection = sections.find(s => s.id === activeSectionId) || sections[0];
   const userDialogueTexts = activeSection?.dialogue?.filter((d: any) => d.sender === "user").map((d: any) => d.text).join(" ") || "";
+  const hasUserAnswer = userDialogueTexts.trim().length > 0;
   const isOptimizing = activeSection ? !!optimizingSections[activeSection.id] : false;
 
   return (
@@ -1962,7 +1970,7 @@ export default function InterviewRecordAnalysisPage() {
                   <h4 className="text-sm font-black text-[#5DECCB] uppercase tracking-wider flex items-center gap-1">
                     优化后话术
                   </h4>
-                  <p className="text-xs text-white/40 leading-normal block mt-1 mb-2">推荐：AI 专家架构师版</p>
+                  <p className="text-xs text-white/40 leading-normal block mt-1 mb-2">推荐：AI 专家版</p>
                 </div>
                 
                 {isOptimizing ? (
@@ -1983,12 +1991,22 @@ export default function InterviewRecordAnalysisPage() {
                       dangerouslySetInnerHTML={{ __html: activeSection.optimizationAdvice.optimized || "" }}
                     />
                   </div>
+                ) : isInitialPolling ? (
+                  <div className="bg-slate-950/60 border border-white/5 p-3.5 rounded-xl text-white/40 font-mono text-xs md:text-sm flex-1 mt-3 flex flex-col items-center justify-center gap-3 select-none min-h-[120px]">
+                    <div className="w-7 h-7 rounded-full border-2 border-[#5DECCB]/20 border-t-[#5DECCB] animate-spin" />
+                    <span className="text-base text-white/50 font-bold animate-pulse">AI 正在重构该片段的高分话术...</span>
+                  </div>
                 ) : (
                   <div className="bg-slate-950/60 border border-white/5 p-3.5 rounded-xl text-white/40 font-mono text-xs md:text-sm flex-1 mt-3 flex flex-col items-center justify-center gap-3 select-none min-h-[120px]">
                     <span className="text-xs text-white/30 font-semibold">该片段暂未生成 AI 优化建议</span>
                     <button
+                      disabled={!hasUserAnswer}
                       onClick={() => handleOptimizeSection(activeSection.id)}
-                      className="px-5 py-2 bg-[#5DECCB] hover:bg-white text-[#050B1A] font-extrabold text-xs rounded-lg transition-all cursor-pointer flex items-center gap-1.5 shadow-lg shadow-cyan-500/10"
+                      className={`px-5 py-2 font-extrabold text-xs rounded-lg flex items-center gap-1.5 transition-all ${
+                        !hasUserAnswer 
+                          ? "bg-white/5 border border-white/10 text-white/20 cursor-not-allowed" 
+                          : "bg-[#5DECCB] hover:bg-white text-[#050B1A] cursor-pointer shadow-lg shadow-cyan-500/10"
+                      }`}
                     >
                       <span className="material-symbols-outlined text-sm">bolt</span>
                       生成优化建议
@@ -2014,9 +2032,6 @@ export default function InterviewRecordAnalysisPage() {
                       <button disabled className="w-full py-2 bg-white/5 border border-white/10 text-white/30 rounded-lg font-black text-xs md:text-sm cursor-not-allowed flex items-center justify-center gap-1">
                         <span className="material-symbols-outlined text-xs">hourglass_empty</span>正在处理...
                       </button>
-                      {/* <button disabled className="w-full py-2 border border-white/5 text-white/20 rounded-lg font-black text-xs md:text-sm cursor-not-allowed flex items-center justify-center gap-1">
-                        加入我的表达库
-                      </button> */}
                     </>
                   ) : activeSection?.optimizationAdvice ? (
                     <>
@@ -2029,27 +2044,26 @@ export default function InterviewRecordAnalysisPage() {
                       >
                         <span className="material-symbols-outlined text-xs">content_copy</span>复制优化版本
                       </button>
-                      {/* <button 
-                        onClick={() => auth.triggerToast("已成功加入您的个人精选表达库！")}
-                        className="w-full py-2 border border-[#AFA7FF]/35 hover:border-white/40 text-[#AFA7FF] hover:text-white rounded-lg font-black text-xs md:text-sm cursor-pointer transition-all flex items-center justify-center gap-1"
-                      >
-                        <span className="material-symbols-outlined text-xs">add_box</span>加入我的表达库
-                      </button> */}
+                    </>
+                  ) : isInitialPolling ? (
+                    <>
+                      <button disabled className="w-full py-2 bg-white/5 border border-white/10 text-white/30 rounded-lg font-black text-xs md:text-sm cursor-not-allowed flex items-center justify-center gap-1">
+                        <span className="material-symbols-outlined text-xs">hourglass_empty</span>正在重构...
+                      </button>
                     </>
                   ) : (
                     <>
                       <button 
+                        disabled={!hasUserAnswer}
                         onClick={() => handleOptimizeSection(activeSection.id)}
-                        className="w-full py-2 bg-[#AFA7FF] hover:bg-white text-[#050B1A] rounded-lg font-black text-xs md:text-sm cursor-pointer flex items-center justify-center gap-1 shadow-lg shadow-purple-500/10"
+                        className={`w-full py-2 rounded-lg font-black text-xs md:text-sm flex items-center justify-center gap-1 transition-all ${
+                          !hasUserAnswer 
+                            ? "bg-white/5 border border-white/10 text-white/20 cursor-not-allowed" 
+                            : "bg-[#AFA7FF] hover:bg-white text-[#050B1A] cursor-pointer shadow-lg shadow-purple-500/10"
+                        }`}
                       >
                         <span className="material-symbols-outlined text-xs">bolt</span>生成优化建议
                       </button>
-                      {/* <button 
-                        disabled
-                        className="w-full py-2 border border-white/5 text-white/20 rounded-lg font-black text-xs md:text-sm cursor-not-allowed flex items-center justify-center gap-1"
-                      >
-                        <span className="material-symbols-outlined text-xs">add_box</span>加入我的表达库
-                      </button> */}
                     </>
                   )}
                 </div>

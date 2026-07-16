@@ -160,6 +160,20 @@ async def analyze_resume(
     # 6.7 兜底清洗 LLM 给的 structure_analysis（缺字段 / status 拼错 / score 越界 → 占位值）
     _normalize_structure_analysis(analysis_result)
 
+    # 6.8 计算综合评分 5 维度真实分项 + 顶层加权分数（替代前端硬编码的假数据）
+    # 各维度字段溯源：
+    #   - keyword_match         ← match_analysis.match_score（LLM 评估的目标岗位匹配度）
+    #   - experience_value      ← avg(structure_analysis.work_experience.score, projects.score)
+    #   - quantification        ← avg(work_experience, projects, business_outcomes).score
+    #   - resume_completeness   ← ats_pass_rate × 60% + structure_analysis.personal_info.score × 40%
+    #   - expression_quality    ← 100 - 风险扣分（高×15 + 中×8 + 低×3，下限 0）
+    # 顶层 score_breakdown.weighted = 加权平均（30/30/20/10/10），同时覆盖到 analysis_result["score"]
+    # （即前端展示的"简历综合评分"），保证顶层数字也可追溯到 5 维度。
+    breakdown = _compute_score_breakdown(analysis_result)
+    analysis_result["score_breakdown"] = breakdown
+    analysis_result["score"] = breakdown["weighted"]
+    analysis_result["optimized_score"] = min(100, breakdown["weighted"] + 10)  # 优化后预估：当前分 + 10
+
     # 7. Persist to DB
     record = models.ResumeAnalysis(
         user_id=current_user.id if current_user else None,
@@ -604,3 +618,128 @@ def _normalize_structure_analysis(analysis_result: dict) -> None:
         }
 
     analysis_result["structure_analysis"] = normalized
+
+
+# ──────────────────────────────────────────────────────────────────
+# 综合评分 5 维度真实分项计算
+# 替代前端硬编码的 85/82/78/92/88 占位假数据
+# 维度选择原则：跨岗位通用，不偏向技术岗
+# ──────────────────────────────────────────────────────────────────
+
+# 风险等级 → 扣分（用于"表达专业度"维度，间接反映错别字/拼写/空洞表达）
+_RISK_PENALTY = {"高风险": 15, "中风险": 8, "低风险": 3}
+
+# 5 维度权重（必须合计 1.0）
+# 设计目标：跨岗位通用 —— 技术/销售/运营/产品/设计均可适用
+_BREAKDOWN_WEIGHTS = {
+    "keyword_match": 0.30,       # 关键词匹配度：与目标 JD 的核心词覆盖
+    "experience_value": 0.30,    # 工作经历含金量：履历规模/决策力
+    "quantification": 0.20,      # 成果量化程度：数字指标（QPS/GMV/转化率/留存/用户量等跨岗位通用）
+    "resume_completeness": 0.10, # 简历完整度：结构完整 + ATS 可读
+    "expression_quality": 0.10,  # 表达专业度：用词规范、无错别字、动作词精准
+}
+
+
+def _safe_get_score(d: dict, key: str = "score") -> int:
+    """从 dict 安全读取指定 key 的数值（缺字段 / 类型错 / 越界 → 0）。"""
+    if not isinstance(d, dict):
+        return 0
+    try:
+        v = int(d.get(key, 0))
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(100, v))
+
+
+def _compute_score_breakdown(analysis_result: dict) -> dict:
+    """从已有 LLM 评估字段计算 5 维度真实分数 + 加权综合分。
+
+    返回结构：
+      {
+        "dimensions": [
+          {"key": "keyword_match", "label": "关键词匹配度", "score": 75, "weight": 0.30, "source": "match_analysis.match_score"},
+          ...
+        ],
+        "weighted": 78,        # 加权综合分（0-100 整数），同时覆盖 analysis_result["score"]
+        "formula": "Σ(维度分 × 权重)，权重 30/30/20/10/10",  # 公式描述（前端展示用）
+      }
+    """
+    structure = analysis_result.get("structure_analysis") or {}
+    risks = analysis_result.get("risks") or []
+    match_analysis = analysis_result.get("match_analysis") or {}
+
+    # 1. 关键词匹配度 ← match_analysis.match_score（LLM 给的目标岗位匹配度）
+    keyword_match = _safe_get_score(match_analysis, "match_score")
+
+    # 2. 工作经历含金量 ← avg(work_experience.score, projects.score)
+    we_score = _safe_get_score(structure.get("work_experience"), "score")
+    proj_score = _safe_get_score(structure.get("projects"), "score")
+    experience_value = (we_score + proj_score) // 2 if (we_score + proj_score) else 0
+
+    # 3. 成果量化程度 ← business_outcomes.score + work_experience.score 平均
+    #    业务成果 section 专门统计 QPS/GMV/转化率/留存/用户量等数字指标；
+    #    跨岗位通用 —— 技术岗看 QPS/性能，销售岗看 GMV/客户数，运营岗看转化率/留存。
+    bo_score = _safe_get_score(structure.get("business_outcomes"), "score")
+    quantification_scores = [s for s in (we_score, proj_score, bo_score) if s > 0]
+    quantification = round(sum(quantification_scores) / len(quantification_scores)) if quantification_scores else 0
+
+    # 4. 简历完整度 ← ats_pass_rate × 60% + personal_info 完整度 × 40%
+    ats_raw = analysis_result.get("ats_pass_rate")
+    try:
+        ats_compatibility = max(0, min(100, int(ats_raw))) if ats_raw is not None else 0
+    except (TypeError, ValueError):
+        ats_compatibility = 0
+    pi_score = _safe_get_score(structure.get("personal_info"), "score")
+    resume_completeness = round(ats_compatibility * 0.6 + pi_score * 0.4)
+
+    # 5. 表达专业度 = 100 - sum(风险扣分)，下限 0
+    #    风险点（高/中/低）通常对应错别字、拼写不规范、指标空洞、口语化表达等问题，
+    #    跨岗位通用 —— 不只针对技术岗。
+    risk_penalty = sum(_RISK_PENALTY.get(r.get("severity", ""), 0) for r in risks if isinstance(r, dict))
+    expression_quality = max(0, 100 - risk_penalty)
+
+    dimensions = [
+        {
+            "key": "keyword_match",
+            "label": "关键词匹配度",
+            "score": keyword_match,
+            "weight": _BREAKDOWN_WEIGHTS["keyword_match"],
+            "source": "match_analysis.match_score",
+        },
+        {
+            "key": "experience_value",
+            "label": "工作经历含金量",
+            "score": experience_value,
+            "weight": _BREAKDOWN_WEIGHTS["experience_value"],
+            "source": "avg(structure_analysis.work_experience.score, projects.score)",
+        },
+        {
+            "key": "quantification",
+            "label": "成果量化程度",
+            "score": quantification,
+            "weight": _BREAKDOWN_WEIGHTS["quantification"],
+            "source": "avg(structure_analysis.{work_experience, projects, business_outcomes}.score)",
+        },
+        {
+            "key": "resume_completeness",
+            "label": "简历完整度",
+            "score": resume_completeness,
+            "weight": _BREAKDOWN_WEIGHTS["resume_completeness"],
+            "source": "ats_pass_rate × 60% + structure_analysis.personal_info.score × 40%",
+        },
+        {
+            "key": "expression_quality",
+            "label": "表达专业度",
+            "score": expression_quality,
+            "weight": _BREAKDOWN_WEIGHTS["expression_quality"],
+            "source": "100 - sum(高风险×15 + 中风险×8 + 低风险×3)",
+        },
+    ]
+
+    weighted = round(sum(d["score"] * d["weight"] for d in dimensions))
+
+    return {
+        "dimensions": dimensions,
+        "weighted": weighted,
+        "formula": "Σ(维度分 × 权重)，权重 30% + 30% + 20% + 10% + 10%",
+    }

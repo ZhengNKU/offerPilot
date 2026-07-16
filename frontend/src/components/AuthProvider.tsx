@@ -390,6 +390,7 @@ function AuthModals() {
   const [phone, setPhone] = useState("");
   const [code, setCode] = useState("");
   const [countdown, setCountdown] = useState(0);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Forgot Password State
   const [showForgot, setShowForgot] = useState(false);
@@ -461,6 +462,7 @@ function AuthModals() {
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoggingIn) return;
     try {
       let body: any = {};
       if (loginTab === "password") {
@@ -490,6 +492,7 @@ function AuthModals() {
         };
       }
 
+      setIsLoggingIn(true);
       const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -499,6 +502,7 @@ function AuthModals() {
       if (!res.ok) {
         const errData = await res.json();
         auth.triggerToast(errData.detail || "登录失败，请检查账号密码/验证码！");
+        setIsLoggingIn(false);
         return;
       }
 
@@ -509,6 +513,8 @@ function AuthModals() {
       router.push("/");
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！");
+    } finally {
+      setIsLoggingIn(false);
     }
   };
 
@@ -783,9 +789,19 @@ function AuthModals() {
 
                   <button
                     type="submit"
-                    className="w-full py-4 mt-6.5 bg-[#AFA7FF] text-[#050B1A] text-base rounded-xl font-black text-sm md:text-base hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-1 text-center shadow-lg shadow-[#AFA7FF]/15"
+                    disabled={isLoggingIn}
+                    className="w-full py-4 mt-6.5 bg-[#AFA7FF] text-[#050B1A] text-base rounded-xl font-black text-sm md:text-base hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center shadow-lg shadow-[#AFA7FF]/15 disabled:opacity-50 disabled:scale-100 disabled:cursor-not-allowed"
                   >
-                    立即登录 <span className="material-symbols-outlined text-lg md:text-xl">login</span>
+                    {isLoggingIn ? (
+                      <>
+                        正在登录...
+                        <div className="w-4 h-4 border-2 border-[#050B1A] border-t-transparent rounded-full animate-spin ml-1" />
+                      </>
+                    ) : (
+                      <>
+                        立即登录 <span className="material-symbols-outlined text-lg md:text-xl">login</span>
+                      </>
+                    )}
                   </button>
 
                   <div className="flex justify-between items-center text-xs md:text-sm text-white/30 font-bold font-mono pt-1 select-none">

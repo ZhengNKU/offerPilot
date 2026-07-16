@@ -224,10 +224,9 @@ DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 DEEPSEEK_MODEL=deepseek-v4-flash
 
-# 求职顾问 RAG 的 Embedding 链路（仍走 MiniMax embo-01，独立配置）
-MINIMAX_API_KEY=sk-cp-...
-MINIMAX_GROUP_ID=
-MINIMAX_EMBEDDING_URL=https://api.minimax.chat/v1/embeddings
+# 求职顾问 RAG 的 Embedding（阿里百炼 Qwen3-Embedding，与联网搜索共用 DASHSCOPE_API_KEY）
+# 可选覆盖 DASHSCOPE_EMBEDDING_BASE_URL / _MODEL / _DIM / _WORKSPACE_ID（一般不需要）
+DASHSCOPE_API_KEY=
 
 VOLC_ASR_API_KEY=
 VOLC_ASR_RESOURCE_ID=volc.seedasr.auc
@@ -452,7 +451,7 @@ npm run dev
 | `TENCENT_SMS_APP_ID` / `_SIGN_NAME` / `_TEMPLATE_ID` | — | 缺省时回退日志模拟 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_SENDER` / `SMTP_USE_SSL` | — | 缺省时回退日志模拟 |
 | `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | `https://api.deepseek.com/v1` / `deepseek-v4-flash` | 文本生成 LLM（DeepSeek，OpenAI-compatible） |
-| `MINIMAX_API_KEY` / `MINIMAX_EMBEDDING_URL` / `MINIMAX_GROUP_ID` | `https://api.minimax.chat/v1/embeddings` | AI 职业顾问 RAG 的 Embedding（embo-01，独立链路） |
+| `DASHSCOPE_API_KEY` / `DASHSCOPE_EMBEDDING_BASE_URL` / `_MODEL` / `_DIM` / `_WORKSPACE_ID` | `https://dashscope.aliyuncs.com/compatible-mode/v1` / `text-embedding-v4` / `1536` | AI 职业顾问 RAG 的 Embedding + 联网搜索 MCP 同 key |
 | `VOLC_ASR_API_KEY` / `VOLC_ASR_RESOURCE_ID` | `volc.seedasr.auc` | 火山引擎大模型 ASR |
 | `FILE_RETENTION_DAYS_FREE` / `_PRO` / `_MAX` | `7` / `30` / `120` | 文件保留 |
 | `FILE_CLEANUP_INTERVAL_HOURS` | `24` | 清理周期 |
@@ -602,7 +601,7 @@ interviewVar_user        // JSON 序列化的 UserProfile
 - 检查 `VOLC_ASR_API_KEY` 和 `DEEPSEEK_API_KEY` 是否有效；
 - `llm.py` 已对 SSL / 连接抖动做了 4 次指数退避重试（`Retry(total=4, ...)`）；
 - 长转写（>80 句）默认 120s 超时；如仍不够请在 `call_llm_sync` 调大 `timeout`。
-- Embedding 失败单独排查：`MINIMAX_API_KEY` / `MINIMAX_GROUP_ID` / `MINIMAX_EMBEDDING_URL` 是否有效。
+- Embedding 失败单独排查：`DASHSCOPE_API_KEY` 是否有效；服务端日志看 `[embedding] 失败 retry` 提示。
 
 **Q4. 简历改写下载失败：`简历排版与诊断结果不匹配`？**
 - 这是 `docx_resume_writer.BulletMatchError`：bullet 匹配率 < 80%。

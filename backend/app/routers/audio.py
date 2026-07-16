@@ -819,21 +819,10 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             "session_id": session_id,
         })
 
-    # P0 优化(#4): fire-and-forget 预生成所有 section 的 optimization_advice
-    # 不阻塞主流程——用户先看到"分析完成",等几秒后所有 section 缓存就绪
-    if sections and raw_segments:
-        asyncio.create_task(
-            _prefetch_section_optimization(
-                session_id=session_id,
-                sections=sections,
-                raw_segments=raw_segments,
-                task_id=task_id,
-            )
-        )
-        logger.info(
-            f"[task={task_id}] 🚀 启动 section optimization 预生成后台任务 "
-            f"({len(sections)} sections)"
-        )
+    # [P0 优化#4 已移除] 不再预生成所有 section 的 optimization_advice
+    # 改为按需生成：用户点击某个 section 的「生成优化建议」时，仅对当前 section
+    # 调一次 LLM，避免「点一下全生成」的错觉，也节省 LLM 成本。
+    # _prefetch_section_optimization 函数保留以备后用。
 
     _set_progress(100, "completed")
     logger.info(f"[task={task_id}] Analysis complete for session {session_id}")

@@ -9,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 import redis.asyncio as aioredis
+from redis.exceptions import RedisError
 
 from app import models, schemas
+from app.config import settings
 from app.services.match_scorer import (
     compute_match_rate_from_profile,
     compute_match_rate_from_profile_llm,
@@ -26,9 +28,28 @@ from app.utils.security import (
 from app.utils.sms import sms_helper
 from app.utils.email import email_helper
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 security = HTTPBearer()
 security_optional = HTTPBearer(auto_error=False)
+
+
+async def _is_token_blacklisted(redis_client: aioredis.Redis, token: str) -> bool:
+    """检查 token 是否在 Redis 黑名单。Redis 故障时降级放行（fail-open）。
+
+    黑名单是次级防御（主防御是 JWT 签名校验），不应因为 Redis 鉴权/连接
+    异常而把整个请求变成 500。生产曾因 REDIS_URL 凭据偶发被服务端拒绝，
+    导致所有需要登录的接口间歇性 500。
+    """
+    try:
+        return bool(await redis_client.get(f"auth:blacklist:{token}"))
+    except RedisError as e:
+        logger.warning(
+            "[auth] 黑名单检查失败，降级放行 token=%s... err=%r",
+            token[:8], e,
+        )
+        return False
 
 # Helper function to format UserProfile to Frontend expected structure
 def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
@@ -94,14 +115,13 @@ async def get_current_user(
     redis_client: aioredis.Redis = Depends(get_redis)
 ) -> models.User:
     token = credentials.credentials
-    # Check if token is blacklisted
-    is_blacklisted = await redis_client.get(f"auth:blacklist:{token}")
-    if is_blacklisted:
+    # Check if token is blacklisted (Redis 故障时降级放行，详见 _is_token_blacklisted)
+    if await _is_token_blacklisted(redis_client, token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token已废弃，请重新登录"
         )
-        
+
     user_id = verify_access_token(token)
     if not user_id:
         raise HTTPException(
@@ -132,14 +152,13 @@ async def get_current_user_optional(
     if not credentials or not credentials.credentials:
         return None
     token = credentials.credentials
-    
-    is_blacklisted = await redis_client.get(f"auth:blacklist:{token}")
-    if is_blacklisted:
+
+    if await _is_token_blacklisted(redis_client, token):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token已废弃，请重新登录"
         )
-        
+
     user_id = verify_access_token(token)
     if not user_id:
         raise HTTPException(
@@ -475,13 +494,14 @@ async def logout(
     current_user: models.User = Depends(get_current_user)
 ):
     token = credentials.credentials
-    # Put token to blacklist with 24 hours expiry (matches Access Token expiry)
-    await redis_client.setex(f"auth:blacklist:{token}", 86400, "revoked")
-    
+    # 写入 token 黑名单，TTL 与 ACCESS_TOKEN_EXPIRE_MINUTES 保持一致
+    # （之前硬编码 86400 已改为从配置读取，避免 token 有效期与黑名单 TTL 漂移）
+    await redis_client.setex(f"auth:blacklist:{token}", settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, "revoked")
+
     # Set user online status to False
     current_user.is_online = False
     await db.commit()
-    
+
     return {"message": "已成功安全退出登录"}
 
 
@@ -569,10 +589,10 @@ async def delete_account(
     await db.delete(current_user)
     await db.commit()
     
-    # Block token
+    # Block token（TTL 与 ACCESS_TOKEN_EXPIRE_MINUTES 保持一致，理由同 /logout）
     token = credentials.credentials
-    await redis_client.setex(f"auth:blacklist:{token}", 86400, "revoked")
-    
+    await redis_client.setex(f"auth:blacklist:{token}", settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, "revoked")
+
     return {"message": "账户及关联所有分析报告已彻底注销且清除成功"}
 
 

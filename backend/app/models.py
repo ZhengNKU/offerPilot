@@ -459,9 +459,9 @@ class UserAnalysisEmbedding(Base):
     source_type + source_id + chunk_index 唯一定位来源，支持后续溯源 / 删除 / 幂等 upsert。
 
     关键约束：
-      - vector(1536) 使用 MiniMax embo-01 输出维度
-      - HNSW 索引用 vector_cosine_ops（MiniMax 向量未归一化，必须用 cosine 距离）
-      - 写入用 type=db，查询用 type=query（embo-01 非对称嵌入）
+      - 维度 = config.DASHSCOPE_EMBEDDING_DIM（默认 1536，对齐阿里百炼 Qwen3-Embedding v4）
+      - HNSW 索引用 vector_cosine_ops（cosine 对归一化 / 未归一化向量都成立，性能稳）
+      - 当前 embedding provider 已统一为对称嵌入，不再区分 db / query 空间
     """
     __tablename__ = "user_analysis_embeddings"
 
@@ -481,7 +481,7 @@ class UserAnalysisEmbedding(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     # 元数据 JSONB（公司 / 时间 / 评分 / 分类等，召回时可作为过滤条件）
     meta: Mapped[dict] = mapped_column(JSONB, default=dict, nullable=False)
-    # 1536 维向量（MiniMax embo-01 输出维度）
+    # 1536 维向量（与 config.DASHSCOPE_EMBEDDING_DIM 对齐）
     embedding = mapped_column(Vector(1536), nullable=False)
     # 写入时间
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
@@ -494,7 +494,7 @@ class UserAnalysisEmbedding(Base):
         UniqueConstraint("source_type", "source_id", "chunk_index", name="uq_source_chunk"),
         # HNSW 索引：单列（pgvector HNSW 不支持多列索引）
         # m=16, ef_construction=64 适合中小规模（单用户 <1k 向量，总量 <10w）
-        # ops class 必须用 vector_cosine_ops，因为 MiniMax 向量未做 L2 归一化
+        # ops 选 vector_cosine_ops：cosine 对归一化 / 未归一化向量都等价安全
         Index(
             "ix_user_embedding_hnsw",
             "embedding",

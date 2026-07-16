@@ -7,15 +7,18 @@ logger = logging.getLogger(__name__)
 
 async def search_web(query: str, count: int = 5) -> str:
     """调用阿里云百炼 MCP 网页搜索工具，返回格式化后的 Markdown 搜索结果文本"""
-    # 优先从 settings 获取，否则从 env 环境变量获取
-    api_key = getattr(settings, "DASHSCOPE_API_KEY", "")
+    # 优先从 settings 读取（pydantic-settings 自动从 .env 读），其次 OS 环境变量
+    api_key = getattr(settings, "DASHSCOPE_API_KEY", "") or ""
     if not api_key:
         import os
-        api_key = os.getenv("DASHSCOPE_API_KEY", "sk-7eb9032977794d2694d46116fb8db4a4")
-    
+        api_key = os.getenv("DASHSCOPE_API_KEY", "")
+
     if not api_key:
-        logger.warning("[mcp] DASHSCOPE_API_KEY 未配置，跳过联网检索。")
-        return ""
+        logger.warning(
+            "[mcp] DASHSCOPE_API_KEY 未配置，联网检索降级为不返回。"
+            "LLM 看到此降级文本后会改成本地回答。"
+        )
+        return "（联网检索暂不可用：未配置 DASHSCOPE_API_KEY）"
 
     url = "https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp"
     headers = {

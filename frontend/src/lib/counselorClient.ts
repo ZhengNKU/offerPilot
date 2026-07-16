@@ -12,9 +12,29 @@ import { API_BASE } from "@/lib/api";
 export type CounselorEvent =
   | { event: "meta"; data: { session_id: number; user_message_id: number; message_count: number; remaining_quota: number } }
   | { event: "token"; data: { text: string } }
+  | { event: "thought"; data: { text: string } }
   | { event: "done"; data: { msg_id: number; citations: Citation[]; recalled_chunks: RecalledChunk[]; context_summary: ContextSummary } }
   | { event: "stopped"; data: { msg_id: number; citations: Citation[]; recalled_chunks: RecalledChunk[]; context_summary: ContextSummary } }
-  | { event: "error"; data: { message: string } };
+  | { event: "error"; data: { message: string } }
+  | { event: "tool_call"; data: ToolCallEvent };
+
+/** LLM Tool Calling 工具调用事件。
+ *  - phase="start": 工具即将执行（含 arguments）
+ *  - phase="end":   工具已完成（含 success / elapsed_ms / result_chars）
+ *  对应后端 counselor_agent._on_tool_event 的 buffer→drain 模型。
+ */
+export interface ToolCallEvent {
+  phase: "start" | "end";
+  name: string;
+  call_id?: string;
+  iter?: number;
+  // start only
+  arguments?: Record<string, unknown>;
+  // end only
+  success?: boolean;
+  elapsed_ms?: number;
+  result_chars?: number;
+}
 
 export interface Citation {
   source_type: string;
@@ -55,6 +75,8 @@ export interface MessageItem {
   citations: Citation[];
   recalled_chunks: RecalledChunk[];
   created_at: string | null;
+  reasoning_content?: string;
+  tool_calls?: any[];
 }
 
 export interface SessionDetail {

@@ -360,6 +360,8 @@ async def get_session(
                         "content": sub_m.get("content", ""),
                         "citations": m.citations or [] if sub_m.get("role") == "assistant" else [],
                         "recalled_chunks": m.recalled_chunks or [] if sub_m.get("role") == "assistant" else [],
+                        "tool_calls": sub_m.get("tool_calls", []) if sub_m.get("role") == "assistant" else [],
+                        "reasoning_content": sub_m.get("reasoning_content", "") if sub_m.get("role") == "assistant" else "",
                         "created_at": m.created_at.isoformat() if m.created_at else None,
                     })
             else:
@@ -369,6 +371,8 @@ async def get_session(
                     "content": m.content,
                     "citations": m.citations or [],
                     "recalled_chunks": m.recalled_chunks or [],
+                    "tool_calls": [],
+                    "reasoning_content": "",
                     "created_at": m.created_at.isoformat() if m.created_at else None,
                 })
         except Exception:
@@ -378,6 +382,8 @@ async def get_session(
                 "content": m.content,
                 "citations": m.citations or [],
                 "recalled_chunks": m.recalled_chunks or [],
+                "tool_calls": [],
+                "reasoning_content": "",
                 "created_at": m.created_at.isoformat() if m.created_at else None,
             })
 

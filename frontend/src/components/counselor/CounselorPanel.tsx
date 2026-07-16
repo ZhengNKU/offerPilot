@@ -14,6 +14,7 @@ import {
   type ContextSummary,
   type Citation,
   type CounselorStats,
+  type ToolCallEvent,
 } from "@/lib/counselorClient";
 import ChatBubble from "./ChatBubble";
 
@@ -116,6 +117,11 @@ export default function CounselorPanel(props: Props) {
   const [internalPending, setInternalPending] = useState<PendingAssistant | null>(null);
   const pending = props.pending !== undefined ? props.pending : internalPending;
   const setPending = props.setPending || setInternalPending;
+
+  // 当前在飞的工具调用（phase=start 进入，end 移除）。仅 UI 用，不入库
+  const [pendingTools, setPendingTools] = useState<ToolCallEvent[]>([]);
+  // 记录本轮已执行的工具历史，用于 pending 泡泡渲染
+  const [executedToolCalls, setExecutedToolCalls] = useState<any[]>([]);
 
   const [internalRemaining, setInternalRemaining] = useState<number | null>(null);
   const remaining = props.remaining !== undefined ? props.remaining : internalRemaining;
@@ -272,8 +278,12 @@ export default function CounselorPanel(props: Props) {
     let finalChunks: RecalledChunk[] = [];
     let finalCtx: ContextSummary | null = null;
     let assistantContent = "";
+    let assistantReasoning = "";
+    const localToolCalls: any[] = [];
     let wasStopped = false;
     let errored = false;
+
+    setExecutedToolCalls([]);
 
     try {
       const iter = streamCounselor(
@@ -287,6 +297,27 @@ export default function CounselorPanel(props: Props) {
           // meta 事件到达时，后端已经把 session 行（title = user_message[:30]）和 user message 行都入库了；
           // 立刻刷新历史列表，让新会话马上出现在左边栏
           try { await loadSessions(); } catch { /* ignore */ }
+        } else if (ev.event === "thought") {
+          assistantReasoning += ev.data.text;
+          setPending((p) => {
+            if (p) {
+              return { ...p, reasoningContent: assistantReasoning };
+            } else {
+              return {
+                role: "assistant",
+                content: "",
+                reasoningContent: assistantReasoning,
+                citations: [],
+                recalledChunks: [],
+                contextSummary: null,
+                streaming: true,
+              };
+            }
+          });
+          requestAnimationFrame(() => {
+            const c = messagesContainerRef.current;
+            if (c) c.scrollTop = c.scrollHeight;
+          });
         } else if (ev.event === "token") {
           assistantContent += ev.data.text;
           setPending((p) => {
@@ -296,6 +327,7 @@ export default function CounselorPanel(props: Props) {
               return {
                 role: "assistant",
                 content: assistantContent,
+                reasoningContent: assistantReasoning,
                 citations: [],
                 recalledChunks: [],
                 contextSummary: null,
@@ -316,6 +348,37 @@ export default function CounselorPanel(props: Props) {
           finalChunks = ev.data.recalled_chunks;
           finalCtx = ev.data.context_summary;
           wasStopped = true;
+        } else if (ev.event === "tool_call") {
+          const d = ev.data;
+          if (d.phase === "start") {
+            setPendingTools((p) => [...p, d]);
+            localToolCalls.push({
+              name: d.name,
+              arguments: d.arguments,
+              call_id: d.call_id,
+              success: null,
+              elapsed_ms: null,
+            });
+            setExecutedToolCalls([...localToolCalls]);
+          } else if (d.phase === "end") {
+            setPendingTools((p) => p.filter((t) => t.call_id !== d.call_id));
+            for (const tc of localToolCalls) {
+              if (tc.call_id === d.call_id) {
+                tc.success = d.success;
+                tc.elapsed_ms = d.elapsed_ms;
+                tc.result = d.result;
+              }
+            }
+            setExecutedToolCalls([...localToolCalls]);
+            // 工具失败（end + success=false）—— 不阻断对话，但 toast 提示一下
+            if (d.success === false) {
+              const label =
+                d.name === "web_search" ? "联网检索" :
+                d.name === "recall_user_history" ? "历史分析召回" :
+                d.name === "query_match_rate" ? "匹配度评估" : `工具 ${d.name}`;
+              auth.triggerToast(`⚠️ ${label}失败，继续基于已有信息回答`);
+            }
+          }
         } else if (ev.event === "error") {
           errored = true;
           auth.triggerToast("AI 出错了：" + ev.data.message);
@@ -331,7 +394,7 @@ export default function CounselorPanel(props: Props) {
       }
     } finally {
       // 任何终止路径（done / stopped / error / abort）都把当前 partial 落进 messages
-      if (assistantContent) {
+      if (assistantContent || assistantReasoning) {
         const finalMsg: MessageItem = {
           id: -Date.now() - 1,
           role: "assistant",
@@ -339,12 +402,16 @@ export default function CounselorPanel(props: Props) {
           citations: finalCitations,
           recalled_chunks: finalChunks,
           created_at: new Date().toISOString(),
+          reasoning_content: assistantReasoning,
+          tool_calls: [...localToolCalls],
         };
         setMessages((prev) => [...prev, finalMsg]);
       }
       // 释放本轮 of controller，只有是当前活跃请求才清空状态
       if (abortControllerRef.current === controller) {
         setPending(null);
+        setPendingTools([]);   // 兜底清理（通常在 tool_call start 时已被 end 移除）
+        setExecutedToolCalls([]);
         setStreaming(false);
         abortControllerRef.current = null;
         if (activeAbortController === controller) {
@@ -357,7 +424,7 @@ export default function CounselorPanel(props: Props) {
         try { await loadSessions(); } catch { /* ignore */ }
       }
       // stopped 状态给个轻量提示
-      if (wasStopped && assistantContent) {
+      if (wasStopped && (assistantContent || assistantReasoning)) {
         auth.triggerToast("已停止生成");
       }
     }
@@ -472,8 +539,8 @@ export default function CounselorPanel(props: Props) {
               {messages
                 .filter((m) => {
                   if (m.role === "user") return true;
-                  // assistant / system：content 为空就不渲染
-                  return !!(m.content && m.content.trim());
+                  // assistant / system：content 为空 且 reasoning_content 也为空就不渲染
+                  return !!(m.content && m.content.trim()) || !!(m.reasoning_content && m.reasoning_content.trim());
                 })
                 .map((m) => (
                   <ChatBubble
@@ -482,8 +549,11 @@ export default function CounselorPanel(props: Props) {
                     content={m.content}
                     citations={m.citations}
                     recalledChunks={m.recalled_chunks}
+                    reasoning_content={m.reasoning_content}
+                    tool_calls={m.tool_calls}
                   />
                 ))}
+
 
               {pending && (
                 <ChatBubble
@@ -493,6 +563,8 @@ export default function CounselorPanel(props: Props) {
                   recalledChunks={pending.recalledChunks}
                   contextSummary={pending.contextSummary}
                   streaming={pending.streaming}
+                  reasoning_content={pending.reasoningContent}
+                  tool_calls={executedToolCalls}
                 />
               )}
             </div>

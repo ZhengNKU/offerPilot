@@ -1272,8 +1272,7 @@ function InterviewTrainingPageContent() {
                         <div className="absolute inset-x-3.5 bottom-3.5 p-3 rounded-xl bg-black/85 backdrop-blur-md border border-white/10 text-left z-10">
                           <span className="text-[9px] text-primary font-black font-label-mono uppercase block tracking-wider mb-1">AI 状态</span>
                           <p className="text-[11px] leading-relaxed text-white font-extrabold">
-                            {aiState === "idle" && "等候中..."}
-                            {aiState === "listening" && "正在聆听你说话"}
+                            {(aiState === "idle" || aiState === "listening") && "正在聆听你说话"}
                             {aiState === "thinking" && "正在思考下一步"}
                             {aiState === "speaking" && "正在回答..."}
                           </p>
@@ -1323,7 +1322,7 @@ function InterviewTrainingPageContent() {
                         提示：回答时尽量使用 PREP 框架（Point-Reason-Example-Point），表达更有条理。
                       </span>
                       <span className="text-xs text-[#ffb2b7] font-bold font-label-mono shrink-0 flex items-center gap-1">
-                        {aiState === "listening" ? "聆听中" : aiState === "thinking" ? "思考中" : aiState === "speaking" ? "回答中" : "等待中"}
+                        {(aiState === "idle" || aiState === "listening") ? "聆听中" : aiState === "thinking" ? "思考中" : aiState === "speaking" ? "回答中" : "聆听中"}
                         <span className="w-1.5 h-1.5 rounded-full bg-primary animate-ping" />
                       </span>
                     </div>
@@ -1399,21 +1398,23 @@ function InterviewTrainingPageContent() {
                     AI 状态
                   </h4>
                   <span className="text-[13px] md:text-base font-bold text-on-surface-variant/50">
-                    {aiState === "idle" ? "等候" : aiState === "listening" ? "聆听" : aiState === "thinking" ? "思考" : aiState === "speaking" ? "回答" : aiState}
+                    {(aiState === "idle" || aiState === "listening") ? "聆听" : aiState === "thinking" ? "思考" : aiState === "speaking" ? "回答" : aiState}
                   </span>
                 </div>
                 <div className="space-y-2">
                   {[
-                    { label: "等候", state: "idle", color: "bg-white/5" },
-                    { label: "聆听", state: "listening", color: "bg-tertiary" },
-                    { label: "思考", state: "thinking", color: "bg-amber-400" },
-                    { label: "回答", state: "speaking", color: "bg-primary" },
-                  ].map((s) => (
-                    <div key={s.state} className="flex items-center gap-2 text-base">
-                      <span className={`w-2 h-2 rounded-full ${s.color} ${aiState === s.state ? "animate-pulse" : "opacity-40"}`} />
-                      <span className={aiState === s.state ? "text-white font-black" : "text-on-surface-variant/40 font-bold"}>{s.label}</span>
-                    </div>
-                  ))}
+                    { label: "聆听", states: ["idle", "listening"], color: "bg-tertiary" },
+                    { label: "思考", states: ["thinking"], color: "bg-amber-400" },
+                    { label: "回答", states: ["speaking"], color: "bg-primary" },
+                  ].map((s) => {
+                    const isActive = s.states.includes(aiState);
+                    return (
+                      <div key={s.label} className="flex items-center gap-2 text-base">
+                        <span className={`w-2 h-2 rounded-full ${s.color} ${isActive ? "animate-pulse" : "opacity-40"}`} />
+                        <span className={isActive ? "text-white font-black" : "text-on-surface-variant/40 font-bold"}>{s.label}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

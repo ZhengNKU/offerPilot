@@ -18,7 +18,11 @@ from sqlalchemy.future import select
 from app import models
 from app.config import settings
 from app.services.embedding import embed_for_query
-from app.utils.llm import call_llm_stream, _strip_codeblock, _safe_json_parse
+from app.utils.llm import (
+    _run_with_optional_tools,
+    _strip_codeblock,
+    _safe_json_parse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +41,12 @@ def _build_batch_prompt(
     experience_years: str,
     sub_abilities: list[dict],  # [{"core": "Redis", "sub": "缓存穿透"}, ...]
     recalled_text: str,
+    enable_network: bool = True,
 ) -> tuple[str, str]:
     """构建批量生成的 system + user prompt。
+
+    enable_network: True 时 system prompt 追加联网检索真实面经的指令，让生成的题目
+    更贴近招聘现状；False 时退回纯 LLM 训练语料生成（与改造前等价）。
 
     返回 (system_prompt, user_content)。
     """
@@ -47,6 +55,21 @@ def _build_batch_prompt(
     for item in sub_abilities:
         ability_lines.append(f"  - {item['core']} → {item['sub']}")
     ability_list = "\n".join(ability_lines)
+
+    # 联网工具说明仅在启用时注入，避免污染 prompt
+    if enable_network:
+        tool_block = (
+            "\n联网检索真实面经（推荐使用）：为了让生成的题目更具代表性、更贴近当下"
+            "招聘考察侧重点，请在生成前调用 `web_search(query, count=5)` 工具搜索目标"
+            "岗位/公司近期的真实面经、考点偏好或行业热门话题。示例查询：\n"
+            "  - 「字节跳动 后端 P7 Redis 缓存 真实面经」\n"
+            "  - 「腾讯 PCG 客户端 性能优化 面试考点」\n"
+            "  - 「阿里云 高级前端 P6 React 面试真题」\n"
+            "搜索 1-2 次即可（不必对每个细化能力都搜），让题目反映真实行业考察方向。"
+            "联网失败时直接基于训练语料生成即可，不要因为工具失败而中断。\n"
+        )
+    else:
+        tool_block = ""
 
     system_prompt = (
         "你是资深AI面试教练。针对以下所有细化能力知识点，为每个知识点各生成10道个性化面试题，"
@@ -60,6 +83,7 @@ def _build_batch_prompt(
         '}},{"title":"...",...}]},...]}\n'
         "每个细化能力恰好10道题。每道题总字数200字以内。freq从14递减到5。a恰好3条。followUps恰好2条。"
         f"共{len(sub_abilities)}个细化能力，每个10题。"
+        f"{tool_block}"
     )
 
     user_content = (
@@ -147,14 +171,23 @@ async def _call_llm_batch(
     experience_years: str,
     sub_abilities: list[dict],
     recalled_text: str,
+    enable_network: bool = True,
+    ctx: Optional[dict] = None,
 ) -> list[dict]:
     """调用 LLM 批量生成面试题（内部使用，单次调用）。
+
+    enable_network: True 时允许 LLM 调用 web_search 检索目标岗位/公司近期的真实
+    面经（核心动机：让生成的题目更具代表性、更贴近当下招聘趋势，而非仅靠 LLM
+    训练语料）。工具调用失败会自动降级，不影响整体生成。
+    ctx: 透传给 tool handler 的运行时上下文；目前 web_search 不依赖，但保留以便
+    未来接入 recall_user_history / query_match_rate。
 
     返回 [{"sub_ability_name": ..., "core_ability_name": ..., "questions": [...]}, ...]
     """
     t0 = asyncio.get_event_loop().time()
     system_prompt, user_content = _build_batch_prompt(
-        target_role, target_grade, experience_years, sub_abilities, recalled_text
+        target_role, target_grade, experience_years, sub_abilities, recalled_text,
+        enable_network=enable_network,
     )
 
     # 每能力约 3500 tokens（10题×200字×1.5tok/字 + STAR结构开销）
@@ -163,7 +196,7 @@ async def _call_llm_batch(
 
     logger.info(
         f"[question_generator] BATCH LLM START user={user_id} "
-        f"abilities={len(sub_abilities)} max_tokens={max_tokens}"
+        f"abilities={len(sub_abilities)} max_tokens={max_tokens} enable_network={enable_network}"
     )
 
     payload = {
@@ -177,7 +210,9 @@ async def _call_llm_batch(
         "max_tokens": max_tokens,
     }
 
-    res_data = await asyncio.to_thread(call_llm_stream, payload, 300.0)
+    res_data = await _run_with_optional_tools(
+        payload, enable_network, sync=False, timeout=300.0, ctx=ctx,
+    )
     content = res_data["choices"][0]["message"]["content"]
     elapsed = asyncio.get_event_loop().time() - t0
     logger.info(
@@ -232,11 +267,16 @@ async def _call_llm_batch_parallel(
     experience_years: str,
     sub_abilities: list[dict],
     recalled_text: str,
+    enable_network: bool = True,
+    ctx: Optional[dict] = None,
 ) -> list[dict]:
     """按核心能力分组，并行调用 LLM 生成面试题。
 
     将 sub_abilities 按 core 分组，每组一个并行 LLM 调用。
     4 个核心能力各 5 个细化标签 → 4 路并行，总耗时 ≈ 最长单路耗时。
+
+    enable_network / ctx: 透传给每组 LLM 调用；模拟面试场景下推荐 enable_network=True
+    让 LLM 先 web_search 真实面经，再生成题目。
     """
     # 按 core 分组
     groups: dict[str, list[dict]] = {}
@@ -250,7 +290,7 @@ async def _call_llm_batch_parallel(
     )
     logger.info(
         f"[question_generator] PARALLEL START user={user_id} "
-        f"groups={len(groups)} total={len(sub_abilities)} | {group_summary}"
+        f"groups={len(groups)} total={len(sub_abilities)} enable_network={enable_network} | {group_summary}"
     )
 
     async def _call_one(core_name: str, items: list[dict]) -> list[dict]:
@@ -262,7 +302,7 @@ async def _call_llm_batch_parallel(
         try:
             result = await _call_llm_batch(
                 user_id, target_role, target_grade, experience_years,
-                items, recalled_text,
+                items, recalled_text, enable_network=enable_network, ctx=ctx,
             )
             elapsed = asyncio.get_event_loop().time() - t0
             qs = sum(len(ab.get("questions", [])) for ab in result)
@@ -414,6 +454,7 @@ async def regenerate_and_cache_all_questions(
     redis_client=None,
     *,
     trigger_reason: str = "",
+    enable_network: bool = True,
 ) -> list[dict]:
     """统一入口：批量重新生成用户所有细化能力的面试题，缓存到 Redis + PG。
 
@@ -421,10 +462,13 @@ async def regenerate_and_cache_all_questions(
     [{"sub_ability_name":..., "core_ability_name":..., "questions":[...]}, ...]
 
     trigger_reason: 日志追踪用，如 "cache_miss" / "ability_change" / "manual"
+    enable_network: True 时 LLM 会先 web_search 真实面经再生成题目（推荐默认开启）；
+    False 时退回纯训练语料生成。模拟面试场景下联网失败不影响整体流程。
     """
     t0 = asyncio.get_event_loop().time()
     logger.info(
-        f"[question_generator] REGENERATE START user={user_id} reason={trigger_reason!r}"
+        f"[question_generator] REGENERATE START user={user_id} reason={trigger_reason!r} "
+        f"enable_network={enable_network}"
     )
 
     # 1. 查用户画像
@@ -471,8 +515,11 @@ async def regenerate_and_cache_all_questions(
     )
 
     # 4. 并行 LLM 生成（按核心能力分组）
+    # 透传 enable_network；ctx 暂不传（web_search 不依赖 db/user_id，
+    # 未来若需 recall_user_history 再补 db/user_id）
     abilities = await _call_llm_batch_parallel(
-        user_id, target_role, target_grade, experience_years, sa_list, recalled_text
+        user_id, target_role, target_grade, experience_years, sa_list, recalled_text,
+        enable_network=enable_network,
     )
 
     if not abilities:
@@ -505,16 +552,20 @@ async def regenerate_with_retry(
     *,
     trigger_reason: str = "",
     max_retries: int = 3,
+    enable_network: bool = True,
 ) -> list[dict]:
     """带重试的批量重新生成（3次指数退避）。
 
     trigger 场景（能力标签变更）使用。
     如果用户无细化能力标签，直接返回空，不重试。
+
+    enable_network: 透传给 regenerate_and_cache_all_questions。
     """
     for attempt in range(1, max_retries + 1):
         try:
             abilities = await regenerate_and_cache_all_questions(
-                db, user_id, redis_client, trigger_reason=trigger_reason,
+                db, user_id, redis_client,
+                trigger_reason=trigger_reason, enable_network=enable_network,
             )
             if abilities:
                 return abilities
@@ -545,10 +596,14 @@ async def get_questions_for_sub_ability(
     user_id: int,
     sub_ability_name: str,
     redis_client=None,
+    *,
+    enable_network: bool = True,
 ) -> list[dict]:
     """查询单个细化能力的面试题。
 
     流程：Redis → (过期) → 批量重生成 → (失败3次) → PG 兜底
+
+    enable_network: 透传到 regenerate_with_retry；模拟面试推荐默认开启。
     """
     # 1. 尝试 Redis
     if redis_client:
@@ -572,7 +627,8 @@ async def get_questions_for_sub_ability(
         f"[question_generator] Redis MISS user={user_id} → regenerating all"
     )
     abilities = await regenerate_with_retry(
-        db, user_id, redis_client, trigger_reason="cache_miss"
+        db, user_id, redis_client,
+        trigger_reason="cache_miss", enable_network=enable_network,
     )
     if abilities:
         for ab in abilities:
@@ -611,16 +667,20 @@ async def generate_and_cache_with_abilities(
     target_grade: str,
     experience_years: str,
     redis_client=None,
+    *,
+    enable_network: bool = True,
 ) -> list[dict]:
     """用预生成的能力标签数据直接批量生成面试题（不查 DB）。
 
     用于能力标签生成流程：标签尚未入库时先生成面试题，成功后再一起入库。
     返回 abilities 列表，格式同 regenerate_and_cache_all_questions。
+
+    enable_network: 模拟面试推荐默认开启（LLM 先 web_search 真实面经再生成题目）。
     """
     t0 = asyncio.get_event_loop().time()
     logger.info(
         f"[question_generator] GENERATE_WITH_ABILITIES START user={user_id} "
-        f"count={len(abilities_data)}"
+        f"count={len(abilities_data)} enable_network={enable_network}"
     )
 
     t_recall = asyncio.get_event_loop().time()
@@ -635,6 +695,7 @@ async def generate_and_cache_with_abilities(
     abilities = await _call_llm_batch_parallel(
         user_id, target_role, target_grade, experience_years,
         abilities_data, recalled_text,
+        enable_network=enable_network,
     )
     if not abilities:
         logger.error(

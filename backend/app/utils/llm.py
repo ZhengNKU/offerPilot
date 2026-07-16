@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 import time
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, AsyncIterator, Awaitable, Callable, Optional, List
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from app.config import settings
@@ -202,11 +202,414 @@ def _safe_json_parse(text: str, log_label: str = "") -> dict | list | None:
     return None
 
 
+# ============================================================================
+# Tool Calling 增强：在 call_llm_sync / call_llm_stream_chunks 基础上
+# 增加 LLM 自主 tool_calls 决策的循环。协议遵循 OpenAI-compatible tool_calls 规范。
+# 设计要点：
+#   - payload 不被原地修改；tools / tool_choice 在副本上挂载
+#   - 每轮把 assistant message 完整追加到 messages，再追加每个 tool result
+#     （role="tool", tool_call_id= 跟 tool_call.id 对齐）
+#   - max_iters 用尽时强制 tool_choice="none" 收尾，避免死循环
+# ============================================================================
+
+async def call_llm_sync_with_tools(
+    payload: dict,
+    tools: list,
+    ctx: Optional[dict] = None,
+    max_iters: int = 4,
+) -> dict:
+    """同步 LLM 调用 + tool calling 循环。
+
+    Args:
+        payload:    标准 chat/completions payload（不会被原地修改）
+        tools:      List[ToolSpec]；空列表时退化为普通 call_llm_sync
+        ctx:        传给 tool handler 的运行时上下文（db / user_id / logger）
+        max_iters:  最多触发几轮工具；达到后强制 tool_choice="none" 收尾
+
+    Returns:
+        最终响应 dict（兼容 OpenAI 格式），正常情况 choices[0].message.content 非空。
+        调用方用法与原有 call_llm_sync 兼容：直接 res["choices"][0]["message"]["content"]。
+    """
+    # lazy import: 避免 tool_registry ↔ utils/llm 循环
+    from app.services.tool_registry import to_openai_tools, dispatch_tool
+
+    if not tools:
+        return await asyncio.to_thread(call_llm_sync, payload)
+
+    cur_payload: dict = dict(payload)
+    cur_payload["tools"] = to_openai_tools(tools)
+    cur_payload["tool_choice"] = "auto"
+    messages: list = list(cur_payload.get("messages") or [])
+
+    log = (ctx or {}).get("logger", logger) if isinstance(ctx, dict) else logger
+    last_resp: Optional[dict] = None
+
+    for i in range(max_iters):
+        cur_payload["messages"] = messages
+        resp = await asyncio.to_thread(call_llm_sync, cur_payload)
+        last_resp = resp
+        msg = resp["choices"][0]["message"]
+        tool_calls = msg.get("tool_calls") or []
+
+        if not tool_calls:
+            log.info(f"[call_llm_sync_with_tools] iter={i} no tool_calls, done")
+            return resp
+
+        # 跑本轮所有 tool_calls，按 OpenAI 协议：assistant msg 先入，再逐个 tool result
+        messages.append(msg)
+        for tc in tool_calls:
+            fn = tc.get("function", {}) or {}
+            name = fn.get("name", "")
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            log.info(
+                f"[call_llm_sync_with_tools] iter={i} call tool={name} "
+                f"args_keys={list(args.keys()) if isinstance(args, dict) else []}"
+            )
+            result, _status = await dispatch_tool(name, args, ctx or {})
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc.get("id"),
+                "content": result,
+            })
+
+    # 兜底:达到 max_iters 强制收尾，确保调用方仍能拿到 content
+    log.warning(
+        f"[call_llm_sync_with_tools] 达到 max_iters={max_iters}, 强制收尾"
+    )
+    cur_payload["messages"] = messages
+    cur_payload["tool_choice"] = "none"
+    return await asyncio.to_thread(call_llm_sync, cur_payload)
+
+
+# ── 流式 Tool Calling ─────────────────────────────────────────────
+# 流式下 tool_calls 是 delta 累积：同一 index 在多轮 chunk 里把
+# `function.arguments` 一块一块拼起来。本文件 _stream_one_with_tools 做
+# chunk 解析 + retry；call_llm_stream_with_tokens 做主循环编排。
+
+async def _stream_one_with_tools(
+    stream_payload: dict,
+    log: logging.Logger,
+):
+    """执行一次流式 LLM 调用（含 tool_calls 解析 + 指数退避重试），产出统一事件：
+
+    yield 字典结构：
+      - {"kind": "content",       "piece": str}
+      - {"kind": "tool_call_delta","index": int, "delta": dict}
+      - {"kind": "finish",        "reason": str | None}
+
+    解析依据：
+      - content 来自 delta.content
+      - tool_calls 来自 delta.tool_calls（list，每个元素含 index、function.arguments 增量）
+      - finish 来自 choices[0].finish_reason
+    """
+    url = f"{settings.DEEPSEEK_BASE_URL}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    retryable_status = {429, 500, 502, 503, 504, 529}
+    max_attempts = 4
+
+    def _do_request():
+        return requests.post(
+            url, headers=headers, json=stream_payload, timeout=300.0,
+            proxies={"http": None, "https": None}, stream=True,
+        )
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(max_attempts):
+        try:
+            resp = await asyncio.to_thread(_do_request)
+            if resp.status_code in retryable_status:
+                raise requests.HTTPError(
+                    f"{resp.status_code} retryable from DeepSeek upstream",
+                    response=resp,
+                )
+            resp.raise_for_status()
+            for raw in resp.iter_lines(decode_unicode=True):
+                if not raw:
+                    continue
+                line = raw.strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[len("data:"):].strip()
+                if data == "[DONE]":
+                    return
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                try:
+                    choice = chunk["choices"][0]
+                    delta = choice.get("delta") or {}
+                    # reasoning piece
+                    reasoning_piece = delta.get("reasoning_content")
+                    if reasoning_piece:
+                        yield {"kind": "reasoning", "piece": reasoning_piece}
+                    # content piece
+                    piece = delta.get("content")
+                    if piece:
+                        yield {"kind": "content", "piece": piece}
+                    # tool_calls 增量（OpenAI 流式协议：每个 chunk 可能给同一 index 的不同字段）
+                    for tc in (delta.get("tool_calls") or []):
+                        yield {
+                            "kind": "tool_call_delta",
+                            "index": tc.get("index", 0),
+                            "delta": tc,
+                        }
+                    # finish
+                    finish = choice.get("finish_reason")
+                    if finish:
+                        yield {"kind": "finish", "reason": finish}
+                        return
+                except (KeyError, IndexError, TypeError):
+                    continue
+            return
+        except requests.HTTPError as e:
+            last_exc = e
+            status_code = e.response.status_code if e.response is not None else None
+            if status_code not in retryable_status or attempt == max_attempts - 1:
+                raise
+            wait = 1.5 * (2 ** attempt)
+            log.warning(
+                f"[stream_with_tools] upstream {status_code}, "
+                f"retry {attempt + 1}/{max_attempts - 1} after {wait:.1f}s"
+            )
+            await asyncio.sleep(wait)
+        except (requests.ConnectionError, requests.Timeout) as e:
+            last_exc = e
+            if attempt == max_attempts - 1:
+                raise
+            wait = 1.5 * (2 ** attempt)
+            log.warning(
+                f"[stream_with_tools] {type(e).__name__}, "
+                f"retry {attempt + 1}/{max_attempts - 1} after {wait:.1f}s"
+            )
+            await asyncio.sleep(wait)
+    raise last_exc if last_exc else RuntimeError("stream_with_tools exhausted retries")
+
+
+async def call_llm_stream_with_tokens(
+    payload: dict,
+    tools: list,
+    ctx: Optional[dict] = None,
+    max_iters: int = 4,
+    on_tool_event: Optional[Callable[[str, dict], Awaitable[None]]] = None,
+    on_reasoning_event: Optional[Callable[[str], Awaitable[None]]] = None,
+) -> AsyncIterator[str]:
+    """流式 LLM + tool calling 循环，逐 chunk yield content 文本片段。
+
+    工具调用期间不 yield content；调用 on_tool_event("start"/"end", info) 给上层
+    hook（典型用途：counselor_agent.stream_chat 在 SSE 协议里转发 tool_call 事件）。
+
+    Args:
+        payload:        标准 chat/completions payload（不原地修改）
+        tools:          List[ToolSpec]；空时退化为 call_llm_stream_chunks
+        ctx:            tool handler 运行时上下文
+        max_iters:      最多触发几轮工具
+        on_tool_event:  async 钩子，签名 async def hook(phase: str, info: dict) -> None
+                        phase ∈ {"start", "end"}；info 含 name / arguments / call_id / result_chars 等
+
+    Yields:
+        str:  LLM 生成的纯文本片段（content pieces）
+
+    Returns:
+        None（async generator 自然结束）
+    """
+    from app.services.tool_registry import to_openai_tools, dispatch_tool
+
+    log = (ctx or {}).get("logger", logger) if isinstance(ctx, dict) else logger
+
+    async def _emit(phase: str, info: dict):
+        if on_tool_event is None:
+            return
+        try:
+            await on_tool_event(phase, info)
+        except Exception as e:
+            log.warning(f"[call_llm_stream_with_tokens] on_tool_event({phase}) 异常: {e!r}")
+
+    if not tools:
+        async for piece in call_llm_stream_chunks(payload):
+            yield piece
+        return
+
+    cur_payload: dict = dict(payload)
+    cur_payload["tools"] = to_openai_tools(tools)
+    cur_payload["tool_choice"] = "auto"
+    stream_payload: dict = {**cur_payload, "stream": True}
+    messages: list = list(cur_payload.get("messages") or [])
+
+    for i in range(max_iters):
+        stream_payload["messages"] = messages
+        # 本轮累积
+        content_parts: list[str] = []
+        streamed_calls: dict[int, dict] = {}  # index -> {id, name, args_str}
+        finish_reason: Optional[str] = None
+
+        try:
+            async for event in _stream_one_with_tools(stream_payload, log):
+                kind = event["kind"]
+                if kind == "content":
+                    content_parts.append(event["piece"])
+                    yield event["piece"]
+                elif kind == "reasoning":
+                    if on_reasoning_event:
+                        try:
+                            await on_reasoning_event(event["piece"])
+                        except Exception as e:
+                            log.warning(f"[call_llm_stream_with_tokens] on_reasoning_event 异常: {e!r}")
+                elif kind == "tool_call_delta":
+                    idx = event["index"]
+                    delta = event["delta"]
+                    slot = streamed_calls.setdefault(idx, {"id": None, "name": None, "args_str": ""})
+                    if "id" in delta and delta["id"]:
+                        slot["id"] = delta["id"]
+                    fn = delta.get("function", {}) or {}
+                    if "name" in fn and fn["name"]:
+                        slot["name"] = fn["name"]
+                    if "arguments" in fn and fn["arguments"] is not None:
+                        slot["args_str"] += fn["arguments"]
+                elif kind == "finish":
+                    finish_reason = event["reason"]
+        except Exception as e:
+            # 让上层（如 counselor_agent）走已有的 CancelledError / 异常路径
+            log.error(f"[call_llm_stream_with_tokens] iter={i} 流式出错: {e!r}")
+            raise
+
+        if not streamed_calls:
+            # 工具未触发，正常完成
+            log.info(f"[call_llm_stream_with_tokens] iter={i} no tool_calls, done")
+            return
+
+        # ── 跑所有 tool_calls ──
+        # 1) 构造 assistant message（与 OpenAI 协议一致：tool_calls 数组）
+        assistant_tool_calls = []
+        tool_results = []  # 与上述 idx 一一对应
+        for idx in sorted(streamed_calls.keys()):
+            slot = streamed_calls[idx]
+            name = slot["name"] or ""
+            try:
+                args = json.loads(slot["args_str"] or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            call_id = slot["id"] or f"call_{i}_{idx}"
+
+            log.info(
+                f"[call_llm_stream_with_tokens] iter={i} call tool={name} "
+                f"args_keys={list(args.keys()) if isinstance(args, dict) else []}"
+            )
+            await _emit("start", {"name": name, "arguments": args, "call_id": call_id, "iter": i})
+            t0 = time.monotonic()
+            result, status = await dispatch_tool(name, args, ctx or {})
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            await _emit("end", {
+                "name": name,
+                "call_id": call_id,
+                "iter": i,
+                "success": status == "ok",
+                "result_chars": len(result or ""),
+                "elapsed_ms": elapsed_ms,
+                "result": result,
+            })
+
+            assistant_tool_calls.append({
+                "id": call_id,
+                "type": "function",
+                "function": {"name": name, "arguments": slot["args_str"] or "{}"},
+            })
+            tool_results.append({"id": call_id, "content": result})
+
+        # 2) 追加 assistant + tool messages，下一轮 LLM 看得到 tool 结果
+        assistant_msg = {
+            "role": "assistant",
+            "content": "".join(content_parts) if content_parts else None,
+            "tool_calls": assistant_tool_calls,
+        }
+        # 移除 None 字段避免 protocol 报「must be string」
+        cleaned_assistant = {k: v for k, v in assistant_msg.items() if v is not None}
+        messages.append(cleaned_assistant)
+        for tr in tool_results:
+            messages.append({"role": "tool", "tool_call_id": tr["id"], "content": tr["content"]})
+
+    # 兜底：max_iters 用尽强制收尾（关闭 tool 选择，纯文本回答）
+    log.warning(f"[call_llm_stream_with_tokens] 达到 max_iters={max_iters}, 强制收尾")
+    stream_payload["messages"] = messages
+    stream_payload["tool_choice"] = "none"
+    async for piece in _stream_one_with_tools(stream_payload, log):
+        if piece["kind"] == "content":
+            yield piece["piece"]
+
+
+# ── 通用 LLM 调用 wrapper ────────────────────────────────────────
+# 把「带 tool calling」与「不带 tool calling」两条路径统一到一个入口，
+# 6 个 JSON 输出场景（面试分析 5 个 + 简历分析 2 个 + 项目提取）都通过它调 LLM。
+#
+# 设计要点：
+#   - 失败兜底：tool calling 任一步抛错，由 tool_registry 内部 try/except
+#     降级为「联网检索失败，已降级为不检索」等占位文本，主流程不会断。
+#   - 返回 dict：调用方按 OpenAI 兼容格式 res["choices"][0]["message"]["content"]
+#     读取，流式模式由本函数内部消费并拼接。
+#   - ctx 默认 None：ctx=None 时 recall_user_history / query_match_rate 会拿到
+#     「上下文不可用」降级，仅 web_search 仍可工作——刚好满足「联网检索失败
+#     也没关系」的场景。
+async def _run_with_optional_tools(
+    payload: dict,
+    enable_network: bool = True,
+    *,
+    sync: bool = False,
+    timeout: float = 300.0,
+    ctx: Optional[dict] = None,
+    max_iters: int = 4,
+) -> dict:
+    """通用 LLM 调用 wrapper：可选启用 tool calling（web_search 等）。
+
+    Args:
+        payload:    标准 chat/completions payload（不被原地修改）
+        enable_network: True 时挂载 tool_registry.all_tools()；False 时退化
+                      到纯 LLM 调用（与改造前等价）
+        sync:       True → 同步模式（call_llm_sync / call_llm_sync_with_tools）
+                    False → 流式模式（call_llm_stream / call_llm_stream_with_tokens），
+                    流式模式下本函数内部消费所有 piece 并聚合成 dict
+        timeout:    仅 sync=False 且 enable_network=False 时传给 call_llm_stream；
+                    其他路径由内部自适应超时（300s）
+        ctx:        tool handler 运行时上下文；None 时仅 web_search 可用
+        max_iters:  tool calling 最大迭代轮数
+
+    Returns:
+        OpenAI 兼容 dict：`{"choices": [{"message": {"content": str}}]}`
+    """
+    # lazy import：避免 utils/llm ↔ tool_registry 形成循环 import
+    from app.services.tool_registry import all_tools as _all_tools
+
+    if not enable_network:
+        if sync:
+            return await asyncio.to_thread(call_llm_sync, payload)
+        return await asyncio.to_thread(call_llm_stream, payload, timeout)
+
+    if sync:
+        return await call_llm_sync_with_tools(
+            payload, _all_tools(), ctx=ctx, max_iters=max_iters,
+        )
+
+    # 流式 + tool calling：消费所有 content piece，tool_call 事件丢弃
+    # （分析场景不需要把工具事件透传给前端；tool 内部已运行并把结果塞回 messages）
+    text_parts: list[str] = []
+    async for piece in call_llm_stream_with_tokens(
+        payload, _all_tools(), ctx=ctx, max_iters=max_iters,
+    ):
+        text_parts.append(piece)
+    return {"choices": [{"message": {"content": "".join(text_parts)}}]}
+
+
 async def analyze_interview_dialogue(
     dialogue_text: str,
     profile_data: Optional[dict] = None,
     job_description: Optional[str] = None,
     existing_projects: Optional[list[dict]] = None,
+    enable_network: bool = True
 ) -> Dict[str, Any]:
     """
     Calls DeepSeek reasoning model API to analyze the interview dialogue and return evaluation results in JSON.
@@ -220,6 +623,7 @@ async def analyze_interview_dialogue(
         "你是一个专业的 AI 面试教练。你需要根据候选人的面试对话内容进行深度评估。\n"
         "如果提供了候选人的职业画像（工作经验、岗位名称、目标公司、目标职级等），请结合该画像的期望要求进行评估。\n"
         "如果提供了目标岗位的岗位详情（JD / Job Description），请着重结合该岗位的技能、职责及期望，深入匹配并评估候选人的技术水平、项目契合度以及表达逻辑。\n"
+        "联网工具（可选）：当对话中提及具体公司名、岗位名、行业趋势或最新技术话题，且你需要参考真实行业信息来更准确地评估时，可以调用 `web_search(query, count=5)` 工具实时检索互联网公开信息（公司背景、岗位要求、行业资讯、面试经验、最新技术趋势、薪资参考等）。仅在对话上下文不足时使用；联网工具返回失败时直接基于已有对话继续评估即可，不要因为工具失败而中断。\n"
         "你必须以 JSON 格式返回评估结果，无需 any Markdown 标记或其它多余的前后导言，只返回纯 JSON 对象字符串。\n"
         "JSON 结构必须严格符合以下属性格式：\n"
         "\n"
@@ -277,7 +681,9 @@ async def analyze_interview_dialogue(
         # P0 优化(#2): 改用流式调用 call_llm_stream。
         # DeepSeek reasoning model 在大 JSON 输出场景下偶发网关断连(RemoteDisconnected),
         # 流式可以降低断连概率 + 内置指数退避重试。
-        res_data = await asyncio.to_thread(call_llm_stream, payload, 180.0)
+        res_data = await _run_with_optional_tools(
+            payload, enable_network, sync=False, timeout=180.0
+        )
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         parsed_data = _safe_json_parse(content_clean, log_label="dialogue")
@@ -394,6 +800,7 @@ async def generate_match_rate_via_llm(
 async def extract_mentioned_projects(
     dialogue_text: str,
     existing_projects: Optional[list[dict]] = None,
+    enable_network: bool = True
 ) -> list[dict]:
     """
     P0 优化(#3): 从面试对话中识别候选人讨论到的项目经历。
@@ -425,6 +832,8 @@ async def extract_mentioned_projects(
         "  - 泛泛而谈的技术讨论未关联具体项目（如「我们一般用 Redis 做缓存」）\n"
         "  - 假设性的场景题回答（如「如果让我设计...」）\n"
         "  - 纯理论/八股文回答未涉及具体项目\n"
+        "\n"
+        "联网工具（可选）：如果候选人提到的项目名你不确定是真实存在的产品/开源项目/业内项目，可以调用 `web_search(query, count=5)` 工具查证（避免把虚构项目当真实项目收录）；联网失败时直接基于对话文本判断即可。\n"
         "\n"
         "每个识别到的项目输出：\n"
         "  - project_name: 使用对话中实际提到的名称，最多 30 字\n"
@@ -459,7 +868,7 @@ async def extract_mentioned_projects(
     }
 
     try:
-        res_data = await asyncio.to_thread(call_llm_sync, payload)
+        res_data = await _run_with_optional_tools(payload, enable_network)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         parsed = _safe_json_parse(content_clean, log_label="mentions")
@@ -492,7 +901,10 @@ async def extract_mentioned_projects(
         return []
 
 
-async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+async def sectionize_transcript(
+    segments: List[Dict[str, Any]],
+    enable_network: bool = True,
+) -> List[Dict[str, Any]]:
     """
     Use DeepSeek reasoning model to semantically split a transcript (list of ASR segments)
     into 3-8 topical sections like 「自我介绍」「项目深挖」「Redis 追问」.
@@ -504,6 +916,9 @@ async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str
     the input segment timestamps. The function enforces this by snapping any
     out-of-range value to the nearest known segment boundary, and discards
     sections that don't overlap any segment.
+
+    enable_network: True 时允许 LLM 调用 web_search 了解候选人口中的具体公司/岗位背景，
+    以便更准确地给段位打 tag（仅在对话出现明确公司/岗位名词时使用；默认开启）。
     """
     if not segments:
         return []
@@ -529,6 +944,8 @@ async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str
         "1. 识别出面试中实际发生的话题块（如「自我介绍」「项目深挖」「技术追问」「算法题」「反问环节」等）\n"
         "2. 把整段对话分成 3-8 个语义段\n"
         "3. 为每个段给出 2-6 字中文标题\n"
+        "\n"
+        "联网工具（可选）：当对话中提及具体公司名、岗位名或行业术语，且你不确定它属于哪个话题类别（如「这家公司一面是不是常考系统设计」），可以调用 `web_search(query, count=5)` 工具查证；联网失败时直接基于对话判断即可。\n"
         "\n"
         "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言）：\n"
         "{\n"
@@ -570,7 +987,8 @@ async def sectionize_transcript(segments: List[Dict[str, Any]]) -> List[Dict[str
 
     raw_sections: List[Dict[str, Any]] = []
     try:
-        res_data = await asyncio.to_thread(call_llm_sync, payload)
+        # sync=True 走 call_llm_sync_with_tools 或 call_llm_sync，与原行为等价
+        res_data = await _run_with_optional_tools(payload, enable_network, sync=True)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         # DEBUG: log raw content to diagnose empty-content returns
@@ -673,9 +1091,16 @@ def _snap_to_segments(t: float, segments: List[Dict[str, Any]]) -> float:
     return min(candidates, key=lambda x: abs(x - t))
 
 
-async def generate_section_optimization_advice(dialogue_text: str) -> Dict[str, Any]:
+async def generate_section_optimization_advice(
+    dialogue_text: str,
+    enable_network: bool = True
+) -> Dict[str, Any]:
     """
     Generate diagnostic conclusion, candidate original answer, and high-score answer recommendation.
+
+    enable_network: True 时允许 LLM 调用 web_search 查询该考点在大厂面试中的最新
+    高分回答思路（如「字节跳动 后端 P7 Redis 缓存架构 真实面经」），让高分话术更
+    贴合行业现状；工具失败时直接基于对话上下文作答即可。
     """
     system_prompt = (
         "你是一个顶尖的大厂架构师和 AI 面试教练。你需要对下面这段面试对话中候选人的回答进行深度诊断，并生成优化建议。\n"
@@ -683,6 +1108,9 @@ async def generate_section_optimization_advice(dialogue_text: str) -> Dict[str, 
         "1. AI 诊断结论：指出候选人回答中的核心技术漏洞、不完美的设计选择、或者表达欠缺（比如对于提到的技术点指出其优缺点或潜在问题）。字数 80-150 字。\n"
         "2. 候选人原版回答：从对话中提取或提炼出候选人的主要回答内容，保持其口语化和原样。\n"
         "3. 大厂架构师版高分话术推荐：编写一个近乎完美、符合大厂架构师/高级开发期望的回答话术，突出技术深度、Trade-off 权衡、真实项目经验、以及正确的解决方案。字数 150-300 字，可以包含对核心概念的强调（不要使用 Markdown 标记；如需高亮关键词，请使用 <strong class='text-[#5DECCB] font-black'> 与 </strong>，注意 HTML 属性必须用单引号；可以合理使用 <br /><br /> 换行分段）。\n"
+        "\n"
+        "联网工具（可选）：为了让高分话术更贴近目标公司/岗位的真实考察侧重点，可以调用 `web_search(query, count=5)` 工具检索相关公司/岗位/技术点的最新面经、考点偏好或行业最佳实践。仅在对话上下文不足时调用；联网失败时直接基于对话作答即可，不要因此中断。\n"
+        "如果 web_search 返回的是降级文案（如「联网检索超过 Ns 仍未返回」「联网检索失败，已降级为不检索」），**不要再调用 web_search**，直接基于已知上下文作答。\n"
         "\n"
         "你必须返回严格符合以下结构的 JSON 对象（不要包含任何 Markdown 标记或其它前后导言，只返回纯 JSON 对象）：\n"
         "{\n"
@@ -702,7 +1130,9 @@ async def generate_section_optimization_advice(dialogue_text: str) -> Dict[str, 
     }
 
     try:
-        res_data = await asyncio.to_thread(call_llm_sync, payload)
+        # 优化建议是"一次性返回 JSON 给前端"的场景，不需要服务端流式。
+        # 走 sync 路径省掉 SSE/stream chunk 装配开销，DeepSeek 直连超时也更可控。
+        res_data = await _run_with_optional_tools(payload, enable_network, sync=True)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         parsed_data = _safe_json_parse(content_clean, log_label="optimize")
@@ -723,10 +1153,17 @@ async def generate_section_optimization_advice(dialogue_text: str) -> Dict[str, 
         }
 
 
-async def generate_transcript_highlights(segments: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+async def generate_transcript_highlights(
+    segments: List[Dict[str, Any]],
+    enable_network: bool = True
+) -> List[Dict[str, Any]]:
     """
     Calls DeepSeek reasoning model LLM to analyze candidate's utterances, returning highlights
     with type ('strength', 'risk', 'tech') and 'tip' explanation.
+
+    enable_network: True 时允许 LLM 调用 web_search 验证候选人提到的「前沿技术」
+    是否属实/是否仍为主流（避免把过时技术误标为 strength）；工具失败时直接
+    基于对话判断即可。
     """
     if not segments:
         return []
@@ -747,6 +1184,8 @@ async def generate_transcript_highlights(segments: List[Dict[str, Any]]) -> List
         "1. strength (亮点)：阐述清晰、论据充分、体现大厂高并发架构思维或有数据量化背书的内容；\n"
         "2. risk (风险)：口癖、啰嗦、语病、逻辑硬伤、没有深度或明显的常识/技术方案错误；\n"
         "3. tech (核心词)：核心技术名词、架构方法论或业务指标词（如 Redis、SLA、双删、QPS 等）。\n"
+        "\n"
+        "联网工具（可选）：当候选人提到某个具体技术名词或方案，且你不确定它是否仍是当下主流/最佳实践时，可以调用 `web_search(query, count=5)` 工具查证。仅在判断存疑时调用；联网失败时直接基于对话判断即可。\n"
         "\n"
         "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言，只返回纯 JSON 对象）：\n"
         "{\n"
@@ -777,7 +1216,7 @@ async def generate_transcript_highlights(segments: List[Dict[str, Any]]) -> List
     }
 
     try:
-        res_data = await asyncio.to_thread(call_llm_sync, payload)
+        res_data = await _run_with_optional_tools(payload, enable_network)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         parsed = _safe_json_parse(content_clean, log_label="highlights")
@@ -957,6 +1396,7 @@ async def analyze_resume_text(
     resume_text: str,
     profile_data: Optional[dict] = None,
     parsed_structure: Optional[dict] = None,
+    enable_network: bool = True
 ) -> Dict[str, Any]:
     """
     Calls DeepSeek (reasoning model) to analyze the extracted resume text and return structured analysis in JSON.
@@ -966,6 +1406,11 @@ async def analyze_resume_text(
     传给 LLM 仅作为 "verbatim 参照表"，避免 LLM 把 "ByteDance" 改写成 "字节跳动"、
     改写公司名/时间等原文。LLM 仍可在结构上自由发挥，但所有公司名/岗位/时间/原文 bullet
     必须 verbatim 等于解析器给出的值。
+
+    enable_network: True 时允许 LLM 调用 web_search 查询候选人目标公司的最新
+    招聘 JD、技术栈要求、岗位画像或行业薪资参考，使 match_analysis 维度评分与
+    recommended_keywords 更贴合当下招聘趋势；工具失败时直接基于简历 + profile
+    判断即可，不要因为联网失败而中断。
     """
     from datetime import datetime
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -973,6 +1418,7 @@ async def analyze_resume_text(
     system_prompt = (
         f"【系统时间上下文】当前北京时间是：{current_date}。在提取或计算候选人的工作年限（例如将 '2023.07 - 至今' 或其他时间段与当前时间对比）时，请严格以该时间作为当前的'至今/Present'基准进行逻辑计算，避免算错工作年限。\n"
         "你是一个专业的 AI 简历分析教练。你的任务是对候选人的简历进行深度雷区检测与优化建议。\n"
+        "联网工具（可选）：为了让 match_analysis、recommended_keywords、risks 更贴近招聘现状，可以调用 `web_search(query, count=5)` 工具实时检索目标公司最新 JD、技术栈要求、行业薪资参考或岗位画像。仅在简历上下文不足时调用；联网工具返回失败时直接基于简历和 profile 继续分析即可，不要因为工具失败而中断。\n"
         "你需要根据提取出的简历文本内容，结合候选人的求职期望画像（如果提供了），完成以下工作：\n"
         "1. 计算简历综合评分（0-100，当前表现）以及优化后预计提升的综合评分（0-100）。\n"
         "2. 计算大厂 ATS 机器可读性通过率百分比（0-100）。\n"
@@ -1108,7 +1554,9 @@ async def analyze_resume_text(
 
     try:
         logger.info(f"[resume] analyzing resume_text len={len(resume_text)} chars")
-        res_data = await asyncio.to_thread(call_llm_stream, payload, 300.0)
+        res_data = await _run_with_optional_tools(
+            payload, enable_network, sync=False, timeout=300.0
+        )
         content = res_data["choices"][0]["message"]["content"]
         logger.info(f"[resume] received content len={len(content)} chars")
         content_clean = _strip_codeblock(content)
@@ -1126,6 +1574,7 @@ async def extract_project_experiences(
     resume_text: str,
     parsed_structure: dict,
     existing_projects: list[dict],
+    enable_network: bool = True
 ) -> list[dict]:
     """
     从简历原文中提取项目经历的结构化信息。
@@ -1135,12 +1584,16 @@ async def extract_project_experiences(
         parsed_structure: 服务端正则解析的结构化简历 {profile, work_experiences}
         existing_projects: 用户已有的项目记忆 [{"id": int, "project_name": str, "category": str}, ...]
             LLM 会对照此列表标注 is_duplicate 和 matched_existing_id
+        enable_network: True 时允许 LLM 调用 web_search 验证简历提到的「开源项目 /
+        业内产品 / 技术名词」是否真实存在，避免把虚构项目入库；联网失败时直接
+        基于简历原文提取即可。
 
     Returns:
         提取出的项目列表；LLM 调用失败时返回空列表 []
     """
     system_prompt = (
         "你是一个专业的 AI 简历解析与项目分析助手。你的任务是从候选人的简历原文中，提取出所有项目经历的结构化信息。\n"
+        "联网工具（可选）：当简历提到你不确定真实性的开源项目/业内产品/技术名词（如某个冷门开源库名），可以调用 `web_search(query, count=5)` 工具查证。仅在存疑时调用；联网失败时直接基于简历原文提取即可，不要因为工具失败而中断。\n"
         "\n"
         "## 核心要求\n"
         "1. **逐项目提取**：从简历中识别出每一个独立的项目经历，不要遗漏、不要合并不同项目\n"
@@ -1237,7 +1690,9 @@ async def extract_project_experiences(
             f"[project_extract] extracting projects from resume len={len(resume_text)} "
             f"existing_projects={len(existing_projects)}"
         )
-        res_data = await asyncio.to_thread(call_llm_stream, payload, 120.0)
+        res_data = await _run_with_optional_tools(
+            payload, enable_network, sync=False, timeout=120.0
+        )
         content = res_data["choices"][0]["message"]["content"]
         logger.info(f"[project_extract] received content len={len(content)} chars")
         content_clean = _strip_codeblock(content)

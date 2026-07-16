@@ -54,6 +54,7 @@ function ResumeAnalysisPageContent() {
 
   // Download button state machine
   const [downloadState, setDownloadState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [expandedAts, setExpandedAts] = useState<Record<number, boolean>>({});
 
   // Prefill metadata from localStorage if available
   useEffect(() => {
@@ -1221,6 +1222,7 @@ function ResumeAnalysisPageContent() {
                         { name: "简历总字数阈值控制", status: "通过", score: "适中 (3.8k字)" },
                         { name: "非标准分隔符识别", status: "警告", score: "图表/虚线可能截断" }
                       ]).map((item: any, idx: number) => {
+                        const isExpanded = !!expandedAts[idx];
                         let color = "text-amber-400 border-amber-400/20 bg-amber-400/10";
                         if (item.status === "通过") {
                           color = "text-[#5DECCB] border-[#5DECCB]/20 bg-[#5DECCB]/10";
@@ -1228,14 +1230,44 @@ function ResumeAnalysisPageContent() {
                           color = "text-[#FF7A95] border-[#FF7A95]/20 bg-[#FF7A95]/10";
                         }
                         return (
-                          <div key={idx} className="p-3 rounded-xl border border-white/5 bg-[#050B1A]/40 flex justify-between items-center text-xs md:text-sm font-bold">
-                            <span className="text-white/80">{item.name}</span>
-                            <div className="flex items-center gap-3">
-                              <span className="font-mono text-white/45">{item.score}</span>
-                              <span className={`px-2.5 py-0.5 rounded border text-xs font-black uppercase ${color}`}>
-                                {item.status}
-                              </span>
+                          <div
+                            key={idx}
+                            onClick={() => setExpandedAts(prev => ({ ...prev, [idx]: !prev[idx] }))}
+                            className="p-4 rounded-xl border border-white/5 bg-[#050B1A]/40 flex flex-col transition-all hover:bg-[#050B1A]/60 cursor-pointer select-none group"
+                          >
+                            <div className="flex justify-between items-center text-xs md:text-sm font-bold gap-4 w-full">
+                              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                <span className="text-white/80 shrink-0">{item.name}</span>
+                                {!isExpanded && item.score && (
+                                  <span className="text-xs text-white/35 font-normal truncate hidden sm:block">
+                                    — {item.score}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 shrink-0">
+                                <span className={`px-2.5 py-0.5 rounded border text-xs font-black uppercase ${color}`}>
+                                  {item.status}
+                                </span>
+                                <span className={`material-symbols-outlined text-white/30 group-hover:text-white transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}>
+                                  expand_more
+                                </span>
+                              </div>
                             </div>
+                            <AnimatePresence initial={false}>
+                              {isExpanded && item.score && (
+                                <motion.div
+                                  initial={{ height: 0, opacity: 0, marginTop: 0 }}
+                                  animate={{ height: "auto", opacity: 1, marginTop: 14 }}
+                                  exit={{ height: 0, opacity: 0, marginTop: 0 }}
+                                  transition={{ duration: 0.2 }}
+                                  className="overflow-hidden"
+                                >
+                                  <div className="pt-3 border-t border-white/5 text-xs md:text-sm text-on-surface-variant/80 font-normal leading-relaxed text-left">
+                                    {item.score}
+                                  </div>
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
                           </div>
                         );
                       })}
@@ -1765,34 +1797,66 @@ function ResumeAnalysisPageContent() {
             </div>
 
             <div className="space-y-4">
-              <p className="text-xs text-white/50 leading-relaxed font-bold">
+              <p className="text-sm text-white/50 leading-relaxed font-bold">
                 简历综合评分由 面试VAR AI 根据您的目标求职画像（<span className="text-white">{profile.targetCompany} · {profile.targetRole}</span>）进行多维度智能分析评估得出：
               </p>
 
               <div className="space-y-3">
-                {[
-                  { name: "关键词匹配度 (权重 30%)", desc: "检测简历中行业核心词及大厂JD高频词的覆盖情况", score: 85, color: "bg-[#00D4FF]" },
-                  { name: "工作经历含金量 (权重 30%)", desc: "评估履历背景、项目规模、独立决策力及技术突破", score: 82, color: "bg-[#AFA7FF]" },
-                  { name: "技术栈深度 (权重 20%)", desc: "考察高并发、缓存、消息队列等架构设计 with Trade-off", score: 78, color: "bg-amber-400" },
-                  { name: "ATS 兼容性与规范 (权重 10%)", desc: "检测 PDF 可读性、双栏排版解析以及文字规范", score: 92, color: "bg-[#5DECCB]" },
-                  { name: "风险防范 (权重 10%)", desc: "检测错别字、名词拼写规范以及核心指标空洞情况", score: 88, color: "bg-[#FF7A95]" }
-                ].map((item, idx) => (
-                  <div key={idx} className="space-y-1.5 p-3 rounded-xl bg-white/[0.02] border border-white/5">
-                    <div className="flex justify-between items-center text-xs font-black">
-                      <span className="text-white/95">{item.name}</span>
-                      <span className="text-white/80 font-mono">{item.score}分</span>
+                {(() => {
+                  // 真实数据优先：后端 score_breakdown.dimensions；若历史数据没有，降级到合理占位
+                  const realDimensions = (analysisResult as any)?.score_breakdown?.dimensions as
+                    | Array<{ key: string; label: string; score: number; weight: number; source: string }>
+                    | undefined;
+                  const colorMap: Record<string, string> = {
+                    keyword_match: "bg-[#00D4FF]",
+                    experience_value: "bg-[#AFA7FF]",
+                    quantification: "bg-amber-400",
+                    resume_completeness: "bg-[#5DECCB]",
+                    expression_quality: "bg-[#FF7A95]",
+                  };
+                  const descMap: Record<string, string> = {
+                    keyword_match: "检测简历中行业核心词及目标 JD 高频词的覆盖情况",
+                    experience_value: "评估履历背景、项目规模、独立决策力与影响力",
+                    quantification: "考察工作成果的数字量化（QPS / GMV / 转化率 / 留存 / 用户量等跨岗位通用）",
+                    resume_completeness: "检测结构完整度、ATS 可读性及个人信息规范",
+                    expression_quality: "检测用词规范、动作词精准度及核心指标空洞情况",
+                  };
+                  const items = realDimensions && realDimensions.length === 5
+                    ? realDimensions.map((d) => ({
+                        key: d.key,
+                        name: `${d.label} (权重 ${Math.round(d.weight * 100)}%)`,
+                        desc: descMap[d.key] || "",
+                        score: d.score,
+                        color: colorMap[d.key] || "bg-[#00D4FF]",
+                      }))
+                    : [
+                        // 历史数据兼容：无 score_breakdown 时不再用假数据，显示"--"
+                        { key: "keyword_match", name: "关键词匹配度 (权重 30%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-white/10" },
+                        { key: "experience_value", name: "工作经历含金量 (权重 30%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-white/10" },
+                        { key: "quantification", name: "成果量化程度 (权重 20%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-white/10" },
+                        { key: "resume_completeness", name: "简历完整度 (权重 10%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-white/10" },
+                        { key: "expression_quality", name: "表达专业度 (权重 10%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-white/10" },
+                      ];
+                  return items.map((item, idx) => (
+                    <div key={idx} className="space-y-1.5 p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                      <div className="flex justify-between items-center text-sm font-black">
+                        <span className="text-white/95">{item.name}</span>
+                        <span className="text-white/80 font-mono">{item.score}分</span>
+                      </div>
+                      <p className="text-xs text-white/40 font-bold leading-normal">{item.desc}</p>
+                      <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden mt-1">
+                        <div className={`h-full ${item.color} rounded-full`} style={{ width: `${item.score}%` }} />
+                      </div>
                     </div>
-                    <p className="text-[10px] text-white/40 font-bold leading-normal">{item.desc}</p>
-                    <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden mt-1">
-                      <div className={`h-full ${item.color} rounded-full`} style={{ width: `${item.score}%` }} />
-                    </div>
-                  </div>
-                ))}
+                  ));
+                })()}
               </div>
 
               <div className="pt-3 border-t border-white/5 flex justify-between items-center text-xs font-bold text-white/40">
                 <span>综合评分计算公式</span>
-                <span className="font-mono text-white/60">加权平均得分 - 风险扣分项</span>
+                <span className="font-mono text-white/60">
+                  加权评分
+                </span>
               </div>
 
               <button

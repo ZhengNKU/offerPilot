@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import model_validator
 
 class Settings(BaseSettings):
     PROJECT_VERSION: str = "V0.0.0"
@@ -33,17 +34,26 @@ class Settings(BaseSettings):
     # P0 优化 O2：把结构化抽取类任务从 reasoning 切到 chat，预计提速 3-5x
     DEEPSEEK_MODEL_FAST: str = "deepseek-chat"
 
-    # MiniMax Embedding API（AI 职业顾问用）
-    # 注意：与 chat 端点域名不同——embedding 用 api.minimax.chat
-    # 与文本生成 LLM 是两条独立链路：embo-01 仍走 MiniMax，文本生成走 deepseek。
-    MINIMAX_API_KEY: str = ""
-    MINIMAX_GROUP_ID: str = "2041338752588062737"
-    MINIMAX_EMBEDDING_URL: str = "https://api.minimax.chat/v1/embeddings"
-    EMBEDDING_MODEL: str = "embo-01"
-    EMBEDDING_DIM: int = 1536
-    EMBEDDING_BATCH_SIZE: int = 32
+    # ── Embedding（阿里百炼 Qwen3-Embedding text-embedding-v4）────────────────
+    # 走 OpenAI 兼容协议 /v1/embeddings；复用同一把 DASHSCOPE_API_KEY（与 MCP 联网搜索同 key）。
+    # 可选维度：2048 / 1536 / 1024(默认) / 768 / 512 / 256 / 128 / 64。
+    # 我们固定用 1536，与原 pgvector Vector(1536) 列对齐，无需列级迁移。
+    # base_url 三种写法（按场景选一）：
+    #   通用默认工作空间：  https://dashscope.aliyuncs.com/compatible-mode/v1
+    #   北京地域 + WorkspaceId：https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+    #   新加坡地域：           https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    # 从 https://bailian.console.aliyun.com/ 获取 WorkspaceId
+    DASHSCOPE_EMBEDDING_BASE_URL: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    DASHSCOPE_EMBEDDING_MODEL: str = "text-embedding-v4"
+    DASHSCOPE_EMBEDDING_DIM: int = 1536   # 与现有 Vector(1536) 列对齐，省迁移
+    DASHSCOPE_WORKSPACE_ID: str = ""      # 留空走默认工作空间；走地域填此 ID 并改 base_url
+
+    # 业务代码用的统一字段名（models.py 的 Vector(EMBEDDING_DIM) 与之对齐）
+    EMBEDDING_MODEL: str = DASHSCOPE_EMBEDDING_MODEL     # 兼容老引用
+    EMBEDDING_DIM: int = DASHSCOPE_EMBEDDING_DIM          # 兼容老引用（仍 1536）
+    EMBEDDING_BATCH_SIZE: int = 10    # DashScope 单批上限 10 条
     EMBEDDING_TIMEOUT_S: float = 30.0
-    EMBEDDING_QPS: int = 20
+    EMBEDDING_QPS: int = 100          # DashScope QPS 较宽松，可按实际情况调
 
     # Volcano Engine (ByteDance Doubao) ASR
     VOLC_ASR_API_KEY: str = "91b64a7e-bd24-41ba-95e7-b1dbca5cb6b3"
@@ -102,7 +112,31 @@ class Settings(BaseSettings):
 
     # Aliyun Bailian DASHSCOPE_API_KEY
     DASHSCOPE_API_KEY: str = ""
-    
+
+    @model_validator(mode="after")
+    def _check_jwt_secret(self) -> "Settings":
+        """
+        启动期校验 JWT_SECRET：
+        - 禁止空值或已知占位符（避免 .env 漏配或残留模板值时静默用弱密钥启动）
+        - 强制 ≥32 字节熵（HS256 的 NIST 推荐下限，防止开发同学临时填个 "secret" 就跑）
+        """
+        unsafe = {
+            "",
+            "secret",
+            "changeme",
+            "super-secret-key-change-me",
+            "super-secret-key-change-me-in-production",
+        }
+        if self.JWT_SECRET in unsafe:
+            raise ValueError(
+                "JWT_SECRET 未配置或仍为占位符 — 请在 .env 中设置 `openssl rand -hex 64` 的输出（≥32 字节熵）"
+            )
+        if len(self.JWT_SECRET) < 32:
+            raise ValueError(
+                f"JWT_SECRET 强度不足：当前 {len(self.JWT_SECRET)} 字符，HS256 至少需要 32 字节（256 bit）熵"
+            )
+        return self
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()

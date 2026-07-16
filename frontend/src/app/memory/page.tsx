@@ -804,6 +804,25 @@ export default function CareerMemoryDashboard() {
     }
   }, [activeTab, fetchKnowledgeAbilities]);
 
+  useEffect(() => {
+    if (activeTab !== "knowledge" && activeTab !== "overview") return;
+    if (knowledgeAbilities.length > 0) return;       // 已有数据，停止轮询
+    if (isLoadingAbilities) return;                  // 单次请求还没回来，避免并发
+    if (typeof document !== "undefined" && document.hidden) return; // 标签页不在前台
+    if (!auth.user?.targetRole) return;              // 没填目标岗位，不能生成
+
+    const timer = setTimeout(() => {
+      fetchKnowledgeAbilities();
+    }, 30000);  // 30s：知识库生成通常 1-2 分钟，30s 一次兼顾响应速度和请求量
+    return () => clearTimeout(timer);
+  }, [
+    activeTab,
+    knowledgeAbilities.length,
+    isLoadingAbilities,
+    auth.user?.targetRole,
+    fetchKnowledgeAbilities,
+  ]);
+
   // Project memory state
   const [projects, setProjects] = useState<ProjectMemoryItem[]>([]);
   const [projectTotal, setProjectTotal] = useState(0);
@@ -1498,13 +1517,13 @@ export default function CareerMemoryDashboard() {
             {/* Navigation Tabs Menu */}
             <div className="flex flex-col gap-1.5 w-full">
               {[
-                { id: "overview", label: "总览看板", icon: "dashboard" },
-                { id: "timeline", label: "分析时间轴", icon: "schedule" },
-                { id: "projects", label: "项目记忆库", icon: "folder_shared" },
-                { id: "knowledge", label: "知识库", icon: "auto_stories" },
-                ...(SHOW_WEAKNESSES_TAB ? [{ id: "weaknesses", label: "弱点分析" as const, icon: "analytics" }] : []),
-                { id: "growth", label: "成长轨迹", icon: "trending_up" },
-                { id: "advisor", label: "AI 职业顾问", icon: "support_agent" }
+                { id: "overview", label: "总览看板", icon: "dashboard", iconColor: "text-emerald-400" },
+                { id: "timeline", label: "分析时间轴", icon: "schedule", iconColor: "text-amber-400" },
+                { id: "projects", label: "项目记忆库", icon: "folder_shared", iconColor: "text-cyan-400" },
+                { id: "knowledge", label: "知识库", icon: "auto_stories", iconColor: "text-rose-400" },
+                ...(SHOW_WEAKNESSES_TAB ? [{ id: "weaknesses", label: "弱点分析" as const, icon: "analytics", iconColor: "text-red-400" }] : []),
+                { id: "growth", label: "成长轨迹", icon: "trending_up", iconColor: "text-indigo-400" },
+                { id: "advisor", label: "AI 职业顾问", icon: "support_agent", iconColor: "text-purple-400" }
               ].map((tab) => {
                 const isActive = activeTab === tab.id;
                 return (
@@ -1518,7 +1537,7 @@ export default function CareerMemoryDashboard() {
                     }`}
                   >
                     <span className={`material-symbols-outlined text-[20px] transition-transform group-hover:scale-110 ${
-                      isActive ? "text-on-primary" : "text-primary"
+                      isActive ? "text-on-primary" : tab.iconColor
                     }`}>
                       {tab.icon}
                     </span>
@@ -1585,7 +1604,7 @@ export default function CareerMemoryDashboard() {
               </div>
               <div className="overflow-y-auto max-h-[280px] flex-1 min-h-0 pr-1 flex flex-col gap-1.5">
                 {counselorSessions.length === 0 ? (
-                  <div className="text-center py-8 text-xs text-on-surface-variant/40">
+                  <div className="text-center py-8 text-sm text-on-surface-variant/40">
                     暂无历史会话
                   </div>
                 ) : (
@@ -1933,7 +1952,7 @@ export default function CareerMemoryDashboard() {
                               );
                             });
                           })() : (
-                            <div className="text-xs text-on-surface-variant/50 text-center py-4">
+                            <div className="text-sm text-on-surface-variant/50 text-center py-4">
                               {auth.isLoggedIn ? "暂无历史面试记录" : "请先登录查看历史记录"}
                             </div>
                           )}
@@ -2876,22 +2895,30 @@ export default function CareerMemoryDashboard() {
                       <img src="/loading.gif" alt="loading" className="w-8 h-8" />
                     </div>
                   ) : knowledgeAbilities.length === 0 ? (
-                    <div className="text-center py-16 space-y-3">
-                      <span className="material-symbols-outlined text-4xl text-on-surface-variant/30">auto_stories</span>
-                      <p className="text-on-surface-variant/50 font-semibold">
-                        {auth.user?.targetRole
-                          ? "知识库生成中，请稍后刷新..."
-                          : "请先在职业驾驶舱完善目标岗位信息，以生成专属知识库"}
-                      </p>
-                      {!auth.user?.targetRole && (
+                    auth.user?.targetRole ? (
+                      <div className="flex flex-col items-center justify-center py-16 gap-4 w-full">
+                        <img src="/loading.gif" alt="loading" className="w-10 h-10 object-contain" />
+                        <div className="space-y-1.5 text-center">
+                          <h4 className="text-base font-black text-white animate-pulse">AI 正在为您生成专属知识库与专业题谱...</h4>
+                          <p className="text-sm text-on-surface-variant/50 font-semibold leading-relaxed max-w-sm mx-auto">
+                            这通常需要几分钟，系统正在基于您的目标岗位「{auth.user.targetRole}」定制核心技能树与高频考核点。
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-16 space-y-3 w-full">
+                        <span className="material-symbols-outlined text-4xl text-on-surface-variant/30">auto_stories</span>
+                        <p className="text-on-surface-variant/50 font-semibold">
+                          请先在职业驾驶舱完善目标岗位信息，以生成专属知识库
+                        </p>
                         <button
                           onClick={() => router.push("/home")}
                           className="px-5 py-2 bg-primary/20 text-primary text-sm font-bold rounded-xl cursor-pointer hover:bg-primary/30 transition-colors"
                         >
                           前往完善
                         </button>
-                      )}
-                    </div>
+                      </div>
+                    )
                   ) : (
                     <div className="max-h-[580px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-white/10">
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 w-full">
@@ -3152,7 +3179,7 @@ export default function CareerMemoryDashboard() {
                     <div className="glass-panel p-5 rounded-3xl border-white/10 space-y-4 text-left flex-1 flex flex-col justify-center">
                       <div>
                         <h4 className="text-base font-black text-white flex items-center gap-2">
-                          <span className="material-symbols-outlined text-base text-primary">data_usage</span>
+                          <span className="material-symbols-outlined text-base text-emerald-400">data_usage</span>
                           能力数据来源
                         </h4>
                       </div>
@@ -3184,7 +3211,7 @@ export default function CareerMemoryDashboard() {
                     <div className="glass-panel p-5 rounded-3xl border-white/10 space-y-4 text-left flex-1 flex flex-col justify-center">
                       <div>
                         <h4 className="text-base font-black text-white flex items-center gap-2">
-                          <span className="material-symbols-outlined text-base text-primary">tips_and_updates</span>
+                          <span className="material-symbols-outlined text-base text-amber-400">tips_and_updates</span>
                           使用建议
                         </h4>
                       </div>

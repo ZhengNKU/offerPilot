@@ -697,13 +697,12 @@ function NewAnalysisDebuggerContent() {
             <div className="space-y-6">
               <div className="pb-4 border-b border-white/5 text-left">
                 <h3 className="font-black text-white text-lg md:text-xl">新建分析</h3>
-                <span className="text-xs font-label-mono text-on-surface-variant/50">Session #New</span>
               </div>
 
-              {/* 分析方式 Switcher (Multi-color vibrant icons scheme) */}
+              {/* 分析类型 Switcher (Multi-color vibrant icons scheme) */}
               <div className="space-y-3 text-left">
                 <h4 className="text-xs md:text-sm text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold mb-3">
-                  分析方式
+                  分析类型
                 </h4>
                 {[
                   { mode: "audio", icon: "graphic_eq", title: "面试录音分析", desc: "上传音频，AI转写并分析表达与逻辑", color: "primary" },

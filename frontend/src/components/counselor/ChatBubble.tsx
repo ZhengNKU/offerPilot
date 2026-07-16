@@ -16,6 +16,8 @@ interface Props {
     history_messages_count: number;
     has_summary: boolean;
   } | null;
+  reasoning_content?: string;
+  tool_calls?: any[];
 }
 
 export function cleanCitations(text: string): string {
@@ -39,6 +41,75 @@ export function cleanCitations(text: string): string {
   
   return cleaned;
 }
+
+interface SearchPage {
+  title: string;
+  url: string;
+  hostname: string;
+  hostlogo: string;
+}
+
+const parseSearchPages = (resultText: any): SearchPage[] => {
+  if (!resultText) return [];
+  
+  let text = "";
+  if (typeof resultText === "string") {
+    text = resultText;
+  } else {
+    try {
+      text = JSON.stringify(resultText);
+    } catch (e) {
+      return [];
+    }
+  }
+  
+  text = text.trim();
+  
+  // 1) 尝试作为 JSON 解析（兼容原始数据或特殊格式）
+  try {
+    if (text.startsWith("{") || text.startsWith("[")) {
+      const parsed = JSON.parse(text);
+      const pages = parsed.pages || (Array.isArray(parsed) ? parsed : []);
+      if (Array.isArray(pages)) {
+        return pages.map((p: any) => ({
+          title: p.title || "无标题",
+          url: p.url || "",
+          hostname: p.hostname || "网页",
+          hostlogo: p.hostlogo || "",
+        })).filter(p => p.url && typeof p.url === "string");
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  // 2) 经典正则解析 Markdown: 1. [title](url) (来源: hostname)
+  const pages: SearchPage[] = [];
+  const regex = /\d+\.\s+\[([^\]]+)\]\(([^)]+)\)(?:\s+\(来源:\s*([^)]+)\))?/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const url = match[2];
+    if (!url || typeof url !== "string") continue;
+    
+    let hostname = match[3] || "";
+    if (!hostname) {
+      try {
+        hostname = new URL(url).hostname;
+      } catch (err) {
+        hostname = "网页";
+      }
+    }
+    pages.push({
+      title: match[1] || "无标题",
+      url: url,
+      hostname: hostname,
+      hostlogo: "",
+    });
+  }
+  return pages;
+};
+
+const GLOBE_SVG = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="%23ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.5"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`;
 
 // 简易 markdown：把 ###、**、换行等渲染出来
 function renderMarkdown(text: string, citations: Citation[]): React.ReactNode {
@@ -314,6 +385,8 @@ export default function ChatBubble({
   recalledChunks = [],
   streaming = false,
   contextSummary = null,
+  reasoning_content = "",
+  tool_calls = [],
 }: Props) {
   const [showContext, setShowContext] = useState(false);
 
@@ -329,7 +402,7 @@ export default function ChatBubble({
     );
   }
 
-  let thinking = "";
+  let thinking = reasoning_content || "";
   let actual = content;
 
   if (content.includes("<think>")) {
@@ -359,14 +432,59 @@ export default function ChatBubble({
         </div>
         
         <div className="bg-surface-container/60 backdrop-blur-md border border-white/10 rounded-2xl rounded-tl-sm px-4.5 py-3.5 text-on-surface shadow-lg">
+          {/* 工具调用历史 - 垂直时间线 */}
+          {tool_calls && tool_calls.length > 0 && (
+            <div className="flex flex-col mb-4 pl-0.5 relative">
+              {/* 垂直连接线（仅在有多个工具调用时显示） */}
+              {tool_calls.length > 1 && (
+                <div className="absolute left-[7px] top-2.5 bottom-2.5 w-[1.5px] bg-white/10 z-0" />
+              )}
+              
+              <div className="flex flex-col gap-3">
+                {tool_calls.map((t: any, idx: number) => {
+                  const isPending = t.success === null;
+                  const isSuccess = t.success !== false;
+                  
+                  const icon = isPending ? "progress_activity" : isSuccess ? "check_circle" : "error";
+                  const iconColor = isPending ? "text-amber-400" : isSuccess ? "text-[#5DECCB]" : "text-[#FF7A95]";
+                  const iconClass = isPending ? "animate-spin" : "";
+                  
+                  const label =
+                    t.name === "web_search"
+                      ? isPending ? "正在联网检索..." : "联网检索"
+                      : t.name === "recall_user_history"
+                      ? isPending ? "正在查询历史分析..." : "历史分析召回"
+                      : t.name === "query_match_rate"
+                      ? isPending ? "正在计算匹配度..." : "匹配度评估"
+                      : isPending ? `正在调用工具: ${t.name}...` : `调用工具: ${t.name}`;
+
+                  return (
+                    <div key={idx} className="flex items-center gap-3 relative z-10">
+                      {/* 节点微标 */}
+                      <div className="flex items-center justify-center w-4 h-4 rounded-full bg-[#1b1c21] shrink-0 border border-white/5 shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
+                        <span className={`material-symbols-outlined text-[11px] ${iconColor} ${iconClass} block`}>
+                          {icon}
+                        </span>
+                      </div>
+                      {/* 工具名称 */}
+                      <span className={`text-[12px] font-bold tracking-wide select-none ${isPending ? "text-amber-400/80" : "text-white/50"}`}>
+                        {label}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* 推理块：默认折叠 */}
           {thinking && (
-            <details className="mb-3 group">
+            <details className="mb-3 group" open={streaming}>
               <summary className="text-sm md:text-sm text-primary cursor-pointer hover:text-primary-light flex items-center gap-2 select-none outline-none list-none [&::-webkit-details-marker]:hidden">
-                <img src="/reasoning.svg" className="w-6 h-6 object-contain" alt="thinking" />
+                <img src="/reasoning.svg" className="w-6 h-6 object-contain animate-pulse" alt="thinking" />
                 <span className="font-bold">查看推理过程</span>
               </summary>
-              <div className="mt-2 px-3 py-2 bg-surface-container-low/50 border border-white/5 rounded-xl text-xs text-on-surface-variant whitespace-pre-wrap font-mono leading-relaxed">
+              <div className="mt-2 px-3 py-2 bg-surface-container-low/50 border border-white/5 rounded-xl text-xs text-on-surface-variant whitespace-pre-wrap font-mono leading-relaxed select-all">
                 {thinking}
               </div>
             </details>
@@ -384,6 +502,99 @@ export default function ChatBubble({
                 {streaming && (
                   <span className="inline-block w-1.5 h-3.5 bg-primary ml-0.5 align-middle animate-pulse" />
                 )}
+
+                {/* 联网搜索参考链接卡片 */}
+                {(() => {
+                  const searchTool = tool_calls?.find(t => t.name === "web_search" && t.success === true);
+                  if (!searchTool || !searchTool.result) return null;
+                  const pages = parseSearchPages(searchTool.result);
+                  if (pages.length === 0) return null;
+
+                  return (
+                    <details className="mt-4 group outline-none select-none">
+                      <summary className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 transition-all cursor-pointer outline-none list-none [&::-webkit-details-marker]:hidden">
+                        {/* overlapping hostlogos */}
+                        <div className="flex -space-x-1.5 overflow-hidden">
+                          {pages.slice(0, 3).map((p, pIdx) => {
+                            let domain = "";
+                            try {
+                              domain = new URL(p.url).hostname;
+                            } catch (e) {}
+                            return (
+                              <img
+                                key={pIdx}
+                                className="inline-block h-4 w-4 rounded-full ring-1 ring-surface-container bg-white object-contain"
+                                src={p.hostlogo || (domain ? `https://${domain}/favicon.ico` : GLOBE_SVG)}
+                                onError={(e) => {
+                                  const img = e.currentTarget;
+                                  img.onerror = null;
+                                  if (p.hostlogo && domain) {
+                                    img.src = `https://${domain}/favicon.ico`;
+                                    img.onerror = () => {
+                                      img.onerror = null;
+                                      img.src = GLOBE_SVG;
+                                    };
+                                  } else {
+                                    img.src = GLOBE_SVG;
+                                  }
+                                }}
+                                alt=""
+                              />
+                            );
+                          })}
+                        </div>
+                        <span className="text-[12px] font-bold text-white/70">
+                          {pages.length} 个网页
+                        </span>
+                        <span className="material-symbols-outlined text-[14px] text-white/40 group-open:rotate-180 transition-transform">
+                          expand_more
+                        </span>
+                      </summary>
+
+                      <div className="mt-2.5 max-w-xl p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col gap-2.5 text-xs animate-fadeIn">
+                        {pages.map((p, pIdx) => {
+                          let domain = "";
+                          try {
+                            domain = new URL(p.url).hostname;
+                          } catch (e) {}
+                          return (
+                            <a
+                              key={pIdx}
+                              href={p.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center justify-between gap-3 text-white/50 hover:text-[#5DECCB] transition-colors py-1.5 border-b border-white/5 last:border-0"
+                            >
+                              <div className="flex items-center gap-2 truncate">
+                                <span className="text-white/20 font-mono text-[10px] w-4 shrink-0">{pIdx + 1}</span>
+                                <img
+                                  className="h-3.5 w-3.5 object-contain bg-white rounded-full p-0.5"
+                                  src={p.hostlogo || (domain ? `https://${domain}/favicon.ico` : GLOBE_SVG)}
+                                  onError={(e) => {
+                                    const img = e.currentTarget;
+                                    img.onerror = null;
+                                    if (p.hostlogo && domain) {
+                                      img.src = `https://${domain}/favicon.ico`;
+                                      img.onerror = () => {
+                                        img.onerror = null;
+                                        img.src = GLOBE_SVG;
+                                      };
+                                    } else {
+                                      img.src = GLOBE_SVG;
+                                    }
+                                  }}
+                                  alt=""
+                               />
+                                <span className="truncate font-medium text-[12px]">{p.title}</span>
+                              </div>
+                              <span className="text-[10px] text-white/30 font-normal shrink-0">{p.hostname}</span>
+                            </a>
+                          );
+                        })}
+                      </div>
+                    </details>
+                  );
+                })()}
               </>
             )}
           </div>
