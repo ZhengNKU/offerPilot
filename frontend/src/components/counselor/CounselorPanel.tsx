@@ -47,9 +47,9 @@ const WELCOME_CARDS = [
     iconColor: "text-amber-400 bg-amber-500/10 border-amber-500/20",
   },
   {
-    title: "我的技术栈是否匹配目标岗位？",
-    prompt: "我的技术栈是否匹配目标岗位？",
-    subtitle: "评估技术栈契合度与学习建议",
+    title: "我的核心能力是否匹配目标岗位？",
+    prompt: "我的核心能力是否匹配目标岗位？",
+    subtitle: "评估背景契合度与核心竞争力",
     icon: "account_circle",
     iconColor: "text-blue-400 bg-blue-500/10 border-blue-500/20",
   },
