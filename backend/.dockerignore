@@ -12,3 +12,6 @@ uploads
 *.log
 .idea
 .vscode
+wheels
+wheels/
+*.whl

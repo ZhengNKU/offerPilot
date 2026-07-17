@@ -96,6 +96,21 @@ class Settings(BaseSettings):
     # 过期文件清理任务运行周期，单位：小时
     FILE_CLEANUP_INTERVAL_HOURS: int = 24
 
+    # 日志保留天数。TimedRotatingFileHandler 的 backupCount 与孤立旧日志清理任务共用此值。
+    LOG_RETENTION_DAYS: int = 7
+    # 孤立旧日志清理任务运行周期，单位：小时
+    LOG_CLEANUP_INTERVAL_HOURS: int = 24
+    # 日志清理任务要扫描的额外目录（逗号分隔）。默认空。
+    # 在 Docker 部署下无需配置 —— 容器内 /app/logs 经 docker-compose volume 映射到宿主机 /data/logs，
+    # 容器内直接清理 /app/logs 即可。对于裸机/直接进程运行的场景，
+    # 可以在这里显式指定宿主机的日志目录（例如 /data/logs）。
+    LOG_CLEANUP_DIRS: str = ""
+
+    # 单点登录豁免名单（逗号分隔用户名，大小写不敏感）。
+    # 这些账号再次签发 token 时不会挤掉前一会话，允许多端同时在线。
+    # 默认仅豁免 admin（管理员账号需要日常多端调试，避免自己挤掉自己）。
+    MULTI_SESSION_EXEMPT_USERNAMES: str = "admin"
+
     # ── 分析功能配额（30 天滚动窗口内最大次数） ─────────────────────
     # 修复"用户删除历史记录 → 又可免费使用"的 bug：
     #   旧实现用 SELECT COUNT(*) FROM interview_sessions WHERE user_id=? 判断，

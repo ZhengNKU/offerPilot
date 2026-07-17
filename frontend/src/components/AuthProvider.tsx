@@ -330,6 +330,113 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
+  // ─── 单点登录：前端全局拦截 401 + 兜底轮询 ─────────────────────────
+  // 后端已经把被挤下线的 token 加入 blacklist (auth:blacklist:{token})，
+  // 此 tab 任何请求一旦返 401 就立即清登录态，避免用户卡在"看起来登录中"
+  // 但点什么接口都失败的状态。
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    // 单点登录中被踢之后清本 tab 状态 + 广播给其他 tab。
+    // 用一个闭包内的局部函数，避免依赖于 useEffect 依赖项变化重置 window.fetch。
+    const forceLogoutDueToEviction = () => {
+      const hadToken = !!localStorage.getItem("interviewVar_token");
+      localStorage.removeItem("interviewVar_token");
+      localStorage.setItem("interviewVar_isLoggedIn", "false");
+      localStorage.removeItem("interviewVar_user");
+      // 触发跨 tab 同步：本 tab setUser 同步给内存，
+      // 其它 tab 通过 storage 事件监听器更新
+      setUser(defaultUser);
+      setIsLoggedIn(false);
+      window.dispatchEvent(new Event("storage"));
+
+      // 只有当真在被踢时才跳落地页（首次 /me 返回 401 也走这里）
+      if (hadToken && typeof window !== "undefined" && window.location.pathname !== "/") {
+        // 用 replace 而不是 push，避免用户在浏览器后退键里看到被踢的页面
+        router.replace("/?evicted=1");
+      } else if (hadToken) {
+        // 已经在 /，只更新 URL search 参数（不引发路由刷新）
+        const u = new URL(window.location.href);
+        u.searchParams.set("evicted", "1");
+        window.history.replaceState({}, "", u.toString());
+      }
+    };
+
+    // 1) 全局 fetch 拦截器：所有 /api/ 调用的 401 都会走到这里
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const res = await originalFetch(input, init);
+      try {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof Request
+              ? input.url
+              : (input as URL)?.toString?.() ?? "";
+        // 只拦截 API；登录失败（/api/auth/login）本来就 401，不能误踢
+        const isApi =
+          url.includes("/api/") ||
+          url.startsWith("http") && url.includes("/api/");
+        const isLoginAttempt = url.includes("/api/auth/login") ||
+          url.includes("/api/auth/send-code");
+        if (isApi && !isLoginAttempt && res.status === 401) {
+          forceLogoutDueToEviction();
+        }
+      } catch {
+        // 解析 URL 失败不影响正常响应返回
+      }
+      return res;
+    };
+
+    // 2) 跨 tab 秒级感知（同一浏览器的多 tab）：用 BroadcastChannel 0 网络请求
+    // B tab 完成登录后 postMessage，A tab 收到后立刻验证本地 token。
+    // 仅覆盖同一浏览器的情况，跨设备由下面的 setInterval 兜底。
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel("auth:sessions");
+    } catch {
+      // 部分老浏览器不支持 BroadcastChannel，try/catch 兜底（fallback 到 setInterval）
+    }
+    if (bc) {
+      bc.onmessage = async () => {
+        const t = localStorage.getItem("interviewVar_token");
+        if (!t) return;
+        try {
+          const res = await originalFetch(`${API_BASE}/api/auth/me`, {
+            headers: { Authorization: `Bearer ${t}` }
+          });
+          if (res.status === 401) forceLogoutDueToEviction();
+        } catch {
+          // 网络错误不算被踢，跳过
+        }
+      };
+    }
+
+    // 3) 跨设备兜底轮询：每 60s 主动探一次 /me
+    // 用 setInterval 跳过手动操作，捕获"我在 A 页面不动 / 也没有 XHR"这种静默被踢场景
+    const pollInterval = setInterval(async () => {
+      const token = localStorage.getItem("interviewVar_token");
+      if (!token) return;
+      try {
+        const res = await originalFetch(`${API_BASE}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+          forceLogoutDueToEviction();
+        }
+      } catch {
+        // 网络错误不算被踢，跳过
+      }
+    }, 60000);
+
+    return () => {
+      // HMR / 卸载时还原 fetch（避免污染全局）
+      window.fetch = originalFetch;
+      bc?.close();
+      clearInterval(pollInterval);
+    };
+  }, [router]);
+
   return (
     <AuthContext.Provider
       value={{
@@ -509,6 +616,15 @@ function AuthModals() {
       const data = await res.json();
       localStorage.setItem("interviewVar_token", data.access_token);
       auth.login(data.user);
+      // 通知同浏览器其他 tab：本账号刚在另一个 tab 签发了新 token，让它们立即验证自己的 token。
+      // 不广播的话，跨 tab 只能等 60s 长轮询才发现被踢，体验差。
+      try {
+        new BroadcastChannel("auth:sessions").postMessage({
+          type: "token-issued"
+        });
+      } catch {
+        // 老浏览器不支持
+      }
       // 登录成功 → 跳转到落地页
       router.push("/");
     } catch (err) {

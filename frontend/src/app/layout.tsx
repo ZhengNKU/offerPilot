@@ -5,6 +5,9 @@ import { AuthProvider } from "@/components/AuthProvider";
 export const metadata: Metadata = {
   title: "面试VAR - AI 面试分析专家",
   description: "面试VAR 分析真实面试录音，定位信任崩溃时刻，揭示面试官真实想法，帮你获得心仪 Offer。",
+  icons: {
+    icon: "/logo.svg",
+  },
 };
 
 export default function RootLayout({
@@ -21,6 +24,7 @@ export default function RootLayout({
           href="/fonts/fonts.css"
           rel="stylesheet"
         />
+        <link rel="icon" href="/logo.svg" type="image/svg+xml" />
       </head>
       <body className="bg-background text-on-surface selection:bg-primary/30 font-body-md overflow-x-hidden min-h-full flex flex-col">
         <AuthProvider>

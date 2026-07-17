@@ -1125,7 +1125,7 @@ function NewAnalysisDebuggerContent() {
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <div className="flex items-center gap-4">
             <span className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-              © 2024 面试VAR AI. All rights reserved.
+              © 2026 面试VAR AI. All rights reserved.
             </span>
           </div>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest animate-pulse">

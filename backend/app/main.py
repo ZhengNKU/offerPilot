@@ -23,7 +23,7 @@ except Exception as _e:
     logging.error(f"[main] Failed to import memory router: {_e}")
     _MEMORY_LOADED = False
     _memory_router = None
-from app.utils.cleanup import run_periodic_cleanup
+from app.utils.cleanup import run_periodic_cleanup, run_periodic_log_cleanup, cleanup_old_logs
 
 from fastapi import Request
 import time
@@ -31,6 +31,7 @@ import time
 import sys
 
 # 日志按天切块 + error 单独文件
+# 容器内为 /app/logs（与 docker-compose 中 /data/logs:/app/logs 挂载点对齐）
 log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, "backend.log")
@@ -61,12 +62,12 @@ logging.basicConfig(
 
 formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-# 全量日志 handler（按天切，保留 30 天）
+# 全量日志 handler（按天切，保留 LOG_RETENTION_DAYS 天）
 all_handler = TimedRotatingFileHandler(
     filename=log_file,
     when="midnight",
     interval=1,
-    backupCount=30,
+    backupCount=settings.LOG_RETENTION_DAYS,
     encoding="utf-8",
     utc=False,  # 用本地时区（依赖容器 TZ=Asia/Shanghai）
 )
@@ -79,7 +80,7 @@ err_handler = TimedRotatingFileHandler(
     filename=err_file,
     when="midnight",
     interval=1,
-    backupCount=30,
+    backupCount=settings.LOG_RETENTION_DAYS,
     encoding="utf-8",
     utc=False,
 )
@@ -100,6 +101,9 @@ except Exception as _e:
 
 # 抑制 watchfiles 的 verbose 日志
 logging.getLogger("watchfiles").setLevel(logging.WARNING)
+
+# 启动期打印当前日志目录，便于运维核对路径（容器内 /app/logs ↔ 宿主机 /data/logs）
+logging.info("[main] 日志目录 = %s (Docker 部署下此目录对应宿主机 /data/logs)", log_dir)
 
 app = FastAPI(
     title="面试VAR - Backend Services",
@@ -170,10 +174,23 @@ async def startup_event():
 
     # 启动后台定期清理任务
     asyncio.create_task(run_periodic_cleanup())
+    # 启动后台定期日志清理任务（LOG_RETENTION_DAYS 之外的旧日志自动清理）
+    asyncio.create_task(run_periodic_log_cleanup())
+    # 启动时立即异步清理一次历史孤立日志（把 backupCount 调小后目录里残留的旧文件清掉）
+    asyncio.create_task(_startup_log_cleanup())
     # 启动标签字典种子数据初始化
     asyncio.create_task(_seed_project_tags())
     # 启动管理员账号初始化
     asyncio.create_task(_seed_admin_account())
+
+
+async def _startup_log_cleanup():
+    """启动期立即跑一次旧日志清理，避免历史残留撑爆磁盘。"""
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, cleanup_old_logs)
+    except Exception as _e:
+        logging.warning(f"[main] 启动期日志清理失败: {_e}")
 
 
 @app.on_event("shutdown")

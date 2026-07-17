@@ -3,8 +3,9 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { Suspense } from "react";
 
 // Elegant Count-Up Component - Animate every time it appears in the viewport
 function StatCounter({ target, suffix = "" }: { target: number | string; suffix?: string }) {
@@ -250,6 +251,11 @@ export default function Home() {
 
   return (
     <main className="pt-20 bg-background text-on-surface select-none">
+      {/* 检测 ?evicted=1，弹"被踢下线"toast。Next.js 16 要求 useSearchParams 在 Suspense 边界里 */}
+      <Suspense fallback={null}>
+        <EvictedToastHandler />
+      </Suspense>
+
       {/* TopNavBar - Covers full screen width */}
       <nav className="fixed top-0 w-full z-50 bg-surface/80 backdrop-blur-xl border-b border-white/10">
         <div className="flex justify-between items-center h-20 px-gutter max-w-container-max mx-auto w-full relative">
@@ -1094,4 +1100,24 @@ export default function Home() {
       </AnimatePresence>
     </main>
   );
+}
+
+// 检测 URL 上的 ?evicted=1，若是被踢下线而来，弹 toast 并清理 URL。
+// 单独抽出是因为 Next.js 16 静态预渲染要求 useSearchParams 必须在 <Suspense> 边界内。
+function EvictedToastHandler() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const auth = useAuth();
+
+  useEffect(() => {
+    if (searchParams.get("evicted") === "1") {
+      auth.triggerToast("您的账号已在其他设备登录，已自动退出");
+      // 清理 URL 上的 evicted=1，避免刷新/分享时再次提示
+      router.replace("/", { scroll: false });
+    }
+    // 仅在 searchParams 变化时检查一次即可
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  return null;
 }

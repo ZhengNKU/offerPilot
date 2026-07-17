@@ -16,9 +16,18 @@ RUN apt-get update \
     || apt-get install -y --no-install-recommends --fix-missing libpq-dev gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Python 依赖（清华 PyPI 镜像）
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+# 安装 Python 依赖（阿里云 PyPI 镜像）
+  COPY requirements.txt .
+  RUN pip download --no-cache-dir -r requirements.txt \
+          -d /wheels \
+          -i https://mirrors.aliyun.com/pypi/simple/ \
+          --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple \
+          --trusted-host mirrors.aliyun.com \
+          --trusted-host pypi.tuna.tsinghua.edu.cn
+  # 从本地 wheels 安装（不再走网络），装完清掉 /wheels
+  RUN pip install --no-cache-dir -r requirements.txt \
+          --no-index --find-links=/wheels \
+      && rm -rf /wheels
 
 # 复制源码
 COPY . .

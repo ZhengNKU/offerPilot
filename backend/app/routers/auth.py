@@ -51,6 +51,113 @@ async def _is_token_blacklisted(redis_client: aioredis.Redis, token: str) -> boo
         )
         return False
 
+
+def _session_key(user_id: int) -> str:
+    """单点登录：每个用户当前唯一活跃 token 的 Redis key。"""
+    return f"auth:session:{user_id}"
+
+
+def _is_multi_session_exempt(username: str | None) -> bool:
+    """判断用户名是否在单点登录豁免名单内（例如 admin）。
+
+    名单来自 settings.MULTI_SESSION_EXEMPT_USERNAMES（逗号分隔，大小写不敏感）。
+    这些账号再次签发 token 时**不会**挤掉前一会话 —— 用于调试/客服等场景。
+    """
+    if not username:
+        return False
+    exempt_list = {
+        name.strip().lower()
+        for name in settings.MULTI_SESSION_EXEMPT_USERNAMES.split(",")
+        if name.strip()
+    }
+    return username.lower() in exempt_list
+
+
+async def _revoke_token(
+    redis_client: aioredis.Redis,
+    token: str,
+    reason: str,
+    ttl_seconds: int | None = None,
+) -> None:
+    """把 token 写入黑名单，TTL 默认与 access token 有效期一致。
+
+    Redis 故障时降级日志告警但不再 raise，避免挤下线逻辑把登录流程拖死。
+    """
+    seconds = ttl_seconds or settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+    try:
+        await redis_client.setex(f"auth:blacklist:{token}", seconds, reason)
+    except RedisError as e:
+        logger.warning(
+            "[auth] 写入黑名单失败 token=%s... reason=%s err=%r",
+            token[:8], reason, e,
+        )
+
+
+async def enforce_single_session(
+    redis_client: aioredis.Redis,
+    user_id: int,
+    new_token: str,
+) -> None:
+    """单点登录策略：用户再次签发 token 时，把上一次还活着的 token 挤下线。
+
+    实现方式：
+      1. Redis 维护 `auth:session:{user_id} -> token`，TTL 与 access token 有效期一致
+      2. 签发新 token 前 GET 旧值；若旧值与新 token 不同 → 写入黑名单
+      3. SET 新值覆盖
+
+    同样的账号第二次登录时，老设备下次任何带旧 token 的请求（HTTP 或 WS）
+    都会被 `_is_token_blacklisted` 挡掉，自动 401 / WS close。
+
+    Redis 故障时降级：不做挤下线（fail-open），但登录仍然成功。这是
+    与黑名单检查一致的降级策略 —— 单点登录是体验优化，不应让 Redis 抖动
+    把登录流程拖死。
+    """
+    try:
+        session_key = _session_key(user_id)
+        old_token = await redis_client.get(session_key)
+    except RedisError as e:
+        logger.warning(
+            "[auth] 单点登录检查失败，跳过挤下线 user_id=%s err=%r",
+            user_id, e,
+        )
+        return
+
+    if old_token and old_token != new_token:
+        await _revoke_token(redis_client, old_token, reason="evicted_by_new_login")
+        logger.info(
+            "[auth] 单点登录挤下线 user_id=%s old_token=%s... → new_token=%s...",
+            user_id, (old_token or "")[:8], new_token[:8],
+        )
+
+    try:
+        await redis_client.setex(
+            session_key,
+            settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            new_token,
+        )
+    except RedisError as e:
+        logger.warning(
+            "[auth] 单点登录 session 写入失败 user_id=%s err=%r",
+            user_id, e,
+        )
+
+
+async def clear_single_session(
+    redis_client: aioredis.Redis,
+    user_id: int,
+) -> None:
+    """主动退出时清除 session 映射（logout / delete-account）。
+
+    同样 fail-open：失败仅告警，不抛出。
+    """
+    try:
+        await redis_client.delete(_session_key(user_id))
+    except RedisError as e:
+        logger.warning(
+            "[auth] 清除单点登录 session 失败 user_id=%s err=%r",
+            user_id, e,
+        )
+
 # Helper function to format UserProfile to Frontend expected structure
 def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
     p = user.profile
@@ -385,9 +492,15 @@ async def register_complete(
 
     # Clear code
     await redis_client.delete(f"auth:code:{target}")
-    
+
     # Generate token
     token = create_access_token(data={"sub": str(new_user.id)})
+
+    # 注册即视为首次登录，同样要走一遍单点登录登记（虽然不可能有旧 token，
+    # 但保持所有"签发 token 后"的逻辑统一在一处）
+    # 豁免名单账号（如 admin）跳过，不挤下线
+    if not _is_multi_session_exempt(new_user.username):
+        await enforce_single_session(redis_client, new_user.id, token)
 
     # 异步为新注册用户生成基于目标岗位的行业基准建议
     if new_profile and new_profile.target_role:
@@ -477,8 +590,14 @@ async def login(
         
     user.is_online = True
     await db.commit()
-    
+
     token = create_access_token(data={"sub": str(user.id)})
+
+    # 单点登录：挤掉该用户此前还活着的旧会话（其他设备登录被自动踢下线）
+    # 但豁免名单（默认 admin）允许多端同时在线，方便日常后台多端调试
+    if not _is_multi_session_exempt(user.username):
+        await enforce_single_session(redis_client, user.id, token)
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -494,9 +613,10 @@ async def logout(
     current_user: models.User = Depends(get_current_user)
 ):
     token = credentials.credentials
-    # 写入 token 黑名单，TTL 与 ACCESS_TOKEN_EXPIRE_MINUTES 保持一致
-    # （之前硬编码 86400 已改为从配置读取，避免 token 有效期与黑名单 TTL 漂移）
-    await redis_client.setex(f"auth:blacklist:{token}", settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, "revoked")
+    # 1. 写入 token 黑名单：当前 token 不能继续使用
+    await _revoke_token(redis_client, token, reason="logout")
+    # 2. 清除单点登录 session：避免下一次登录时被错误地当成"旧设备"挤下线
+    await clear_single_session(redis_client, current_user.id)
 
     # Set user online status to False
     current_user.is_online = False
@@ -588,10 +708,12 @@ async def delete_account(
     # Cascade delete is handled by relationship cascade option, deleting Profile
     await db.delete(current_user)
     await db.commit()
-    
+
     # Block token（TTL 与 ACCESS_TOKEN_EXPIRE_MINUTES 保持一致，理由同 /logout）
     token = credentials.credentials
-    await redis_client.setex(f"auth:blacklist:{token}", settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, "revoked")
+    await _revoke_token(redis_client, token, reason="account_deleted")
+    # 同时清理单点登录 session，防止已被删除的 user_id 残留 Redis 记录
+    await clear_single_session(redis_client, current_user.id)
 
     return {"message": "账户及关联所有分析报告已彻底注销且清除成功"}
 
