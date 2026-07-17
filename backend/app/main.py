@@ -1,8 +1,10 @@
 import asyncio
 import logging
 import os
+import posixpath
 import sys
 import uvicorn
+from logging.handlers import TimedRotatingFileHandler
 
 # asyncpg 在 Windows 上需要 SelectorEventLoop
 if sys.platform == "win32":
@@ -28,10 +30,20 @@ import time
 
 import sys
 
-# 日志同时输出到控制台和文件
+# 日志按天切块 + error 单独文件
 log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, "backend.log")
+err_file = os.path.join(log_dir, "backend-error.log")
+
+# 自定义旋转后的文件名：backend.log.2026-07-17 → backend-2026-07-17.log
+def _daily_namer(default_name):
+    dir_name = posixpath.dirname(default_name)
+    base = posixpath.basename(default_name)
+    if ".log." in base:
+        name_part, date_part = base.rsplit(".log.", 1)
+        return posixpath.join(dir_name, f"{name_part}-{date_part}.log")
+    return default_name
 
 # Windows 控制台 UTF-8 编码修复（解决中文乱码）
 if sys.platform == "win32":
@@ -47,10 +59,44 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
-# 再添加文件 handler（避免被 uvicorn 覆盖）
-file_handler = logging.FileHandler(log_file, encoding="utf-8")
-file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-logging.getLogger().addHandler(file_handler)
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+# 全量日志 handler（按天切，保留 30 天）
+all_handler = TimedRotatingFileHandler(
+    filename=log_file,
+    when="midnight",
+    interval=1,
+    backupCount=30,
+    encoding="utf-8",
+    utc=False,  # 用本地时区（依赖容器 TZ=Asia/Shanghai）
+)
+all_handler.namer = _daily_namer
+all_handler.setFormatter(formatter)
+logging.getLogger().addHandler(all_handler)
+
+# 错误日志 handler（按天切，只记 ERROR 及以上）
+err_handler = TimedRotatingFileHandler(
+    filename=err_file,
+    when="midnight",
+    interval=1,
+    backupCount=30,
+    encoding="utf-8",
+    utc=False,
+)
+err_handler.namer = _daily_namer
+err_handler.setLevel(logging.ERROR)
+err_handler.setFormatter(formatter)
+logging.getLogger().addHandler(err_handler)
+
+# 启动时立即轮转一次：把当前 backend.log / backend-error.log 改名为带日期的文件
+# 这样今天的日志会进 backend-YYYY-MM-DD.log，新文件从空开始
+try:
+    if os.path.exists(log_file) and os.path.getsize(log_file) > 0:
+        all_handler.doRollover()
+    if os.path.exists(err_file) and os.path.getsize(err_file) > 0:
+        err_handler.doRollover()
+except Exception as _e:
+    logging.warning(f"[main] 日志启动轮转失败: {_e}")
 
 # 抑制 watchfiles 的 verbose 日志
 logging.getLogger("watchfiles").setLevel(logging.WARNING)

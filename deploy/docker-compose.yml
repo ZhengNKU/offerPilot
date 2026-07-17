@@ -6,6 +6,7 @@ services:
       POSTGRES_USER: offerpilot
       POSTGRES_PASSWORD: offerPilot@2026
       POSTGRES_DB: offerpilot
+      TZ: Asia/Shanghai
     ports:
       - "5432:5432"
     volumes:
@@ -19,6 +20,7 @@ services:
     # PG 内存参数适配 384MB 容器上限
     command: >
       postgres
+      -c timezone=Asia/Shanghai
       -c shared_buffers=64MB
       -c effective_cache_size=192MB
       -c maintenance_work_mem=32MB
@@ -33,6 +35,8 @@ services:
     image: redis:7-alpine
     container_name: offerpilot-redis
     command: redis-server --appendonly yes --maxmemory 100mb --maxmemory-policy allkeys-lru --requirepass offerPilot@2026
+    environment:
+      TZ: Asia/Shanghai
     ports:
       - "6379:6379"
     volumes:
@@ -62,6 +66,7 @@ services:
       - ../backend/.env
     environment:
       - PYTHONUNBUFFERED=1
+      - TZ=Asia/Shanghai
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,6 +89,8 @@ services:
         PROJECT_VERSION: ${PROJECT_VERSION:-V0.0.0}
     container_name: offerpilot-frontend
     restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
     deploy:
       resources:
         limits:
@@ -99,6 +106,8 @@ services:
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
+    environment:
+      - TZ=Asia/Shanghai
     depends_on:
       - backend
       - frontend
