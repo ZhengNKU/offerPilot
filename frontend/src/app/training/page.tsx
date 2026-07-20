@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { useRealtimeSession } from "@/app/utils/useRealtimeSession";
 import { useRealtimeAudio } from "./hooks/useRealtimeAudio";
 import { API_BASE } from "@/lib/api";
@@ -106,7 +107,8 @@ function InterviewTrainingPageContent() {
   const [countdownNum, setCountdownNum] = useState(3);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
-  const [showNormsModal, setShowNormsModal] = useState(false);
+  // 内测版本：删除"训练规范与用户权益" Modal，对应 state 注释掉
+  // const [showNormsModal, setShowNormsModal] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackKind, setFeedbackKind] = useState<"tech_question" | "voice" | "ux" | "other">("tech_question");
   // PR6 配额：会员等级 + 当月已用 + 限额
@@ -680,6 +682,7 @@ function InterviewTrainingPageContent() {
             <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">职业记忆看板</a>
             <a onClick={() => router.push("/training")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">面试训练场</a>
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">职业驾驶舱</a>
+            <a onClick={() => window.open("/guide", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">面试指南</a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">体验反馈中心</a>
           </div>
           <div className="flex items-center gap-4">
@@ -969,15 +972,9 @@ function InterviewTrainingPageContent() {
                     </div>
                     {/* PR6: 配额 chip */}
                     {quota && auth.isLoggedIn && (
-                      <div className={`shrink-0 px-2.5 py-1 rounded-full border text-[10px] font-black flex items-center gap-1 ${
-                        (quota.membership === "pro" || quota.membership === "max")
-                          ? "bg-tertiary/10 border-tertiary/30 text-tertiary"
-                          : "bg-secondary/10 border-secondary/30 text-secondary"
-                      }`}>
-                        <span className="material-symbols-outlined text-xs">
-                          {quota.membership === "max" ? "diamond" : quota.membership === "pro" ? "workspace_premium" : "schedule"}
-                        </span>
-                        {quota.used_min}/{quota.limit_min} 分钟
+                      <div className="shrink-0 px-2.5 py-1 rounded-full border border-tertiary/30 bg-tertiary/10 text-tertiary text-[10px] font-black flex items-center gap-1">
+                        <span className="material-symbols-outlined text-xs">science</span>
+                        内测 · {quota.used_min}/{quota.limit_min} 分钟
                       </div>
                     )}
                   </div>
@@ -1127,9 +1124,7 @@ function InterviewTrainingPageContent() {
                       重新开始
                     </button>
                   )}
-                  <span onClick={() => setShowNormsModal(true)} className="text-xs font-bold text-on-surface-variant/30 hover:text-white transition-colors cursor-pointer text-center block">
-                    开始即表示同意 <span className="text-primary hover:underline">训练规范与用户权益 →</span>
-                  </span>
+                  {/* 内测版本：删除"开始即表示同意 训练规范与用户权益" 文本（对应 modal 已删除） */}
                 </div>
               </div>
             </div>
@@ -1333,9 +1328,7 @@ function InterviewTrainingPageContent() {
                 {isLive && (
                   <div className="border-t border-white/5 pt-5 space-y-4 flex-1 flex flex-col min-h-0 text-left">
                     <div className="flex items-center gap-5 border-b border-white/5 pb-2 font-black text-xs md:text-[13px] select-none shrink-0">
-                      <span className="text-white border-b-2 border-primary pb-2 cursor-pointer relative z-10">实时对话</span>
-                      <span className="text-on-surface-variant/45 cursor-not-allowed" title="PR5 接入">面试笔记</span>
-                      <span className="text-on-surface-variant/45 cursor-not-allowed" title="PR5 接入">AI 建议</span>
+                      <span className="text-white border-b-2 border-primary pb-2 relative z-10">实时对话</span>
                     </div>
                     <div ref={transcriptContainerRef} className="space-y-3 flex-1 overflow-y-auto pr-1 min-h-0 max-h-[560px] scrollbar-thin scrollbar-thumb-white/10">
                       {transcript.length === 0 && (
@@ -1537,12 +1530,12 @@ function InterviewTrainingPageContent() {
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 面试VAR AI. All rights reserved.
+            © 2026 面试VAR. All rights reserved.
           </span>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">服务条款</span>
-            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">隐私政策</span>
-            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">联系方式</span>
+            <span onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer select-none">服务条款</span>
+            <span onClick={() => openLegalPrivacy()} className="hover:text-primary transition-colors cursor-pointer select-none">隐私政策</span>
+            <span onClick={() => openLegalContact()} className="hover:text-primary transition-colors cursor-pointer select-none">联系方式</span>
           </div>
         </div>
       </footer>
@@ -1578,135 +1571,7 @@ function InterviewTrainingPageContent() {
         )}
       </AnimatePresence>
 
-      {/* 训练规范与用户权益 Modal */}
-      <AnimatePresence>
-        {showNormsModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowNormsModal(false)} className="absolute inset-0 bg-[#050B1A]/80 backdrop-blur-md" />
-            <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }} className="bg-[#0e1626]/95 border border-white/10 rounded-3xl max-w-2xl w-full text-left relative z-10 shadow-2xl max-h-[85vh] flex flex-col overflow-hidden">
-              {/* 固定 header（不参与滚动） */}
-              <div className="shrink-0 flex justify-between items-center px-6 pt-5 pb-3 border-b border-white/5 bg-[#0e1626]">
-                <h3 className="font-extrabold text-white text-lg flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary">policy</span>
-                  训练规范与用户权益
-                </h3>
-                <button onClick={() => setShowNormsModal(false)} className="text-white/40 hover:text-white transition-colors cursor-pointer flex items-center justify-center w-8 h-8 rounded-lg hover:bg-white/5">
-                  <span className="material-symbols-outlined text-lg">close</span>
-                </button>
-              </div>
-
-              {/* 滚动内容区（flex-1 + overflow-y-auto） */}
-              <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5 text-sm text-on-surface-variant leading-relaxed font-medium scrollbar-thin scrollbar-thumb-white/10">
-                {/* 1. 服务说明 */}
-                <section>
-                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-primary text-base">info</span>
-                    1. 服务说明
-                  </h4>
-                  <p>
-                    「面试训练场」是基于豆包实时语音大模型（火山引擎）提供的 AI 模拟面试服务。
-                    候选人可在浏览器中与 AI 面试官进行实时语音对话，AI 基于岗位画像提问、追问并给出反馈。
-                  </p>
-                </section>
-
-                {/* 2. 数据采集与隐私 */}
-                <section>
-                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-tertiary text-base">verified_user</span>
-                    2. 数据采集与隐私保护
-                  </h4>
-                  <ul className="list-disc pl-5 space-y-1.5">
-                    <li>面试中浏览器采集的<strong className="text-white">麦克风音频仅在本地加密传输到火山引擎</strong>用于实时识别，<strong className="text-white">不会上传到服务器</strong>。</li>
-                    <li>面试结束<strong className="text-white">仅在分析完成后</strong>，识别出的<strong className="text-white">文字</strong>会被持久化到数据库，用于生成报告。</li>
-                    <li>原始音频 PCM 流<strong className="text-white">不会被录制</strong>、不会被保存。</li>
-                    <li>所有数据按会员等级对应的<strong className="text-white">保留期</strong>自动清理（免费 7 天 / PRO 30 天 / MAX 120 天）。</li>
-                  </ul>
-                </section>
-
-                {/* 3. AI 回复免责 */}
-                <section>
-                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-secondary text-base">warning</span>
-                    3. AI 回复免责声明
-                  </h4>
-                  <p>
-                    AI 面试官的回答由大模型实时生成，<strong className="text-white">可能存在事实性错误、逻辑偏差或不恰当表达</strong>。
-                    面试VAR 不保证 AI 反馈的绝对准确性，所有报告<strong className="text-white">仅供求职者练习参考</strong>，
-                    不构成任何职业建议或录用承诺。
-                  </p>
-                </section>
-
-                {/* 4. 时长统计与计费 */}
-                <section>
-                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-amber-400 text-base">schedule</span>
-                    4. 时长统计与计费规则
-                  </h4>
-                  <ul className="list-disc pl-5 space-y-1.5">
-                    <li>系统按<strong className="text-white">自然周和自然月</strong>统计实时面试总时长，单位为分钟。</li>
-                    <li><strong className="text-white">用户提前结束面试也会正常计入时长和归档分析</strong>，不退款。</li>
-                    <li>免费会员：<strong className="text-white">0 分钟</strong>（不可使用实时模拟面试）。</li>
-                    <li>PRO 会员：每月 <strong className="text-white">60 分钟</strong> 上限。</li>
-                    <li>MAX 会员：每月 <strong className="text-white">120 分钟</strong> 上限。</li>
-                    <li>超出上限的实时面试请求将被拒绝，但已开始的会话不受影响。</li>
-                  </ul>
-                </section>
-
-                {/* 5. 用户行为规范 */}
-                <section>
-                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-secondary text-base">gavel</span>
-                    5. 用户行为规范
-                  </h4>
-                  <p>禁止以下行为，违者将被永久封禁且不予退款：</p>
-                  <ul className="list-disc pl-5 space-y-1.5">
-                    <li>用脚本、机器人、伪造身份等手段滥用服务。</li>
-                    <li>对 AI 面试官进行恶意诱导、Prompt 注入或试图越权获取系统信息。</li>
-                    <li>录制、转售、公开分享本服务的输出内容用于商业用途。</li>
-                    <li>利用本服务生成违法违规、歧视性或骚扰性内容。</li>
-                  </ul>
-                </section>
-
-                {/* 6. 退款与售后 */}
-                <section>
-                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-primary text-base">support_agent</span>
-                    6. 退款与售后
-                  </h4>
-                  <p>
-                    付费会员开通后<strong className="text-white">7 天内未使用实时模拟面试</strong>（用量为 0 分钟）可申请全额退款；
-                    已使用部分按 PRO 0.5 元/分钟、MAX 0.3 元/分钟扣除。技术问题请联系
-                    <a className="text-primary hover:underline ml-1" href="mailto:support@interviewvar.com">interviewvvar@163.com</a>。
-                  </p>
-                </section>
-
-                {/* 7. 协议变更 */}
-                <section>
-                  <h4 className="text-white font-black text-base mb-2 flex items-center gap-2">
-                    <span className="material-symbols-outlined text-on-surface-variant text-base">edit_note</span>
-                    7. 协议变更
-                  </h4>
-                  <p>
-                    面试VAR 保留根据法律法规变化或业务调整需要修订本规范的权利。
-                    重大变更将通过站内信、邮件或登录页弹窗提前 7 天通知。
-                    继续使用即视为接受修订后的规范。
-                  </p>
-                </section>
-              </div>
-
-              {/* 固定 footer（不参与滚动） */}
-              <div className="shrink-0 flex justify-between items-center px-6 py-3 border-t border-white/5 bg-[#0e1626]">
-                <span className="text-[10px] text-on-surface-variant/40 font-mono">
-                  最后更新：2026-06-19 · v1.0
-                </span>
-                <button onClick={() => setShowNormsModal(false)} className="px-5 py-2 bg-primary text-on-primary text-sm font-black rounded-xl hover:scale-[1.02] active:scale-98 transition-all cursor-pointer">
-                  我已阅读并同意
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      {/* 内测版本：删除"训练规范与用户权益" Modal（含 PRO/MAX 价格、7 天退款文案等内测不适用的信息） */}
 
       {/* 反馈 Modal */}
       <AnimatePresence>

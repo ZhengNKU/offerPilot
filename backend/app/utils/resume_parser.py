@@ -106,11 +106,18 @@ _WORK_SECTION_KEYS = (
     "工作经历", "工作经验", "职业经历", "任职经历", "employment",
     "work experience", "professional experience", "experience",
 )
+_INTERN_SECTION_KEYS = (
+    "实习经历", "实习经验", "internship",
+)
 _NEXT_SECTION_KEYS = (
     "教育背景", "教育经历", "项目经历", "项目经验", "专业技能", "技能",
     "自我评价", "兴趣爱好", "获奖", "证书", "语言",
     "education", "projects", "skills", "awards", "certifications",
     "summary", "interests",
+    # 工作经历和实习经历互相作为边界，避免重叠解析
+    "工作经历", "工作经验", "职业经历", "任职经历", "employment",
+    "work experience", "professional experience", "experience",
+    "实习经历", "实习经验", "internship",
 )
 
 _BULLET_PREFIX_RE = re.compile(r"^[\s　]*[•·●○■□◆◇▶▷\-–—\*]\s*")
@@ -178,12 +185,15 @@ def _parse_profile(lines: list[str], full_text: str) -> dict:
         elif years:
             profile["years"] = f"{years}年"
 
-    # name: 前 5 行第一个 2-4 字纯中文独立行
+    # name: 前 5 行第一个 2-4 字纯中文独立行（过滤掉常见的标题/栏目头）
+    _EXCLUDE_NAME_HEADERS = {"基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料", "教育背景", "工作经历", "项目经历", "专业技能", "联系方式"}
     for line in lines[:5]:
         m = _NAME_LINE_RE.match(line)
         if m:
-            profile["name"] = m.group(1)
-            break
+            val = m.group(1).strip()
+            if val not in _EXCLUDE_NAME_HEADERS:
+                profile["name"] = val
+                break
 
     return profile
 
@@ -386,9 +396,20 @@ def parse_resume_structure(text: str) -> dict:
     """主入口。返回 {profile, work_experiences}，所有字段原文 verbatim。"""
     lines = text.split("\n")
 
+    # 分别解析工作经历和实习经历，合并到 work_experiences
     work_start, work_end = _find_section_bounds(lines, _WORK_SECTION_KEYS)
-    work_section = lines[work_start + 1: work_end] if work_start is not None else []
-    work_experiences = _parse_work_experiences(work_section)
+    intern_start, intern_end = _find_section_bounds(lines, _INTERN_SECTION_KEYS)
+
+    work_experiences: list[dict] = []
+    if work_start is not None:
+        work_section = lines[work_start + 1: work_end]
+        work_experiences.extend(_parse_work_experiences(work_section))
+    if intern_start is not None:
+        # 如果工作经历 section 已覆盖实习内容，避免重复解析
+        if work_start is None or intern_start < work_start or intern_start >= (work_end or 0):
+            intern_section = lines[intern_start + 1: intern_end]
+            work_experiences.extend(_parse_work_experiences(intern_section))
+        # else: 实习在 work section 内部，已被工作经历解析覆盖，跳过
 
     profile = _parse_profile(lines, text)
 

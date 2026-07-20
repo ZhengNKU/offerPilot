@@ -23,6 +23,8 @@ from app.services.quota import (
     get_status,
 )
 
+from app.utils.privacy import desensitize_text
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/audio", tags=["Audio Analysis"])
@@ -266,8 +268,9 @@ async def create_record_session(
         await db.commit()
         await db.refresh(session)
 
-    # Parse and save transcript
-    segments = parse_dialogue_to_segments(req.paste_text)
+    # Parse and save transcript (with privacy desensitization)
+    cleaned_text = desensitize_text(req.paste_text)
+    segments = parse_dialogue_to_segments(cleaned_text)
     transcript = models.InterviewTranscript(
         session_id=session.id,
         data=segments
@@ -368,6 +371,12 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
                 pass
 
     _set_progress(45, "processing")
+
+    # ── Step 2.1: 隐私脱敏处理 (2026-07-20+) ─────────────────────────────────
+    if raw_segments:
+        for seg in raw_segments:
+            if "content" in seg and isinstance(seg["content"], str):
+                seg["content"] = desensitize_text(seg["content"])
 
     # ── Step 2.0: 预热(纯 CPU/DB,无 LLM) ───────────────────────────────────
     #              把 analyze_interview_dialogue 需要的 dialogue_text 和

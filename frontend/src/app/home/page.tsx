@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { API_BASE } from "@/lib/api";
 import { getQuotaStatus } from "@/lib/quotaClient";
 
@@ -58,16 +59,6 @@ export default function CareerDashboard() {
   const [recentActivity, setRecentActivity] = useState<TimelineItem[]>([]);
   const [quotaStatus, setQuotaStatus] = useState<any>(null);
   const [liveQuota, setLiveQuota] = useState<any>(null);
-
-  // 获取下月1号重置日期
-  const getNextMonthFirstDay = () => {
-    const d = new Date();
-    const nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 1);
-    const y = nextMonth.getFullYear();
-    const m = String(nextMonth.getMonth() + 1).padStart(2, '0');
-    const r = String(nextMonth.getDate()).padStart(2, '0');
-    return `${y}-${m}-${r}`;
-  };
 
   // 最近活动 & 资源配额获取
   useEffect(() => {
@@ -129,7 +120,6 @@ export default function CareerDashboard() {
   // Modals visibility
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showEditGoalModal, setShowEditGoalModal] = useState(false);
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showEditSecurityModal, setShowEditSecurityModal] = useState(false);
   const [avatarError, setAvatarError] = useState(false);
 
@@ -137,13 +127,11 @@ export default function CareerDashboard() {
   const [profileForm, setProfileForm] = useState({ ...profile, tagsString: profile.tags.join(", ") });
   const [goalForm, setGoalForm] = useState({ ...careerGoal });
   const [securityForm, setSecurityForm] = useState({ ...accountSecurity });
-  const [securityTab, setSecurityTab] = useState<"email" | "phone">("phone");
+  const [securityTab, setSecurityTab] = useState<"email">("email");
 
   // Verification states for security edits
   const [emailCountdown, setEmailCountdown] = useState(0);
-  const [phoneCountdown, setPhoneCountdown] = useState(0);
   const [emailCode, setEmailCode] = useState("");
-  const [phoneCode, setPhoneCode] = useState("");
 
 
   // ── Modal open handlers (reset form state from current data) ──
@@ -166,29 +154,15 @@ export default function CareerDashboard() {
   const handleOpenSecurityModal = () => {
     setSecurityForm({ ...accountSecurity });
     setEmailCode("");
-    setPhoneCode("");
     setEmailCountdown(0);
-    setPhoneCountdown(0);
-    setSecurityTab("phone");
+    setSecurityTab("email");
     setShowEditSecurityModal(true);
   };
 
   const handleCloseSecurityModal = () => {
     setEmailCode("");
-    setPhoneCode("");
     setEmailCountdown(0);
-    setPhoneCountdown(0);
     setShowEditSecurityModal(false);
-  };
-
-  const handleSecurityTabChange = (tab: "email" | "phone") => {
-    if (tab !== securityTab) {
-      setEmailCode("");
-      setPhoneCode("");
-      setEmailCountdown(0);
-      setPhoneCountdown(0);
-      setSecurityTab(tab);
-    }
   };
 
   // ── Countdown timers ──
@@ -202,17 +176,64 @@ export default function CareerDashboard() {
     return () => clearInterval(interval);
   }, [emailCountdown]);
 
-  useEffect(() => {
-    let interval: any;
-    if (phoneCountdown > 0) {
-      interval = setInterval(() => {
-        setPhoneCountdown(prev => prev - 1);
-      }, 1000);
+  const handleSaveSecurity = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = localStorage.getItem("interviewVar_token");
+    if (!token) {
+      auth.triggerToast("未登录或会话已过期，请重新登录！");
+      return;
     }
-    return () => clearInterval(interval);
-  }, [phoneCountdown]);
 
-  // Synchronize search params and highlights (History navbar action)
+    const isEmail = securityTab === "email";
+    const value = isEmail ? securityForm.email : securityForm.phone;
+    const verify_code = isEmail ? emailCode : phoneCode;
+
+    if (!value) {
+      auth.triggerToast(isEmail ? "请输入邮箱地址！" : "请输入手机号码！");
+      return;
+    }
+    if (!verify_code) {
+      auth.triggerToast("请输入验证码！");
+      return;
+    }
+    try {
+      const token = localStorage.getItem("interviewVar_token");
+      if (!token) {
+        auth.triggerToast("未登录或会话已过期，请重新登录！");
+        return;
+      }
+      const body = {
+        type: isEmail ? "email" : "phone",
+        value,
+        verify_code,
+        new_password: securityForm.password || null,
+      };
+      const res = await fetch(`${API_BASE}/api/auth/security/update`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        auth.triggerToast(errData.detail || "安全信息修改失败，请核对输入！");
+        return;
+      }
+      setAccountSecurity(prev => ({
+        ...prev,
+        email: securityForm.email,
+        phone: securityForm.phone,
+        password: "",
+      }));
+      auth.triggerToast("修改成功！");
+      handleCloseSecurityModal();
+    } catch (err) {
+      auth.triggerToast("无法连接到后端服务！");
+    }
+  };
+
   const handleHistoryRedirect = () => {
     router.push("/memory?tab=timeline");
   };
@@ -545,90 +566,6 @@ export default function CareerDashboard() {
     }
   };
 
-  const handleGetSecurityPhoneCode = async () => {
-    if (!securityForm.phone) {
-      auth.triggerToast("请输入手机号码！");
-      return;
-    }
-    const phoneRegex = /^1[3-9]\d{9}$/;
-    if (!phoneRegex.test(securityForm.phone)) {
-      auth.triggerToast("请输入正确的手机号格式！");
-      return;
-    }
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/send-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "phone", target: securityForm.phone })
-      });
-      if (!res.ok) {
-        const errData = await res.json();
-        auth.triggerToast(errData.detail || "发送验证码失败！");
-        return;
-      }
-      setPhoneCountdown(60);
-      auth.triggerToast("验证码已发送，请查收！");
-    } catch (e) {
-      auth.triggerToast("无法连接到后端服务！");
-    }
-  };
-
-  const handleSaveSecurity = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const token = localStorage.getItem("interviewVar_token");
-    if (!token) {
-      auth.triggerToast("未登录或会话已过期，请重新登录！");
-      return;
-    }
-
-    const isEmail = securityTab === "email";
-    const value = isEmail ? securityForm.email : securityForm.phone;
-    const verify_code = isEmail ? emailCode : phoneCode;
-
-    if (!value) {
-      auth.triggerToast(isEmail ? "请输入邮箱地址！" : "请输入手机号码！");
-      return;
-    }
-    if (!verify_code) {
-      auth.triggerToast("请输入验证码！");
-      return;
-    }
-
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/security/update`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          update_type: securityTab,
-          value: value,
-          verify_code: verify_code,
-          new_password: securityForm.password || null
-        })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        auth.triggerToast(errData.detail || "安全信息修改失败，请核对输入！");
-        return;
-      }
-
-      setAccountSecurity(prev => ({
-        ...prev,
-        email: securityForm.email,
-        phone: securityForm.phone,
-        password: ""
-      }));
-
-      auth.triggerToast("修改成功！");
-      handleCloseSecurityModal();
-    } catch (err) {
-      auth.triggerToast("无法连接到后端服务！");
-    }
-  };
-
   return (
     <div className="min-h-screen bg-background text-on-background font-body-md flex flex-col relative overflow-hidden select-none pt-20">
       
@@ -672,6 +609,9 @@ export default function CareerDashboard() {
             </a>
             <a onClick={() => router.push("/home")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
               职业驾驶舱
+            </a>
+            <a onClick={() => router.push("/guide")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试指南
             </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
@@ -777,6 +717,9 @@ export default function CareerDashboard() {
                   </span>
                   <span className="px-3.5 py-1 rounded-full bg-tertiary/10 text-tertiary text-xs md:text-sm font-black border border-tertiary/20 whitespace-nowrap">
                     {profile.status}
+                  </span>
+                  <span className="px-3 py-1 rounded-full bg-purple-500/10 text-purple-300 text-xs md:text-sm font-black border border-purple-500/20 whitespace-nowrap">
+                    内测用户
                   </span>
                 </div>
 
@@ -922,65 +865,21 @@ export default function CareerDashboard() {
               </div>
             </div>
 
-            {/* WIDGET 2: MEMBERSHIP PLANS */}
+            {/* WIDGET 2: BETA STATUS */}
             <div className="col-span-12 md:col-span-4 flex flex-col h-full">
               <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-4.5 relative overflow-hidden hover:border-secondary/20 transition-all duration-300">
-                
-                {/* 3D Crystalline vector elements in background */}
-                <div className="absolute right-[-10px] top-[15%] w-32 h-32 opacity-15 pointer-events-none z-0">
-                  <svg className="w-full h-full text-secondary animate-pulse" viewBox="0 0 100 100" fill="currentColor">
-                    <polygon points="50,0 93,25 93,75 50,100 7,75 7,25" fill="none" stroke="currentColor" strokeWidth="2" />
-                    <line x1="50" y1="0" x2="50" y2="100" stroke="currentColor" strokeWidth="1" />
-                    <line x1="7" y1="25" x2="93" y2="75" stroke="currentColor" strokeWidth="1" />
-                    <line x1="7" y1="75" x2="93" y2="25" stroke="currentColor" strokeWidth="1" />
-                  </svg>
-                </div>
-                <div className="absolute right-[10px] top-[30%] w-16 h-16 bg-secondary/10 rounded-full blur-xl pointer-events-none" />
 
                 <div className="flex justify-between items-center pb-2.5 border-b border-white/5 relative z-10">
                   <h4 className="text-base font-black text-white flex items-center gap-2">
-                    <span className="material-symbols-outlined text-lg text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>workspace_premium</span>
-                    当前会员
+                    <span className="material-symbols-outlined text-lg text-secondary">science</span>
+                    当前账号状态
                   </h4>
-                  <span className="px-2.5 py-0.5 rounded bg-secondary/15 text-secondary text-[11px] font-black border border-secondary/20">当前套餐</span>
                 </div>
 
                 <div className="space-y-3.5 flex-1 flex flex-col justify-center relative z-10">
-                  <div className="flex items-baseline gap-2.5">
-                    <h3 className="text-2xl font-black text-white font-label-mono">PRO 会员</h3>
-                    <span className="text-sm text-on-surface-variant/45 font-bold">有效期至 2026-07-01</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm text-on-surface-variant/75 font-semibold leading-relaxed">
-                    {[
-                      { l: "面试录音分析", ok: true },
-                      { l: "AI 模拟面试", ok: true },
-                      { l: "面试记录分析", ok: true },
-                      { l: "职业记忆系统", ok: true },
-                      { l: "简历深度优化", ok: true },
-                      { l: "专属职业顾问", ok: true }
-                    ].map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-1.5 whitespace-nowrap">
-                        <span className="material-symbols-outlined text-sm text-tertiary" style={{ fontVariationSettings: "'wght' 700" }}>check_circle</span>
-                        <span>{item.l}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-2.5 relative z-10">
-                  <button
-                    onClick={() => setShowUpgradeModal(true)}
-                    className="w-full py-2.5 bg-gradient-to-r from-secondary to-primary text-on-primary text-sm font-black rounded-xl hover:scale-[1.01] active:scale-98 transition-all shadow-md shadow-secondary/25 cursor-pointer text-center"
-                  >
-                    升级会员
-                  </button>
-                  <span 
-                    onClick={() => setShowUpgradeModal(true)}
-                    className="text-sm font-black text-primary hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1 mt-2.5"
-                  >
-                    查看所有会员权益 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
-                  </span>
+                  <p className="text-sm text-on-surface-variant/70 leading-relaxed font-semibold">
+                    当前正处于内部测试阶段，会员体系暂未开放。系统将根据你的内测反馈持续优化体验，正式上线后将第一时间通知。
+                  </p>
                 </div>
               </div>
             </div>
@@ -1005,17 +904,20 @@ export default function CareerDashboard() {
                 {/* Circular Quota meters in 2x2 grids */}
                 <div className="grid grid-cols-2 gap-3.5 flex-1 items-center">
                   {(() => {
-                    const audioRemaining = quotaStatus?.audio?.remaining ?? (auth.isLoggedIn ? 0 : 1);
-                    const audioTotal = quotaStatus?.audio?.max ?? (auth.isLoggedIn ? 0 : 1);
+                    // 内测版本：fallback 统一用 test 档额度（2 / 5 / 5 / 20 分钟），
+                    // 避免未登录或接口异常时回退到 FREE 1 次让用户误以为额度极小。
+                    const TEST_QUOTA = { audio: 2, record: 5, resume: 5, live: 20 };
+                    const audioRemaining = quotaStatus?.audio?.remaining ?? TEST_QUOTA.audio;
+                    const audioTotal = quotaStatus?.audio?.max ?? TEST_QUOTA.audio;
 
-                    const recordRemaining = quotaStatus?.record?.remaining ?? (auth.isLoggedIn ? 0 : 1);
-                    const recordTotal = quotaStatus?.record?.max ?? (auth.isLoggedIn ? 0 : 1);
+                    const recordRemaining = quotaStatus?.record?.remaining ?? TEST_QUOTA.record;
+                    const recordTotal = quotaStatus?.record?.max ?? TEST_QUOTA.record;
 
-                    const resumeRemaining = quotaStatus?.resume?.remaining ?? (auth.isLoggedIn ? 0 : 1);
-                    const resumeTotal = quotaStatus?.resume?.max ?? (auth.isLoggedIn ? 0 : 1);
+                    const resumeRemaining = quotaStatus?.resume?.remaining ?? TEST_QUOTA.resume;
+                    const resumeTotal = quotaStatus?.resume?.max ?? TEST_QUOTA.resume;
 
-                    const liveRemaining = liveQuota?.remaining_min ?? 0;
-                    const liveTotal = liveQuota?.limit_min ?? 0;
+                    const liveRemaining = liveQuota?.remaining_min ?? TEST_QUOTA.live;
+                    const liveTotal = liveQuota?.limit_min ?? TEST_QUOTA.live;
 
                     const quotas = [
                       { label: "录音分析", remaining: audioRemaining, total: audioTotal, unit: "次", color: "stroke-[#4edea3]", textStyle: "text-[#4edea3]", icon: "graphic_eq" },
@@ -1060,13 +962,6 @@ export default function CareerDashboard() {
                       );
                     });
                   })()}
-                </div>
-
-                <div className="border-t border-white/5 pt-3.5 flex justify-between items-center text-xs text-on-surface-variant/40 font-extrabold font-label-mono">
-                  <span className="flex items-center gap-1">
-                    <span className="material-symbols-outlined text-xs">info</span>
-                    额度重置日期: {getNextMonthFirstDay()}
-                  </span>
                 </div>
 
               </div>
@@ -1198,45 +1093,22 @@ export default function CareerDashboard() {
               </div>
             </div>
 
-            {/* WIDGET 6: BILLS AND INVOICES */}
+            {/* WIDGET 6: TESTING NOTES */}
             <div className="col-span-12 md:col-span-4 flex flex-col h-full">
               <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-start gap-4 hover:border-tertiary/20 transition-all duration-300">
-                
+
                 <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
                   <h4 className="text-base font-black text-white flex items-center gap-2">
-                    <span className="material-symbols-outlined text-lg text-tertiary" style={{ fontVariationSettings: "'FILL' 1" }}>receipt_long</span>
-                    账单与订单
+                    <span className="material-symbols-outlined text-lg text-tertiary">info</span>
+                    内测说明
                   </h4>
-                  <span 
-                    onClick={() => setShowUpgradeModal(true)}
-                    className="text-sm text-tertiary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-1"
-                  >
-                    查看全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
-                  </span>
                 </div>
 
-                {/* Orders billing list */}
-                <div className="space-y-3.5 py-1 mt-[-2px]">
-                  {[
-                    { date: "2026-05-01", type: "PRO 会员 (月付)", price: "¥39", status: "已支付" },
-                    { date: "2026-04-01", type: "MAX 会员 (月付)", price: "¥99", status: "已支付" }
-                  ].map((bill, i) => (
-                    <div key={i} className="flex justify-between items-center py-4.5 px-4.5 rounded-2xl bg-white/[0.01] border border-white/5">
-                      <div className="text-left space-y-0.5 min-w-0 pr-3">
-                        <span className="text-xs text-on-surface-variant/40 font-label-mono font-bold block">{bill.date}</span>
-                        <span className="text-sm font-black text-white block leading-snug truncate">{bill.type}</span>
-                      </div>
-                      
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="text-sm font-black text-white font-label-mono">{bill.price}</span>
-                        <span className="px-2 py-0.5 rounded bg-tertiary/10 text-tertiary text-[11px] font-black border border-tertiary/20">
-                          {bill.status}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
+                <div className="flex-1 flex items-center py-2">
+                  <p className="text-sm text-on-surface-variant/70 leading-relaxed font-semibold my-auto">
+                    内测期间所有功能免费使用，不产生任何订单或费用。正式计费策略上线前，会通过站内信与邮件提前通知。
+                  </p>
                 </div>
-
               </div>
             </div>
 
@@ -1303,16 +1175,16 @@ export default function CareerDashboard() {
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 面试VAR AI. All rights reserved.
+            © 2026 面试VAR. All rights reserved.
           </span>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">
+            <span onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer select-none">
               服务条款
             </span>
-            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">
+            <span onClick={() => openLegalPrivacy()} className="hover:text-primary transition-colors cursor-pointer select-none">
               隐私政策
             </span>
-            <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">
+            <span onClick={() => openLegalContact()} className="hover:text-primary transition-colors cursor-pointer select-none">
               联系方式
             </span>
           </div>
@@ -1701,102 +1573,40 @@ export default function CareerDashboard() {
               </div>
 
               <form onSubmit={handleSaveSecurity} className="space-y-4 text-sm font-semibold text-white">
-                
-                {/* Tab switchers matching Forgot Password style (Phone first, Email second) */}
-                <div className="flex bg-[#050B1A] p-1.5 rounded-xl border border-white/5 font-bold text-sm select-none">
-                  <button
-                    type="button"
-                    onClick={() => handleSecurityTabChange("phone")}
-                    className={`flex-1 py-2.5 rounded-lg text-center transition-all cursor-pointer ${
-                      securityTab === "phone" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
-                    }`}
-                  >
-                    手机修改
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleSecurityTabChange("email")}
-                    className={`flex-1 py-2.5 rounded-lg text-center transition-all cursor-pointer ${
-                      securityTab === "email" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
-                    }`}
-                  >
-                    邮箱修改
-                  </button>
+
+                <div className="space-y-1.5">
+                  <label className="text-on-surface-variant/60 font-bold block">邮箱地址 <span className="text-[#FF7A95]">*</span></label>
+                  <input
+                    type="email"
+                    required
+                    value={securityForm.email}
+                    onChange={(e) => setSecurityForm({ ...securityForm, email: e.target.value })}
+                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-[#AFA7FF]/40 text-sm text-white placeholder-white/20"
+                  />
                 </div>
 
-                {securityTab === "email" ? (
-                  <>
-                    <div className="space-y-1.5">
-                      <label className="text-on-surface-variant/60 font-bold block">邮箱地址 <span className="text-[#FF7A95]">*</span></label>
-                      <input
-                        type="email"
-                        required
-                        value={securityForm.email}
-                        onChange={(e) => setSecurityForm({ ...securityForm, email: e.target.value })}
-                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-[#AFA7FF]/40 text-sm text-white placeholder-white/20"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5 animate-fade-in">
-                      <label className="text-on-surface-variant/60 font-bold block">验证码 <span className="text-[#FF7A95]">*</span></label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          required
-                          maxLength={6}
-                          placeholder="输入 6 位验证码"
-                          value={emailCode}
-                          onChange={(e) => setEmailCode(e.target.value)}
-                          className="flex-1 py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold"
-                        />
-                        <button
-                          type="button"
-                          disabled={emailCountdown > 0}
-                          onClick={handleGetSecurityEmailCode}
-                          className="px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer"
-                        >
-                          {emailCountdown > 0 ? `${emailCountdown}s` : "获取验证码"}
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="space-y-1.5">
-                      <label className="text-on-surface-variant/60 font-bold block">手机号码 <span className="text-[#FF7A95]">*</span></label>
-                      <input
-                        type="text"
-                        required
-                        value={securityForm.phone}
-                        onChange={(e) => setSecurityForm({ ...securityForm, phone: e.target.value })}
-                        className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-[#AFA7FF]/40 text-sm text-white placeholder-white/20"
-                      />
-                    </div>
-
-                    <div className="space-y-1.5 animate-fade-in">
-                      <label className="text-on-surface-variant/60 font-bold block">验证码 <span className="text-[#FF7A95]">*</span></label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          required
-                          maxLength={6}
-                          placeholder="输入 6 位验证码"
-                          value={phoneCode}
-                          onChange={(e) => setPhoneCode(e.target.value)}
-                          className="flex-1 py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold"
-                        />
-                        <button
-                          type="button"
-                          disabled={phoneCountdown > 0}
-                          onClick={handleGetSecurityPhoneCode}
-                          className="px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer"
-                        >
-                          {phoneCountdown > 0 ? `${phoneCountdown}s` : "获取验证码"}
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
+                <div className="space-y-1.5 animate-fade-in">
+                  <label className="text-on-surface-variant/60 font-bold block">验证码 <span className="text-[#FF7A95]">*</span></label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      required
+                      maxLength={6}
+                      placeholder="输入 6 位验证码"
+                      value={emailCode}
+                      onChange={(e) => setEmailCode(e.target.value)}
+                      className="flex-1 py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold"
+                    />
+                    <button
+                      type="button"
+                      disabled={emailCountdown > 0}
+                      onClick={handleGetSecurityEmailCode}
+                      className="px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer"
+                    >
+                      {emailCountdown > 0 ? `${emailCountdown}s` : "获取验证码"}
+                    </button>
+                  </div>
+                </div>
 
                 <div className="space-y-1.5">
                   <label className="text-on-surface-variant/60 font-bold block">修改密码 (选填)</label>
@@ -1831,127 +1641,6 @@ export default function CareerDashboard() {
 
 
 
-        {/* UPGRADE AND MEMBERSHIP DETAILS MODAL */}
-        {showUpgradeModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowUpgradeModal(false)}
-              className="absolute inset-0 bg-surface/60 backdrop-blur-md"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface-container-high border border-white/10 rounded-3xl p-7 max-w-4xl w-full text-left relative z-10 space-y-6 shadow-2xl max-h-[85vh] overflow-y-auto"
-            >
-              <div className="flex justify-between items-center pb-4 border-b border-white/5">
-                <h3 className="font-extrabold text-white text-lg flex items-center gap-2">
-                  <span className="material-symbols-outlined text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>workspace_premium</span>
-                  解锁 面试VAR 顶配 AI 职业大招：会员计划对比
-                </h3>
-                <button
-                  onClick={() => setShowUpgradeModal(false)}
-                  className="text-on-surface-variant hover:text-white transition-colors cursor-pointer flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/5"
-                >
-                  <span className="material-symbols-outlined text-lg">close</span>
-                </button>
-              </div>
-
-              {/* Plans comparison cards row */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 leading-relaxed text-xs font-semibold">
-                
-                {/* Plan 1: Free */}
-                <div className="p-5.5 rounded-2xl bg-white/[0.01] border border-white/5 flex flex-col justify-between gap-5 text-left">
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-black text-white">基础体验版</h4>
-                      <span className="text-[20px] font-black text-white font-label-mono mt-1 block">¥0 <span className="text-xs text-on-surface-variant/40 font-normal">/ 免费永久</span></span>
-                    </div>
-                    <p className="text-on-surface-variant/60">适用于基本面试调试与简历排版快速自测，限制部分 AI 深度模型。</p>
-                    <ul className="space-y-2 border-t border-white/5 pt-4 text-on-surface-variant/75">
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>每月 2 次面试录音 analysis</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>每月 1 次简历基础诊断</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-on-surface-variant/30">cancel</span>AI 模拟对话演练</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-on-surface-variant/30">cancel</span>长期职业记忆云存储</li>
-                    </ul>
-                  </div>
-                  <button onClick={() => setShowUpgradeModal(false)} className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl font-black border border-white/10 transition-all cursor-pointer">
-                    当前版本
-                  </button>
-                </div>
-
-                {/* Plan 2: PRO */}
-                <div className="p-5.5 rounded-2xl bg-primary/5 border border-primary/20 flex flex-col justify-between gap-5 text-left relative overflow-hidden">
-                  <div className="absolute top-0 right-0 px-2.5 py-0.5 bg-primary text-on-primary text-[9px] font-black rounded-bl-xl uppercase tracking-widest font-label-mono select-none">推荐</div>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-black text-white">PRO 专家会员</h4>
-                      <span className="text-[20px] font-black text-primary font-label-mono mt-1 block">¥39 <span className="text-xs text-on-surface-variant/40 font-normal">/ 月付套餐</span></span>
-                    </div>
-                    <p className="text-on-surface-variant/60">适合正在频繁参加面试、渴望快速突破弱点并获得中高大厂 Offer 的高级工程师。</p>
-                    <ul className="space-y-2 border-t border-white/5 pt-4 text-on-surface-variant/75">
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>每月 10 次面试录音分析</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>每月 5 次简历深度优化</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>每月 5 次 AI 模拟面试演练</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>全套职业记忆库系统支撑</li>
-                    </ul>
-                  </div>
-                  <button onClick={() => setShowUpgradeModal(false)} className="w-full py-2.5 bg-primary text-on-primary rounded-xl font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer">
-                    已是此会员 (去续费)
-                  </button>
-                </div>
-
-                {/* Plan 3: MAX */}
-                <div className="p-5.5 rounded-2xl bg-secondary/5 border border-secondary/20 flex flex-col justify-between gap-5 text-left relative overflow-hidden">
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-black text-white">MAX 领航会员</h4>
-                      <span className="text-[20px] font-black text-secondary font-label-mono mt-1 block">¥99 <span className="text-xs text-on-surface-variant/40 font-normal">/ 月付套餐</span></span>
-                    </div>
-                    <p className="text-on-surface-variant/60">尊享无限分析额度与特权，适合追求极致、备战顶级架构师/技术总监职位的技术精英。</p>
-                    <ul className="space-y-2 border-t border-white/5 pt-4 text-on-surface-variant/75">
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>无限次面试录音/记录分析</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>无限次简历深度精修</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>无限次 AI 模拟面试通关</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>一对一专属 AI 终身顾问咨询</li>
-                    </ul>
-                  </div>
-                  <button onClick={() => setShowUpgradeModal(false)} className="w-full py-2.5 bg-gradient-to-r from-secondary to-primary text-on-primary rounded-xl font-black shadow-lg shadow-secondary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer">
-                    立即升级
-                  </button>
-                </div>
-
-              </div>
-
-              {/* Checkout simulation QR section */}
-              <div className="border-t border-white/5 pt-6 flex flex-col sm:flex-row justify-between items-center gap-5">
-                <div className="text-left max-w-md">
-                  <h5 className="text-xs md:text-sm font-black text-white">微信/支付宝 扫码快捷支付</h5>
-                  <p className="text-[11px] text-on-surface-variant/50 leading-relaxed font-semibold mt-1">付款后会员权益实时重置，PRO/MAX 会员均可随时退订，7天内无理由全额退款保障。</p>
-                </div>
-                <div className="flex gap-4 items-center shrink-0">
-                  <div className="p-2 rounded-xl bg-white border border-white/10 w-24 h-24 flex items-center justify-center relative overflow-hidden select-none">
-                    {/* Simulated QR Code graph */}
-                    <div className="absolute inset-2 bg-[linear-gradient(to_right,#000_1px,transparent_1px),linear-gradient(to_bottom,#000_1px,transparent_1px)] bg-[size:6px_6px]" />
-                    <div className="absolute w-6 h-6 bg-black left-2 top-2 border-2 border-white" />
-                    <div className="absolute w-6 h-6 bg-black right-2 top-2 border-2 border-white" />
-                    <div className="absolute w-6 h-6 bg-black left-2 bottom-2 border-2 border-white" />
-                  </div>
-                  <div className="text-left font-label-mono text-xs font-semibold text-on-surface-variant/70 leading-normal">
-                    <p>微信支付: 支持信用卡</p>
-                    <p>支付宝: 支持蚂蚁花呗</p>
-                    <p className="text-tertiary font-black block mt-1">7天无理由退款保证</p>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
 
       </AnimatePresence>
 

@@ -12,10 +12,15 @@ def get_password_hash(password: str) -> str:
     hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
     return hashed.decode("utf-8")
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def verify_password(plain_password: str, hashed_password: Optional[str]) -> bool:
     """
-    比对明文密码与哈希密码
+    比对明文密码与哈希密码。
+
+    password_hash 为空时直接返回 False，避免 bcrypt 抛 TypeError。
+    当前注册流程强制要求设置密码，但 schema 保留 nullable 以兼容历史数据。
     """
+    if not hashed_password:
+        return False
     try:
         return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
     except Exception:

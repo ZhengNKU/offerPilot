@@ -23,7 +23,7 @@ export interface UserProfile {
   degree?: string;
   gradYear?: string;
   hasExp?: boolean;
-  membership?: string;
+  membership?: string;  // 内测版本：值为 "free" | "test" | "pro" | "max"
   phone?: string;
   email?: string;
   targetCity?: string;
@@ -333,7 +333,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // ─── 单点登录：前端全局拦截 401 + 兜底轮询 ─────────────────────────
   // 后端已经把被挤下线的 token 加入 blacklist (auth:blacklist:{token})，
   // 此 tab 任何请求一旦返 401 就立即清登录态，避免用户卡在"看起来登录中"
-  // 但点什么接口都失败的状态。
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -490,33 +489,20 @@ function AuthModals() {
   const router = useRouter();
 
   // Login Form State
-  const [loginTab, setLoginTab] = useState<"password" | "code">("password");
+  // 内测版本：删除"验证码登录"tab 和"手机找回"分支，只保留密码登录 + 邮箱找回
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [phone, setPhone] = useState("");
-  const [code, setCode] = useState("");
-  const [countdown, setCountdown] = useState(0);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Forgot Password State
   const [showForgot, setShowForgot] = useState(false);
-  const [forgotTab, setForgotTab] = useState<"phone" | "email">("phone");
-  const [forgotPhone, setForgotPhone] = useState("");
   const [forgotEmail, setForgotEmail] = useState("");
   const [forgotCode, setForgotCode] = useState("");
   const [forgotCountdown, setForgotCountdown] = useState(0);
   const [forgotPassword, setForgotPassword] = useState("");
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
   const [showForgotPwd, setShowForgotPwd] = useState(false);
-
-  useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (countdown > 0) {
-      timer = setTimeout(() => setCountdown(countdown - 1), 1000);
-    }
-    return () => clearTimeout(timer);
-  }, [countdown]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -529,7 +515,6 @@ function AuthModals() {
   // Reset forgot password state when recovery panel is closed or switched away
   useEffect(() => {
     if (!auth.showLogin || !showForgot) {
-      setForgotPhone("");
       setForgotEmail("");
       setForgotCode("");
       setForgotPassword("");
@@ -538,67 +523,20 @@ function AuthModals() {
     }
   }, [auth.showLogin, showForgot]);
 
-  const handleGetCode = async () => {
-    if (!phone) {
-      auth.triggerToast("请输入手机号！");
-      return;
-    }
-    const phoneRegex = /^1[3-9]\d{9}$/;
-    if (!phoneRegex.test(phone)) {
-      auth.triggerToast("请输入正确的手机号格式！");
-      return;
-    }
-
-    try {
-      const res = await fetch(`${API_BASE}/api/auth/send-code`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "phone", target: phone })
-      });
-      if (!res.ok) {
-        const errData = await res.json();
-        auth.triggerToast(errData.detail || "发送验证码失败！");
-        return;
-      }
-      setCountdown(60);
-      auth.triggerToast("验证码已发送，请查收！");
-    } catch (err) {
-      auth.triggerToast("无法连接到后端服务！");
-    }
-  };
-
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isLoggingIn) return;
+    // 内测版本：只支持密码登录（验证码登录已禁用）
+    if (!username || !password) {
+      auth.triggerToast("请输入邮箱和密码！");
+      return;
+    }
     try {
-      let body: any = {};
-      if (loginTab === "password") {
-        if (!username || !password) {
-          auth.triggerToast("请输入用户名和密码！");
-          return;
-        }
-        body = {
-          login_type: "password",
-          account: username,
-          password: password
-        };
-      } else {
-        if (!phone || !code) {
-          auth.triggerToast("请输入手机号和验证码！");
-          return;
-        }
-        const phoneRegex = /^1[3-9]\d{9}$/;
-        if (!phoneRegex.test(phone)) {
-          auth.triggerToast("请输入正确的手机号格式！");
-          return;
-        }
-        body = {
-          login_type: "code",
-          account: phone,
-          verify_code: code
-        };
-      }
-
+      const body = {
+        login_type: "password",
+        account: username,
+        password: password,
+      };
       setIsLoggingIn(true);
       const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
@@ -608,7 +546,7 @@ function AuthModals() {
 
       if (!res.ok) {
         const errData = await res.json();
-        auth.triggerToast(errData.detail || "登录失败，请检查账号密码/验证码！");
+        auth.triggerToast(errData.detail || "登录失败，请检查账号密码！");
         setIsLoggingIn(false);
         return;
       }
@@ -635,31 +573,23 @@ function AuthModals() {
   };
 
   const handleForgotGetCode = async () => {
-    const isPhone = forgotTab === "phone";
-    const target = isPhone ? forgotPhone : forgotEmail;
+    // 内测版本：只支持邮箱找回密码
+    const target = forgotEmail;
     if (!target) {
-      auth.triggerToast(isPhone ? "请输入手机号！" : "请输入邮箱地址！");
+      auth.triggerToast("请输入邮箱地址！");
       return;
     }
-    if (isPhone) {
-      const phoneRegex = /^1[3-9]\d{9}$/;
-      if (!phoneRegex.test(target)) {
-        auth.triggerToast("请输入正确的手机号格式！");
-        return;
-      }
-    } else {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(target)) {
-        auth.triggerToast("请输入正确的邮箱地址格式！");
-        return;
-      }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(target)) {
+      auth.triggerToast("请输入正确的邮箱地址格式！");
+      return;
     }
 
     try {
       const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
+        body: JSON.stringify({ type: "email", target })
       });
       if (!res.ok) {
         const errData = await res.json();
@@ -675,21 +605,13 @@ function AuthModals() {
 
   const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const isPhone = forgotTab === "phone";
-    const target = isPhone ? forgotPhone : forgotEmail;
+    // 内测版本：只支持邮箱找回密码
+    const target = forgotEmail;
 
-    if (isPhone) {
-      const phoneRegex = /^1[3-9]\d{9}$/;
-      if (!phoneRegex.test(target)) {
-        auth.triggerToast("请输入正确的手机号格式！");
-        return;
-      }
-    } else {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(target)) {
-        auth.triggerToast("请输入正确的邮箱地址格式！");
-        return;
-      }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(target)) {
+      auth.triggerToast("请输入正确的邮箱地址格式！");
+      return;
     }
 
     if (!forgotCode) {
@@ -715,7 +637,7 @@ function AuthModals() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: forgotTab,
+          type: "email",
           target,
           verify_code: forgotCode,
           new_password: forgotPassword
@@ -730,7 +652,6 @@ function AuthModals() {
 
       auth.triggerToast("密码重置成功，请使用新密码登录！");
       setShowForgot(false);
-      setForgotPhone("");
       setForgotEmail("");
       setForgotCode("");
       setForgotPassword("");
@@ -786,29 +707,7 @@ function AuthModals() {
                     </svg>
                   </div>
                   <h3 className="font-black text-white text-xl md:text-2xl">欢迎登录 面试VAR</h3>
-                  <p className="text-white/45 text-xs md:text-sm font-bold">AI 助力，高效求职</p>
-                </div>
-
-                {/* Tab switchers */}
-                <div className="flex bg-[#050B1A] p-1.5 rounded-xl border border-white/5 font-bold text-sm select-none">
-                  <button
-                    type="button"
-                    onClick={() => setLoginTab("password")}
-                    className={`flex-1 py-2.5 rounded-lg text-center transition-all cursor-pointer ${
-                      loginTab === "password" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
-                    }`}
-                  >
-                    密码登录
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLoginTab("code")}
-                    className={`flex-1 py-2.5 rounded-lg text-center transition-all cursor-pointer ${
-                      loginTab === "code" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
-                    }`}
-                  >
-                    验证码登录
-                  </button>
+                  <p className="text-white/45 text-xs md:text-sm font-bold">内测版本 · 邮箱密码登录</p>
                 </div>
 
                 {/* Form */}
@@ -821,87 +720,40 @@ function AuthModals() {
                   }}
                   className="space-y-4 text-sm font-semibold text-white/60 text-left"
                 >
-                  {loginTab === "password" ? (
-                    <>
-                      <div>
-                        <label className="block mb-1.5">用户名 / 手机号 / 邮箱</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="请输入您的账号"
-                          value={username}
-                          onChange={(e) => setUsername(e.target.value)}
-                          className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
-                        />
-                      </div>
-                      <div>
-                        <label className="block mb-1.5">登录密码</label>
-                        <div className="relative">
-                          <input
-                            type={showPassword ? "text" : "password"}
-                            required
-                            placeholder="请输入密码"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 pr-10 text-sm md:text-base font-semibold"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowPassword(!showPassword)}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
-                          >
-                            <span className="material-symbols-outlined text-base">
-                              {showPassword ? "visibility_off" : "visibility"}
-                            </span>
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div>
-                        <label className="block mb-1.5">手机号码</label>
-                        <div className="flex gap-2">
-                          <select className="py-3 px-2 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold shrink-0">
-                            <option className="bg-[#0e1626]">+86</option>
-                            <option className="bg-[#0e1626]">+852</option>
-                            <option className="bg-[#0e1626]">+1</option>
-                          </select>
-                          <input
-                            type="tel"
-                            required
-                            placeholder="请输入手机号"
-                            value={phone}
-                            onChange={(e) => setPhone(e.target.value)}
-                            className="flex-1 py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
-                          />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="block mb-1.5">短信验证码</label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            required
-                            placeholder="输入 6 位验证码"
-                            value={code}
-                            onChange={(e) => setCode(e.target.value)}
-                            className="flex-1 py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
-                          />
-                          <button
-                            type="button"
-                            onClick={handleGetCode}
-                            disabled={countdown > 0}
-                            className={`px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer ${
-                              countdown > 0 ? "opacity-50 cursor-not-allowed" : ""
-                            }`}
-                          >
-                            {countdown > 0 ? `${countdown}s` : "获取验证码"}
-                          </button>
-                        </div>
-                      </div>
-                    </>
-                  )}
+                  {/* 内测版本：登录支持用户名 / 邮箱地址 + 密码（删除验证码登录 tab） */}
+                  <div>
+                    <label className="block mb-1.5">用户名 / 邮箱地址</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="请输入用户名或邮箱地址"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1.5">登录密码</label>
+                    <div className="relative">
+                      <input
+                        type={showPassword ? "text" : "password"}
+                        required
+                        placeholder="请输入密码"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 pr-10 text-sm md:text-base font-semibold"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                      >
+                        <span className="material-symbols-outlined text-base">
+                          {showPassword ? "visibility_off" : "visibility"}
+                        </span>
+                      </button>
+                    </div>
+                  </div>
 
                   <button
                     type="submit"
@@ -957,45 +809,7 @@ function AuthModals() {
                     </svg>
                   </div>
                   <h3 className="font-black text-white text-xl md:text-2xl">重置账户密码</h3>
-                  <p className="text-white/45 text-xs md:text-sm font-bold">验证身份以设定新密码</p>
-                </div>
-
-                {/* Tab switchers */}
-                <div className="flex bg-[#050B1A] p-1.5 rounded-xl border border-white/5 font-bold text-sm select-none">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setForgotTab("phone");
-                      setForgotPhone("");
-                      setForgotEmail("");
-                      setForgotCode("");
-                      setForgotPassword("");
-                      setForgotConfirmPassword("");
-                      setForgotCountdown(0);
-                    }}
-                    className={`flex-1 py-2.5 rounded-lg text-center transition-all cursor-pointer ${
-                      forgotTab === "phone" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
-                    }`}
-                  >
-                    手机找回
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setForgotTab("email");
-                      setForgotPhone("");
-                      setForgotEmail("");
-                      setForgotCode("");
-                      setForgotPassword("");
-                      setForgotConfirmPassword("");
-                      setForgotCountdown(0);
-                    }}
-                    className={`flex-1 py-2.5 rounded-lg text-center transition-all cursor-pointer ${
-                      forgotTab === "email" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
-                    }`}
-                  >
-                    邮箱找回
-                  </button>
+                  <p className="text-white/45 text-xs md:text-sm font-bold">通过邮箱验证身份后设定新密码</p>
                 </div>
 
                 {/* Form */}
@@ -1008,31 +822,18 @@ function AuthModals() {
                   }}
                   className="space-y-4 text-sm font-semibold text-white/60 text-left"
                 >
-                  {forgotTab === "phone" ? (
-                    <div>
-                      <label className="block mb-1.5">手机号码</label>
-                      <input
-                        type="tel"
-                        required
-                        placeholder="请输入绑定的手机号"
-                        value={forgotPhone}
-                        onChange={(e) => setForgotPhone(e.target.value)}
-                        className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
-                      />
-                    </div>
-                  ) : (
-                    <div>
-                      <label className="block mb-1.5">邮箱地址</label>
-                      <input
-                        type="email"
-                        required
-                        placeholder="请输入绑定的邮箱"
-                        value={forgotEmail}
-                        onChange={(e) => setForgotEmail(e.target.value)}
-                        className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
-                      />
-                    </div>
-                  )}
+                  {/* 内测版本：只支持邮箱找回（删除手机找回 tab） */}
+                  <div>
+                    <label className="block mb-1.5">邮箱地址</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="请输入绑定的邮箱"
+                      value={forgotEmail}
+                      onChange={(e) => setForgotEmail(e.target.value)}
+                      className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
+                    />
+                  </div>
 
                   <div>
                     <label className="block mb-1.5">验证码</label>
@@ -1239,7 +1040,12 @@ export function UserMenu() {
                   </span>
                 )}
               </div>
-              <p className="text-xs text-white/40 font-semibold truncate">{auth.user.role || "求职者"}</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-white/40 font-semibold truncate">{auth.user.role || "求职者"}</p>
+                <span className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 text-[11px] font-extrabold border border-purple-500/20 shrink-0">
+                  内测用户
+                </span>
+              </div>
             </div>
             <button
               onClick={() => {

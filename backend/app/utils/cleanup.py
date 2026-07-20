@@ -181,6 +181,8 @@ def _retention_days_for(membership: str | None) -> int:
         return settings.FILE_RETENTION_DAYS_MAX
     if membership == "pro":
         return settings.FILE_RETENTION_DAYS_PRO
+    if membership == "test":
+        return settings.FILE_RETENTION_DAYS_TEST
     return settings.FILE_RETENTION_DAYS_FREE
 
 
@@ -188,6 +190,7 @@ async def find_expired_files(db: AsyncSession) -> list[models.UploadedFile]:
     """查找所有已超过保留期限的文件，按用户当前会员等级判定。"""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     free_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_FREE)
+    test_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_TEST)
     pro_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_PRO)
     max_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_MAX)
 
@@ -208,6 +211,12 @@ async def find_expired_files(db: AsyncSession) -> list[models.UploadedFile]:
                     models.User.is_online.is_(True),
                     models.User.membership.is_(None),
                     models.UploadedFile.created_at < free_cutoff,
+                ),
+                # 已登录且在线的内测档用户 (membership = "test") -> 内测档 30 天
+                and_(
+                    models.User.is_online.is_(True),
+                    models.User.membership == "test",
+                    models.UploadedFile.created_at < test_cutoff,
                 ),
                 # 已登录且在线的 Pro 用户
                 and_(

@@ -88,10 +88,8 @@ export default function RegisterPage() {
   // -------------------------------------------------------------
   // STEP 1: ACCOUNT REGISTRATION STATE
   // -------------------------------------------------------------
-  const [regMethod, setRegMethod] = useState<"phone" | "email">("phone");
-  const [phone, setPhone] = useState("");
+  // 内测版本：只保留邮箱注册（删除手机号相关 state）
   const [email, setEmail] = useState("");
-  const [phoneVerifyCode, setPhoneVerifyCode] = useState("");
   const [emailVerifyCode, setEmailVerifyCode] = useState("");
   const [isSendingCode, setIsSendingCode] = useState(false);
   const [username, setUsername] = useState("");
@@ -102,17 +100,8 @@ export default function RegisterPage() {
   const [agreePolicy, setAgreePolicy] = useState(false);
   const [showAgreementModal, setShowAgreementModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
-  const [phoneTimer, setPhoneTimer] = useState(0);
   const [emailTimer, setEmailTimer] = useState(0);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    let t: NodeJS.Timeout;
-    if (phoneTimer > 0) {
-      t = setTimeout(() => setPhoneTimer(phoneTimer - 1), 1000);
-    }
-    return () => clearTimeout(t);
-  }, [phoneTimer]);
 
   useEffect(() => {
     let t: NodeJS.Timeout;
@@ -123,29 +112,18 @@ export default function RegisterPage() {
   }, [emailTimer]);
 
   const handleSendCode = async () => {
-    const isPhone = regMethod === "phone";
-    const target = isPhone ? phone : email;
+    // 内测版本：只支持邮箱验证码
+    const target = email;
     if (!target) {
-      if (isPhone) setErrors(prev => ({ ...prev, phone: true }));
-      else setErrors(prev => ({ ...prev, email: true }));
-      auth.triggerToast(isPhone ? "请输入手机号！" : "请输入邮箱地址！");
+      setErrors(prev => ({ ...prev, email: true }));
+      auth.triggerToast("请输入邮箱地址！");
       return;
     }
-
-    if (isPhone) {
-      const phoneRegex = /^1[3-9]\d{9}$/;
-      if (!phoneRegex.test(target)) {
-        setErrors(prev => ({ ...prev, phone: true }));
-        auth.triggerToast("请输入正确的手机号格式！");
-        return;
-      }
-    } else {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(target)) {
-        setErrors(prev => ({ ...prev, email: true }));
-        auth.triggerToast("请输入正确的邮箱地址格式！");
-        return;
-      }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(target)) {
+      setErrors(prev => ({ ...prev, email: true }));
+      auth.triggerToast("请输入正确的邮箱地址格式！");
+      return;
     }
 
     setIsSendingCode(true);
@@ -153,15 +131,14 @@ export default function RegisterPage() {
       const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
+        body: JSON.stringify({ type: "email", target })
       });
       if (!res.ok) {
         const errData = await res.json();
         auth.triggerToast(errData.detail || "发送验证码失败！");
         return;
       }
-      if (isPhone) setPhoneTimer(60);
-      else setEmailTimer(60);
+      setEmailTimer(60);
       auth.triggerToast("验证码已发送，请查收！");
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！");
@@ -171,41 +148,21 @@ export default function RegisterPage() {
   };
 
   const handleNextToStep2 = async () => {
+    // 内测版本：只走邮箱验证
     const newErrors: Record<string, boolean> = {};
-    if (regMethod === "phone") {
-      if (!phone) {
-        newErrors.phone = true;
-      } else {
-        const phoneRegex = /^1[3-9]\d{9}$/;
-        if (!phoneRegex.test(phone)) {
-          newErrors.phone = true;
-          setErrors(prev => ({ ...prev, phone: true }));
-          auth.triggerToast("请输入正确的手机号格式！");
-          return;
-        }
-      }
-    }
-    if (regMethod === "email") {
-      if (!email) {
-        newErrors.email = true;
-      } else {
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-          newErrors.email = true;
-          setErrors(prev => ({ ...prev, email: true }));
-          auth.triggerToast("请输入正确的邮箱地址格式！");
-          return;
-        }
-      }
-    }
-    if (regMethod === "phone") {
-      if (!phoneVerifyCode) {
-        newErrors.phoneVerifyCode = true;
-      }
+    if (!email) {
+      newErrors.email = true;
     } else {
-      if (!emailVerifyCode) {
-        newErrors.emailVerifyCode = true;
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        newErrors.email = true;
+        setErrors(prev => ({ ...prev, email: true }));
+        auth.triggerToast("请输入正确的邮箱地址格式！");
+        return;
       }
+    }
+    if (!emailVerifyCode) {
+      newErrors.emailVerifyCode = true;
     }
     if (!username) {
       newErrors.username = true;
@@ -251,10 +208,9 @@ export default function RegisterPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reg_method: regMethod,
-          phone: regMethod === "phone" ? phone : null,
-          email: regMethod === "email" ? email : null,
-          verify_code: regMethod === "phone" ? phoneVerifyCode : emailVerifyCode,
+          reg_method: "email",
+          email: email,
+          verify_code: emailVerifyCode,
           username,
           password
         })
@@ -481,10 +437,9 @@ export default function RegisterPage() {
   const saveUserData = async (avatarDataUrl: string) => {
     const payload = {
       account: {
-        reg_method: regMethod,
-        phone: regMethod === "phone" ? phone : null,
-        email: regMethod === "email" ? email : null,
-        verify_code: regMethod === "phone" ? phoneVerifyCode : emailVerifyCode,
+        reg_method: "email",
+        email: email,
+        verify_code: emailVerifyCode,
         username,
         password
       },
@@ -685,156 +640,60 @@ export default function RegisterPage() {
                         <div className="space-y-4.5 w-full">
                           <div>
                             <h2 className="text-xl md:text-2xl font-black text-white">创建账号</h2>
-                            <p className="text-xs md:text-sm text-white/40 font-bold mt-1">选择您喜欢的方式注册 面试VAR</p>
-                          </div>
-
-                          {/* Login Method Toggle */}
-                          <div className="flex bg-[#050B1A] p-1.5 rounded-xl border border-white/5 font-bold text-xs md:text-sm select-none">
-                            <button
-                              onClick={() => setRegMethod("phone")}
-                              className={`flex-1 py-3 rounded-lg text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                                regMethod === "phone" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
-                              }`}
-                            >
-                              <span className="material-symbols-outlined text-base md:text-lg">phone_iphone</span>
-                              手机号注册
-                            </button>
-                            <button
-                              onClick={() => setRegMethod("email")}
-                              className={`flex-1 py-3 rounded-lg text-center transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
-                                regMethod === "email" ? "bg-[#AFA7FF]/15 text-[#AFA7FF]" : "text-white/40 hover:text-white/70"
-                              }`}
-                            >
-                              <span className="material-symbols-outlined text-base md:text-lg">mail</span>
-                              邮箱注册
-                            </button>
+                            <p className="text-xs md:text-sm text-white/40 font-bold mt-1">内测版本：仅支持邮箱注册</p>
                           </div>
 
                           {/* Fields */}
-                          {regMethod === "phone" ? (
-                            <div className="space-y-4">
-                              <div>
-                                <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
-                                  手机号 <span className="text-[#FF7A95] ml-0.5">*</span>
-                                </label>
-                                <div className="flex gap-2">
-                                  <select className="py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-xs md:text-sm font-semibold shrink-0">
-                                    <option>+86</option>
-                                    <option>+852</option>
-                                    <option>+1</option>
-                                  </select>
-                                  <input
-                                    type="tel"
-                                    placeholder="请输入手机号"
-                                    value={phone}
-                                    onChange={(e) => {
-                                      setPhone(e.target.value);
-                                      if (errors.phone) setErrors(prev => ({ ...prev, phone: false }));
-                                    }}
-                                    className={`flex-1 py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
-                                      errors.phone 
-                                        ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
-                                        : "border-white/10 focus:border-[#AFA7FF]/40"
-                                    }`}
-                                  />
-                                </div>
-                              </div>
-
-                              {/* Verification Code for Phone */}
-                              <div>
-                                <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
-                                  验证码 <span className="text-[#FF7A95] ml-0.5">*</span>
-                                </label>
-                                <div className="flex gap-2">
-                                  <input
-                                    type="text"
-                                    placeholder="请输入验证码"
-                                    value={phoneVerifyCode}
-                                    onChange={(e) => {
-                                      setPhoneVerifyCode(e.target.value);
-                                      if (errors.phoneVerifyCode) setErrors(prev => ({ ...prev, phoneVerifyCode: false }));
-                                    }}
-                                    className={`flex-1 py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
-                                      errors.phoneVerifyCode 
-                                        ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
-                                        : "border-white/10 focus:border-[#AFA7FF]/40"
-                                    }`}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={handleSendCode}
-                                    disabled={isSendingCode || phoneTimer > 0}
-                                    className={`px-5 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-xs md:text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer flex items-center justify-center gap-1.5 ${
-                                      (isSendingCode || phoneTimer > 0) ? "opacity-50 cursor-not-allowed" : ""
-                                    }`}
-                                  >
-                                    {isSendingCode ? (
-                                      <>
-                                        <svg className="animate-spin h-4 w-4 text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
-                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                        </svg>
-                                        发送中
-                                      </>
-                                    ) : (
-                                      phoneTimer > 0 ? `${phoneTimer}s 后重发` : "获取验证码"
-                                    )}
-                                  </button>
-                                </div>
-                                <span className="text-[10px] md:text-xs text-white/30 font-bold block mt-1">验证码将发送至您的手机</span>
-                              </div>
+                          <div className="space-y-4">
+                            <div>
+                              <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
+                                邮箱地址 <span className="text-[#FF7A95] ml-0.5">*</span>
+                              </label>
+                              <input
+                                type="email"
+                                placeholder="请输入邮箱地址"
+                                value={email}
+                                onChange={(e) => {
+                                  setEmail(e.target.value);
+                                  if (errors.email) setErrors(prev => ({ ...prev, email: false }));
+                                }}
+                                className={`w-full py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
+                                  errors.email
+                                    ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]"
+                                    : "border-white/10 focus:border-[#AFA7FF]/40"
+                                }`}
+                              />
                             </div>
-                          ) : (
-                            <div className="space-y-4">
-                              <div>
-                                <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
-                                  邮箱地址 <span className="text-[#FF7A95] ml-0.5">*</span>
-                                </label>
+
+                            {/* Verification Code for Email */}
+                            <div>
+                              <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
+                                验证码 <span className="text-[#FF7A95] ml-0.5">*</span>
+                              </label>
+                              <div className="flex gap-2">
                                 <input
-                                  type="email"
-                                  placeholder="请输入邮箱地址"
-                                  value={email}
+                                  type="text"
+                                  placeholder="请输入验证码"
+                                  value={emailVerifyCode}
                                   onChange={(e) => {
-                                    setEmail(e.target.value);
-                                    if (errors.email) setErrors(prev => ({ ...prev, email: false }));
+                                    setEmailVerifyCode(e.target.value);
+                                    if (errors.emailVerifyCode) setErrors(prev => ({ ...prev, emailVerifyCode: false }));
                                   }}
-                                  className={`w-full py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
-                                    errors.email 
-                                      ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
+                                  className={`flex-1 py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
+                                    errors.emailVerifyCode
+                                      ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]"
                                       : "border-white/10 focus:border-[#AFA7FF]/40"
                                   }`}
                                 />
-                              </div>
-
-                              {/* Verification Code for Email */}
-                              <div>
-                                <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
-                                  验证码 <span className="text-[#FF7A95] ml-0.5">*</span>
-                                </label>
-                                <div className="flex gap-2">
-                                  <input
-                                    type="text"
-                                    placeholder="请输入验证码"
-                                    value={emailVerifyCode}
-                                    onChange={(e) => {
-                                      setEmailVerifyCode(e.target.value);
-                                      if (errors.emailVerifyCode) setErrors(prev => ({ ...prev, emailVerifyCode: false }));
-                                    }}
-                                    className={`flex-1 py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
-                                      errors.emailVerifyCode 
-                                        ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
-                                        : "border-white/10 focus:border-[#AFA7FF]/40"
-                                    }`}
-                                  />
-                                  <button
-                                    type="button"
-                                    onClick={handleSendCode}
-                                    disabled={isSendingCode || emailTimer > 0}
-                                    className={`px-5 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-xs md:text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer flex items-center justify-center gap-1.5 ${
-                                      (isSendingCode || emailTimer > 0) ? "opacity-50 cursor-not-allowed" : ""
-                                    }`}
-                                  >
-                                    {isSendingCode ? (
+                                <button
+                                  type="button"
+                                  onClick={handleSendCode}
+                                  disabled={isSendingCode || emailTimer > 0}
+                                  className={`px-5 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-xs md:text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer flex items-center justify-center gap-1.5 ${
+                                    (isSendingCode || emailTimer > 0) ? "opacity-50 cursor-not-allowed" : ""
+                                  }`}
+                                >
+                                  {isSendingCode ? (
                                       <>
                                         <svg className="animate-spin h-4 w-4 text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
                                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
@@ -850,7 +709,6 @@ export default function RegisterPage() {
                                 <span className="text-[10px] md:text-xs text-white/30 font-bold block mt-1">验证码将发送至您的邮箱</span>
                               </div>
                             </div>
-                          )}
 
                           {/* Account username & password */}
                           <div className="grid grid-cols-2 gap-4">
@@ -1774,7 +1632,7 @@ export default function RegisterPage() {
 
           <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-left">
             <span className="text-xs md:text-sm text-white/30 font-label-mono font-bold tracking-widest">
-              © 2026 面试VAR AI. All rights reserved.
+              © 2026 面试VAR. All rights reserved.
             </span>
             <div className="flex gap-8 text-xs md:text-sm text-white/30 font-label-mono font-bold tracking-widest">
               <a onClick={() => router.push("/")} className="hover:text-[#AFA7FF] transition-colors cursor-pointer">

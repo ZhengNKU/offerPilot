@@ -20,7 +20,8 @@ export type FeatureQuota = {
 };
 
 export type QuotaStatus = {
-  membership: "free" | "pro" | "max";
+  // 内测版本（2026-07-18+）：新增 "test" 档，所有内测用户默认 test 档
+  membership: "free" | "test" | "pro" | "max";
   audio: FeatureQuota;
   record: FeatureQuota;
   resume: FeatureQuota;
@@ -48,6 +49,7 @@ export function toDisplayRemaining(
   feature: Feature,
 ): number | "unlimited" {
   if (!status) return 1; // 网络失败默认乐观显示 1 次
+  // 内测版本：test 档按真实次数显示（不视为 unlimited）
   if (status.membership === "max") {
     return "unlimited";
   }

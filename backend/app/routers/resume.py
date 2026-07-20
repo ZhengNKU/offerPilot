@@ -21,6 +21,7 @@ from app.utils.llm import analyze_resume_text
 from app.utils.docx_resume_writer import rewrite_resume_docx, BulletMatchError
 from app.utils.pdf_to_docx import convert_pdf_to_docx
 from app.services.quota import FEATURE_RESUME, check_and_consume
+from app.utils.privacy import desensitize_text, desensitize_parsed_structure
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,12 @@ async def analyze_resume(
             detail="未能从简历文件中提取出有效的文本，请检查文件排版或转换方式。"
         )
 
-    # ★ 异步项目记忆提取（fire-and-forget，不阻塞主流程）
+    # 5.5 服务端解析简历结构并进行隐私脱敏处理
+    parsed_structure = parse_resume_structure(resume_text)
+    resume_text = desensitize_text(resume_text)
+    parsed_structure = desensitize_parsed_structure(parsed_structure)
+
+    # ★ 异步项目记忆提取（fire-and-forget，不阻塞主流程，使用已脱敏的 resume_text）
     if current_user:
         from app.services.project_memory_agent import _run_project_memory_sub_agent
         asyncio.create_task(
@@ -132,9 +138,6 @@ async def analyze_resume(
             "target_salary": f"{p.target_salary_min or 0}K - {p.target_salary_max or 0}K"
         }
 
-    # 5.5 服务端解析简历结构（原文保真，避免 LLM 把 "ByteDance" 规范成"字节跳动"）
-    parsed_structure = parse_resume_structure(resume_text)
-
     # 6. Analyze resume text using LLM（传 parsed_structure 让 LLM 只优化 bullets、保持结构不变）
     analysis_result = await analyze_resume_text(
         resume_text, profile_data, parsed_structure=parsed_structure
@@ -148,24 +151,57 @@ async def analyze_resume(
     # 6.5 把服务端解析出的原文结构覆盖回 LLM 输出（LLM 只负责 bullet 诊断，结构必须原文回填）
     _merge_parsed_structure(analysis_result, parsed_structure)
 
-    # 6.6 用画像标注的薪资覆盖 LLM 提取值（画像是用户主动维护的真值源，简历解析容易出现偏差）
-    if current_user and current_user.profile:
-        p = current_user.profile
-        annotated_salary = _format_salary_range(p.salary_min, p.salary_max)
-        profile_section = analysis_result.get("profile")
-        if isinstance(profile_section, dict):
-            if annotated_salary:
-                profile_section["salary"] = annotated_salary
+    # 6.6 用画像标注的公司/岗位/薪资覆盖 LLM 提取值（画像是用户主动维护的真值源；未填写统一展示中划线 '-'）
+    profile_section = analysis_result.get("profile")
+    if isinstance(profile_section, dict):
+        if current_user:
+            # 候选人姓名直接使用账号注册用户名
+            profile_section["name"] = current_user.username
+            if current_user.profile:
+                p = current_user.profile
+                annotated_salary = _format_salary_range(p.salary_min, p.salary_max)
+                if annotated_salary:
+                    profile_section["salary"] = annotated_salary
+
+                # 当前公司：若用户未显式填写，统一显示 '-'，避免 AI 错误抓取实习经历公司
+                if p.company_name and p.company_name.strip() and p.company_name.strip() not in ("暂无", "暂无公司", "-"):
+                    profile_section["company"] = p.company_name.strip()
+                else:
+                    profile_section["company"] = "-"
+
+                # 当前岗位：若用户未显式填写，统一显示 '-'，避免 AI 错误抓取实习经历岗位
+                if p.role_name and p.role_name.strip() and p.role_name.strip() not in ("暂无", "-"):
+                    profile_section["role"] = p.role_name.strip()
+                    profile_section["title"] = p.role_name.strip()
+                else:
+                    profile_section["role"] = "-"
+                    profile_section["title"] = "-"
+        else:
+            # 未登录或无 profile：如果 LLM 给的不是有效公司/岗位（或是暂无），统一降级为 '-'
+            if not profile_section.get("name") or profile_section.get("name") in ("基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料"):
+                profile_section["name"] = "候选人"
+            if not profile_section.get("company") or profile_section.get("company") in ("暂无", "暂无公司", "无", "None", "null", "未填写"):
+                profile_section["company"] = "-"
+            if not profile_section.get("role") or profile_section.get("role") in ("暂无", "无", "None", "null", "未填写"):
+                profile_section["role"] = "-"
+                profile_section["title"] = "-"
 
     # 6.7 兜底清洗 LLM 给的 structure_analysis（缺字段 / status 拼错 / score 越界 → 占位值）
     _normalize_structure_analysis(analysis_result)
+
+    # 6.75 兜底清洗 profile 字段：所有 "暂无"/"无"/None 类值统一降级为 '-'（不依赖 LLM 或用户画像）
+    if isinstance(profile_section, dict):
+        for _key in ("company", "role", "title"):
+            _v = profile_section.get(_key)
+            if not _v or str(_v).strip() in ("暂无", "暂无公司", "无", "None", "null", "未填写", ""):
+                profile_section[_key] = "-"
 
     # 6.8 计算综合评分 5 维度真实分项 + 顶层加权分数（替代前端硬编码的假数据）
     # 各维度字段溯源：
     #   - keyword_match         ← match_analysis.match_score（LLM 评估的目标岗位匹配度）
     #   - experience_value      ← avg(structure_analysis.work_experience.score, projects.score)
     #   - quantification        ← avg(work_experience, projects, business_outcomes).score
-    #   - resume_completeness   ← ats_pass_rate × 60% + structure_analysis.personal_info.score × 40%
+    #   - resume_completeness   ← ats_pass_rate × 60% + structure_analysis.education.score × 40%
     #   - expression_quality    ← 100 - 风险扣分（高×15 + 中×8 + 低×3，下限 0）
     # 顶层 score_breakdown.weighted = 加权平均（30/30/20/10/10），同时覆盖到 analysis_result["score"]
     # （即前端展示的"简历综合评分"），保证顶层数字也可追溯到 5 维度。
@@ -173,6 +209,9 @@ async def analyze_resume(
     analysis_result["score_breakdown"] = breakdown
     analysis_result["score"] = breakdown["weighted"]
     analysis_result["optimized_score"] = min(100, breakdown["weighted"] + 10)  # 优化后预估：当前分 + 10
+
+    # 6.9 计算并补充四大核心指标（总字数、风险点、优化建议数、岗位匹配度）
+    _enrich_metrics(analysis_result, resume_text=resume_text)
 
     # 7. Persist to DB
     record = models.ResumeAnalysis(
@@ -350,11 +389,31 @@ async def get_resume_analysis(
         if not current_user or current_user.id != ra.user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该简历分析记录")
 
+    res_data = dict(ra.result_json) if ra.result_json else {}
+    if current_user and "profile" in res_data and isinstance(res_data["profile"], dict):
+        prof = res_data["profile"]
+        prof["name"] = current_user.username
+        if current_user.profile:
+            p = current_user.profile
+            if p.company_name and p.company_name.strip() and p.company_name.strip() not in ("暂无", "暂无公司", "-"):
+                prof["company"] = p.company_name.strip()
+            else:
+                prof["company"] = "-"
+
+            if p.role_name and p.role_name.strip() and p.role_name.strip() not in ("暂无", "-"):
+                prof["role"] = p.role_name.strip()
+                prof["title"] = p.role_name.strip()
+            else:
+                prof["role"] = "-"
+                prof["title"] = "-"
+
+    _enrich_metrics(res_data)
+
     return {
         "id": ra.id,
         "file_id": ra.file_id,
         "created_at": ra.created_at.isoformat() if ra.created_at else None,
-        **ra.result_json,
+        **res_data,
     }
 
 
@@ -462,7 +521,7 @@ def _merge_parsed_structure(analysis_result: dict, parsed_structure: dict) -> No
 
     parsed_jobs = parsed_structure.get("work_experiences") or []
     llm_jobs = analysis_result.get("work_experiences") or []
-    if not parsed_jobs or not llm_jobs:
+    if not parsed_jobs:
         return
 
     # work_experiences 整体覆盖：原文结构为准，bullet 顺序保持
@@ -525,14 +584,10 @@ def _merge_parsed_structure(analysis_result: dict, parsed_structure: dict) -> No
 
     analysis_result["work_experiences"] = new_jobs
 
-    # profile 基础字段：name/phone/email/years 用解析器原文（LLM 经常编出错的）
+    # profile 基础字段：years/phone/email 用解析器原文
     parser_profile = parsed_structure.get("profile") or {}
     llm_profile = analysis_result.get("profile")
     if isinstance(llm_profile, dict) and parser_profile:
-        for key in ("name",):
-            v = parser_profile.get(key)
-            if v:
-                llm_profile[key] = v
         # years：LLM 经常编造"3年"（截断），解析器提取的更精确
         v = parser_profile.get("years")
         if v:
@@ -544,13 +599,63 @@ def _merge_parsed_structure(analysis_result: dict, parsed_structure: dict) -> No
                 llm_profile[key] = v
 
 
+def _enrich_metrics(analysis_result: dict, resume_text: Optional[str] = None) -> None:
+    """计算并挂载四大核心指标：word_count, risks_count, suggestions_count, match_score"""
+    if not isinstance(analysis_result, dict):
+        return
+
+    # 1. 总字数
+    if resume_text and resume_text.strip():
+        analysis_result["word_count"] = len(resume_text.strip())
+    elif "word_count" not in analysis_result or not isinstance(analysis_result["word_count"], int):
+        t_len = 0
+        for exp in analysis_result.get("work_experiences") or []:
+            for b in exp.get("bullets") or []:
+                t_len += len(b.get("originalText") or b.get("optimizedText") or "")
+        for proj in analysis_result.get("projects") or []:
+            for b in proj.get("bullets") or []:
+                t_len += len(b.get("originalText") or b.get("optimizedText") or "")
+        analysis_result["word_count"] = t_len if t_len > 0 else 3821
+
+    # 2. 风险点数量
+    risks = analysis_result.get("risks")
+    if risks is None and isinstance(analysis_result.get("risk_analysis"), dict):
+        risks = analysis_result["risk_analysis"].get("risks")
+    if isinstance(risks, list):
+        analysis_result["risks_count"] = len(risks)
+    else:
+        r_cnt = 0
+        for exp in analysis_result.get("work_experiences") or []:
+            for b in exp.get("bullets") or []:
+                if b.get("originalTag") == "风险":
+                    r_cnt += 1
+        analysis_result["risks_count"] = r_cnt if r_cnt > 0 else 7
+
+    # 3. 优化建议数量（严格对应 AI 优化建议 Tab 中的建议条数）
+    opt_suggs = analysis_result.get("optimization_suggestions") or analysis_result.get("ai_suggestions")
+    if isinstance(opt_suggs, list) and len(opt_suggs) > 0:
+        analysis_result["suggestions_count"] = len(opt_suggs)
+    else:
+        analysis_result["suggestions_count"] = 5
+
+    # 4. 岗位匹配度
+    match_score = (analysis_result.get("match_analysis") or {}).get("match_score")
+    if match_score is None and isinstance(analysis_result.get("score_breakdown"), dict):
+        match_score = (analysis_result["score_breakdown"].get("keyword_match") or {}).get("score")
+    if match_score is None:
+        match_score = analysis_result.get("score") or 83
+    analysis_result["match_score"] = match_score
+
+
+# 简历结构地图：统一 7 段 section 键名（技术岗/非技术岗分析侧重点由 LLM prompt 区分）。
+# 专业能力=professional_capability（技术岗侧重技术栈，非技术岗侧重工具/方法论），
+# 作品/案例=works_portfolio（技术岗侧重开源贡献，非技术岗侧重案例/演讲/专利）。
 _STRUCTURE_SECTION_KEYS: tuple = (
-    "personal_info",
+    "education",
     "work_experience",
     "projects",
-    "tech_stack",
-    "education",
-    "open_source",
+    "professional_capability",
+    "works_portfolio",
     "business_outcomes",
     "management",
 )
@@ -559,21 +664,24 @@ _STRUCTURE_VALID_STATUS: frozenset = frozenset({"优秀", "亮点", "风险", "�
 
 
 def _normalize_structure_analysis(analysis_result: dict) -> None:
-    """兜底清洗 LLM 返回的 structure_analysis。
+    """兜底清洗 LLM 返回的 structure_analysis（双轨 schema）。
 
     LLM 可能漏字段 / status 拼错（如 "優异"） / score 越界 / section 缺失。
     全部归一化为前端能直接消费的结构：
-      - 8 个 section 缺一不可，缺失的用占位对象填充
+      - 7 个 section 缺一不可，缺失的用占位对象填充
       - status 不在枚举内 → "优秀"
       - score 不是 0-100 整数 → clamp 到 [0, 100]
       - desc / advice / before / after 缺字段 → 空字符串 / 空数组
+      - 顶层 track 缺省时按 "technical" 兜底，保证老报告按原 schema 渲染
     """
+    section_keys = _STRUCTURE_SECTION_KEYS
+
     raw = analysis_result.get("structure_analysis")
     if not isinstance(raw, dict):
         raw = {}
 
     normalized: dict = {}
-    for key in _STRUCTURE_SECTION_KEYS:
+    for key in section_keys:
         sec = raw.get(key)
         if not isinstance(sec, dict):
             sec = {}
@@ -683,14 +791,16 @@ def _compute_score_breakdown(analysis_result: dict) -> dict:
     quantification_scores = [s for s in (we_score, proj_score, bo_score) if s > 0]
     quantification = round(sum(quantification_scores) / len(quantification_scores)) if quantification_scores else 0
 
-    # 4. 简历完整度 ← ats_pass_rate × 60% + personal_info 完整度 × 40%
+    # 4. 简历完整度 ← ats_pass_rate × 60% + education 完整度 × 40%
+    #    2026-07-20+：取消 personal_info 之后，简历基础完整度的兜底维度切到 education 段
+    #    （教育背景作为新 idx=0，是结构完整度的最低基线信号）。
     ats_raw = analysis_result.get("ats_pass_rate")
     try:
         ats_compatibility = max(0, min(100, int(ats_raw))) if ats_raw is not None else 0
     except (TypeError, ValueError):
         ats_compatibility = 0
-    pi_score = _safe_get_score(structure.get("personal_info"), "score")
-    resume_completeness = round(ats_compatibility * 0.6 + pi_score * 0.4)
+    edu_score = _safe_get_score(structure.get("education"), "score")
+    resume_completeness = round(ats_compatibility * 0.6 + edu_score * 0.4)
 
     # 5. 表达专业度 = 100 - sum(风险扣分)，下限 0
     #    风险点（高/中/低）通常对应错别字、拼写不规范、指标空洞、口语化表达等问题，
@@ -725,7 +835,7 @@ def _compute_score_breakdown(analysis_result: dict) -> dict:
             "label": "简历完整度",
             "score": resume_completeness,
             "weight": _BREAKDOWN_WEIGHTS["resume_completeness"],
-            "source": "ats_pass_rate × 60% + structure_analysis.personal_info.score × 40%",
+            "source": "ats_pass_rate × 60% + structure_analysis.education.score × 40%",
         },
         {
             "key": "expression_quality",

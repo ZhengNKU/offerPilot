@@ -4,10 +4,10 @@ import { useState, useRef, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
-import { PricingModal } from "@/components/PricingModal";
+import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
 import { API_BASE } from "@/lib/api";
-import { getQuotaStatus, toDisplayRemaining, type Feature } from "@/lib/quotaClient";
+import { getQuotaStatus, type Feature } from "@/lib/quotaClient";
 
 const getTodayString = () => {
   const d = new Date();
@@ -40,23 +40,29 @@ function NewAnalysisDebuggerContent() {
 
   const [remainingCount, setRemainingCount] = useState<number | "unlimited" | null>(null);
 
-  // 底部 PRO/MAX 会员弹窗控制（highlight 用于预设目标档卡片的高亮）
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [upgradeHighlight, setUpgradeHighlight] = useState<"pro" | "max">("pro");
-  const openUpgradeModal = (target: "pro" | "max") => {
-    setUpgradeHighlight(target);
-    setShowUpgradeModal(true);
-  };
-  const closeUpgradeModal = () => setShowUpgradeModal(false);
+  // 内测版本：删除 PricingModal 相关 state（付费功能屏蔽后不再需要）
+  // const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  // const [upgradeHighlight, setUpgradeHighlight] = useState<"pro" | "max">("pro");
+  // const openUpgradeModal = (target: "pro" | "max") => {
+  //   setUpgradeHighlight(target);
+  //   setShowUpgradeModal(true);
+  // };
+  // const closeUpgradeModal = () => setShowUpgradeModal(false);
 
   const checkRemainingLimit = async () => {
+    // 内测版本：fallback 统一用 test 档额度（2 / 5 / 5），与 home 资源额度卡片一致。
+    // 实际限制在后端，前端只是友好提示。
+    const TEST_QUOTA: Record<string, number> = { audio: 2, record: 5, resume: 5 };
+
     // ── 未登录用户：仅本地占位（实际限制在后端，前端只是友好提示） ──
     if (!auth.isLoggedIn) {
       const hasAnalyzedKey = `interviewVar_analyzed_${activeMode}`;
+      const feature = activeMode === "text" ? "record" : activeMode;
+      const featureMax = TEST_QUOTA[feature] ?? 1;
       if (localStorage.getItem(hasAnalyzedKey) === "true") {
         setRemainingCount(0);
       } else {
-        setRemainingCount(1);
+        setRemainingCount(featureMax);
       }
       return;
     }
@@ -73,7 +79,16 @@ function NewAnalysisDebuggerContent() {
     };
     const feature: Feature = featureMap[activeMode] ?? "audio";
     const status = await getQuotaStatus();
-    setRemainingCount(toDisplayRemaining(status, feature));
+    if (!status) {
+      // 接口失败时按 test 档额度兜底，避免误显示为 FREE 1 次
+      setRemainingCount(TEST_QUOTA[feature] ?? 1);
+      return;
+    }
+    if (status.membership === "max") {
+      setRemainingCount("unlimited");
+      return;
+    }
+    setRemainingCount(status[feature]?.remaining ?? 0);
   };
 
   useEffect(() => {
@@ -304,15 +319,16 @@ function NewAnalysisDebuggerContent() {
           auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！");
           return;
         }
+        // 内测版本：test 与 free 都走"一次性永久累计"分支；只有 pro / max 走 30 天滚动窗口
         const isPaid = status.membership === "pro" || status.membership === "max";
         if (!isPaid && status[feature].remaining <= 0) {
           const featureLabel =
             feature === "audio" ? "面试录音分析" :
             feature === "record" ? "面试记录分析" : "简历分析";
-          const isFreeUser = status.membership === "free";
-          const detail = isFreeUser
-            ? `您已使用过${featureLabel}的免费体验（永久 1 次），请升级至 PRO 会员解锁更多！`
-            : `30 天内${featureLabel}体验次数已用完（${status[feature].used}/${status[feature].max}），请升级会员或等待额度重置！`;
+          const isTestUser = status.membership === "test";
+          const detail = isTestUser
+            ? `您的内测${featureLabel}额度已用完（一次性），内测期间无重置，敬请期待正式版！`
+            : `您已使用过${featureLabel}的免费体验（永久 1 次），请升级至 PRO 会员解锁更多！`;
           auth.triggerToast(detail);
           return;
         }
@@ -653,6 +669,9 @@ function NewAnalysisDebuggerContent() {
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
             </a>
+            <a onClick={() => window.open("/guide", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试指南
+            </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
             </a>
@@ -835,9 +854,11 @@ function NewAnalysisDebuggerContent() {
                   }`}>
                     {remainingCount === "unlimited"
                       ? "MAX会员：无限体验"
-                      : (auth.user?.membership === "pro"
-                          ? `PRO会员 · 剩余体验：${remainingCount}次`
-                          : `免费体验剩余：${remainingCount}次`)}
+                      : auth.user?.membership === "pro"
+                      ? `PRO会员 · 剩余体验：${remainingCount}次`
+                      : auth.user?.membership === "test"
+                      ? `内测档 · 剩余体验：${remainingCount}次`
+                      : `免费体验剩余：${remainingCount}次`}
                   </div>
                 )}
               </div>
@@ -1076,78 +1097,93 @@ function NewAnalysisDebuggerContent() {
             </h4>
             <p className="text-xs md:text-sm text-on-surface-variant/70 leading-relaxed font-semibold">
               {!auth.isLoggedIn
-                ? "登录后即可把本次面试分析记录安全保存到云端，并解锁完整会员特权持续追踪每一次成长。"
+                ? "登录后即可把本次面试分析记录安全保存到云端，持续追踪每一次成长。"
+                : auth.user?.membership === "test"
+                ? "内测体验版已为你解锁 2 次录音分析 / 5 次记录分析 / 5 次简历分析 / 20 分钟 AI 模拟面试。一次性额度，用完即止。"
                 : auth.user?.membership === "max"
-                ? "续费 Max 专家版，继续享有无限次面试分析和简历分析、高级表达重塑配套逻辑图以及完整的面试成长轨迹档案。"
+                ? "MAX 档已解锁全部无限分析额度与特权功能。"
                 : auth.user?.membership === "pro"
-                ? "升级为 Max 专家版，即可解除所有限制，解锁完整无限次面试分析和简历分析、高级表达重塑配套逻辑图以及完整的面试成长轨迹档案。"
-                : "升级为 Pro 专家版，即可解除所有限制，解锁完整 10 次面试分析和简历分析、高级表达重塑配套逻辑图以及完整的面试成长轨迹档案。"}
+                ? "PRO 档已解锁 30 天内 10 次录音/记录/简历分析 + 5 次 AI 模拟面试 + 60 分钟/月实时面试。"
+                : "免费版仅可使用 1 次录音分析 / 1 次记录分析 / 1 次简历分析。"}
             </p>
           </div>
 
           <div className="relative z-10 flex gap-4 w-full md:w-auto">
-            {!auth.isLoggedIn ? (
-              <button
-                onClick={handleInterceptAction}
-                className="w-full md:w-auto px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-on-primary font-black text-xs md:text-sm rounded-xl hover:scale-[1.02] active:scale-98 transition-all whitespace-nowrap shadow-[0_0_20px_rgba(192,193,255,0.35)] cursor-pointer"
-              >
-                登录保存分析结果
-              </button>
-            ) : auth.user?.membership === "pro" ? (
-              <button
-                onClick={() => openUpgradeModal("max")}
-                className="w-full md:w-auto px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-on-primary font-black text-xs md:text-sm rounded-xl hover:scale-[1.02] active:scale-98 transition-all whitespace-nowrap shadow-[0_0_20px_rgba(192,193,255,0.35)] cursor-pointer"
-              >
-                升级 Max 会员
-              </button>
-            ) : auth.user?.membership === "max" ? (
-              <button
-                onClick={() => openUpgradeModal("max")}
-                className="w-full md:w-auto px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-on-primary font-black text-xs md:text-sm rounded-xl hover:scale-[1.02] active:scale-98 transition-all whitespace-nowrap shadow-[0_0_20px_rgba(192,193,255,0.35)] cursor-pointer"
-              >
-                续费 Max 会员
-              </button>
-            ) : (
-              <button
-                onClick={() => openUpgradeModal("pro")}
-                className="w-full md:w-auto px-6 py-2.5 bg-gradient-to-r from-primary to-secondary text-on-primary font-black text-xs md:text-sm rounded-xl hover:scale-[1.02] active:scale-98 transition-all whitespace-nowrap shadow-[0_0_20px_rgba(192,193,255,0.35)] cursor-pointer"
-              >
-                升级 Pro 会员
-              </button>
-            )}
+            <span className="px-6 py-2.5 bg-tertiary/15 border border-tertiary/30 text-tertiary font-black text-xs md:text-sm rounded-xl whitespace-nowrap">
+              ✨ 内测体验中
+            </span>
           </div>
         </div>
 
       </div>
 
       {/* Footer */}
-      <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8">
+      <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
-          <div className="flex items-center gap-4">
-            <span className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-              © 2026 面试VAR AI. All rights reserved.
-            </span>
-          </div>
-          <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest animate-pulse">
-            <a onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer">
-              返回主页
-            </a>
-            <a className="hover:text-primary transition-colors cursor-default" href="#">
-              隐私政策
-            </a>
-            <a className="hover:text-primary transition-colors cursor-default" href="#">
+          <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
+            © 2026 面试VAR. All rights reserved.
+          </span>
+          <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
+            <span onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer select-none">
               服务条款
-            </a>
+            </span>
+            <span onClick={() => openLegalPrivacy()} className="hover:text-primary transition-colors cursor-pointer select-none">
+              隐私政策
+            </span>
+            <span onClick={() => openLegalContact()} className="hover:text-primary transition-colors cursor-pointer select-none">
+              联系方式
+            </span>
           </div>
         </div>
       </footer>
 
-      {/* 会员计划对比弹窗（点击"升级 Pro/Max 会员"按钮触发） */}
-      <PricingModal
-        open={showUpgradeModal}
-        onClose={closeUpgradeModal}
-        highlight={upgradeHighlight}
-      />
+      {/* UNAUTHENTICATED OVERLAY — 参照面试训练场样式：背景模糊 + 居中卡片 */}
+      {!auth.isLoggedIn && (
+        <div className="fixed inset-0 z-30 bg-background/55 backdrop-blur-md flex items-center justify-center px-4">
+          <div className="glass-panel relative rounded-3xl border border-white/10 p-8 sm:p-10 max-w-md w-full text-center space-y-6 shadow-[0_20px_60px_rgba(0,0,0,0.4)] overflow-hidden">
+            <div className="absolute -top-16 -right-16 w-40 h-40 bg-primary/15 rounded-full blur-3xl pointer-events-none" />
+            <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-secondary/15 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative space-y-5">
+              <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/15 border border-primary/30 flex items-center justify-center shadow-[0_0_30px_rgba(192,193,255,0.2)]">
+                <span className="material-symbols-outlined !text-3xl text-primary">lock</span>
+              </div>
+
+              <div className="space-y-2">
+                <span className="text-[10px] font-label-mono tracking-widest text-primary font-bold uppercase block">
+                  Interview Debugger
+                </span>
+                <h3 className="text-2xl font-black text-white leading-tight">登录解锁你的面试调试器</h3>
+                <p className="text-sm text-on-surface-variant/70 font-semibold leading-relaxed">
+                  上传面试录音 / 简历 / 面试记录，AI 会结合你的个人画像与历史职业记忆，输出专属的深度诊断报告与可执行的改进建议。
+                </p>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3 pt-1">
+                <button
+                  onClick={() => auth.setShowLogin(true)}
+                  className="flex-1 py-3 bg-primary text-on-primary font-black rounded-xl hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_24px_rgba(192,193,255,0.35)] cursor-pointer"
+                >
+                  立即登录
+                </button>
+                <button
+                  onClick={() => router.push("/register")}
+                  className="flex-1 py-3 bg-white/5 border border-white/10 text-white font-black rounded-xl hover:bg-white/10 transition-all cursor-pointer"
+                >
+                  免费注册
+                </button>
+              </div>
+
+              <button
+                onClick={() => router.push("/")}
+                className="text-base font-bold text-on-surface-variant/50 hover:text-on-surface-variant transition-colors cursor-pointer"
+              >
+                返回首页
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

@@ -102,6 +102,22 @@ function ResumeAnalysisPageContent() {
     if (!hasIdInUrl) setIsHydrating(false);
   }, []);
 
+  // Sync logged in user profile (username, current company, current role) to profile state
+  useEffect(() => {
+    if (auth.isLoggedIn && auth.user) {
+      const validCompany = auth.user.company && !["暂无", "暂无公司", "无", "None", "null", "未填写", "-"].includes(auth.user.company) ? auth.user.company : "-";
+      const validRole = auth.user.role && !["暂无", "无", "None", "null", "未填写", "-"].includes(auth.user.role) ? auth.user.role : "-";
+      const displayName = auth.user.name && auth.user.name.trim() !== "" && auth.user.name !== "XXX" ? auth.user.name : "候选人";
+      setProfile((prev) => ({
+        ...prev,
+        name: displayName,
+        company: validCompany,
+        role: validRole,
+        title: validRole !== "-" ? validRole : "-",
+      }));
+    }
+  }, [auth.isLoggedIn, auth.user]);
+
   // If URL has ?id=<analysis_id>, fetch that historical analysis from backend
   // and overwrite localStorage so the page renders the right report.
   useEffect(() => {
@@ -358,16 +374,15 @@ function ResumeAnalysisPageContent() {
   const medLen = totalRisksCount > 0 ? (medRisksCount / totalRisksCount) * circ : 0;
   const highLen = totalRisksCount > 0 ? (highRisksCount / totalRisksCount) * circ : 0;
 
-  // 8 个 section 索引 ↔ 后端 structure_analysis 字段 key（顺序与按钮列表一致）
+  // 简历结构地图：统一 7 段 schema（技术岗/非技术岗分析侧重点由 LLM prompt 区分）
   const STRUCTURE_KEYS = [
-    "personal_info", "work_experience", "projects", "tech_stack",
-    "education", "open_source", "business_outcomes", "management",
+    "education", "work_experience", "projects", "professional_capability",
+    "works_portfolio", "business_outcomes", "management",
   ] as const;
 
-  // 8 个 section 的中文名（供 LLM 兜底不足时使用）
   const STRUCTURE_NAMES = [
-    "个人信息", "工作经历", "项目经历", "技术栈",
-    "教育背景", "开源经历", "业务成果", "管理经验",
+    "教育背景", "工作/实习经历", "项目经历", "专业能力",
+    "作品/案例", "业务成果", "管理经验",
   ];
 
   // 后端 status 文本 → 前端颜色/默认分数映射
@@ -396,16 +411,17 @@ function ResumeAnalysisPageContent() {
   const getDynamicBulletExample = (sectionIdx: number) => {
     let matchedBullet: any = null;
     
-    const searchKeywords = [
-      ["email", "mail", "微信", "联系方式"], // 个人信息
-      ["工作", "开发", "实现", "负责", "优化"], // 工作经历
-      ["项目", "重构", "分布式", "架构", "设计"], // 项目经历
-      ["Redis", "Kafka", "JVM", "MySQL", "技术栈", "掌握", "精通"], // 技术栈
-      ["南开", "大学", "硕士", "本科", "论文", "奖学金", "毕业"], // 教育背景
-      ["Github", "开源", "vllm", "vLLM", "笔记", "贡献"], // 开源经历
-      ["%", "QPS", "吞吐", "万", "亿", "指标", "日活"], // 业务成果
-      ["Mentor", "带人", "规范", "指导", "统筹", "主导"] // 管理经验
-    ][sectionIdx];
+    // 统一关键词（技术岗/非技术岗关键词合并，LLM 按岗位类型侧重分析）
+    const SEARCH_KEYWORDS: string[][] = [
+      ["南开", "大学", "硕士", "本科", "论文", "奖学金", "毕业"],
+      ["工作", "开发", "实现", "负责", "优化", "推动", "完成"],
+      ["项目", "重构", "分布式", "架构", "设计", "策划", "落地", "统筹"],
+      ["Redis", "Kafka", "JVM", "MySQL", "技术栈", "CRM", "Excel", "PPT", "方法论", "认证", "工具"],
+      ["Github", "开源", "作品", "案例", "演讲", "分享", "课程", "专利", "获奖", "客户"],
+      ["%", "QPS", "吞吐", "万", "亿", "指标", "转化", "留存", "GMV", "日活", "客户数"],
+      ["Mentor", "带人", "规范", "指导", "统筹", "主导", "团队"]
+    ];
+    const searchKeywords = SEARCH_KEYWORDS[sectionIdx];
 
     for (const exp of workExperiences) {
       for (const bullet of exp.bullets || []) {
@@ -440,42 +456,46 @@ function ResumeAnalysisPageContent() {
       };
     }
 
-    const staticFallbacks = [
+    // 统一 before/after 范例（技术岗/非技术岗合并，LLM 按岗位类型侧重分析）
+    const FALLBACKS = [
+      // 0 教育背景
       {
-        before: "微信: xxxxx | 邮箱: " + (profile.name === "郑泽其" ? "471815124@qq.com" : "myemail@qq.com"),
-        after: "手机: 186-xxxx-xxxx | 邮箱: " + (profile.name ? profile.name.toLowerCase().replace(/\s+/g, '') : "candidate") + "@outlook.com"
-      },
-      {
-        before: `负责在${profile.company || "公司"}研发常用业务系统开发与维护。`,
-        after: `主导${profile.company || "公司"}核心高并发服务接口优化，响应延迟缩短 40%，大幅提升系统吞吐率。`
-      },
-      {
-        before: "参与分布式事务相关业务开发，解决多服务调用一致性问题。",
-        after: "基于 Seata TCC 模式与 Saga 事务补偿机制重写复杂嵌套交易链路，规避异构系统账实不符风险。"
-      },
-      {
-        before: "熟练掌握 Java/Spring 框架、Redis 缓存、Kafka 消息队列开发。",
-        after: "深入理解 JVM 内存调优；熟练掌握 Redis 大Key/热Key治理；主导落地 Kafka 消息堆积治理方案。"
-      },
-      {
-        before: "硕士/本科 (仅列出专业与学校学历，无重点技术亮点突出)",
+        before: "硕士/本科 (仅列出专业与学校学历，无重点亮点突出)",
         after: "硕士/本科 | 主导研发课题并获一等奖学金，论文被评为校级优秀论文。"
       },
+      // 1 工作/实习经历
       {
-        before: "业余在 GitHub 上开发了一些小工具 / 无开源经历。",
-        after: "活跃开源社区贡献者（附个人Github链接），产出多篇源码深度剖析文档，社区 Star 累计超 100+。"
+        before: `负责在${profile.company || "公司"}完成日常业务对接与系统开发工作。`,
+        after: `主导${profile.company || "公司"}核心业务项目落地，推动关键指标（性能 / 转化率 / 客户满意度）环比提升 25%。`
       },
+      // 2 项目经历
       {
-        before: "重构了系统召回算法，提高了推荐效率。",
-        after: "核心召回链路重构，API 吞吐量整体提升 25%，带来核心业务漏斗转化率（CTR）相对提升 2.3%。"
+        before: "参与项目开发与交付，负责部分模块的策划或实现。",
+        after: "独立操盘覆盖多部门的端到端项目，提前交付并沉淀 SOP，成为后续团队复用标准。"
       },
+      // 3 专业能力
       {
-        before: "日常配合团队研发工作，编写开发文档并协助部署。",
-        after: "作为团队技术骨干，担任 3 名研发新人的技术 Mentor，主导制定并推广团队通用分布式部署规范。"
+        before: "熟练使用常用工具/框架完成日常工作。",
+        after: "深入掌握核心技能（技术栈/方法论/工具链），主导关键治理与体系建设，沉淀可复制的方法论。"
+      },
+      // 4 作品/案例
+      {
+        before: "未体现可展示的作品或行业沉淀。",
+        after: "有公开作品/案例（开源项目/GitHub/白皮书/客户案例/演讲），产出多篇深度内容，累计获得行业认可。"
+      },
+      // 5 业务成果
+      {
+        before: "推进了日常工作指标的提升。",
+        after: "主导核心指标优化（性能/转化率/GMV/留存），提升幅度显著，沉淀为团队 SOP 在多条业务线复用。"
+      },
+      // 6 管理经验
+      {
+        before: "参与团队日常工作安排，配合主管完成事务性支持。",
+        after: "作为团队骨干/小组负责人，统筹团队 OKR 拆解与跨部门协作，关键项目交付准时率显著提升。"
       }
     ];
 
-    return staticFallbacks[sectionIdx];
+    return FALLBACKS[sectionIdx];
   };
 
   const getDynamicSectionStatus = (sectionIdx: number) => {
@@ -490,11 +510,15 @@ function ResumeAnalysisPageContent() {
     const hasRisk = (keywords: string[]) => keywords.some(kw => risksText.includes(kw));
 
     switch (sectionIdx) {
+      // 7-section schema：education, work_experience, projects, professional_capability, works_portfolio, business_outcomes, management
       case 0:
-        return { status: "优秀", score: 95, color: "text-[#5DECCB]", barColor: "bg-[#5DECCB]" };
+        // 教育背景
+        return { status: "优秀", score: 92, color: "text-[#5DECCB]", barColor: "bg-[#5DECCB]" };
       case 1:
+        // 工作经历
         return { status: "优秀", score: 90, color: "text-[#5DECCB]", barColor: "bg-[#5DECCB]" };
       case 2:
+        // 项目经历
         const projRisk = hasRisk(["项目", "设计", "日常"]);
         return {
           status: projRisk ? "风险" : "优秀",
@@ -503,6 +527,7 @@ function ResumeAnalysisPageContent() {
           barColor: projRisk ? "bg-amber-400" : "bg-[#5DECCB]"
         };
       case 3:
+        // 技术栈 / 专业能力
         const techRisk = hasRisk(["技术", "拼写", "redis", "kafka", "jvm", "名词"]);
         return {
           status: techRisk ? "风险" : "优秀",
@@ -511,19 +536,19 @@ function ResumeAnalysisPageContent() {
           barColor: techRisk ? "bg-amber-400" : "bg-[#5DECCB]"
         };
       case 4:
-        return { status: "优秀", score: 92, color: "text-[#5DECCB]", barColor: "bg-[#5DECCB]" };
-      case 5:
-        const hasOpenSource = workExperiences.some((exp: any) => 
-          (exp.company + exp.role + (exp.bullets || []).map((b: any) => b.originalText + b.optimizedText).join(" ")).toLowerCase().includes("github") ||
-          (exp.company + exp.role + (exp.bullets || []).map((b: any) => b.originalText + b.optimizedText).join(" ")).includes("开源")
-        );
+        // 开源经历 / 作品案例：双轨识别
+        const expText5 = workExperiences.map((exp: any) =>
+          exp.company + exp.role + (exp.bullets || []).map((b: any) => b.originalText + b.optimizedText).join(" ")
+        ).join(" ").toLowerCase();
+        const hasHighlight = /github|开源|作品|案例|演讲|分享|课程|专利|比赛|获奖|客户|白皮书|标杆/.test(expText5);
         return {
-          status: hasOpenSource ? "亮点" : "缺失",
-          score: hasOpenSource ? 85 : 45,
-          color: hasOpenSource ? "text-[#00D4FF]" : "text-[#FF7A95]",
-          barColor: hasOpenSource ? "bg-[#00D4FF]" : "bg-[#FF7A95]"
+          status: hasHighlight ? "亮点" : "缺失",
+          score: hasHighlight ? 85 : 45,
+          color: hasHighlight ? "text-[#00D4FF]" : "text-[#FF7A95]",
+          barColor: hasHighlight ? "bg-[#00D4FF]" : "bg-[#FF7A95]"
         };
-      case 6:
+      case 5:
+        // 业务成果
         const bizRisk = hasRisk(["量化", "指标", "成果", "业绩", "数据"]);
         return {
           status: bizRisk ? "缺失" : "优秀",
@@ -531,7 +556,8 @@ function ResumeAnalysisPageContent() {
           color: bizRisk ? "text-[#FF7A95]" : "text-[#5DECCB]",
           barColor: bizRisk ? "bg-[#FF7A95]" : "bg-[#5DECCB]"
         };
-      case 7:
+      case 6:
+        // 管理经验
         const mgtRisk = hasRisk(["管理", "带人", "导师", "mentor", "统统", "团队", "规模"]);
         return {
           status: mgtRisk ? "缺失" : "优秀",
@@ -573,13 +599,15 @@ function ResumeAnalysisPageContent() {
     const company = (profile.company && profile.company !== "暂无公司") ? profile.company : "当前公司";
     const school = (profile.school && profile.school !== "暂无学校") ? profile.school : "教育背景";
 
-    const sectionsInfo = [
+    // 统一 7 段 section 介绍文案（技术岗/非技术岗合并，LLM 按岗位类型侧重分析）
+    const SECTIONS_INFO = [
+      // 0 教育背景（前置）
       {
-        name: "个人信息",
-        desc: `基本信息开发梳理完整，求职意向非常明确，对基本学历、联系方式的梳理符合大厂简历推荐规范。`,
+        name: "教育背景",
+        desc: `学历背景（${school}）交代清晰。在目标岗位为高级开发/架构师级别时，建议突出理论积累与工程底蕴。`,
         advice: [
-          "建议使用专业的国内或海外主流邮箱系统（如 Outlook、Gmail ），替代娱乐性强的邮箱后缀以表现严谨的工作作风。",
-          `求职意向明确为‘${targetRole}’，后续技术面试需着重体现系统性架构思维与架构匹配度。`
+          "在学历信息下方可以添加在校期间 of 算法竞赛、奖学金、或者是软件研发课题实践，进一步建立技术可信度。",
+          "强调硕士/本科期间 of 计算机编程实践，淡化非相关专业课程的影响。"
         ]
       },
       {
@@ -607,16 +635,8 @@ function ResumeAnalysisPageContent() {
         ]
       },
       {
-        name: "教育背景",
-        desc: `学历背景（${school}）交代清晰。在目标岗位为高级开发/架构师级别时，建议突出理论积累与工程底蕴。`,
-        advice: [
-          "在学历信息下方可以添加在校期间 of 算法竞赛、奖学金、或者是软件研发课题实践，进一步建立技术可信度。",
-          "强调硕士/本科期间 of 计算机编程实践，淡化非相关专业课程的影响。"
-        ]
-      },
-      {
         name: "开源经历",
-        desc: ds.status === "亮点" 
+        desc: ds.status === "亮点"
           ? "简历中体现了开源或社区贡献经历，这是一个非常好的差异化亮点，能够体现个人的技术追求与极客精神。"
           : "目前简历中缺少开源经历或社区贡献。对于高级技术岗位，参与开源社区或拥有个人技术积累能大幅提升简历竞争力。",
         advice: [
@@ -644,7 +664,8 @@ function ResumeAnalysisPageContent() {
           "突出跨团队的技术协同和影响力半径。"
         ]
       }
-    ][idx];
+    ];
+    const sectionsInfo = SECTIONS_INFO[idx];
 
     return {
       ...ds,
@@ -732,6 +753,9 @@ function ResumeAnalysisPageContent() {
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
             </a>
+            <a onClick={() => window.open("/guide", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试指南
+            </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
             </a>
@@ -799,57 +823,80 @@ function ResumeAnalysisPageContent() {
               </div>
 
               {/* Avatar and basic info */}
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-full bg-[#AFA7FF] text-[#050B1A] flex items-center justify-center font-black text-lg select-none">
-                  {profile.name.substring(0, 1)}
-                </div>
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-base font-black text-white">{profile.name}</span>
-                    <span className="px-1.5 py-0.2 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/25 text-xs font-black uppercase">
-                      {profile.status}
-                    </span>
-                  </div>
-                  <p className="text-xs text-white/50 font-bold">{profile.title}</p>
-                </div>
-              </div>
+              {(() => {
+                const displayName = (auth.user?.name && auth.user.name.trim() !== "" && auth.user.name !== "XXX")
+                  ? auth.user.name
+                  : (profile.name && !["基本信息", "个人信息", "简历信息", "个人简历", "基本资料", "XXX"].includes(profile.name) ? profile.name : "候选人");
 
-              {/* Attributes list */}
-              <div className="space-y-2.5 text-xs font-bold text-white/60">
-                <div className="flex justify-between items-start gap-3">
-                  <span className="shrink-0">工作年限</span>
-                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.years}</span>
-                </div>
-                <div className="flex justify-between items-start gap-3">
-                  <span className="shrink-0">当前公司</span>
-                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.company}</span>
-                </div>
-                <div className="flex justify-between items-start gap-3">
-                  <span className="shrink-0">当前岗位</span>
-                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.role}</span>
-                </div>
-                <div className="flex justify-between items-start gap-3">
-                  <span className="shrink-0">当前薪资</span>
-                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.salary}</span>
-                </div>
-                <div className="h-px bg-white/5 my-1" />
-                <div className="flex justify-between items-start gap-3">
-                  <span className="shrink-0">目标公司</span>
-                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetCompany}</span>
-                </div>
-                <div className="flex justify-between items-start gap-3">
-                  <span className="shrink-0">目标岗位</span>
-                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetRole}</span>
-                </div>
-                <div className="flex justify-between items-start gap-3">
-                  <span className="shrink-0">目标职级</span>
-                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetGrade}</span>
-                </div>
-                <div className="flex justify-between items-start gap-3">
-                  <span className="shrink-0">目标薪资</span>
-                  <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetSalary}</span>
-                </div>
-              </div>
+                const isValidCompany = (c?: string) => Boolean(c && c.trim() !== "" && !["暂无", "暂无公司", "无", "None", "null", "未填写", "-"].includes(c));
+                const isValidRole = (r?: string) => Boolean(r && r.trim() !== "" && !["暂无", "无", "None", "null", "未填写", "-"].includes(r));
+
+                const displayCompany = isValidCompany(auth.user?.company)
+                  ? auth.user!.company
+                  : (isValidCompany(profile.company) ? profile.company : "-");
+
+                const displayRole = isValidRole(auth.user?.role)
+                  ? auth.user!.role
+                  : (isValidRole(profile.role) ? profile.role : "-");
+
+                return (
+                  <>
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-full bg-[#AFA7FF] text-[#050B1A] flex items-center justify-center font-black text-lg select-none">
+                        {displayName.substring(0, 1)}
+                      </div>
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-base font-black text-white">{displayName}</span>
+                          <span className="px-1.5 py-0.2 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/25 text-xs font-black uppercase">
+                            {profile.status}
+                          </span>
+                        </div>
+                        {displayRole && displayRole !== "-" && (
+                          <p className="text-xs text-white/50 font-bold">{displayRole}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Attributes list */}
+                    <div className="space-y-2.5 text-xs font-bold text-white/60">
+                      <div className="flex justify-between items-start gap-3">
+                        <span className="shrink-0">工作年限</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.years}</span>
+                      </div>
+                      <div className="flex justify-between items-start gap-3">
+                        <span className="shrink-0">当前公司</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{displayCompany}</span>
+                      </div>
+                      <div className="flex justify-between items-start gap-3">
+                        <span className="shrink-0">当前岗位</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{displayRole}</span>
+                      </div>
+                      <div className="flex justify-between items-start gap-3">
+                        <span className="shrink-0">当前薪资</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.salary}</span>
+                      </div>
+                      <div className="h-px bg-white/5 my-1" />
+                      <div className="flex justify-between items-start gap-3">
+                        <span className="shrink-0">目标公司</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetCompany}</span>
+                      </div>
+                      <div className="flex justify-between items-start gap-3">
+                        <span className="shrink-0">目标岗位</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetRole}</span>
+                      </div>
+                      <div className="flex justify-between items-start gap-3">
+                        <span className="shrink-0">目标职级</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetGrade}</span>
+                      </div>
+                      <div className="flex justify-between items-start gap-3">
+                        <span className="shrink-0">目标薪资</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetSalary}</span>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
             </div>
 
             {/* Sidebar Structure Status Card */}
@@ -863,14 +910,13 @@ function ResumeAnalysisPageContent() {
 
               <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 select-none">
                 {[
-                  { name: "个人信息", status: "优秀", color: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25" },
-                  { name: "工作经历", status: "优秀", color: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25" },
-                  { name: "项目经历", status: "风险", color: "text-amber-400 bg-amber-400/10 border-amber-400/25" },
-                  { name: "技术栈", status: "风险", color: "text-amber-400 bg-amber-400/10 border-amber-400/25" },
-                  { name: "教育背景", status: "优秀", color: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25" },
-                  { name: "开源经历", status: "亮点", color: "text-[#00D4FF] bg-[#00D4FF]/10 border-[#00D4FF]/25" },
-                  { name: "业务成果", status: "缺失", color: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25" },
-                  { name: "管理经验", status: "缺失", color: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25" }
+                  { name: STRUCTURE_NAMES[0], status: "优秀", color: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25" },
+                  { name: STRUCTURE_NAMES[1], status: "优秀", color: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25" },
+                  { name: STRUCTURE_NAMES[2], status: "风险", color: "text-amber-400 bg-amber-400/10 border-amber-400/25" },
+                  { name: STRUCTURE_NAMES[3], status: "风险", color: "text-amber-400 bg-amber-400/10 border-amber-400/25" },
+                  { name: STRUCTURE_NAMES[4], status: "亮点", color: "text-[#00D4FF] bg-[#00D4FF]/10 border-[#00D4FF]/25" },
+                  { name: STRUCTURE_NAMES[5], status: "缺失", color: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25" },
+                  { name: STRUCTURE_NAMES[6], status: "缺失", color: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25" }
                 ].map((item, idx) => (
                   <div
                     key={idx}
@@ -912,28 +958,87 @@ function ResumeAnalysisPageContent() {
             </div>
 
             {/* Quick Metrics Row */}
-            <div className="grid grid-cols-4 gap-3.5 select-none shrink-0">
-              {[
-                { title: "总字数", val: "3,821", icon: "article", color: "text-[#00D4FF]" },
-                { title: "风险点", val: "7 个", icon: "warning", color: "text-[#FF7A95]" },
-                { title: "优化建议", val: "21 条", icon: "lightbulb", color: "text-[#AFA7FF]" },
-                { title: "岗位匹配度", val: "83%", icon: "donut_large", color: "text-[#5DECCB]" }
-              ].map((m, i) => (
-                <div key={i} className="glass-panel p-4 rounded-xl border-white/5 flex items-center gap-3 w-full">
-                  <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
-                    <span className={`material-symbols-outlined text-base ${m.color}`}>
-                      {m.icon}
-                    </span>
-                  </div>
-                  <div className="text-left min-w-0 flex-1">
-                    <span className="text-xs text-white/40 font-bold block">{m.title}</span>
-                    <span className="text-sm md:text-base font-black text-white block mt-0.5 leading-none font-mono">
-                      {m.val}
-                    </span>
-                  </div>
+            {(() => {
+              // 1. 总字数
+              let wordCount = analysisResult?.word_count;
+              if (!wordCount || typeof wordCount !== "number") {
+                let calcLen = 0;
+                (analysisResult?.work_experiences || []).forEach((exp: any) => {
+                  (exp.bullets || []).forEach((b: any) => {
+                    calcLen += (b.originalText || b.optimizedText || "").length;
+                  });
+                });
+                (analysisResult?.projects || []).forEach((proj: any) => {
+                  (proj.bullets || []).forEach((b: any) => {
+                    calcLen += (b.originalText || b.optimizedText || "").length;
+                  });
+                });
+                wordCount = calcLen > 0 ? calcLen : 3821;
+              }
+
+              // 2. 风险点
+              let risksCount = analysisResult?.risks_count;
+              if (typeof risksCount !== "number") {
+                const risksList = analysisResult?.risks || analysisResult?.risk_analysis?.risks;
+                if (Array.isArray(risksList)) {
+                  risksCount = risksList.length;
+                } else {
+                  let rCount = 0;
+                  (analysisResult?.work_experiences || []).forEach((exp: any) => {
+                    (exp.bullets || []).forEach((b: any) => {
+                      if (b.originalTag === "风险") rCount++;
+                    });
+                  });
+                  risksCount = rCount > 0 ? rCount : 7;
+                }
+              }
+
+              // 3. 优化建议（严格对应 “AI 优化建议” Tab 中的建议条数）
+              let suggestionsCount = analysisResult?.suggestions_count;
+              if (typeof suggestionsCount !== "number") {
+                const optList = analysisResult?.optimization_suggestions || analysisResult?.ai_suggestions;
+                if (Array.isArray(optList) && optList.length > 0) {
+                  suggestionsCount = optList.length;
+                } else {
+                  suggestionsCount = 5;
+                }
+              }
+
+              // 4. 岗位匹配度
+              let matchRate = analysisResult?.match_score;
+              if (typeof matchRate !== "number") {
+                matchRate = analysisResult?.match_analysis?.match_score ?? 
+                            analysisResult?.score_breakdown?.keyword_match?.score ?? 
+                            analysisResult?.score ?? 83;
+              }
+
+              const dynamicMetrics = [
+                { title: "总字数", val: Number(wordCount).toLocaleString(), icon: "article", color: "text-[#00D4FF]" },
+                { title: "风险点", val: `${risksCount} 个`, icon: "warning", color: "text-[#FF7A95]" },
+                { title: "优化建议", val: `${suggestionsCount} 条`, icon: "lightbulb", color: "text-[#AFA7FF]" },
+                { title: "岗位匹配度", val: `${matchRate}%`, icon: "donut_large", color: "text-[#5DECCB]" }
+              ];
+
+              return (
+                <div className="grid grid-cols-4 gap-3.5 select-none shrink-0">
+                  {dynamicMetrics.map((m, i) => (
+                    <div key={i} className="glass-panel p-4 rounded-xl border-white/5 flex items-center gap-3 w-full">
+                      <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                        <span className={`material-symbols-outlined text-base ${m.color}`}>
+                          {m.icon}
+                        </span>
+                      </div>
+                      <div className="text-left min-w-0 flex-1">
+                        <span className="text-xs text-white/40 font-bold block">{m.title}</span>
+                        <span className="text-sm md:text-base font-black text-white block mt-0.5 leading-none font-mono">
+                          {m.val}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              );
+            })()}
 
             {/* Interactive Tab Switcher Panel */}
             <div className="glass-panel rounded-2xl border-white/5 p-4 flex flex-col gap-4 flex-1 lg:h-0 lg:min-h-0 min-h-[600px] overflow-hidden">
@@ -972,7 +1077,7 @@ function ResumeAnalysisPageContent() {
                     <div className="flex justify-between items-center pb-2 border-b border-white/5">
                       <h4 className="text-sm font-black text-white flex items-center gap-1.5">
                         <span className="material-symbols-outlined text-base text-[#00D4FF]">business_center</span>
-                        工作经历
+                        工作/实习经历
                       </h4>
 
                       {/* Original vs Optimized Switcher */}
@@ -1104,7 +1209,7 @@ function ResumeAnalysisPageContent() {
                   <div className="space-y-4 pt-1 text-left">
                     <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
                       <span className="material-symbols-outlined text-base text-[#5DECCB]">donut_large</span>
-                      岗位画像深度匹配分析 (Target: {profile.targetCompany} {profile.targetRole})
+                      岗位画像深度匹配分析 (目标岗位: {profile.targetCompany} {profile.targetRole})
                     </h4>
                     <div className="space-y-4">
                       <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 flex items-center gap-5 justify-between">
@@ -1602,7 +1707,7 @@ function ResumeAnalysisPageContent() {
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left select-none">
           <div className="flex items-center gap-4">
             <span className="text-xs text-white/30 font-label-mono font-bold tracking-widest">
-              © 2026 面试VAR AI. All rights reserved.
+              © 2026 面试VAR. All rights reserved.
             </span>
           </div>
           <div className="flex gap-8 text-xs text-white/30 font-label-mono font-bold tracking-widest animate-pulse">
@@ -1921,16 +2026,7 @@ function ResumeAnalysisPageContent() {
                 <div className="absolute left-[35px] top-[74px] bottom-[30px] w-0.5 bg-gradient-to-b from-[#5DECCB] via-amber-400 to-[#FF7A95]/30 pointer-events-none hidden md:block" />
 
                 <div className="space-y-3 relative z-10">
-                  {[
-                    "1. 个人信息",
-                    "2. 工作经历",
-                    "3. 项目经历",
-                    "4. 技术栈",
-                    "5. 教育背景",
-                    "6. 开源经历",
-                    "7. 业务成果",
-                    "8. 管理经验"
-                  ].map((name, idx) => {
+                  {STRUCTURE_NAMES.map((name, idx) => {
                     const isActive = selectedStructureSection === idx;
                     const ds = getDynamicSectionStatus(idx);
                     let badgeStyle = "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25";
@@ -1958,7 +2054,7 @@ function ResumeAnalysisPageContent() {
                             {idx + 1}
                           </span>
                           <span className={`text-[14.5px] transition-colors ${isActive ? "text-white font-extrabold" : "text-white/80"}`}>
-                            {name.substring(3)}
+                            {name}
                           </span>
                         </div>
                         <div className="flex items-center gap-1.5">
@@ -2105,11 +2201,3 @@ export default function ResumeAnalysisPage() {
     </Suspense>
   );
 }
-
-
-
-
-
-
-
-

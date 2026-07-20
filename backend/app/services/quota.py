@@ -47,13 +47,17 @@ _FEATURE_LABELS = {
 
 
 def _is_free_user(user: Optional[models.User]) -> bool:
-    """判断是否为"非会员"（membership 为 None 或未知值）。
+    """判断是否为"非会员"或"内测用户"（membership 为 None / "free" / "test" / 未知值）。
 
-    只有 NULL 才算非会员——保守兜底任何未知的 membership 字符串也走 FREE。
+    内测版本（2026-07-18+）调整：
+      - free（NULL）→ 永久 1 次，不滚窗
+      - test → 内测用户一次性额度（2/5/5），用完即止，**不滚窗**
+      - pro / max → 30 天滚动窗口
     """
     if user is None:
         return False  # 未登录不视为 FREE，由路由层拦截
     plan = (user.membership or "").lower()
+    # test 与 free 都走"一次性永久累计"分支；只有 pro / max 走 30 天滚动
     return plan not in ("pro", "max")
 
 
@@ -65,12 +69,14 @@ def get_quota_for(user: Optional[models.User]) -> dict:
     """
     if user is None:
         return settings.QUOTA_FREE
-    if _is_free_user(user):
-        return settings.QUOTA_FREE
-    if (user.membership or "").lower() == "max":
+    plan = (user.membership or "").lower()
+    if plan == "test":
+        return settings.QUOTA_TEST
+    if plan == "max":
         return settings.QUOTA_MAX
-    if (user.membership or "").lower() == "pro":
+    if plan == "pro":
         return settings.QUOTA_PRO
+    # None 或其他未知值 → FREE
     return settings.QUOTA_FREE
 
 
@@ -174,11 +180,23 @@ async def check_and_consume(
     used = await _count_used(db, user, feature, windowed=not is_free)
 
     if used >= max_count:
-        plan_name = "免费" if is_free else (
-            "MAX" if (user.membership or "").lower() == "max" else "PRO"
-        )
+        plan = (user.membership or "").lower()
         if is_free:
-            # 永久 1 次，没有"等待重置"的提示，直接引导升级
+            plan_name = "免费"
+        elif plan == "test":
+            plan_name = "内测"
+        elif plan == "max":
+            plan_name = "MAX"
+        else:
+            plan_name = "PRO"
+        if plan == "test":
+            # 内测版：test 档一次性额度已用完，不滚窗
+            detail = (
+                f"您的内测{_FEATURE_LABELS[feature]}额度已用完（{max_count} 次），"
+                f"内测期间无重置，敬请期待正式版！"
+            )
+        elif is_free:
+            # free 永久 1 次，没有"等待重置"的提示，直接引导升级
             detail = (
                 f"您已使用过{_FEATURE_LABELS[feature]}的免费体验（1 次），"
                 f"请升级至 PRO 会员解锁更多分析！"
@@ -186,7 +204,7 @@ async def check_and_consume(
         else:
             detail = (
                 f"{plan_name}用户 {settings.QUOTA_WINDOW_DAYS} 天内仅可使用 "
-                f"{max_count} 次{_FEATURE_LABELS[feature]}，请升级会员或等待额度重置"
+                f"{max_count} 次{_FEATURE_LABELS[feature]}，请等待额度重置或联系客服"
             )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

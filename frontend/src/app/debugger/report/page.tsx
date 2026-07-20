@@ -45,7 +45,6 @@ export default function CareerDashboard() {
   // Modals visibility
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showEditGoalModal, setShowEditGoalModal] = useState(false);
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [showEditSecurityModal, setShowEditSecurityModal] = useState(false);
 
   // Form states for modals
@@ -73,15 +72,18 @@ export default function CareerDashboard() {
 
   useEffect(() => {
     if (auth.isLoggedIn && auth.user) {
+      const validCompany = auth.user.company && !["暂无", "暂无公司", "无", "None", "null", "未填写", "-"].includes(auth.user.company) ? auth.user.company : "-";
+      const validRole = auth.user.role && !["暂无", "无", "None", "null", "未填写", "-"].includes(auth.user.role) ? auth.user.role : "-";
+      const displayName = auth.user.name && auth.user.name.trim() !== "" && auth.user.name !== "XXX" ? auth.user.name : "候选人";
       setProfile(prev => ({
         ...prev,
-        name: auth.user.name,
+        name: displayName,
         status: auth.user.status || prev.status,
-        title: auth.user.role || prev.title,
+        title: validRole !== "-" ? validRole : "-",
         experience: auth.user.years ? `${auth.user.years}经验` : prev.experience,
-        company: auth.user.company || prev.company,
-        role: auth.user.role ? auth.user.role.split(" · ")[0] : prev.role,
-        level: auth.user.role ? auth.user.role.split(" · ")[1] || prev.level : prev.level
+        company: validCompany,
+        role: validRole,
+        level: auth.user.role && auth.user.role.includes(" · ") ? auth.user.role.split(" · ")[1] : "-"
       }));
       setCareerGoal(prev => ({
         ...prev,
@@ -256,6 +258,9 @@ export default function CareerDashboard() {
             <a onClick={() => router.push("/debugger/report")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
               职业驾驶舱
             </a>
+            <a onClick={() => window.open("/guide", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试指南
+            </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
             </a>
@@ -318,7 +323,7 @@ export default function CareerDashboard() {
               </span>
               <div className="flex items-center gap-2 border-l border-white/10 pl-4">
                 <div className="w-7 h-7 rounded-full bg-slate-900 border border-white/10 overflow-hidden shrink-0">
-                  <img src={auth.user.avatar} alt={auth.user.name} className="w-full h-full object-cover" />
+                  <img src={auth.user.avatar || "/register.jpg"} alt={auth.user.name} className="w-full h-full object-cover" />
                 </div>
                 <span className="text-white font-black whitespace-nowrap">{auth.user.name}</span>
                 <span className="material-symbols-outlined text-sm text-on-surface-variant/40 select-none">expand_more</span>
@@ -334,7 +339,7 @@ export default function CareerDashboard() {
               <div className="relative shrink-0 select-none">
                 <div className="w-20 h-20 rounded-full border border-primary/30 overflow-hidden bg-slate-900 flex items-center justify-center shadow-2xl relative z-10">
                   <img
-                    src={auth.user.avatar}
+                    src={auth.user.avatar || "/register.jpg"}
                     alt={profile.name}
                     className="w-full h-full object-cover"
                     onError={(e) => {
@@ -361,6 +366,9 @@ export default function CareerDashboard() {
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full bg-tertiary/10 text-tertiary text-[11px] font-black border border-tertiary/20 whitespace-nowrap">
                     {profile.status}
+                  </span>
+                  <span className="px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-300 text-[11px] font-black border border-purple-500/20 whitespace-nowrap">
+                    内测用户
                   </span>
                 </div>
 
@@ -402,12 +410,16 @@ export default function CareerDashboard() {
               <div className="flex gap-6 px-5 py-4 rounded-2xl bg-white/[0.02] border border-white/5 shrink-0 w-full sm:w-auto justify-between sm:justify-start">
                 <div className="text-left whitespace-nowrap min-w-0">
                   <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">当前公司</span>
-                  <span className="text-sm font-black text-white block mt-0.5 whitespace-nowrap">{profile.company}</span>
+                  <span className="text-sm font-black text-white block mt-0.5 whitespace-nowrap">
+                    {profile.company && profile.company !== "暂无公司" && profile.company !== "暂无" ? profile.company : "-"}
+                  </span>
                 </div>
                 <div className="w-px bg-white/10 self-stretch my-1 shrink-0" />
                 <div className="text-left whitespace-nowrap min-w-0">
                   <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">当前岗位</span>
-                  <span className="text-sm font-black text-white block mt-0.5 whitespace-nowrap">{profile.role}</span>
+                  <span className="text-sm font-black text-white block mt-0.5 whitespace-nowrap">
+                    {profile.role && profile.role !== "暂无" ? profile.role : "-"}
+                  </span>
                 </div>
                 <div className="w-px bg-white/10 self-stretch my-1 shrink-0" />
                 <div className="text-left whitespace-nowrap min-w-0">
@@ -502,65 +514,21 @@ export default function CareerDashboard() {
               </div>
             </div>
 
-            {/* WIDGET 2: MEMBERSHIP PLANS */}
+            {/* WIDGET 2: BETA STATUS */}
             <div className="col-span-12 md:col-span-4 flex flex-col h-full">
               <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-4.5 relative overflow-hidden hover:border-secondary/20 transition-all duration-300">
-                
-                {/* 3D Crystalline vector elements in background */}
-                <div className="absolute right-[-10px] top-[15%] w-32 h-32 opacity-15 pointer-events-none z-0">
-                  <svg className="w-full h-full text-secondary animate-pulse" viewBox="0 0 100 100" fill="currentColor">
-                    <polygon points="50,0 93,25 93,75 50,100 7,75 7,25" fill="none" stroke="currentColor" strokeWidth="2" />
-                    <line x1="50" y1="0" x2="50" y2="100" stroke="currentColor" strokeWidth="1" />
-                    <line x1="7" y1="25" x2="93" y2="75" stroke="currentColor" strokeWidth="1" />
-                    <line x1="7" y1="75" x2="93" y2="25" stroke="currentColor" strokeWidth="1" />
-                  </svg>
-                </div>
-                <div className="absolute right-[10px] top-[30%] w-16 h-16 bg-secondary/10 rounded-full blur-xl pointer-events-none" />
 
                 <div className="flex justify-between items-center pb-2.5 border-b border-white/5 relative z-10">
                   <h4 className="text-base font-black text-white flex items-center gap-2">
-                    <span className="material-symbols-outlined text-lg text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>workspace_premium</span>
-                    当前会员
+                    <span className="material-symbols-outlined text-lg text-secondary">science</span>
+                    当前账号状态
                   </h4>
-                  <span className="px-2.5 py-0.5 rounded bg-secondary/15 text-secondary text-[11px] font-black border border-secondary/20">当前套餐</span>
                 </div>
 
                 <div className="space-y-3.5 flex-1 flex flex-col justify-center relative z-10">
-                  <div className="flex items-baseline gap-2.5">
-                    <h3 className="text-2xl font-black text-white font-label-mono">PRO 会员</h3>
-                    <span className="text-sm text-on-surface-variant/45 font-bold">有效期至 2026-07-01</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm text-on-surface-variant/75 font-semibold leading-relaxed">
-                    {[
-                      { l: "面试录音分析", ok: true },
-                      { l: "AI 模拟面试", ok: true },
-                      { l: "面试记录分析", ok: true },
-                      { l: "职业记忆系统", ok: true },
-                      { l: "简历深度优化", ok: true },
-                      { l: "专属职业顾问", ok: true }
-                    ].map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-1.5 whitespace-nowrap">
-                        <span className="material-symbols-outlined text-sm text-tertiary" style={{ fontVariationSettings: "'wght' 700" }}>check_circle</span>
-                        <span>{item.l}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="space-y-2.5 relative z-10">
-                  <button
-                    onClick={() => setShowUpgradeModal(true)}
-                    className="w-full py-2.5 bg-gradient-to-r from-secondary to-primary text-on-primary text-sm font-black rounded-xl hover:scale-[1.01] active:scale-98 transition-all shadow-md shadow-secondary/25 cursor-pointer text-center"
-                  >
-                    升级会员
-                  </button>
-                  <span 
-                    onClick={() => setShowUpgradeModal(true)}
-                    className="text-sm font-black text-primary hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1 mt-2.5"
-                  >
-                    查看所有会员权益 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
-                  </span>
+                  <p className="text-sm text-on-surface-variant/70 leading-relaxed font-semibold">
+                    当前正处于内部测试阶段，会员体系暂未开放。系统将根据你的内测反馈持续优化体验，正式上线后将第一时间通知。
+                  </p>
                 </div>
               </div>
             </div>
@@ -574,8 +542,8 @@ export default function CareerDashboard() {
                     <span className="material-symbols-outlined text-lg text-tertiary">pie_chart</span>
                     资源额度
                   </h4>
-                  <span 
-                    onClick={() => setShowUpgradeModal(true)}
+                  <span
+                    onClick={() => router.push("/debugger/record?tab=timeline")}
                     className="text-sm text-tertiary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
                   >
                     使用记录 →
@@ -741,45 +709,20 @@ export default function CareerDashboard() {
               </div>
             </div>
 
-            {/* WIDGET 6: BILLS AND INVOICES */}
+            {/* WIDGET 6: TESTING NOTES */}
             <div className="col-span-12 md:col-span-4 flex flex-col h-full">
               <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-start gap-4 hover:border-tertiary/20 transition-all duration-300">
-                
+
                 <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
                   <h4 className="text-base font-black text-white flex items-center gap-2">
-                    <span className="material-symbols-outlined text-lg text-tertiary" style={{ fontVariationSettings: "'FILL' 1" }}>receipt_long</span>
-                    账单与订单
+                    <span className="material-symbols-outlined text-lg text-tertiary">info</span>
+                    内测说明
                   </h4>
-                  <span 
-                    onClick={() => setShowUpgradeModal(true)}
-                    className="text-sm text-tertiary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-1"
-                  >
-                    查看全部 <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
-                  </span>
                 </div>
 
-                {/* Orders billing list */}
-                <div className="space-y-3.5 py-1 mt-[-2px]">
-                  {[
-                    { date: "2026-05-01", type: "PRO 会员 (月付)", price: "¥39", status: "已支付" },
-                    { date: "2026-04-01", type: "MAX 会员 (月付)", price: "¥99", status: "已支付" }
-                  ].map((bill, i) => (
-                    <div key={i} className="flex justify-between items-center py-4.5 px-4.5 rounded-2xl bg-white/[0.01] border border-white/5">
-                      <div className="text-left space-y-0.5 min-w-0 pr-3">
-                        <span className="text-xs text-on-surface-variant/40 font-label-mono font-bold block">{bill.date}</span>
-                        <span className="text-sm font-black text-white block leading-snug truncate">{bill.type}</span>
-                      </div>
-                      
-                      <div className="flex items-center gap-3 shrink-0">
-                        <span className="text-sm font-black text-white font-label-mono">{bill.price}</span>
-                        <span className="px-2 py-0.5 rounded bg-tertiary/10 text-tertiary text-[11px] font-black border border-tertiary/20">
-                          {bill.status}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
+                <p className="text-sm text-on-surface-variant/70 leading-relaxed font-semibold">
+                  内测期间所有功能免费使用，不产生任何订单或费用。正式计费策略上线前，会通过站内信与邮件提前通知。
+                </p>
               </div>
             </div>
 
@@ -858,7 +801,7 @@ export default function CareerDashboard() {
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 面试VAR AI. All rights reserved.
+            © 2026 面试VAR. All rights reserved.
           </span>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
             <span onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer select-none">
@@ -1171,19 +1114,6 @@ export default function CareerDashboard() {
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">绑定手机号</label>
-                  <input
-                    type="text"
-                    required
-                    value={securityForm.phone}
-                    onChange={(e) => setSecurityForm({ ...securityForm, phone: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40"
-                  />
-                </div>
-
-
-
                 <div className="pt-4 border-t border-white/5 flex gap-3 justify-end">
                   <button
                     type="button"
@@ -1205,129 +1135,7 @@ export default function CareerDashboard() {
         )}
 
 
-        {/* UPGRADE AND MEMBERSHIP DETAILS MODAL */}
-        {showUpgradeModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowUpgradeModal(false)}
-              className="absolute inset-0 bg-surface/60 backdrop-blur-md"
-            />
-
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface-container-high border border-white/10 rounded-3xl p-7 max-w-4xl w-full text-left relative z-10 space-y-6 shadow-2xl max-h-[85vh] overflow-y-auto"
-            >
-              <div className="flex justify-between items-center pb-4 border-b border-white/5">
-                <h3 className="font-extrabold text-white text-lg flex items-center gap-2">
-                  <span className="material-symbols-outlined text-secondary" style={{ fontVariationSettings: "'FILL' 1" }}>workspace_premium</span>
-                  解锁 面试VAR 顶配 AI 职业大招：会员计划对比
-                </h3>
-                <button
-                  onClick={() => setShowUpgradeModal(false)}
-                  className="text-on-surface-variant hover:text-white transition-colors cursor-pointer flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/5"
-                >
-                  <span className="material-symbols-outlined text-lg">close</span>
-                </button>
-              </div>
-
-              {/* Plans comparison cards row */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 leading-relaxed text-xs font-semibold">
-                
-                {/* Plan 1: Free */}
-                <div className="p-5.5 rounded-2xl bg-white/[0.01] border border-white/5 flex flex-col justify-between gap-5 text-left">
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-black text-white">基础体验版</h4>
-                      <span className="text-[20px] font-black text-white font-label-mono mt-1 block">¥0 <span className="text-xs text-on-surface-variant/40 font-normal">/ 免费永久</span></span>
-                    </div>
-                    <p className="text-on-surface-variant/60">适用于基本面试调试与简历排版快速自测，限制部分 AI 深度模型。</p>
-                    <ul className="space-y-2 border-t border-white/5 pt-4 text-on-surface-variant/75">
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>每月 2 次面试录音分析</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>每月 1 次简历基础诊断</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-on-surface-variant/30">cancel</span>AI 模拟对话演练</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-on-surface-variant/30">cancel</span>长期职业记忆云存储</li>
-                    </ul>
-                  </div>
-                  <button onClick={() => setShowUpgradeModal(false)} className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-white rounded-xl font-black border border-white/10 transition-all cursor-pointer">
-                    当前版本
-                  </button>
-                </div>
-
-                {/* Plan 2: PRO */}
-                <div className="p-5.5 rounded-2xl bg-primary/5 border border-primary/20 flex flex-col justify-between gap-5 text-left relative overflow-hidden">
-                  <div className="absolute top-0 right-0 px-2.5 py-0.5 bg-primary text-on-primary text-[9px] font-black rounded-bl-xl uppercase tracking-widest font-label-mono select-none">推荐</div>
-                  
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-black text-white">PRO 专家会员</h4>
-                      <span className="text-[20px] font-black text-primary font-label-mono mt-1 block">¥39 <span className="text-xs text-on-surface-variant/40 font-normal">/ 月付套餐</span></span>
-                    </div>
-                    <p className="text-on-surface-variant/60">适合正在频繁参加面试、渴望快速突破弱点并获得中高大厂 Offer 的高级工程师。</p>
-                    <ul className="space-y-2 border-t border-white/5 pt-4 text-on-surface-variant/75">
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>每月 10 次面试录音分析</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>每月 5 次简历深度优化</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>每月 5 次 AI 模拟面试演练</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>全套职业记忆库系统支撑</li>
-                    </ul>
-                  </div>
-                  <button onClick={() => setShowUpgradeModal(false)} className="w-full py-2.5 bg-primary text-on-primary rounded-xl font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer">
-                    已是此会员 (去续费)
-                  </button>
-                </div>
-
-                {/* Plan 3: MAX */}
-                <div className="p-5.5 rounded-2xl bg-secondary/5 border border-secondary/20 flex flex-col justify-between gap-5 text-left relative overflow-hidden">
-                  <div className="space-y-4">
-                    <div>
-                      <h4 className="text-sm font-black text-white">MAX 领航会员</h4>
-                      <span className="text-[20px] font-black text-secondary font-label-mono mt-1 block">¥99 <span className="text-xs text-on-surface-variant/40 font-normal">/ 月付套餐</span></span>
-                    </div>
-                    <p className="text-on-surface-variant/60">尊享无限分析额度与特权，适合追求极致、备战顶级架构师/技术总监职位的技术精英。</p>
-                    <ul className="space-y-2 border-t border-white/5 pt-4 text-on-surface-variant/75">
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>无限次面试录音/记录分析</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>无限次简历深度精修</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>无限次 AI 模拟面试通关</li>
-                      <li className="flex items-center gap-1.5"><span className="material-symbols-outlined text-xs text-tertiary">check_circle</span>一对一专属 AI 终身顾问咨询</li>
-                    </ul>
-                  </div>
-                  <button onClick={() => setShowUpgradeModal(false)} className="w-full py-2.5 bg-gradient-to-r from-secondary to-primary text-on-primary rounded-xl font-black shadow-lg shadow-secondary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer">
-                    立即升级
-                  </button>
-                </div>
-
-              </div>
-
-              {/* Checkout simulation QR section */}
-              <div className="border-t border-white/5 pt-6 flex flex-col sm:flex-row justify-between items-center gap-5">
-                <div className="text-left max-w-md">
-                  <h5 className="text-xs md:text-sm font-black text-white">微信/支付宝 扫码快捷支付</h5>
-                  <p className="text-[11px] text-on-surface-variant/50 leading-relaxed font-semibold mt-1">付款后会员权益立即实时到账重置，PRO/MAX 会员均可随时退订，7天内无理由全额退款保障。</p>
-                </div>
-                <div className="flex gap-4 items-center shrink-0">
-                  <div className="p-2 rounded-xl bg-white border border-white/10 w-24 h-24 flex items-center justify-center relative overflow-hidden select-none">
-                    {/* Simulated QR Code graph */}
-                    <div className="absolute inset-2 bg-[linear-gradient(to_right,#000_1px,transparent_1px),linear-gradient(to_bottom,#000_1px,transparent_1px)] bg-[size:6px_6px]" />
-                    <div className="absolute w-6 h-6 bg-black left-2 top-2 border-2 border-white" />
-                    <div className="absolute w-6 h-6 bg-black right-2 top-2 border-2 border-white" />
-                    <div className="absolute w-6 h-6 bg-black left-2 bottom-2 border-2 border-white" />
-                  </div>
-                  <div className="text-left font-label-mono text-xs font-semibold text-on-surface-variant/70 leading-normal">
-                    <p>微信支付: 支持信用卡</p>
-                    <p>支付宝: 支持蚂蚁花呗</p>
-                    <p className="text-tertiary font-black block mt-1">7天无理由退款保证</p>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-
-      </AnimatePresence>
+        </AnimatePresence>
 
     </div>
   );

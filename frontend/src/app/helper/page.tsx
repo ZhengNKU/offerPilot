@@ -480,7 +480,7 @@ export default function HelperPage() {
       <footer className="border-t border-white/5 py-8 relative z-10 text-center bg-[#070c17]/50 mt-12">
         <div className="max-w-container-max mx-auto px-gutter flex items-center justify-center">
           <span className="text-xs text-on-surface-variant/40 font-semibold">
-            © 2026 面试VAR AI · Built with AI · Made for Career Growth
+            © 2026 面试VAR · Built with AI · Made for Career Growth
           </span>
         </div>
       </footer>

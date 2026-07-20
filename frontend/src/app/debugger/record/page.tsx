@@ -614,12 +614,12 @@ export default function InterviewRecordAnalysisPage() {
           auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！");
           return;
         }
-        // PRO/MAX 视为无限，不卡这里
+        // 内测版本：test 与 free 都走"一次性永久累计"分支；只有 pro / max 走 30 天滚动窗口
         const isPaid = status.membership === "pro" || status.membership === "max";
         if (!isPaid && status.record.remaining <= 0) {
-          const detail = status.membership === "free"
-            ? "您已使用过面试记录分析的免费体验（永久 1 次），请升级至 PRO 会员解锁更多！"
-            : `30 天内面试记录分析体验次数已用完（${status.record.used}/${status.record.max}），请升级会员或等待额度重置！`;
+          const detail = status.membership === "test"
+            ? "您的内测面试记录分析额度已用完（一次性），内测期间无重置，敬请期待正式版！"
+            : "您已使用过面试记录分析的免费体验（永久 1 次），请升级至 PRO 会员解锁更多！";
           auth.triggerToast(detail);
           return;
         }
@@ -810,6 +810,9 @@ export default function InterviewRecordAnalysisPage() {
             </a>
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
+            </a>
+            <a onClick={() => window.open("/guide", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试指南
             </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
@@ -1146,8 +1149,7 @@ export default function InterviewRecordAnalysisPage() {
                         <div className="flex items-center gap-3 min-w-0">
                           {/* Connector line dot */}
                           <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
-                          <div className="space-y-0.5 min-w-0">
-                            <span className="text-[10px] text-white/40 font-mono block leading-none">{q.timeRange}</span>
+                          <div className="min-w-0">
                             <h5 className={`text-sm font-black truncate leading-tight ${isSelected ? "text-[#AFA7FF]" : "text-white"}`}>
                               Q{idx + 1} {q.title}
                             </h5>

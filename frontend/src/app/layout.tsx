@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
+import LegalModals from "@/components/LegalModals";
 
 export const metadata: Metadata = {
   title: "面试VAR - AI 面试分析专家",
@@ -29,6 +30,9 @@ export default function RootLayout({
       <body className="bg-background text-on-surface selection:bg-primary/30 font-body-md overflow-x-hidden min-h-full flex flex-col">
         <AuthProvider>
           {children}
+          {/* 全局法务弹窗：用户协议 / 隐私政策 / 联系我们。
+              各页面 footer 调用 openLegalTerms() / openLegalPrivacy() / openLegalContact() 触发。 */}
+          <LegalModals />
         </AuthProvider>
       </body>
     </html>

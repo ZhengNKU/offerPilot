@@ -8,16 +8,17 @@ from app.database import Base
 
 class User(Base):
     __tablename__ = "users"
-    
+
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False, index=True)
-    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    # 保留 nullable 是为了和后续可能的邮箱-only 流程兼容；当前注册流程强制要求 username/password
+    username: Mapped[Optional[str]] = mapped_column(String(50), unique=True, nullable=True, index=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     phone: Mapped[Optional[str]] = mapped_column(String(20), unique=True, nullable=True, index=True)
     email: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True, index=True)
     is_online: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     # 会员等级: NULL=免费, "pro", "max"。决定文件保留时长。
     membership: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 

@@ -80,8 +80,9 @@ class SessionDetail(BaseModel):
 
 DAILY_LIMIT = {
     None: 20,    # 免费
+    "test": 100,  # 内测：100 次/天（介于 free 和 pro 之间）
     "pro": 200,
-    "max": 9999,
+    "max": 200,
 }
 
 

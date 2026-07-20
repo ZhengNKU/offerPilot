@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import GrowthCurveChart, { type GrowthPoint } from "@/components/GrowthCurveChart";
 import CounselorPanel from "@/components/counselor/CounselorPanel";
 import {
@@ -594,7 +595,8 @@ export default function CareerMemoryDashboard() {
   }, [activeTab]);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [showLoginModal, setShowLoginModal] = useState(false);
+  // 内测版本：删除假微信登录 modal 后，showLoginModal state 不再被使用；保留以避免大改业务代码
+  // const [showLoginModal, setShowLoginModal] = useState(false);
   const [activeOfferIdx, setActiveOfferIdx] = useState<number | null>(null);
   const [searchSidebarQuery, setSearchSidebarQuery] = useState("");
   const [activeTimelineFilter, setActiveTimelineFilter] = useState("all");
@@ -1176,7 +1178,8 @@ export default function CareerMemoryDashboard() {
   }, [auth.isLoggedIn, counselorPage, loadCounselorSessions, fetchCounselorStats, fetchAdvisorInsights]);
 
   const handleInterceptAction = () => {
-    setShowLoginModal(true);
+    // 内测版本：直接跳到训练场，不再弹假微信/手机号登录 modal
+    window.location.href = "/training";
   };
 
   const handleViewDetails = (item: SessionHistoryItem) => {
@@ -1463,6 +1466,9 @@ export default function CareerMemoryDashboard() {
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
             </a>
+            <a onClick={() => window.open("/guide", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试指南
+            </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
             </a>
@@ -1747,7 +1753,7 @@ export default function CareerMemoryDashboard() {
               {/* User Avatar */}
               <div className="relative shrink-0 select-none">
                 <div className="w-20 h-20 rounded-full border border-primary/30 overflow-hidden bg-slate-900 flex items-center justify-center shadow-2xl relative z-10">
-                  {!avatarError ? (
+                  {!avatarError && auth.user.avatar ? (
                     <img
                       src={auth.user.avatar}
                       alt={auth.user.name}
@@ -3507,81 +3513,26 @@ export default function CareerMemoryDashboard() {
       </div>
 
       {/* Footer */}
-      <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10">
+      <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
-          <div className="flex items-center gap-4">
-            <span className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-              © 2026 面试VAR AI. All rights reserved.
-            </span>
-          </div>
+          <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
+            © 2026 面试VAR. All rights reserved.
+          </span>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-            <a onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer">
-              返回主页
-            </a>
-            <a className="hover:text-primary transition-colors cursor-default" href="#">
-              隐私政策
-            </a>
-            <a className="hover:text-primary transition-colors cursor-default" href="#">
+            <span onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer select-none">
               服务条款
-            </a>
+            </span>
+            <span onClick={() => openLegalPrivacy()} className="hover:text-primary transition-colors cursor-pointer select-none">
+              隐私政策
+            </span>
+            <span onClick={() => openLegalContact()} className="hover:text-primary transition-colors cursor-pointer select-none">
+              联系方式
+            </span>
           </div>
         </div>
       </footer>
 
-      {/* WECHAT MODAL */}
-      {showLoginModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div
-            onClick={() => setShowLoginModal(false)}
-            className="absolute inset-0 bg-surface/60 backdrop-blur-md transition-opacity duration-300"
-          />
-
-          <div className="bg-surface-container-high border border-white/10 rounded-3xl p-8 max-w-sm w-full text-center relative z-10 space-y-6 shadow-2xl transition-all scale-100 animate-fade-in">
-            <div className="flex justify-between items-center">
-              <span className="font-label-mono text-[10px] text-primary tracking-widest uppercase font-bold">
-                面试VAR Intelligence
-              </span>
-              <button
-                onClick={() => setShowLoginModal(false)}
-                className="text-on-surface-variant hover:text-white transition-colors"
-              >
-                <span className="material-symbols-outlined text-lg">close</span>
-              </button>
-            </div>
-
-            <div className="space-y-2">
-              <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto mb-2 animate-bounce">
-                <span className="material-symbols-outlined text-2.5xl">lock</span>
-              </div>
-              <h3 className="font-extrabold text-white text-lg">保存分析结果与成长轨迹</h3>
-              <p className="text-on-surface-variant text-xs leading-relaxed max-w-xs mx-auto font-semibold">
-                注册并登录账号，即可保存本次分析历史、下载修改好的简历并追踪您的面试成长路径。
-              </p>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <button
-                onClick={() => setShowLoginModal(false)}
-                className="w-full py-3.5 rounded-xl bg-tertiary text-on-tertiary font-bold text-xs hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-tertiary/15"
-              >
-                <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
-                  chat
-                </span>
-                使用微信一键登录
-              </button>
-              <button
-                onClick={() => setShowLoginModal(false)}
-                className="w-full py-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-white font-bold text-xs hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <span className="material-symbols-outlined text-sm">phone_iphone</span>
-                手机号验证码登录
-              </button>
-            </div>
-
-            <p className="text-[10px] text-on-surface-variant/40">登录即代表您已阅读并同意《服务条款》和《隐私政策》</p>
-          </div>
-        </div>
-      )}
+      {/* 内测版本：删除原假微信登录 modal（只保留邮箱登录/注册入口） */}
 
 {/* KNOWLEDGE BASE DETAIL MODAL */}
       {selectedKnowledge && (
@@ -3928,7 +3879,7 @@ export default function CareerMemoryDashboard() {
               {/* Tech Stack */}
               {selectedProject.tech_stack && selectedProject.tech_stack.length > 0 && (
                 <div className="space-y-2">
-                  <span className="text-xs font-label-mono text-primary font-bold uppercase tracking-wider block">技术栈</span>
+                  <span className="text-xs font-label-mono text-primary font-bold uppercase tracking-wider block">标签</span>
                   <div className="flex flex-wrap gap-2">
                     {selectedProject.tech_stack.map((tech: string, i: number) => (
                       <span key={i} className="px-3 py-1 rounded-full bg-white/5 text-on-surface-variant/70 text-xs font-bold border border-white/5">

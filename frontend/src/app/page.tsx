@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { Suspense } from "react";
 
 // Elegant Count-Up Component - Animate every time it appears in the viewport
@@ -149,85 +150,12 @@ function WaveformBar({ isPlaying, index }: { isPlaying: boolean; index: number }
   );
 }
 
-const agreementMarkdown = `欢迎您使用 面试VAR AI 面试教练系统（以下简称“本服务”）。本协议由您与 面试VAR 运营团队共同缔结。在注册或开始使用本服务前，请您务必仔细阅读并理解本《用户服务协议》。
-
-## 一、 服务内容与规则
-1. **服务定位**：面试VAR 是一款 AI 驱动的面试智能分析及职业成长辅助系统，主要为您提供简历深度分析、面试录音/记录分析、AI 模拟面试场景训练以及 Offer 概率预测等服务。
-2. **免责声明**：您理解并同意，本服务生成的评估数据、分析结果、STAR 优化话术等内容均为 AI 模型根据您提供的信息推理得出，仅供您的求职参考，我们不保证其绝对的准确性、完整性或对最终面试结果的保证性。
-
-## 二、 账户注册与安全
-1. **信息真实性**：您在注册本服务时应当提供真实、合法、有效的个人账户资料（包括但不限于手机号、邮箱、用户名等）。
-2. **账户保管**：您有责任妥善保管您的登录密码与账号安全，凡是以您账户名义进行的操作，均视为您本人之行为。您不得将账户以任何形式转让、借用或售卖给第三方使用。
-
-## 三、 用户行为规范
-在使用本服务时，您承诺遵守国家法律法规，不得利用本服务进行以下行为：
-* 上传或粘贴包含虚假、欺诈、恶意诽谤、侵犯他人隐私或知识产权的内容；
-* 录制并上传包含国家机密、商业机密、他人敏感隐私等违反保密义务的面试音频；
-* 恶意攻击、破解、逆向工程本服务后台系统，或者干扰其他用户的正常使用。
-
-## 四、 服务的修改与终止
-面试VAR 有权根据系统维护、AI 模型迭代或业务调整需要，对本服务的部分或全部内容进行优化、升级、暂停或终止。您可以在职业驾驶舱中随时注销并删除您的账号，注销后我们将立即抹除您的所有关联数据。`;
-
-const privacyMarkdown = `我们非常重视您的隐私。本《隐私政策》详细说明了 面试VAR 在您使用我们的服务时，如何收集、使用、存储 和 保护您的个人信息。
-
-## 一、 我们如何收集和使用信息
-1. **基本账号信息**：当您注册本服务时，我们将收集您的手机号码或邮箱，用于身份认证和账号创建。
-2. **职业背景与求职期望**：我们将收集您的工作年限、当前岗位、目标薪资、教育背景等数据。这些数据将仅用于为您的简历分析、STAR 重写、JD 匹配以及 Offer 预测建立个性化画像模型。
-3. **面试音频与对话记录**：当您上传面试录音、粘贴面试文本时，我们将收集这些音频或文字信息。我们通过底层脱敏算法自动识别并抹去姓名、企业等显著敏感词，仅对其核心的技术问答、表达逻辑等进行技术性评估推理。
-
-## 二、 信息安全与存储保护
-1. **数据脱敏**：我们在模型输入层引入本地脱敏逻辑，全力防止您的敏感身份数据传输到外部的大语言模型接口。
-2. **安全存储**：您的所有个人数据都经过高强度 SSL 加密传输，并采用银行级多层加密算法进行安全数据库存储。
-3. **绝不泄露**：我们承诺绝不会将您的个人简历、音频、对话及评估分析报告出售、转让或授权给任何无关的第三方企业或机构。
-
-## 三、 您的权利与数据清除
-您对您的个人数据拥有绝对的控制权。您可以在“职业驾驶舱 - 账号与安全”中，随时查看、修改您的基本职业档案，或者直接点击“注销账号”。账号注销属于不可逆操作，注销后我们的数据库将立即彻底清空并永久抹去您的所有关联数据和历史分析报告。`;
-
-function renderMarkdown(md: string) {
-  let html = md;
-  // Escape HTML tags to prevent XSS
-  html = html
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-    
-  // Headers: ###, ##, #
-  html = html.replace(/^### (.*?)$/gm, '<h5 class="text-white font-extrabold text-sm mt-4 mb-2">$1</h5>');
-  html = html.replace(/^## (.*?)$/gm, '<h4 class="text-white font-black text-base mt-5 mb-2.5">$1</h4>');
-  html = html.replace(/^# (.*?)$/gm, '<h3 class="text-white font-black text-lg mt-6 mb-3">$1</h3>');
-  
-  // Bold: **text**
-  html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="text-white font-extrabold">$1</strong>');
-  
-  // Lists: ● or * or -
-  html = html.replace(/^● (.*?)$/gm, '<li class="ml-4 list-disc text-white/70 mt-1">$1</li>');
-  html = html.replace(/^[-\*] (.*?)$/gm, '<li class="ml-4 list-disc text-white/70 mt-1">$1</li>');
-  
-  // Paragraphs
-  const lines = html.split('\n');
-  const processedLines = lines.map(line => {
-    const trimmed = line.trim();
-    if (!trimmed) return '';
-    if (trimmed.startsWith('<h') || trimmed.startsWith('<li')) return line;
-    return `<p class="mb-3 text-white/70 leading-relaxed">${line}</p>`;
-  });
-  
-  return (
-    <div 
-      className="space-y-1 text-xs md:text-sm text-white/70 space-y-4 font-normal leading-relaxed"
-      dangerouslySetInnerHTML={{ __html: processedLines.join('\n') }} 
-    />
-  );
-}
 
 export default function Home() {
   const router = useRouter();
   const auth = useAuth();
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(18); // Start at 00:18 (crash point)
-  const [showAgreementModal, setShowAgreementModal] = useState(false);
-  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
-  const [showContactModal, setShowContactModal] = useState(false);
 
   // Audio timeline counts up when playing
   useEffect(() => {
@@ -284,6 +212,9 @@ export default function Home() {
             </a>
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
+            </a>
+            <a onClick={() => router.push("/guide")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              面试指南
             </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
@@ -733,126 +664,65 @@ export default function Home() {
       {/* Pricing Section - Spans 100% width across the browser */}
       <section className="py-section-padding px-gutter relative overflow-hidden w-full block" id="pricing">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[500px] bg-primary/5 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
-        <div className="max-w-container-max mx-auto space-y-16 relative z-10 w-full flex flex-col items-center">
+        <div className="max-w-container-max mx-auto space-y-12 relative z-10 w-full flex flex-col items-center">
           <div className="text-center space-y-4 w-full">
-            <div className="inline-flex items-center gap-2.5 px-5 py-2 rounded-full glass-panel border-primary/20 mb-4">
-              <span className="font-label-mono tracking-[0.2em] text-primary uppercase font-bold" style={{ fontSize: "14px" }}>Flexible Pricing · 灵活订阅</span>
+            <div className="inline-flex items-center gap-2.5 px-5 py-2 rounded-full glass-panel border-tertiary/30 mb-4">
+              <span className="font-label-mono tracking-[0.2em] text-tertiary uppercase font-bold" style={{ fontSize: "14px" }}>Internal Beta · 内测体验</span>
             </div>
             <h2 className="text-on-surface font-black tracking-tight" style={{ fontSize: "52px", fontFamily: "'Hanken Grotesk', sans-serif" }}>投资你的职业未来</h2>
-            <p className="text-on-surface-variant font-semibold" style={{ fontSize: "18px" }}>选择最适合你的方案，开启高效求职之旅</p>
+            <p className="text-on-surface-variant font-semibold" style={{ fontSize: "18px" }}>内测期间所有功能免费体验</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full text-left">
-            {/* Free Plan */}
-            <div className="glass-panel p-8 rounded-[32px] flex flex-col border-white/5 hover:border-primary/30 hover:-translate-y-4 hover:shadow-[0_20px_40px_rgba(192,193,255,0.1)] transition-all duration-500 group">
-              <div className="mb-8">
-                <h3 className="font-bold mb-2 text-white" style={{ fontSize: "22px" }}>基础版</h3>
-                <p className="text-on-surface-variant text-base font-medium">适合初探 AI 面试分析的用户</p>
+          {/* 内测统一 test 档：单卡片居中展示 */}
+          <div className="w-full max-w-3xl flex justify-center">
+            <div className="glass-panel p-10 md:p-12 rounded-[32px] flex flex-col border-tertiary/30 bg-surface-container-low/50 shadow-[0_20px_60px_rgba(78,222,163,0.12)] relative overflow-hidden w-full text-center">
+              {/* 角标 */}
+              <div className="absolute top-0 right-0 px-4 py-1.5 bg-tertiary text-on-tertiary text-xs font-black rounded-bl-xl uppercase tracking-widest font-label-mono">
+                Beta · 内测
               </div>
-              <div className="mb-8">
-                <div className="flex items-baseline gap-1">
-                  <span className="font-black text-white" style={{ fontSize: "48px", fontFamily: "'Hanken Grotesk', sans-serif" }}>¥0</span>
-                  <span className="text-on-surface-variant text-base font-bold">/月</span>
-                </div>
+
+              <div className="mb-6 mt-4">
+                <h3 className="font-black text-white mb-3" style={{ fontSize: "32px", fontFamily: "'Hanken Grotesk', sans-serif" }}>
+                  内测体验版
+                </h3>
+                <p className="text-on-surface-variant text-base font-medium">
+                  所有注册用户自动获得内测体验版会员资格，无需付费 · 一次性额度，用完即止
+                </p>
               </div>
-              <ul className="space-y-4 mb-10 flex-1 font-semibold">
-                <li className="flex items-center gap-3 text-base text-on-surface-variant">
-                  <span className="material-symbols-outlined text-primary text-lg">check_circle</span>
-                  每月 1 次面试录音分析
+
+              <div className="mb-8 inline-flex items-baseline gap-2 justify-center">
+                <span className="font-black text-tertiary" style={{ fontSize: "56px", fontFamily: "'Hanken Grotesk', sans-serif" }}>¥0</span>
+                <span className="text-on-surface-variant text-base font-bold">/ 内测期</span>
+              </div>
+
+              <ul className="space-y-5 mb-10 flex-1 font-semibold text-left max-w-xl mx-auto w-full">
+                <li className="flex items-center gap-3 text-base text-on-surface">
+                  <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
+                  <span><span className="text-tertiary font-black">2 次</span> 面试录音分析（一次性）</span>
                 </li>
-                <li className="flex items-center gap-3 text-base text-on-surface-variant">
-                  <span className="material-symbols-outlined text-primary text-lg">check_circle</span>
-                  基础信任度评分
+                <li className="flex items-center gap-3 text-base text-on-surface">
+                  <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
+                  <span><span className="text-tertiary font-black">5 次</span> 面试记录分析（一次性）</span>
                 </li>
-                <li className="flex items-center gap-3 text-base text-on-surface-variant">
-                  <span className="material-symbols-outlined text-primary text-lg">check_circle</span>
-                  标准转写服务
+                <li className="flex items-center gap-3 text-base text-on-surface">
+                  <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
+                  <span><span className="text-tertiary font-black">5 次</span> 简历分析（一次性）</span>
+                </li>
+                <li className="flex items-center gap-3 text-base text-on-surface">
+                  <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
+                  <span><span className="text-tertiary font-black">20 分钟</span> AI 模拟面试（一次性）</span>
+                </li>
+                <li className="flex items-center gap-3 text-base text-on-surface">
+                  <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
+                  <span>100 次/天 AI 职业顾问</span>
                 </li>
               </ul>
+
               <button
-                onClick={() => router.push("/debugger")}
-                className="w-full py-4 rounded-xl border border-white/10 text-on-surface font-bold hover:bg-white/5 active:scale-95 transition-all cursor-pointer"
+                onClick={() => router.push("/register")}
+                className="w-full py-4 rounded-xl bg-tertiary text-on-tertiary font-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-[0_0_20px_rgba(78,222,163,0.25)] cursor-pointer"
               >
-                免费开始
-              </button>
-            </div>
-
-            {/* PRO Plan (Current) */}
-            <div className="glass-panel p-8 rounded-[32px] flex flex-col border-primary/30 relative bg-surface-container-low/50 hover:-translate-y-4 hover:shadow-[0_20px_50px_rgba(192,193,255,0.15)] transition-all duration-500">
-              <div className="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1.5 bg-primary text-on-primary text-xs font-extrabold rounded-full uppercase tracking-widest shadow-lg whitespace-nowrap">Current Plan · 当前方案</div>
-              <div className="mb-8">
-                <h3 className="font-bold mb-2 text-primary" style={{ fontSize: "22px" }}>专业版 PRO</h3>
-                <p className="text-on-surface-variant text-base font-medium">最受欢迎的高级求职者之选</p>
-              </div>
-              <div className="mb-8">
-                <div className="flex items-baseline gap-1">
-                  <span className="font-black text-primary" style={{ fontSize: "48px", fontFamily: "'Hanken Grotesk', sans-serif" }}>¥69</span>
-                  <span className="text-on-surface-variant text-base font-bold">/月</span>
-                </div>
-              </div>
-              <ul className="space-y-4 mb-10 flex-1 font-semibold">
-                <li className="flex items-center gap-3 text-base">
-                  <span className="material-symbols-outlined text-primary text-lg">check_circle</span>
-                  每月 10 次深度分析
-                </li>
-                <li className="flex items-center gap-3 text-base">
-                  <span className="material-symbols-outlined text-primary text-lg">check_circle</span>
-                  信任崩溃时刻精准定位
-                </li>
-                <li className="flex items-center gap-3 text-base">
-                  <span className="material-symbols-outlined text-primary text-lg">check_circle</span>
-                  AI 表达重构建议 (标准)
-                </li>
-                <li className="flex items-center gap-3 text-base">
-                  <span className="material-symbols-outlined text-primary text-lg">check_circle</span>
-                  简历风险实时扫描
-                </li>
-              </ul>
-              <button className="w-full py-4 rounded-xl bg-primary text-on-primary font-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-[0_0_20px_rgba(192,193,255,0.2)] cursor-pointer">
-                订阅
-              </button>
-            </div>
-
-            {/* MAX Plan (Most Powerful) */}
-            <div className="glass-panel p-8 rounded-[32px] flex flex-col border-white/5 hover:border-tertiary/50 hover:-translate-y-4 hover:shadow-[0_20px_40px_rgba(78,222,163,0.1)] transition-all duration-500 group relative overflow-hidden">
-              <div className="absolute top-0 right-0 p-4 opacity-20 group-hover:opacity-100 transition-opacity">
-                <span className="material-symbols-outlined text-4xl text-tertiary">bolt</span>
-              </div>
-              <div className="mb-8">
-                <h3 className="font-bold mb-2 text-tertiary" style={{ fontSize: "22px" }}>极致版 MAX</h3>
-                <p className="text-on-surface-variant text-base font-medium">全流程面试陪跑，斩获顶尖 Offer</p>
-              </div>
-              <div className="mb-8">
-                <div className="flex items-baseline gap-1">
-                  <span className="font-black text-white" style={{ fontSize: "48px", fontFamily: "'Hanken Grotesk', sans-serif" }}>¥99</span>
-                  <span className="text-on-surface-variant text-base font-bold">/月</span>
-                </div>
-                <div className="mt-2 text-xs text-tertiary font-label-mono uppercase tracking-widest font-extrabold">Powerful Option · 专家之选</div>
-              </div>
-              <ul className="space-y-4 mb-10 flex-1 font-semibold">
-                <li className="flex items-center gap-3 text-base">
-                  <span className="material-symbols-outlined text-tertiary text-lg">verified</span>
-                  无限次面试深度复盘
-                </li>
-                <li className="flex items-center gap-3 text-base">
-                  <span className="material-symbols-outlined text-tertiary text-lg">verified</span>
-                  面试官心理实时洞察
-                </li>
-                <li className="flex items-center gap-3 text-base">
-                  <span className="material-symbols-outlined text-tertiary text-lg">verified</span>
-                  高阶定制化话术重构
-                </li>
-                <li className="flex items-center gap-3 text-base">
-                  <span className="material-symbols-outlined text-tertiary text-lg">verified</span>
-                  1对1 AI 模拟面试导师
-                </li>
-                <li className="flex items-center gap-3 text-base">
-                  <span className="material-symbols-outlined text-tertiary text-lg">verified</span>
-                  大厂层级对应分析
-                </li>
-              </ul>
-              <button className="w-full py-4 rounded-xl bg-tertiary text-on-tertiary font-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-[0_0_20px_rgba(78,222,163,0.2)] cursor-pointer">
-                订阅
+                免费内测注册
               </button>
             </div>
           </div>
@@ -921,183 +791,26 @@ export default function Home() {
             <ul className="space-y-2 text-sm text-on-surface-variant font-semibold">
               <li><a href="/helper" target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors cursor-pointer">使用指南</a></li>
               <li><a onClick={() => router.push("/feedback")} className="hover:text-primary transition-colors cursor-pointer">常见问题</a></li>
-              <li><a onClick={() => setShowContactModal(true)} className="hover:text-primary transition-colors cursor-pointer">联系我们</a></li>
+              <li><a onClick={() => openLegalContact()} className="hover:text-primary transition-colors cursor-pointer">联系我们</a></li>
             </ul>
           </div>
           
           <div className="space-y-4">
             <h4 className="font-extrabold text-on-surface">关于</h4>
             <ul className="space-y-2 text-sm text-on-surface-variant font-semibold">
-              <li><a onClick={() => setShowAgreementModal(true)} className="hover:text-primary transition-colors cursor-pointer">用户协议</a></li>
-              <li><a onClick={() => setShowPrivacyModal(true)} className="hover:text-primary transition-colors cursor-pointer">隐私政策</a></li>
+              <li><a onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer">用户协议</a></li>
+              <li><a onClick={() => openLegalPrivacy()} className="hover:text-primary transition-colors cursor-pointer">隐私政策</a></li>
             </ul>
           </div>
         </div>
         
         <div className="px-gutter py-8 border-t border-white/5 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="text-left space-y-1">
-            <p className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">© 2026 面试VAR AI</p>
+            <p className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">© 2026 面试VAR</p>
             <p className="text-[10px] text-on-surface-variant/40 font-label-mono font-bold tracking-widest">Built with AI · Made for Career Growth</p>
           </div>
         </div>
       </footer>
-
-      {/* USER AGREEMENT MODAL */}
-      <AnimatePresence>
-        {showAgreementModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <div
-              onClick={() => setShowAgreementModal(false)}
-              className="absolute inset-0 bg-[#050B1A]/85 backdrop-blur-md transition-opacity duration-300"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-[#0e1626]/95 border border-white/10 rounded-3xl p-8 max-w-2xl w-full text-left relative z-10 space-y-6 shadow-2xl max-h-[80vh] flex flex-col"
-            >
-              <div className="flex justify-between items-center pb-3 border-b border-white/5">
-                <span className="font-label-mono text-[10px] text-[#AFA7FF] tracking-widest uppercase font-bold">
-                  面试VAR User Agreement
-                </span>
-                <button
-                  onClick={() => setShowAgreementModal(false)}
-                  className="text-white/40 hover:text-white transition-colors cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-lg">close</span>
-                </button>
-              </div>
-
-              <div className="space-y-1">
-                <h3 className="font-extrabold text-white text-lg">面试VAR 用户服务协议</h3>
-                <p className="text-white/45 text-xs">更新日期：2026年6月4日</p>
-              </div>
-
-              {/* Scrollable text area */}
-              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                {renderMarkdown(agreementMarkdown)}
-              </div>
-
-              <div className="pt-4 border-t border-white/5 flex justify-end">
-                <button
-                  onClick={() => setShowAgreementModal(false)}
-                  className="px-6 py-2 bg-white/5 border border-white/10 text-white font-bold rounded-xl text-xs md:text-sm hover:bg-white/10 active:scale-98 transition-all cursor-pointer flex items-center justify-center"
-                >
-                  关闭
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* PRIVACY POLICY MODAL */}
-      <AnimatePresence>
-        {showPrivacyModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <div
-              onClick={() => setShowPrivacyModal(false)}
-              className="absolute inset-0 bg-[#050B1A]/85 backdrop-blur-md transition-opacity duration-300"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-[#0e1626]/95 border border-white/10 rounded-3xl p-8 max-w-2xl w-full text-left relative z-10 space-y-6 shadow-2xl max-h-[80vh] flex flex-col"
-            >
-              <div className="flex justify-between items-center pb-3 border-b border-white/5">
-                <span className="font-label-mono text-[10px] text-[#AFA7FF] tracking-widest uppercase font-bold">
-                  面试VAR Privacy Policy
-                </span>
-                <button
-                  onClick={() => setShowPrivacyModal(false)}
-                  className="text-white/40 hover:text-white transition-colors cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-lg">close</span>
-                </button>
-              </div>
-
-              <div className="space-y-1">
-                <h3 className="font-extrabold text-white text-lg">面试VAR 用户隐私政策</h3>
-                <p className="text-white/45 text-xs">更新日期：2026年6月4日</p>
-              </div>
-
-              {/* Scrollable text area */}
-              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                {renderMarkdown(privacyMarkdown)}
-              </div>
-
-              <div className="pt-4 border-t border-white/5 flex justify-end">
-                <button
-                  onClick={() => setShowPrivacyModal(false)}
-                  className="px-6 py-2 bg-white/5 border border-white/10 text-white font-bold rounded-xl text-xs md:text-sm hover:bg-white/10 active:scale-98 transition-all cursor-pointer flex items-center justify-center"
-                >
-                  关闭
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
-      {/* CONTACT US MODAL */}
-      <AnimatePresence>
-        {showContactModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <div
-              onClick={() => setShowContactModal(false)}
-              className="absolute inset-0 bg-[#050B1A]/80 backdrop-blur-md transition-opacity duration-300"
-            />
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="bg-[#0e1626]/95 border border-white/10 rounded-3xl p-8 max-w-md w-full text-center relative z-10 space-y-6 shadow-2xl flex flex-col"
-            >
-              <div className="flex justify-between items-center pb-3 border-b border-white/5">
-                <span className="font-label-mono text-[10px] text-[#AFA7FF] tracking-widest uppercase font-bold">
-                  Contact Us
-                </span>
-                <button
-                  onClick={() => setShowContactModal(false)}
-                  className="text-white/40 hover:text-white transition-colors cursor-pointer"
-                >
-                  <span className="material-symbols-outlined text-lg">close</span>
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <div className="w-16 h-16 mx-auto rounded-2xl bg-primary/15 border border-primary/30 flex items-center justify-center shadow-[0_0_35px_rgba(192,193,255,0.25)]">
-                  <span className="material-symbols-outlined !text-4xl text-primary">mail</span>
-                </div>
-                
-                <div className="space-y-2">
-                  <h3 className="font-extrabold text-white text-xl">联系我们</h3>
-                  <p className="text-sm text-on-surface-variant/70 font-semibold leading-relaxed">
-                    如果您在使用过程中遇到任何问题，或有商业合作意向，欢迎通过邮件与我们取得联系。
-                  </p>
-                </div>
-
-                <div className="flex items-center justify-center gap-2 py-2">
-                  <span className="text-lg font-bold text-white select-all">
-                    interviewvar@163.com
-                  </span>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText("interviewvar@163.com");
-                      auth.triggerToast("产品联系邮箱已复制到剪贴板！");
-                    }}
-                    className="text-[#AFA7FF] hover:text-white transition-colors cursor-pointer flex items-center justify-center p-1.5 rounded-lg hover:bg-white/5 active:scale-95"
-                    title="复制邮箱"
-                  >
-                    <span className="material-symbols-outlined text-lg">content_copy</span>
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
     </main>
   );
 }

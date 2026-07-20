@@ -168,7 +168,7 @@ async def startup_event():
         logging.error(f"[startup] Failed to ensure pgvector extension: {_e}")
         # 不抛出——其他功能可用，仅 counselor 向量检索不可用
 
-    # 2. Automatically create tables in local PostgreSQL on startup (development convenience)
+    # 2. 自动建表（仅建缺失的表；不 ALTER 已存在的列）
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

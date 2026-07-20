@@ -34,9 +34,11 @@ router = APIRouter(prefix="/api/live", tags=["Live Interview"])
 
 # ---------- PR6 定价限额配置 ----------
 # 按会员等级的月度实时面试时长上限（分钟）。0 表示不可用。
+# 内测版本：test 档 = 20 分钟/月（2026-07-18+）
 MEMBERSHIP_MONTHLY_MINUTES = {
     None: 0,      # 免费用户：0 分钟（不可使用实时模拟面试；只能试文本/录音分析）
     "free": 0,
+    "test": 20,   # 内测用户：20 分钟/月（统一）
     "pro": 60,    # PRO：60 分钟/月
     "max": 120,   # MAX：120 分钟/月
 }
