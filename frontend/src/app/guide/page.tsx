@@ -1579,7 +1579,7 @@ export default function InterviewGuidePage() {
                 <div className="glass-panel p-6 sm:p-8 rounded-3xl border-white/15 relative overflow-hidden flex flex-col justify-between gap-6 group cursor-default shadow-2xl">
                   {/* Background Image: /guide/note.jpg */}
                   <div
-                    className="absolute inset-0 bg-cover bg-center opacity-30 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
+                    className="absolute inset-0 bg-cover bg-center opacity-80 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
                     style={{ backgroundImage: "url('/guide/note.jpg')" }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-r from-[#0b1326] via-[#0b1326]/85 to-transparent pointer-events-none" />
@@ -1704,11 +1704,17 @@ export default function InterviewGuidePage() {
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-black/20" />
 
-                            {/* Top Left Platform Badge */}
-                            <div className="absolute top-2.5 left-2.5">
-                              <span className={`px-2 py-0.5 rounded-md text-[10px] font-black border backdrop-blur-md ${item.platformBadgeBg}`}>
-                                {item.platform}
-                              </span>
+                            {/* Top Left Platform SVG Icon (Replacing text badge per user request) */}
+                            <div className="absolute top-2.5 left-2.5 z-10">
+                              {item.platform === "小红书" ? (
+                                <img src="/guide/redbook.svg" alt="小红书" className="w-6 h-6 object-contain drop-shadow-md rounded-md" />
+                              ) : item.platform === "抖音" ? (
+                                <img src="/guide/douyin.svg" alt="抖音" className="w-6 h-6 object-contain drop-shadow-md rounded-md" />
+                              ) : (
+                                <span className={`px-2 py-0.5 rounded-md text-[10px] font-black border backdrop-blur-md ${item.platformBadgeBg}`}>
+                                  {item.platform}
+                                </span>
+                              )}
                             </div>
 
                             {/* Bottom Right Duration Badge */}
@@ -1835,7 +1841,7 @@ export default function InterviewGuidePage() {
                 <div className="glass-panel p-6 sm:p-8 rounded-3xl border-white/15 relative overflow-hidden flex flex-col justify-between gap-6 group cursor-default shadow-2xl">
                   {/* Background Image: /guide/question.jpg */}
                   <div
-                    className="absolute inset-0 bg-cover bg-center opacity-30 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
+                    className="absolute inset-0 bg-cover bg-center opacity-80 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
                     style={{ backgroundImage: "url('/guide/question.jpg')" }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-r from-[#0b1326] via-[#0b1326]/85 to-transparent pointer-events-none" />
@@ -2017,7 +2023,7 @@ export default function InterviewGuidePage() {
                 <div className="glass-panel p-6 sm:p-8 rounded-3xl border-white/15 relative overflow-hidden flex flex-col justify-between gap-6 group cursor-default shadow-2xl">
                   {/* Background Image: /guide/polite.jpg */}
                   <div
-                    className="absolute inset-0 bg-cover bg-center opacity-30 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
+                    className="absolute inset-0 bg-cover bg-center opacity-80 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
                     style={{ backgroundImage: "url('/guide/polite.jpg')" }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-r from-[#0b1326] via-[#0b1326]/85 to-transparent pointer-events-none" />
@@ -2190,7 +2196,7 @@ export default function InterviewGuidePage() {
         <div className="glass-panel p-6 sm:p-8 rounded-3xl border-white/15 relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-6 text-left shadow-2xl group cursor-default">
           {/* Background Image: /guide/practice.jpg */}
           <div
-            className="absolute inset-0 bg-cover bg-center opacity-30 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
+            className="absolute inset-0 bg-cover bg-center opacity-80 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
             style={{ backgroundImage: "url('/guide/practice.jpg')" }}
           />
           <div className="absolute inset-0 bg-gradient-to-r from-[#0b1326] via-[#0b1326]/85 to-transparent pointer-events-none" />
