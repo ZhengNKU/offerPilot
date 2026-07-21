@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, audio, file, resume, live, counselor, feedback
+from app.routers import auth, audio, file, resume, live, counselor, feedback, guide
 
 try:
     import app.routers.memory as _memory_router
@@ -149,6 +149,7 @@ app.include_router(resume.router)
 app.include_router(live.router)
 app.include_router(counselor.router)
 app.include_router(feedback.router)
+app.include_router(guide.router)
 if _MEMORY_LOADED and _memory_router is not None:
     app.include_router(_memory_router.router)
     logging.info("[main] Memory router registered successfully")

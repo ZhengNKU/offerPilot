@@ -752,3 +752,25 @@ class FeedbackVote(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     
     feedback: Mapped["Feedback"] = relationship("Feedback", back_populates="votes")
+
+
+class FeaturedGuide(Base):
+    """精选推荐文章与视频资源表"""
+    __tablename__ = "featured_guides"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    cover_img: Mapped[str] = mapped_column(String(500), nullable=False)
+    platform: Mapped[str] = mapped_column(String(50), nullable=False, default="小红书")  # 小红书, 抖音, B站, 微信公众号
+    platform_badge_bg: Mapped[str] = mapped_column(String(100), nullable=False, default="bg-[#FF2442]/20 text-[#FF2442] border-[#FF2442]/30")
+    duration: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # 图文笔记, 05:23, etc.
+    url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    author: Mapped[str] = mapped_column(String(100), nullable=False)
+    author_avatar: Mapped[str] = mapped_column(String(500), nullable=False, default="/test.jpg")
+    author_verified: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    category: Mapped[str] = mapped_column(String(50), default="推荐", index=True)
+    reads: Mapped[int] = mapped_column(Integer, default=1240)
+    likes: Mapped[int] = mapped_column(Integer, default=86)
+    favorites: Mapped[int] = mapped_column(Integer, default=42)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+

@@ -669,7 +669,7 @@ function NewAnalysisDebuggerContent() {
             <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               职业驾驶舱
             </a>
-            <a onClick={() => window.open("/guide", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/guide")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               面试指南
             </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
@@ -1110,7 +1110,7 @@ function NewAnalysisDebuggerContent() {
 
           <div className="relative z-10 flex gap-4 w-full md:w-auto">
             <span className="px-6 py-2.5 bg-tertiary/15 border border-tertiary/30 text-tertiary font-black text-xs md:text-sm rounded-xl whitespace-nowrap">
-              ✨ 内测体验中
+              内测体验中
             </span>
           </div>
         </div>

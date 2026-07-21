@@ -187,3 +187,32 @@ class FeedbackListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class FeaturedGuideOut(BaseModel):
+    id: str
+    title: str
+    cover_img: str
+    platform: str
+    platform_badge_bg: str
+    duration: Optional[str] = None
+    url: str
+    author: str
+    author_avatar: str
+    author_verified: bool = True
+    category: str
+    reads: int
+    likes: int
+    favorites: int
+
+    class Config:
+        from_attributes = True
+
+
+class FeaturedGuidePageOut(BaseModel):
+    items: List[FeaturedGuideOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
