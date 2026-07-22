@@ -271,7 +271,7 @@ export default function Home() {
         <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none z-0 opacity-65">
           <video
             ref={heroVideoRef}
-            src="/logo/landing-page-video.mp4"
+            src="/logo/landing-page.mp4"
             autoPlay
             muted
             playsInline
