@@ -1684,7 +1684,7 @@ export default function InterviewGuidePage() {
                 ) : displayFeaturedList.length === 0 ? (
                   <div className="glass-panel p-12 rounded-3xl border-white/5 text-center space-y-4 flex-1 flex flex-col items-center justify-center min-h-[580px]">
                     <span className="material-symbols-outlined !text-5xl text-white/20">favorite_border</span>
-                    <p className="text-xl font-bold text-white/60">您尚未点赞或收藏任何精选内容</p>
+                    <p className="text-xl font-bold text-white/60">您尚未收藏任何精选内容</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 flex-1 items-start min-h-[580px]">

@@ -18,7 +18,11 @@ RUN apt-get update \
 
 # 安装 Python 依赖（阿里云 PyPI 镜像）
   COPY requirements.txt .
-  RUN pip download --no-cache-dir -r requirements.txt \
+  # 把构建依赖（setuptools / wheel）也下载到 /wheels，
+  # 否则 --no-index 离线安装阶段，源码包（如 pdf2docx / pgvector）构建时会找不到 setuptools 而失败
+  RUN pip download --no-cache-dir \
+          -r requirements.txt \
+          setuptools wheel \
           -d /wheels \
           -i https://mirrors.aliyun.com/pypi/simple/ \
           --extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple \
