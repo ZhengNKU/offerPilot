@@ -682,7 +682,7 @@ function AuthModals() {
               <>
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
                   <span className="font-label-mono text-xs text-[#AFA7FF] tracking-widest uppercase font-extrabold">
-                    面试VAR Login
+                    面试驾到 Login
                   </span>
                   <button
                     onClick={() => auth.setShowLogin(false)}
@@ -694,19 +694,8 @@ function AuthModals() {
 
                 {/* Logo Graphic */}
                 <div className="space-y-1.5 flex flex-col items-center">
-                  <div className="w-14 h-14 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-center mb-1 shadow-inner">
-                    <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none">
-                      <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo-modal-login)" />
-                      <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#0b1326" />
-                      <defs>
-                        <linearGradient id="nav-brand-logo-modal-login" x1="0" y1="0" x2="1" y2="1">
-                          <stop offset="0%" stopColor="#c0c1ff" />
-                          <stop offset="100%" stopColor="#ffb2b7" />
-                        </linearGradient>
-                      </defs>
-                    </svg>
-                  </div>
-                  <h3 className="font-black text-white text-xl md:text-2xl">欢迎登录 面试VAR</h3>
+                  <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-16 h-16 object-contain mb-1 drop-shadow-md" />
+                  <h3 className="font-black text-white text-xl md:text-2xl">欢迎登录 面试驾到</h3>
                   <p className="text-white/45 text-xs md:text-sm font-bold">内测版本 · 邮箱密码登录</p>
                 </div>
 
@@ -784,7 +773,7 @@ function AuthModals() {
               <>
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
                   <span className="font-label-mono text-xs text-[#AFA7FF] tracking-widest uppercase font-extrabold">
-                    面试VAR Recovery
+                    面试驾到 Recovery
                   </span>
                   <button
                     onClick={() => { setShowForgot(false); auth.setShowLogin(false); }}
@@ -796,18 +785,7 @@ function AuthModals() {
 
                 {/* Logo Graphic */}
                 <div className="space-y-1.5 flex flex-col items-center">
-                  <div className="w-14 h-14 rounded-2xl bg-white/[0.03] border border-white/10 flex items-center justify-center mb-1 shadow-inner">
-                    <svg className="w-8 h-8" viewBox="0 0 24 24" fill="none">
-                      <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo-modal-forgot)" />
-                      <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#0b1326" />
-                      <defs>
-                        <linearGradient id="nav-brand-logo-modal-forgot" x1="0" y1="0" x2="1" y2="1">
-                          <stop offset="0%" stopColor="#c0c1ff" />
-                          <stop offset="100%" stopColor="#ffb2b7" />
-                        </linearGradient>
-                      </defs>
-                    </svg>
-                  </div>
+                  <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-16 h-16 object-contain mb-1 drop-shadow-md" />
                   <h3 className="font-black text-white text-xl md:text-2xl">重置账户密码</h3>
                   <p className="text-white/45 text-xs md:text-sm font-bold">通过邮箱验证身份后设定新密码</p>
                 </div>

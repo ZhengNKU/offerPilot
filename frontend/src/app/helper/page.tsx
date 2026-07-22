@@ -2,9 +2,11 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth, UserMenu } from "@/components/AuthProvider";
 
 export default function HelperPage() {
   const router = useRouter();
+  const auth = useAuth();
   const [activeTab, setActiveTab] = useState("audio-analysis");
   const [playingVideo, setPlayingVideo] = useState<Record<string, boolean>>({});
 
@@ -86,7 +88,7 @@ export default function HelperPage() {
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] bg-primary/10 rounded-full blur-[80px] pointer-events-none" />
 
         <h1 className="text-3xl sm:text-5xl font-black tracking-tight text-white mb-4">
-          面试VAR <span className="text-gradient">使用指南</span>
+          面试驾到 <span className="text-gradient">帮助中心</span>
         </h1>
         <p className="text-base sm:text-lg text-on-surface-variant/70 font-semibold max-w-2xl mx-auto leading-relaxed">
           像复盘比赛录像一样，深度分析您的每一次面试表现。五分钟助您快速掌握产品所有核心功能，开启 Offer 丰收之旅。
@@ -480,7 +482,7 @@ export default function HelperPage() {
       <footer className="border-t border-white/5 py-8 relative z-10 text-center bg-[#070c17]/50 mt-12">
         <div className="max-w-container-max mx-auto px-gutter flex items-center justify-center">
           <span className="text-xs text-on-surface-variant/40 font-semibold">
-            © 2026 面试VAR · Built with AI · Made for Career Growth
+            © 2026 面试驾到 · Built with AI · 面试驾到，Offer来到
           </span>
         </div>
       </footer>

@@ -641,19 +641,10 @@ function NewAnalysisDebuggerContent() {
         <div className="flex justify-between items-center h-20 px-gutter max-w-container-max mx-auto w-full relative">
           <div
             onClick={() => router.push("/")}
-            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2 cursor-pointer"
+            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-3 cursor-pointer"
           >
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo)" />
-              <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#0b1326" />
-              <defs>
-                <linearGradient id="nav-brand-logo" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#c0c1ff" />
-                  <stop offset="100%" stopColor="#ffb2b7" />
-                </linearGradient>
-              </defs>
-            </svg>
-            面试VAR
+            <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-11 h-11 object-contain" />
+            面试驾到
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -674,6 +665,9 @@ function NewAnalysisDebuggerContent() {
             </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
+            </a>
+            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              帮助中心
             </a>
           </div>
 
@@ -806,7 +800,7 @@ function NewAnalysisDebuggerContent() {
 
                 <div className="text-center space-y-3">
                   <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">
-                    {taskStep || "面试VAR AI 正在分析中..."}
+                    {taskStep || "面试驾到 AI 正在分析中..."}
                   </h3>
                   <p className="text-base md:text-lg text-white/70 font-semibold">
                     {activeMode === "resume"
@@ -1121,7 +1115,7 @@ function NewAnalysisDebuggerContent() {
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 面试VAR. All rights reserved.
+            © 2026 面试驾到. All rights reserved.
           </span>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
             <span onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer select-none">

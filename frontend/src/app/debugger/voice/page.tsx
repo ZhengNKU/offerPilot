@@ -1630,19 +1630,10 @@ export default function InterviewVoiceAnalysisPage() {
           
           <div
             onClick={() => router.push("/")}
-            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2 cursor-pointer"
+            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-3 cursor-pointer"
           >
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo)" />
-              <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#050B1A" />
-              <defs>
-                <linearGradient id="nav-brand-logo" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#c0c1ff" />
-                  <stop offset="100%" stopColor="#ffb2b7" />
-                </linearGradient>
-              </defs>
-            </svg>
-            面试VAR
+            <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-11 h-11 object-contain" />
+            面试驾到
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -1663,6 +1654,9 @@ export default function InterviewVoiceAnalysisPage() {
             </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
+            </a>
+            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              帮助中心
             </a>
           </div>
 
@@ -2495,7 +2489,7 @@ export default function InterviewVoiceAnalysisPage() {
               <div className="flex justify-between items-center pb-2.5 border-b border-white/5 select-none">
                 <h3 className="font-extrabold text-white text-base flex items-center gap-2">
                   <span className="material-symbols-outlined text-[#00D4FF] animate-pulse">auto_awesome</span>
-                  面试VAR AI 表达重塑对策建议
+                  面试驾到 AI 表达重塑对策建议
                 </h3>
                 <button
                   onClick={() => setShowOptimizer(false)}

@@ -106,7 +106,7 @@ logging.getLogger("watchfiles").setLevel(logging.WARNING)
 logging.info("[main] 日志目录 = %s (Docker 部署下此目录对应宿主机 /data/logs)", log_dir)
 
 app = FastAPI(
-    title="面试VAR - Backend Services",
+    title="面试驾到 - Backend Services",
     description="Backend user authentication, profiles management, LangGraph APIs, and AI Career Counselor.",
     version=settings.PROJECT_VERSION
 )
@@ -201,7 +201,7 @@ async def shutdown_event():
 
 @app.get("/")
 def read_root():
-    return {"message": "面试VAR Backend Services are running."}
+    return {"message": "面试驾到 Backend Services are running."}
 
 
 async def _seed_project_tags():

@@ -21,10 +21,10 @@ import { useAuth } from "./AuthProvider";
 
 // ─── 静态文案（与原 page.tsx 完全一致，2026-06-04 版本）────────────────────
 
-const agreementMarkdown = `欢迎您使用 面试VAR AI 面试教练系统（以下简称"本服务"）。本协议由您与 面试VAR 运营团队共同缔结。在注册或开始使用本服务前，请您务必仔细阅读并理解本《用户服务协议》。
+const agreementMarkdown = `欢迎您使用 面试驾到 AI 面试教练系统（以下简称"本服务"）。本协议由您与 面试驾到 运营团队共同缔结。在注册或开始使用本服务前，请您务必仔细阅读并理解本《用户服务协议》。
 
 ## 一、 服务内容与规则
-1. **服务定位**：面试VAR 是一款 AI 驱动的面试智能分析及职业成长辅助系统，主要为您提供简历深度分析、面试录音/记录分析、AI 模拟面试场景训练以及 Offer 概率预测等服务。
+1. **服务定位**：面试驾到 是一款 AI 驱动的面试智能分析及职业成长辅助系统，主要为您提供简历深度分析、面试录音/记录分析、AI 模拟面试场景训练以及 Offer 概率预测等服务。
 2. **免责声明**：您理解并同意，本服务生成的评估数据、分析结果、STAR 优化话术等内容均为 AI 模型根据您提供的信息推理得出，仅供您的求职参考，我们不保证其绝对的准确性、完整性或对最终面试结果的保证性。
 
 ## 二、 账户注册与安全
@@ -38,9 +38,9 @@ const agreementMarkdown = `欢迎您使用 面试VAR AI 面试教练系统（以
 * 恶意攻击、破解、逆向工程本服务后台系统，或者干扰其他用户的正常使用。
 
 ## 四、 服务的修改与终止
-面试VAR 有权根据系统维护、AI 模型迭代或业务调整需要，对本服务的部分或全部内容进行优化、升级、暂停或终止。您可以在职业驾驶舱中随时注销并删除您的账号，注销后我们将立即抹除您的所有关联数据。`;
+面试驾到 有权根据系统维护、AI 模型迭代或业务调整需要，对本服务的部分或全部内容进行优化、升级、暂停或终止。您可以在职业驾驶舱中随时注销并删除您的账号，注销后我们将立即抹除您的所有关联数据。`;
 
-const privacyMarkdown = `我们非常重视您的隐私。本《隐私政策》详细说明了 面试VAR 在您使用我们的服务时，如何收集、使用、存储 和 保护您的个人信息。
+const privacyMarkdown = `我们非常重视您的隐私。本《隐私政策》详细说明了 面试驾到 在您使用我们的服务时，如何收集、使用、存储 和 保护您的个人信息。
 
 ## 一、 我们如何收集和使用信息
 1. **基本账号信息**：当您注册本服务时，我们将收集您的手机号码或邮箱，用于身份认证和账号创建。
@@ -144,7 +144,7 @@ export default function LegalModals() {
             >
               <div className="flex justify-between items-center pb-3 border-b border-white/5">
                 <span className="font-label-mono text-[10px] text-[#AFA7FF] tracking-widest uppercase font-bold">
-                  面试VAR User Agreement
+                  面试驾到 User Agreement
                 </span>
                 <button
                   onClick={closeTerms}
@@ -155,7 +155,7 @@ export default function LegalModals() {
               </div>
 
               <div className="space-y-1">
-                <h3 className="font-extrabold text-white text-lg">面试VAR 用户服务协议</h3>
+                <h3 className="font-extrabold text-white text-lg">面试驾到 用户服务协议</h3>
                 <p className="text-white/45 text-xs">更新日期：2026年6月4日</p>
               </div>
 
@@ -193,7 +193,7 @@ export default function LegalModals() {
             >
               <div className="flex justify-between items-center pb-3 border-b border-white/5">
                 <span className="font-label-mono text-[10px] text-[#AFA7FF] tracking-widest uppercase font-bold">
-                  面试VAR Privacy Policy
+                  面试驾到 Privacy Policy
                 </span>
                 <button
                   onClick={closePrivacy}
@@ -204,7 +204,7 @@ export default function LegalModals() {
               </div>
 
               <div className="space-y-1">
-                <h3 className="font-extrabold text-white text-lg">面试VAR 用户隐私政策</h3>
+                <h3 className="font-extrabold text-white text-lg">面试驾到 用户隐私政策</h3>
                 <p className="text-white/45 text-xs">更新日期：2026年6月4日</p>
               </div>
 

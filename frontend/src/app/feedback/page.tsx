@@ -814,19 +814,10 @@ export default function FeedbackPage() {
         <div className="max-w-container-max mx-auto px-gutter h-20 flex items-center justify-between">
           <div
             onClick={() => router.push("/")}
-            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2 cursor-pointer"
+            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-3 cursor-pointer"
           >
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo)" />
-              <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#0b1326" />
-              <defs>
-                <linearGradient id="nav-brand-logo" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#c0c1ff" />
-                  <stop offset="100%" stopColor="#ffb2b7" />
-                </linearGradient>
-              </defs>
-            </svg>
-            面试VAR
+            <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-11 h-11 object-contain" />
+            面试驾到
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -847,6 +838,9 @@ export default function FeedbackPage() {
             </a>
             <a onClick={() => router.push("/feedback")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
               体验反馈中心
+            </a>
+            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              帮助中心
             </a>
           </div>
 
@@ -909,8 +903,25 @@ export default function FeedbackPage() {
             <div className="text-left">
               <h1 className="text-2xl md:text-3xl font-extrabold text-on-surface">体验反馈中心</h1>
               <p className="text-sm md:text-base text-on-surface-variant mt-1.5 font-medium">
-                你的反馈是我们前进的动力，帮助我们打造更好的面试VAR
+                你的反馈是我们前进的动力，帮助我们打造更好的面试驾到
               </p>
+            </div>
+          </div>
+
+          {/* 右侧帮助中心入口模块 */}
+          <div 
+            onClick={() => window.open("/helper", "_blank")}
+            className="relative z-10 hidden md:flex items-center gap-4 p-4 px-6 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 hover:border-primary/50 backdrop-blur-xl cursor-pointer transition-all duration-300 group hover:scale-[1.02] shadow-xl shrink-0"
+          >
+            <div className="w-12 h-12 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center text-primary group-hover:scale-110 transition-transform shrink-0">
+              <span className="material-symbols-outlined text-2xl">help_center</span>
+            </div>
+            <div className="text-left pr-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-base font-black text-white group-hover:text-primary transition-colors">帮助中心</span>
+                <span className="material-symbols-outlined text-sm text-primary group-hover:translate-x-1 transition-transform">arrow_forward</span>
+              </div>
+              <p className="text-xs text-on-surface-variant/90 font-semibold mt-0.5">五分钟快速上手，掌控 AI 复盘核心大招</p>
             </div>
           </div>
         </div>
@@ -1133,6 +1144,15 @@ export default function FeedbackPage() {
                 </div>
                 
                 <div className="flex items-center gap-3">
+                  {/* 帮助中心按钮 */}
+                  <button
+                    onClick={() => window.open("/helper", "_blank")}
+                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-primary/10 border border-primary/25 hover:bg-primary/20 text-primary transition-all text-xs font-extrabold cursor-pointer shrink-0 shadow-sm"
+                  >
+                    <span className="material-symbols-outlined text-sm">help_center</span>
+                    帮助中心
+                  </button>
+
                   {/* Search Input */}
                   <div className="relative flex items-center">
                     <input
@@ -1651,7 +1671,7 @@ export default function FeedbackPage() {
                     <span className="text-on-surface-variant/40 font-bold">快捷回复:</span>
                     <button
                       type="button"
-                      onClick={() => postQuickComment("感谢您的反馈！此建议非常棒，我们已确认此需求，并已将其排入后续开发计划中，会尽快予以优化和实现。再次感谢您对 面试VAR 的支持！")}
+                      onClick={() => postQuickComment("感谢您的反馈！此建议非常棒，我们已确认此需求，并已将其排入后续开发计划中，会尽快予以优化和实现。再次感谢您对 面试驾到 的支持！")}
                       className="px-2 py-0.5 bg-primary/10 border border-primary/20 text-[#AFA7FF] rounded hover:bg-primary/20 transition-all font-bold cursor-pointer"
                     >
                       接受建议
@@ -1869,7 +1889,7 @@ export default function FeedbackPage() {
                 </span>
                 <h3 className="text-2xl font-black text-white leading-tight">登录解锁体验反馈中心</h3>
                 <p className="text-sm text-on-surface-variant/70 font-semibold leading-relaxed">
-                  您的反馈是我们前进的动力，登录后可提交您的反馈与建议，参与其他用户的交流与讨论，共同打造更好的面试VAR。
+                  您的反馈是我们前进的动力，登录后可提交您的反馈与建议，参与其他用户的交流与讨论，共同打造更好的面试驾到。
                 </p>
               </div>
 
@@ -1903,7 +1923,7 @@ export default function FeedbackPage() {
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
           <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 面试VAR AI. All rights reserved.
+            © 2026 面试驾到. All rights reserved.
           </span>
           <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
             <span onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer select-none">

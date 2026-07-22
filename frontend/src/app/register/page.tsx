@@ -6,10 +6,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
 import { API_BASE } from "@/lib/api";
 
-const agreementMarkdown = `欢迎您使用 面试VAR AI 面试教练系统（以下简称“本服务”）。本协议由您与 面试VAR 运营团队共同缔结。在注册或开始使用本服务前，请您务必仔细阅读并理解本《用户服务协议》。
+const agreementMarkdown = `欢迎您使用 面试驾到 AI 面试教练系统（以下简称“本服务”）。本协议由您与 面试驾到 运营团队共同缔结。在注册或开始使用本服务前，请您务必仔细阅读并理解本《用户服务协议》。
 
 ## 一、 服务内容与规则
-1. **服务定位**：面试VAR 是一款 AI 驱动的面试智能分析及职业成长辅助系统，主要为您提供简历深度分析、面试录音/记录分析、AI 模拟面试场景训练以及 Offer 概率预测等服务。
+1. **服务定位**：面试驾到 是一款 AI 驱动的面试智能分析及职业成长辅助系统，主要为您提供简历深度分析、面试录音/记录分析、AI 模拟面试场景训练以及 Offer 概率预测等服务。
 2. **免责声明**：您理解并同意，本服务生成的评估数据、分析结果、STAR 优化话术等内容均为 AI 模型根据您提供的信息推理得出，仅供您的求职参考，我们不保证其绝对的准确性、完整性或对最终面试结果的保证性。
 
 ## 二、 账户注册与安全
@@ -23,9 +23,9 @@ const agreementMarkdown = `欢迎您使用 面试VAR AI 面试教练系统（以
 * 恶意攻击、破解、逆向工程本服务后台系统，或者干扰其他用户的正常使用。
 
 ## 四、 服务的修改与终止
-面试VAR 有权根据系统维护、AI 模型迭代或业务调整需要，对本服务的部分或全部内容进行优化、升级、暂停或终止。您可以在职业驾驶舱中随时注销并删除您的账号，注销后我们将立即抹除您的所有关联数据。`;
+面试驾到 有权根据系统维护、AI 模型迭代或业务调整需要，对本服务的部分或全部内容进行优化、升级、暂停或终止。您可以在职业驾驶舱中随时注销并删除您的账号，注销后我们将立即抹除您的所有关联数据。`;
 
-const privacyMarkdown = `我们非常重视您的隐私。本《隐私政策》详细说明了 面试VAR 在您使用我们的服务时，如何收集、使用、存储 and 保护您的个人信息。
+const privacyMarkdown = `我们非常重视您的隐私。本《隐私政策》详细说明了 面试驾到 在您使用我们的服务时，如何收集、使用、存储 and 保护您的个人信息。
 
 ## 一、 我们如何收集和使用信息
 1. **基本账号信息**：当您注册本服务时，我们将收集您的手机号码或邮箱，用于身份认证和账号创建。
@@ -34,7 +34,7 @@ const privacyMarkdown = `我们非常重视您的隐私。本《隐私政策》�
 
 ## 二、 信息安全与存储保护
 1. **数据脱敏**：我们在模型输入层引入本地脱敏逻辑，全力防止您的敏感身份数据传输到外部的大语言模型接口。
-2. **安全存储**：您的所有个人数据都经过高强度 SSL 加密传输，并采用银行级多层加密算法进行安全数据库存储。
+2. **安全存储**：您的所有个人数据都经过高强度 SSL 加密传输，并进行安全数据库存储。
 3. **绝不泄露**：我们承诺绝不会将您的个人简历、音频、对话及评估分析报告出售、转让或授权给任何无关的第三方企业或机构。
 
 ## 三、 您的权利与数据清除
@@ -505,19 +505,10 @@ export default function RegisterPage() {
         <div className="flex justify-between items-center h-20 px-gutter max-w-container-max mx-auto w-full">
           <div
             onClick={() => router.push("/")}
-            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2 cursor-pointer"
+            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-3 cursor-pointer"
           >
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo)" />
-              <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#050B1A" />
-              <defs>
-                <linearGradient id="nav-brand-logo" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#c0c1ff" />
-                  <stop offset="100%" stopColor="#ffb2b7" />
-                </linearGradient>
-              </defs>
-            </svg>
-            面试VAR
+            <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-11 h-11 object-contain" />
+            面试驾到
           </div>
 
           <div className="flex items-center gap-4 text-sm font-bold">
@@ -1567,7 +1558,7 @@ export default function RegisterPage() {
                           onClick={handleFinishRegister}
                           className="flex-1 py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] text-base rounded-xl hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center shadow-lg shadow-[#AFA7FF]/15 group"
                         >
-                          完成，进入 面试VAR
+                          完成，进入 面试驾到
                           <span className="material-symbols-outlined text-lg leading-none transform transition-transform duration-200 group-hover:translate-x-0.5 select-none">
                             arrow_forward
                           </span>
@@ -1598,7 +1589,7 @@ export default function RegisterPage() {
               <div>
                 <h4 className="text-xs md:text-base font-black text-white">我们承诺您的数据安全</h4>
                 <p className="text-[10px] md:text-sm text-white/40 leading-relaxed font-bold mt-0.5">
-                  面试VAR 采用职业画像引擎构建个性化分析模型。您的姓名、公司、学校等敏感信息在 AI 分析过程中自动脱敏处理，<br />
+                  面试驾到 采用职业画像引擎构建个性化分析模型。您的姓名、公司、学校等敏感信息在 AI 分析过程中自动脱敏处理，<br />
                   仅保留与岗位能力相关的逻辑数据用于推理与评估，您的个人信息不会被公开展示或用于未经授权的用途。
                 </p>
               </div>
@@ -1632,7 +1623,7 @@ export default function RegisterPage() {
 
           <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-left">
             <span className="text-xs md:text-sm text-white/30 font-label-mono font-bold tracking-widest">
-              © 2026 面试VAR. All rights reserved.
+              © 2026 面试驾到. All rights reserved.
             </span>
             <div className="flex gap-8 text-xs md:text-sm text-white/30 font-label-mono font-bold tracking-widest">
               <a onClick={() => router.push("/")} className="hover:text-[#AFA7FF] transition-colors cursor-pointer">
@@ -1665,7 +1656,7 @@ export default function RegisterPage() {
             >
               <div className="flex justify-between items-center pb-3 border-b border-white/5">
                 <span className="font-label-mono text-[10px] text-[#AFA7FF] tracking-widest uppercase font-bold">
-                  面试VAR User Agreement
+                  面试驾到 User Agreement
                 </span>
                 <button
                   onClick={() => setShowAgreementModal(false)}
@@ -1676,7 +1667,7 @@ export default function RegisterPage() {
               </div>
 
               <div className="space-y-1">
-                <h3 className="font-extrabold text-white text-lg">面试VAR 用户服务协议</h3>
+                <h3 className="font-extrabold text-white text-lg">面试驾到 用户服务协议</h3>
                 <p className="text-white/45 text-xs">更新日期：2026年6月4日</p>
               </div>
 
@@ -1718,7 +1709,7 @@ export default function RegisterPage() {
             >
               <div className="flex justify-between items-center pb-3 border-b border-white/5">
                 <span className="font-label-mono text-[10px] text-[#AFA7FF] tracking-widest uppercase font-bold">
-                  面试VAR Privacy Policy
+                  面试驾到 Privacy Policy
                 </span>
                 <button
                   onClick={() => setShowPrivacyModal(false)}
@@ -1729,7 +1720,7 @@ export default function RegisterPage() {
               </div>
 
               <div className="space-y-1">
-                <h3 className="font-extrabold text-white text-lg">面试VAR 用户隐私政策</h3>
+                <h3 className="font-extrabold text-white text-lg">面试驾到 用户隐私政策</h3>
                 <p className="text-white/45 text-xs">更新日期：2026年6月4日</p>
               </div>
 

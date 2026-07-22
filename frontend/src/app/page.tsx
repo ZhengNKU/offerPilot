@@ -155,7 +155,31 @@ export default function Home() {
   const router = useRouter();
   const auth = useAuth();
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(18); // Start at 00:18 (crash point)
+  const [currentTime, setCurrentTime] = useState(378); // Start at 06:18 (crash point)
+  const heroVideoRef = useRef<HTMLVideoElement>(null);
+
+  // Play video from start whenever Hero section scrolls into viewport
+  useEffect(() => {
+    const video = heroVideoRef.current;
+    if (!video) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            video.currentTime = 0;
+            video.play().catch(() => {});
+          } else {
+            video.pause();
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+
+    observer.observe(video);
+    return () => observer.disconnect();
+  }, []);
 
   // Audio timeline counts up when playing
   useEffect(() => {
@@ -173,34 +197,28 @@ export default function Home() {
 
   const formatTime = (secs: number) => {
     const mins = Math.floor(secs / 60);
-    const remainder = secs % 60;
-    return `${mins.toString().padStart(2, "0")}:${remainder.toString().padStart(2, "0")}`;
+    const s = secs % 60;
+    return `${mins < 10 ? "0" : ""}${mins}:${s < 10 ? "0" : ""}${s}`;
   };
 
   return (
-    <main className="pt-20 bg-background text-on-surface select-none">
-      {/* 检测 ?evicted=1，弹"被踢下线"toast。Next.js 16 要求 useSearchParams 在 Suspense 边界里 */}
+    <div className="min-h-screen bg-background text-on-surface font-body select-none overflow-x-hidden w-full relative">
       <Suspense fallback={null}>
         <EvictedToastHandler />
       </Suspense>
-
-      {/* TopNavBar - Covers full screen width */}
-      <nav className="fixed top-0 w-full z-50 bg-surface/80 backdrop-blur-xl border-b border-white/10">
+      
+      {/* Top Navigation Bar */}
+      <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-xl border-b border-white/10 h-20">
         <div className="flex justify-between items-center h-20 px-gutter max-w-container-max mx-auto w-full relative">
-          <div className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2">
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo)" />
-              <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#0b1326" />
-              <defs>
-                <linearGradient id="nav-brand-logo" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#c0c1ff" />
-                  <stop offset="100%" stopColor="#ffb2b7" />
-                </linearGradient>
-              </defs>
-            </svg>
-            面试VAR
+          <div
+            onClick={() => router.push("/")}
+            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-3 cursor-pointer"
+          >
+            <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-11 h-11 object-contain" />
+            面试驾到
           </div>
-          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
+
+          <div className="absolute left-1/2 -translate-x-1/2 hidden lg:flex items-center gap-8">
             <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               面试调试器
             </a>
@@ -219,15 +237,19 @@ export default function Home() {
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
             </a>
+            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              帮助中心
+            </a>
           </div>
-           <div className="flex items-center gap-4">
+
+          <div className="flex items-center gap-4">
             {auth.isLoggedIn ? (
               <UserMenu />
             ) : (
               <>
                 <button
                   onClick={() => auth.setShowLogin(true)}
-                  className="px-6 py-2 text-on-surface-variant hover:text-on-surface transition-colors font-medium cursor-pointer"
+                  className="text-on-surface-variant hover:text-on-surface font-bold text-sm px-3 py-2 cursor-pointer"
                 >
                   登录
                 </button>
@@ -243,29 +265,43 @@ export default function Home() {
         </div>
       </nav>
 
-      {/* Hero Section - Spans full screen width */}
-      <section className="relative min-h-[90vh] flex flex-col items-center justify-center px-gutter text-center py-section-padding overflow-hidden w-full bg-background z-10">
+      {/* Hero Headline Section - Full Width Video Background */}
+      <section className="relative flex flex-col items-center justify-center px-gutter text-center pt-32 md:pt-36 pb-36 md:pb-44 overflow-hidden w-full bg-background z-10">
+        {/* Full-Width Video Background - Covers 100% of this Section (Zero Gaps) */}
+        <div className="absolute inset-0 w-full h-full overflow-hidden pointer-events-none z-0 opacity-65">
+          <video
+            ref={heroVideoRef}
+            src="/logo/landing-page-video.mp4"
+            autoPlay
+            muted
+            playsInline
+            className="w-full h-full object-cover object-[75%_center] scale-110 translate-y-14 md:translate-y-20"
+          />
+          {/* Subtle Dark Gradient Overlay for Optimal Contrast */}
+          <div className="absolute inset-0 bg-gradient-to-b from-[#0b1326]/80 via-[#0b1326]/30 to-[#0b1326]/95 pointer-events-none" />
+        </div>
+
         {/* Ambient Background Glows */}
         <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-primary/10 rounded-full blur-[120px] -z-10 animate-pulse pointer-events-none"></div>
         <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-tertiary/5 rounded-full blur-[100px] -z-10 animate-pulse pointer-events-none" style={{ animationDelay: "1s" }}></div>
         
-        {/* Centered Top Headline Container - Expanded width for gorgeous widescreen harmony */}
+        {/* Centered Top Headline Container */}
         <div className="max-w-[1440px] space-y-8 transition-all duration-1000 opacity-100 translate-y-0 flex flex-col items-center w-full relative z-10 mx-auto">
           <div className="inline-flex items-center gap-2.5 px-5 py-2 rounded-full glass-panel border-primary/20">
             <span className="w-2.5 h-2.5 rounded-full bg-primary ai-pulse"></span>
-            <span className="font-label-mono tracking-widest text-primary uppercase" style={{ fontSize: "13px", fontWeight: 600 }}>AI Interview OS · 全流程面试分析引擎</span>
+            <span className="font-label-mono tracking-widest text-primary uppercase" style={{ fontSize: "13px", fontWeight: 600 }}>AI Interview OS · 面试驾到，Offer来到</span>
           </div>
           
-          <h1 className="text-on-surface leading-tight whitespace-normal tracking-tight text-left inline-flex flex-col mx-auto" style={{ fontSize: "80px", fontWeight: 800, fontFamily: "'Hanken Grotesk', sans-serif", letterSpacing: "-0.04em" }}>
-            <span>像调试代码一样，</span>
-            <span className="text-primary drop-shadow-[0_0_15px_rgba(192,193,255,0.4)] pl-0 md:pl-[3em] mt-2 block md:inline-block">
-              调试你的面试
+          <h1 className="text-on-surface leading-tight whitespace-nowrap tracking-tight inline-flex flex-col text-left mx-auto select-none" style={{ fontSize: "84px", fontWeight: 800, fontFamily: "'Hanken Grotesk', sans-serif", letterSpacing: "-0.04em" }}>
+            <span>面试驾到</span>
+            <span className="text-primary drop-shadow-[0_0_20px_rgba(192,193,255,0.45)] mt-2 block pl-[2.05em]">
+              Offer来到
             </span>
           </h1>
           
           <div className="w-full max-w-[1200px] block mx-auto">
             <p className="text-on-surface-variant whitespace-normal break-words" style={{ fontSize: "20px", lineHeight: "1.7", fontWeight: 400, fontFamily: "Inter, sans-serif" }}>
-              面试VAR 分析真实面试录音，定位信任崩溃时刻，揭示面试官真实想法，帮你获得心仪 Offer。
+              面试驾到 分析真实面试录音，定位信任崩溃时刻，揭示面试官真实想法，帮你获得心仪 Offer。
             </p>
           </div>
           
@@ -295,13 +331,15 @@ export default function Home() {
               ))}
             </div>
             <span className="text-on-surface-variant font-label-mono flex items-center gap-1.5 whitespace-nowrap font-bold" style={{ fontSize: "15px" }}>
-              10,000+ 工程师正在使用 <span className="text-tertiary animate-pulse font-black">●</span>
+              1000+ 同学正在使用 <span className="text-tertiary animate-pulse font-black">●</span>
             </span>
           </div>
         </div>
+      </section>
 
-        {/* Hero Dashboard Visualization - Wide container spanning 1280px screen block */}
-        <div className="mt-20 w-full max-w-container-max mx-auto glass-panel rounded-3xl p-4 md:p-8 relative group overflow-hidden border-white/5 transition-all duration-1000 opacity-100 translate-y-0 block z-10 text-left">
+      {/* Hero Dashboard Visualization Section */}
+      <section className="-mt-16 md:-mt-24 pb-8 px-gutter w-full block relative z-20">
+        <div className="w-full max-w-container-max mx-auto glass-panel rounded-3xl p-4 md:p-8 relative group overflow-hidden border-white/5 transition-all duration-1000 opacity-100 translate-y-0 block z-10 text-left">
           <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 to-transparent pointer-events-none"></div>
           
           <div className="relative grid md:grid-cols-12 gap-6 h-full items-stretch">
@@ -310,20 +348,20 @@ export default function Home() {
               <div className="p-7 rounded-2xl bg-surface-container-low border border-white/5 h-fit">
                 <div className="space-y-5">
                   <div className="flex gap-4 text-[15px] items-center opacity-75 py-1">
-                    <span className="text-on-surface-variant opacity-50 font-mono">00:01</span>
+                    <span className="text-on-surface-variant opacity-50 font-mono">00:30</span>
                     <span className="text-on-surface font-semibold">自我介绍</span>
                   </div>
                   <div className="flex gap-4 text-[15px] items-center opacity-75 py-1">
-                    <span className="text-on-surface-variant opacity-50 font-mono">00:05</span>
-                    <span className="text-on-surface font-semibold">项目介绍</span>
+                    <span className="text-on-surface-variant opacity-50 font-mono">01:35</span>
+                    <span className="text-on-surface font-semibold">项目经历</span>
                   </div>
                   <div className="flex gap-4 text-[15px] text-secondary font-black bg-secondary/10 p-3.5 rounded-xl border border-secondary/20 -mx-2 items-center">
-                    <span className="font-mono">00:18</span>
-                    <span>Redis 深度: 信任崩溃时刻</span>
+                    <span className="font-mono">06:18</span>
+                    <span>核心追问: 信任崩溃时刻</span>
                   </div>
                   <div className="flex gap-4 text-[15px] items-center opacity-75 py-1">
-                    <span className="text-on-surface-variant opacity-50 font-mono">00:24</span>
-                    <span className="text-on-surface font-semibold">系统设计</span>
+                    <span className="text-on-surface-variant opacity-50 font-mono">10:20</span>
+                    <span className="text-on-surface font-semibold">难题复盘</span>
                   </div>
                 </div>
               </div>
@@ -336,16 +374,16 @@ export default function Home() {
                 {/* Score Indicators */}
                 <div className="flex justify-between items-center mb-6">
                   <div>
-                    <p className="text-sm text-on-surface-variant font-label-mono tracking-widest font-extrabold">TRUST SCORE</p>
+                    <p className="text-sm text-on-surface-variant font-label-mono tracking-widest font-extrabold">信任指数</p>
                     <h3 className="text-primary mt-1 leading-none" style={{ fontSize: "48px", fontWeight: 800, fontFamily: "'Hanken Grotesk', sans-serif" }}>82%</h3>
                   </div>
                   <div className="text-right">
-                    <p className="text-sm text-secondary font-label-mono tracking-widest font-extrabold">CRITICAL DROP</p>
+                    <p className="text-sm text-secondary font-label-mono tracking-widest font-extrabold">最大降幅</p>
                     <h3 className="text-secondary mt-1 leading-none" style={{ fontSize: "48px", fontWeight: 800, fontFamily: "'Hanken Grotesk', sans-serif" }}>41%</h3>
                   </div>
                 </div>
 
-                {/* SVG Line Chart - Fixed camelCase SVG properties for zero console errors */}
+                {/* SVG Line Chart */}
                 <div className="h-56 relative mb-4 w-full">
                   <svg className="w-full h-full overflow-visible" viewBox="0 0 400 120" preserveAspectRatio="none">
                     <defs>
@@ -372,7 +410,7 @@ export default function Home() {
                     {/* Fill Area */}
                     <path d="M0 30 Q 50 25, 100 35 T 150 20 T 195 50 L 195 120 L 0 120 Z" fill="url(#areaGradient)" />
 
-                    {/* Smooth SVG Line curve - Lifted red portion upwards for elegant alignment */}
+                    {/* Smooth SVG Line curve */}
                     <path
                       className="data-trail"
                       d="M0 30 Q 50 25, 100 35 T 150 20 T 200 55 T 250 72 T 300 75 T 400 78"
@@ -399,7 +437,7 @@ export default function Home() {
                   <div className="absolute top-[2px] left-[50%] -translate-x-1/2">
                     <div className="bg-secondary text-on-secondary px-3.5 py-1.5 rounded-lg text-sm font-bold font-label-mono whitespace-nowrap shadow-lg animate-bounce flex items-center gap-1.5">
                       <span className="w-1.5 h-1.5 rounded-full bg-on-secondary animate-pulse" />
-                      00:18 信任崩溃时刻
+                      06:18 信任崩溃时刻
                     </div>
                   </div>
                 </div>
@@ -433,7 +471,7 @@ export default function Home() {
                     </div>
 
                     <div className="px-4 py-2 bg-surface-container-highest rounded-lg font-label-mono text-sm text-on-surface-variant font-bold shadow-inner">
-                      {formatTime(currentTime)} / 45:22
+                      {formatTime(currentTime)} / 25:22
                     </div>
                   </div>
                 </div>
@@ -444,17 +482,17 @@ export default function Home() {
             <div className="md:col-span-3 flex flex-col gap-6">
               <div className="p-7 rounded-2xl bg-surface-container-low border border-white/5 flex flex-col justify-center flex-1 min-h-[160px]">
                 <h4 className="text-secondary text-[15px] mb-4 font-label-mono font-bold flex items-center gap-2 uppercase tracking-widest">
-                  <span className="material-symbols-outlined text-[18px]">warning</span> CRITICAL
+                  <span className="material-symbols-outlined text-[18px]">warning</span> 关键减分项
                 </h4>
                 <p className="text-[16px] text-on-surface leading-relaxed font-semibold">
-                  面试官想法：缺乏架构底座思维，判断项目经验不足。
+                  面试官想法：回答停留在表面，缺乏逻辑闭环与量化成果。
                 </p>
               </div>
               
               <div className="p-7 rounded-2xl glass-panel border border-tertiary/20 flex flex-col justify-center flex-1 min-h-[160px]">
                 <h4 className="text-tertiary text-[15px] mb-4 font-label-mono font-bold uppercase tracking-widest">AI 重构建议</h4>
                 <p className="text-[16px] text-on-surface-variant leading-relaxed font-semibold">
-                  建议从 QPS 高并发场景切入，解释选择 RabbitMQ 的权衡。
+                  建议使用 STAR 法则，突出业务痛点、个人决策逻辑与最终成效。
                 </p>
               </div>
             </div>
@@ -467,14 +505,14 @@ export default function Home() {
         <div className="max-w-container-max mx-auto grid grid-cols-2 md:grid-cols-5 gap-8 w-full">
           <div className="text-center space-y-2 flex flex-col items-center justify-center">
             <div className="text-primary-container font-black tracking-tight leading-none" style={{ fontSize: "64px", fontFamily: "'Hanken Grotesk', sans-serif" }}>
-              <StatCounter target={10000} suffix="+" />
+              <StatCounter target={1000} suffix="+" />
             </div>
             <div className="text-on-surface-variant font-label-mono font-bold uppercase tracking-widest" style={{ fontSize: "14px" }}>真实面试分析</div>
           </div>
           
           <div className="text-center space-y-2 flex flex-col items-center justify-center">
             <div className="text-primary-container font-black tracking-tight leading-none" style={{ fontSize: "64px", fontFamily: "'Hanken Grotesk', sans-serif" }}>
-              <StatCounter target={200000} suffix="+" />
+              <StatCounter target={2000} suffix="+" />
             </div>
             <div className="text-on-surface-variant font-label-mono font-bold uppercase tracking-widest" style={{ fontSize: "14px" }}>分钟录音处理</div>
           </div>
@@ -522,8 +560,8 @@ export default function Home() {
               { icon: "description", color: "text-primary", bg: "bg-primary/10", title: "简历分析", desc: "发现简历风险点", stagger: "stagger-1" },
               { icon: "graphic_eq", color: "text-secondary", bg: "bg-secondary/10", title: "录音转写", desc: "精准语音转文字", stagger: "stagger-2" },
               { icon: "psychology", color: "text-tertiary", bg: "bg-tertiary/10", title: "智能分析", desc: "定位失信时刻", stagger: "stagger-3" },
-              { icon: "visibility", color: "text-primary", bg: "bg-primary/10", title: "AI 深度洞察", desc: "面试官真实想法", stagger: "stagger-4" },
-              { icon: "record_voice_over", color: "text-secondary", bg: "bg-secondary/10", title: "表达重构", desc: "高阶话术升级", stagger: "stagger-5" },
+              { icon: "record_voice_over", color: "text-secondary", bg: "bg-secondary/10", title: "表达重构", desc: "高阶话术升级", stagger: "stagger-4" },
+              { icon: "interpreter_mode", color: "text-primary", bg: "bg-primary/10", title: "模拟面试", desc: "AI 拟真实战对练", stagger: "stagger-5" },
               { icon: "workspace_premium", color: "text-tertiary", bg: "bg-tertiary/10", title: "获得 Offer", desc: "AI 助你斩获 Offer", stagger: "stagger-6" }
             ].map((feature, i) => (
               <div
@@ -604,8 +642,8 @@ export default function Home() {
       <section className="py-section-padding px-gutter w-full overflow-hidden block">
         <div className="max-w-container-max mx-auto w-full flex flex-col items-center">
           <div className="text-center mb-16 space-y-4 w-full">
-            <h2 className="text-on-surface font-black tracking-tight" style={{ fontSize: "52px", fontFamily: "'Hanken Grotesk', sans-serif" }}>他们用 面试VAR 拿到了更好的 Offer</h2>
-            <p className="text-on-surface-variant font-label-mono font-bold tracking-widest uppercase" style={{ fontSize: "14px" }}>5,200+ 职业人士的真实反馈</p>
+            <h2 className="text-on-surface font-black tracking-tight" style={{ fontSize: "52px", fontFamily: "'Hanken Grotesk', sans-serif" }}>他们用 面试驾到 拿到了更好的 Offer</h2>
+            <p className="text-on-surface-variant font-label-mono font-bold tracking-widest uppercase" style={{ fontSize: "14px" }}>500+ 校招求职者的真实反馈</p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-8 w-full">
@@ -613,26 +651,26 @@ export default function Home() {
               {
                 avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAoBpggRj1UtigDFdEnOK0sAAmSdS-IVJ2H9W38TRex37DPfiHqEvwoY6eQcy4GeTPpfeEJDjyuoSFA55gzpIvv7R5Mfz9ZSXKlQbqUKTzPLxqLTXr-9tvsKlzmM1X0EAYIJVwDIewcFXEEh6EIHymYLEHtaG3QthqZnrrX0q-U87O-FrecJz9XcdHZoz2ZndesMcgGuwEkcaCDeujsrkHIVZ2b_s1ue1sD9aCOzimyGM0EZ6xbYMXOZYnG5fMTc5XCa01xnjuPbNeK",
                 name: "张同学",
-                title: "字节跳动 · 后端开发工程师",
-                quote: "“之前总是不知道为什么面试挂了，面试VAR 帮我找到了问题所在。最佩服的是 00:18 的那个信任崩溃点，让我恍然大悟！”",
+                title: "知名科技大厂 · 软件开发工程师",
+                quote: "“校招技术面时总是卡在场景设计题，不知道为什么面完就挂。面试驾到帮我定位到了表达逻辑漏洞，AI 重构后的思路非常清晰，二面顺利拿下 Offer！”",
                 tagColor: "text-primary",
-                tag: "拿到字节跳动 Offer"
+                tag: "斩获科技大厂 Offer"
               },
               {
                 avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuDFshg7TaIUBGgEoN9JlGImNqjxSHpt7AhRu-PbphzAn5SRZ5yIKPQVnt7MjqHWSjcaFOH3c-Z9RctvigPYZQQzWs5DFeQO_8lLFFNccVXVeYJLk_8B5MUbPOvtedzFCeFMkASReREHENKonnQ5Dgtd3m5h88GZffVVuSKxtNnySeH3A2sgHaysDkze-IycN2pg951zf8B27PdqLrDFqy3SZcvE-YgWmwWmsV5-Y6lPMtJHGu_Qk2cjZdchCxr9yPyUq0ZhXGtK18lj",
                 name: "李同学",
-                title: "阿里巴巴 · 高级工程师",
-                quote: "“AI 的建议非常精准，不是那种大而空的建议。而是针对我的问题 and 场景，重构后的表达让我面试中脱颖而出！”",
+                title: "互联网平台 · 产品运营管培生",
+                quote: "“作为非技术背景的文科应届生，面对面试官深挖实习项目时总是心里发虚。AI 重构把我的表达结构梳理得极其严密，帮助我在群面和终面中脱颖而出！”",
                 tagColor: "text-tertiary",
-                tag: "拿到阿里巴巴 Offer"
+                tag: "斩获名企运营 Offer"
               },
               {
                 avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuDq0oV8NegQm719QROkK-ggi194pRkwKl7fHB8GEkJwwxEDaGssftR2ZcL4XT3Iu35dejN5439XwRofApsNIVCKgZBrKYNaUhrbwoHxbvncKbDFu1dXrqkTGOxvL4VcAut8iUIAlSvE8TiAIkhn03XFAGoK0knqMY51qStDuYjR2L3bNHY4Sxn502nwfstmS1SsoSFUQxP86Imppj1BGJ2vIUH8tEeclAtdMMFYo856Zpim5zG7DD2nTHwiokYtUOCmtq6SU81uMO5u",
-                name: "王同学",
-                title: "腾讯 · 高级产品经理",
-                quote: "“从简历优化到面试复盘，再到表达升级，面试VAR 是我求职路上最亲密的战友，成功拿到了腾讯的 Offer！”",
+                name: "陈同学",
+                title: "知名外企 · 市场营销助理",
+                quote: "“从简历深挖到真实面试分析，面试驾到帮我把零碎的校园经历转化为有说服力的成果数据，面试时心理底气特别足，成功收到了梦寐以求的校招 Offer！”",
                 tagColor: "text-secondary",
-                tag: "拿到腾讯 Offer"
+                tag: "斩获校招优选 Offer"
               }
             ].map((item, i) => (
               <div
@@ -749,7 +787,7 @@ export default function Home() {
           
           <div className="w-full max-w-3xl mx-auto block mb-10 relative z-10">
             <p className="text-on-surface-variant whitespace-normal break-words" style={{ fontSize: "18px", lineHeight: "1.6", fontWeight: 400, fontFamily: "Inter, sans-serif" }}>
-              立即体验 面试VAR，发现你的面试优势，拿到心仪 Offer。
+              立即体验 面试驾到，发现你的面试优势，拿到心仪 Offer。
             </p>
           </div>
           
@@ -765,13 +803,16 @@ export default function Home() {
       <footer className="bg-surface-container-lowest border-t border-white/5 w-full block">
         <div className="grid grid-cols-1 md:grid-cols-5 gap-stack-gap px-gutter py-section-padding max-w-container-max mx-auto text-left">
           <div className="col-span-1 md:col-span-2 space-y-6">
-            <div className="text-xl font-black text-on-surface" style={{ fontSize: "32px", fontFamily: "'Hanken Grotesk', sans-serif" }}>面试VAR</div>
+            <div className="text-xl font-black text-on-surface flex items-center gap-3" style={{ fontSize: "32px", fontFamily: "'Hanken Grotesk', sans-serif" }}>
+              <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-12 h-12 object-contain inline-block" />
+              面试驾到
+            </div>
             <div className="w-full max-w-xs block">
               <p className="text-on-surface-variant text-sm font-medium leading-relaxed">
                 AI Interview OS · 全流程面试分析引擎
               </p>
               <p className="text-on-surface-variant text-sm font-medium leading-relaxed">
-                像分析比赛录像一样，分析你的每一次面试。
+                面试驾到，Offer来到
               </p>
             </div>
           </div>
@@ -789,7 +830,7 @@ export default function Home() {
           <div className="space-y-4">
             <h4 className="font-extrabold text-on-surface">支持</h4>
             <ul className="space-y-2 text-sm text-on-surface-variant font-semibold">
-              <li><a href="/helper" target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors cursor-pointer">使用指南</a></li>
+              <li><a href="/helper" target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors cursor-pointer">帮助中心</a></li>
               <li><a onClick={() => router.push("/feedback")} className="hover:text-primary transition-colors cursor-pointer">常见问题</a></li>
               <li><a onClick={() => openLegalContact()} className="hover:text-primary transition-colors cursor-pointer">联系我们</a></li>
             </ul>
@@ -806,12 +847,12 @@ export default function Home() {
         
         <div className="px-gutter py-8 border-t border-white/5 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="text-left space-y-1">
-            <p className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">© 2026 面试VAR</p>
-            <p className="text-[10px] text-on-surface-variant/40 font-label-mono font-bold tracking-widest">Built with AI · Made for Career Growth</p>
+            <p className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">© 2026 面试驾到</p>
+            <p className="text-[10px] text-on-surface-variant/40 font-label-mono font-bold tracking-widest">Built with AI · 面试驾到，Offer来到</p>
           </div>
         </div>
       </footer>
-    </main>
+    </div>
   );
 }
 

@@ -35,7 +35,7 @@ class EmailHelper:
         self.secret_key = settings.TENCENT_SECRET_KEY
         self.region = settings.TENCENT_SES_REGION or "ap-guangzhou"
         self.from_email = settings.TENCENT_SES_FROM_EMAIL
-        self.from_name = settings.TENCENT_SES_FROM_NAME or "面试VAR"
+        self.from_name = settings.TENCENT_SES_FROM_NAME or "面试驾到"
         self.reply_to = settings.TENCENT_SES_REPLY_TO
         self.template_id = settings.TENCENT_SES_TEMPLATE_ID
 
@@ -74,7 +74,7 @@ class EmailHelper:
             req.Destination = [email]
             # Subject 即使使用模板模式也必须传（API 要求）
             # 模板主题里如有 {{变量}} 会被 TemplateData 替换
-            req.Subject = "面试VAR 验证码"
+            req.Subject = "面试驾到 验证码"
 
             # 【模板模式】Simple 字段已废弃，普通账户只能通过模板发送
             req.Template = models.Template()

@@ -231,7 +231,7 @@ function ResumeAnalysisPageContent() {
       if (!filename) {
         const safeName = (profile.name || "候选人").replace(/[\\/:*?"<>|\r\n\t]+/g, "_");
         const today = new Date().toISOString().slice(0, 10);
-        filename = `面试VAR_简历_${safeName}_${today}.docx`;
+        filename = `面试驾到_简历_${safeName}_${today}.docx`;
       }
 
       const blob = await res.blob();
@@ -725,19 +725,10 @@ function ResumeAnalysisPageContent() {
         <div className="flex justify-between items-center h-20 px-gutter max-w-container-max mx-auto w-full relative">
           <div
             onClick={() => router.push("/")}
-            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-2 cursor-pointer"
+            className="text-2xl font-display-xl font-bold tracking-tight text-on-surface flex items-center gap-3 cursor-pointer"
           >
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none">
-              <path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" fill="url(#nav-brand-logo)" />
-              <path d="M12 6L16 11H13V18L12 18L11 18V13H8L12 6Z" fill="#050B1A" />
-              <defs>
-                <linearGradient id="nav-brand-logo" x1="0" y1="0" x2="1" y2="1">
-                  <stop offset="0%" stopColor="#c0c1ff" />
-                  <stop offset="100%" stopColor="#ffb2b7" />
-                </linearGradient>
-              </defs>
-            </svg>
-            面试VAR
+            <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-11 h-11 object-contain" />
+            面试驾到
           </div>
 
           <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
@@ -758,6 +749,9 @@ function ResumeAnalysisPageContent() {
             </a>
             <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
               体验反馈中心
+            </a>
+            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+              帮助中心
             </a>
           </div>
 
@@ -1707,7 +1701,7 @@ function ResumeAnalysisPageContent() {
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left select-none">
           <div className="flex items-center gap-4">
             <span className="text-xs text-white/30 font-label-mono font-bold tracking-widest">
-              © 2026 面试VAR. All rights reserved.
+              © 2026 面试驾到. All rights reserved.
             </span>
           </div>
           <div className="flex gap-8 text-xs text-white/30 font-label-mono font-bold tracking-widest animate-pulse">
@@ -1903,7 +1897,7 @@ function ResumeAnalysisPageContent() {
 
             <div className="space-y-4">
               <p className="text-sm text-white/50 leading-relaxed font-bold">
-                简历综合评分由 面试VAR AI 根据您的目标求职画像（<span className="text-white">{profile.targetCompany} · {profile.targetRole}</span>）进行多维度智能分析评估得出：
+                简历综合评分由 面试驾到 AI 根据您的目标求职画像（<span className="text-white">{profile.targetCompany} · {profile.targetRole}</span>）进行多维度智能分析评估得出：
               </p>
 
               <div className="space-y-3">

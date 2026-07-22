@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 /**
  * 会员计划对比弹窗
  *
- * - 标题: 解锁 面试VAR 顶配 AI 职业大招：会员计划对比
+ * - 标题: 解锁 面试驾到 顶配 AI 职业大招：会员计划对比
  * - 列出 基础体验版 / PRO 专家会员 / MAX 领航会员 三档
  * - 底部加微信/支付宝扫码支付视觉块
  *
@@ -47,7 +47,7 @@ export function PricingModal({ open, onClose, highlight }: PricingModalProps) {
                 >
                   workspace_premium
                 </span>
-                解锁 面试VAR 顶配 AI 职业大招：会员计划对比
+                解锁 面试驾到 顶配 AI 职业大招：会员计划对比
               </h3>
               <button
                 onClick={onClose}
