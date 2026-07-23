@@ -795,6 +795,9 @@ class KnowledgeAbilityService:
 
 # ── 后台任务触发器 ─────────────────────────────────────────────
 
+# 防止同一用户并发触发生成
+_inflight_generations: set[int] = set()
+
 
 async def trigger_knowledge_generation(user_id: int):
     """后台任务：生成能力标签 → 生成面试题 → 一起入库。
@@ -805,81 +808,89 @@ async def trigger_knowledge_generation(user_id: int):
     3. 面试题成功后 → 能力标签入库 + 面试题写 Redis&PG
     失败重试 3 次（指数退避）。
     """
+    # 防止同一用户并发触发生成（同一用户同时只允许一个生成任务运行）
+    if user_id in _inflight_generations:
+        logger.info(
+            f"[trigger_knowledge_generation] user={user_id} already generating, skip duplicate"
+        )
+        return
+    _inflight_generations.add(user_id)
+
     from app.database import async_session
 
-    async with async_session() as db:
-        # 读取用户画像
-        profile_result = await db.execute(
-            select(models.UserProfile).where(models.UserProfile.user_id == user_id)
-        )
-        profile = profile_result.scalars().first()
-        if not profile or not profile.target_role:
-            logger.info(f"[trigger_knowledge_generation] user={user_id} no target_role, skip")
-            return
+    try:
+        async with async_session() as db:
+            # 读取用户画像
+            profile_result = await db.execute(
+                select(models.UserProfile).where(models.UserProfile.user_id == user_id)
+            )
+            profile = profile_result.scalars().first()
+            if not profile or not profile.target_role:
+                logger.info(f"[trigger_knowledge_generation] user={user_id} no target_role, skip")
+                return
 
         target_role = profile.target_role or ""
         experience_years = profile.experience_years or "1-3年"
         target_grade = profile.target_grade or ""
 
-        # 连接 Redis
-        import redis.asyncio as aioredis
-        from app.config import settings
-        redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        # 复用全局 Redis 连接池（不再每请求新建连接）
+        from app.database import _get_redis_pool
+        redis_client = _get_redis_pool()
 
-        try:
-            for attempt in range(1, 4):
-                try:
-                    logger.info(
-                        f"[trigger_knowledge_generation] START user={user_id} attempt={attempt}"
-                    )
+        for attempt in range(1, 4):
+            try:
+                logger.info(
+                    f"[trigger_knowledge_generation] START user={user_id} attempt={attempt}"
+                )
 
-                    # ① LLM 生成能力标签（不写 DB）
-                    abilities_data = await KnowledgeAbilityService.generate_abilities_data(
-                        target_role, experience_years, target_grade, user_id
-                    )
-                    if not abilities_data:
-                        raise ValueError("abilities_data is empty")
+                # ① LLM 生成能力标签（不写 DB）
+                abilities_data = await KnowledgeAbilityService.generate_abilities_data(
+                    target_role, experience_years, target_grade, user_id
+                )
+                if not abilities_data:
+                    raise ValueError("abilities_data is empty")
 
-                    # ② 展开为 question_generator 需要的格式
-                    sa_list = []
-                    for ca in abilities_data:
-                        for sub in ca["subs"]:
-                            sa_list.append({"core": ca["core"], "sub": sub})
+                # ② 展开为 question_generator 需要的格式
+                sa_list = []
+                for ca in abilities_data:
+                    for sub in ca["subs"]:
+                        sa_list.append({"core": ca["core"], "sub": sub})
 
-                    # ③ LLM 批量生成面试题 + 写 Redis + PG
-                    from app.services.question_generator import (
-                        generate_and_cache_with_abilities,
-                    )
-                    result = await generate_and_cache_with_abilities(
-                        db, user_id, sa_list,
-                        target_role, target_grade, experience_years,
-                        redis_client,
-                    )
-                    if not result:
-                        raise ValueError("question generation returned empty")
+                # ③ LLM 批量生成面试题 + 写 Redis + PG
+                from app.services.question_generator import (
+                    generate_and_cache_with_abilities,
+                )
+                result = await generate_and_cache_with_abilities(
+                    db, user_id, sa_list,
+                    target_role, target_grade, experience_years,
+                    redis_client,
+                    enable_network=False,  # 后台任务关闭联网搜索，避免 web_search 超时阻塞
+                )
+                if not result:
+                    raise ValueError("question generation returned empty")
 
-                    # ④ 面试题成功后 → 能力标签入库
-                    await KnowledgeAbilityService.save_abilities_to_db(
-                        db, user_id, abilities_data,
-                        target_role, experience_years, target_grade,
-                    )
+                # ④ 面试题成功后 → 能力标签入库
+                await KnowledgeAbilityService.save_abilities_to_db(
+                    db, user_id, abilities_data,
+                    target_role, experience_years, target_grade,
+                )
 
-                    logger.info(
-                        f"[trigger_knowledge_generation] DONE user={user_id} "
-                        f"abilities={len(abilities_data)} questions_abilities={len(result)}"
-                    )
-                    return  # 成功
+                logger.info(
+                    f"[trigger_knowledge_generation] DONE user={user_id} "
+                    f"abilities={len(abilities_data)} questions_abilities={len(result)}"
+                )
+                return  # 成功
 
-                except Exception as e:
-                    logger.error(
-                        f"[trigger_knowledge_generation] attempt {attempt}/3 FAILED "
-                        f"user={user_id}: {e}", exc_info=True
-                    )
-                    if attempt < 3:
-                        delay = 2 ** attempt
-                        await asyncio.sleep(delay)
-        finally:
-            await redis_client.aclose()
+            except Exception as e:
+                logger.error(
+                    f"[trigger_knowledge_generation] attempt {attempt}/3 FAILED "
+                    f"user={user_id}: {e}", exc_info=True
+                )
+                if attempt < 3:
+                    delay = 2 ** attempt
+                    await asyncio.sleep(delay)
+    finally:
+        _inflight_generations.discard(user_id)
 
 
 async def trigger_knowledge_match(user_id: int, issues: list[dict]):
@@ -910,11 +921,8 @@ async def trigger_knowledge_match(user_id: int, issues: list[dict]):
 
         # 匹配完成后批量刷新面试题（写 Redis + PG）
         try:
-            import redis.asyncio as aioredis
-            from app.config import settings
-            redis_client = aioredis.from_url(
-                settings.REDIS_URL, decode_responses=True
-            )
+            from app.database import _get_redis_pool
+            redis_client = _get_redis_pool()
             try:
                 from app.services.question_generator import (
                     invalidate_and_regenerate,
@@ -927,7 +935,7 @@ async def trigger_knowledge_match(user_id: int, issues: list[dict]):
                     f"[trigger_knowledge_match] batch question refresh DONE user={user_id}"
                 )
             finally:
-                await redis_client.aclose()
+                pass  # redis 使用全局连接池，不 close
         except Exception as e:
             logger.error(
                 f"[trigger_knowledge_match] batch question refresh FAILED user={user_id}: {e}",

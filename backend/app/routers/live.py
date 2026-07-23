@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models
 from app.config import settings
-from app.database import get_db, async_session
+from app.database import get_db, async_session, _get_redis_pool
 from app.routers.auth import get_current_user_optional
 from app.utils.moderation_dep import moderated
 from app.utils.ws_auth import get_current_user_from_ws
@@ -1205,7 +1205,7 @@ async def ws_live(websocket: WebSocket, live_id: int):
     # ---------- 1. 鉴权：首条 JSON 消息必须是 auth ----------
     user = None
     db_for_auth = async_session()
-    redis_for_auth = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    redis_for_auth = _get_redis_pool()
     try:
         try:
             raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
@@ -1229,7 +1229,7 @@ async def ws_live(websocket: WebSocket, live_id: int):
         logger.info(f"[ws] live_id={live_id} 鉴权 OK user_id={user.id}")
     finally:
         await db_for_auth.close()
-        await redis_for_auth.aclose()
+        # redis 使用全局连接池，不 close
 
     # ---------- 2. 校验 live session 归属 ----------
     db = async_session()

@@ -149,25 +149,44 @@ def _repair_llm_json(text: str) -> str:
 
     repaired = _fix_string_values(repaired)
 
-    # ── 策略3: 尝试用 json.loads 的错误位置信息修复缺失逗号 ──
-    # 如果仍有 "Expecting ',' delimiter" 错误，在错误位置尝试插入逗号
-    try:
-        json.loads(repaired)
-        return repaired
-    except json.JSONDecodeError as e:
-        # 如果错误是 "Expecting ',' delimiter"，尝试在出错位置插入逗号
-        if "Expecting ','" in str(e) and e.pos > 0:
-            # 在 pos 之前找合适位置插入逗号
-            before = repaired[:e.pos]
-            after = repaired[e.pos:]
-            # 在错误位置之前插入逗号（但不要插在空白中间）
-            insert_pos = e.pos
-            # 向前找到最近的换行或非空白字符末尾
-            while insert_pos > 0 and repaired[insert_pos - 1] in ' \t':
-                insert_pos -= 1
-            repaired = repaired[:insert_pos] + ',' + repaired[insert_pos:]
-            # 清理可能的双逗号
-            repaired = repaired.replace(',,', ',')
+    # ── 策略3: 迭代修复，每次用 json.loads 的错误位置修复一处 ──
+    # 循环最多 15 次，覆盖多数 LLM 输出中的多处缺失逗号 / 多余逗号 / 属性名缺引号等问题
+    MAX_FIX_ITERATIONS = 15
+    for _ in range(MAX_FIX_ITERATIONS):
+        try:
+            json.loads(repaired)
+            return repaired
+        except json.JSONDecodeError as e:
+            msg = str(e)
+            if "Expecting ','" in msg and e.pos > 0:
+                # 缺失逗号：在错误位置前插入逗号
+                insert_pos = e.pos
+                while insert_pos > 0 and repaired[insert_pos - 1] in ' \t':
+                    insert_pos -= 1
+                repaired = repaired[:insert_pos] + ',' + repaired[insert_pos:]
+            elif "Expecting property name" in msg and e.pos > 0:
+                # LLM 可能把属性名写成了裸字（缺双引号），跳过该字符重试
+                # 在 pos 处尝试插入一个双引号
+                repaired = repaired[:e.pos] + '"' + repaired[e.pos:]
+            elif "Expecting ':'" in msg and e.pos > 0:
+                # 对象属性缺少冒号分隔符
+                repaired = repaired[:e.pos] + ':' + repaired[e.pos:]
+            elif "Extra data" in msg and e.pos > 0:
+                # 多余数据（如末尾多了 ]} 之后的内容），截断到 e.pos
+                repaired = repaired[:e.pos]
+            elif "Expecting value" in msg and e.pos > 0:
+                # 缺少值（如 "key": 后面为空），插入 null
+                repaired = repaired[:e.pos] + 'null' + repaired[e.pos:]
+            elif "Invalid control character" in msg and e.pos > 0:
+                # 字符串中有未转义的控制字符，转义它
+                ch = repaired[e.pos] if e.pos < len(repaired) else ''
+                repaired = repaired[:e.pos] + '\\n' + repaired[e.pos + 1:]
+            else:
+                # 无法识别的错误类型，停止修复
+                break
+
+    # 清理修复过程可能引入的双逗号 / 逗号冒号混合
+    repaired = repaired.replace(',,', ',').replace(',:', ':').replace(':,' , ':')
 
     return repaired
 

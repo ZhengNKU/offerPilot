@@ -18,10 +18,28 @@ async def get_db():
             await session.rollback()
             raise
 
-# FastAPI Dependency for Redis Client Connection
-async def get_redis():
-    client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    try:
-        yield client
-    finally:
-        await client.close()
+# ── Redis 连接池（复用以避免每请求建连/断连导致 TIME_WAIT 风暴）────
+# Windows 下 TCP 连接关闭后会在 TIME_WAIT 状态停留 120s，
+# 高频创建/销毁连接会在极短时间内耗尽系统临时端口，导致所有 I/O 阻塞。
+_redis_pool: aioredis.Redis | None = None
+
+
+def _get_redis_pool() -> aioredis.Redis:
+    """获取全局 Redis 连接池实例（供非 FastAPI 上下文使用）。
+
+    首次调用时建立连接池，后续复用。"""
+    global _redis_pool
+    if _redis_pool is None:
+        _redis_pool = aioredis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            max_connections=20,
+            socket_keepalive=True,
+            health_check_interval=30,
+        )
+    return _redis_pool
+
+
+async def get_redis() -> aioredis.Redis:
+    """FastAPI 依赖：从持久连接池中获取 Redis 客户端。"""
+    yield _get_redis_pool()
