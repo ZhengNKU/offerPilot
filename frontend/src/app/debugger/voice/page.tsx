@@ -1338,7 +1338,7 @@ export default function InterviewVoiceAnalysisPage() {
   // Export all dialogue logs to PDF
   const handleExportPDF = async () => {
     if (liveSegmentsData.length === 0) {
-      auth.triggerToast("没有可导出的对话记录！");
+      auth.triggerToast("没有可导出的对话记录！", "error");
       return;
     }
 
@@ -1525,7 +1525,7 @@ export default function InterviewVoiceAnalysisPage() {
 
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
-      auth.triggerToast("请允许弹出窗口以进行 PDF 导出");
+      auth.triggerToast("请允许弹出窗口以进行 PDF 导出", "error");
       return;
     }
     printWindow.document.write(htmlContent);

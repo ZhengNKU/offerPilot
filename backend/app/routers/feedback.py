@@ -4,10 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+import logging
 
 from app import models, schemas
 from app.database import get_db
 from app.routers.auth import get_current_user, get_current_user_optional
+from app.utils.moderation_dep import moderated
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/feedback", tags=["Feedback"])
 
@@ -237,10 +241,11 @@ async def list_feedbacks(
 @router.post("", response_model=schemas.FeedbackResponse)
 async def create_feedback(
     req: schemas.FeedbackCreate,
+    _moderation: None = Depends(moderated("feedback", "title", "description")),
     current_user: models.User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # Create feedback
+    # 内容审核由 @moderated Depends 完成(违规 raise 400 + 自动写审计);这里直接进入业务
     fb = models.Feedback(
         title=req.title,
         description=req.description,
@@ -253,6 +258,7 @@ async def create_feedback(
     )
     db.add(fb)
     await db.commit()
+    await db.refresh(fb)
 
     return schemas.FeedbackResponse(
         id=fb.id,
@@ -310,6 +316,7 @@ async def toggle_vote(
 async def add_comment(
     id: int,
     req: schemas.CommentCreate,
+    _moderation: None = Depends(moderated("feedback_comment", "content")),
     current_user: models.User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -319,6 +326,7 @@ async def add_comment(
     if not fb:
         raise HTTPException(status_code=404, detail="反馈不存在")
 
+    # 内容审核由 @moderated Depends 完成
     avatar_url = None
     if current_user.profile:
         avatar_url = current_user.profile.avatar_url

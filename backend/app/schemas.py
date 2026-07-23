@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional
+from datetime import datetime
 
 class SendCodeRequest(BaseModel):
     type: str = Field(..., description="phone or email")
@@ -27,6 +28,7 @@ class UserProfileSchema(BaseModel):
     school: Optional[str] = None
     degree: Optional[str] = None
     has_experience: bool = True
+    additional_desc: Optional[str] = Field(None, max_length=200)
 
 class ExpectationsSchema(BaseModel):
     target_cities: List[str]
@@ -104,13 +106,16 @@ class ProfileUpdateReq(BaseModel):
     school: Optional[str] = None
     degree: Optional[str] = None
     has_experience: Optional[bool] = None
-    
+
     target_cities: Optional[List[str]] = None
     target_company: Optional[str] = None
     target_role: Optional[str] = None
     target_grade: Optional[str] = None
     target_salary_min: Optional[int] = None
     target_salary_max: Optional[int] = None
+
+    # 自描述,内容审核覆盖
+    additional_desc: Optional[str] = Field(None, max_length=200)
 
 
 # ── 项目记忆库 ──
@@ -215,4 +220,35 @@ class FeaturedGuidePageOut(BaseModel):
     page: int
     page_size: int
     total_pages: int
+
+
+# ── 内容审核审计────────────────────────────────────────────
+
+class ModerationAuditOut(BaseModel):
+    """单条审计日志输出(管理端用)。仅返回哈希与元数据,不含原文/原图。"""
+    id: int
+    user_id: Optional[int] = None
+    scene: str
+    source_type: str
+    target_id: Optional[int] = None
+    suggestion: str
+    label: str
+    sub_label: str
+    score: int
+    content_hash: str
+    content_length: int
+    keywords_hash: List[str]
+    is_fallback: bool
+    error_code: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ModerationListResponse(BaseModel):
+    items: List[ModerationAuditOut]
+    total: int
+    page: int
+    page_size: int
 

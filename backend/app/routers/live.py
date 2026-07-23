@@ -25,6 +25,7 @@ from app import models
 from app.config import settings
 from app.database import get_db, async_session
 from app.routers.auth import get_current_user_optional
+from app.utils.moderation_dep import moderated
 from app.utils.ws_auth import get_current_user_from_ws
 
 logger = logging.getLogger(__name__)
@@ -138,6 +139,7 @@ class LiveSessionResponse(BaseModel):
 @router.post("/sessions", response_model=LiveSessionResponse)
 async def create_live_session(
     req: CreateLiveSessionRequest,
+    _moderation: None = Depends(moderated("live", "job_description")),
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):
@@ -379,6 +381,7 @@ class FeedbackRequest(BaseModel):
 async def submit_live_feedback(
     live_id: int,
     req: FeedbackRequest,
+    _moderation: None = Depends(moderated("live:feedback", "content")),
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):

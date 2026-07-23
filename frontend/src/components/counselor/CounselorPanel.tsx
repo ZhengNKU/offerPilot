@@ -177,7 +177,7 @@ export default function CounselorPanel(props: Props) {
       if (currentSessionId === sid) newSession();
       await loadSessions();
     } catch (e: any) {
-      auth.triggerToast("删除失败：" + e.message);
+      auth.triggerToast("删除失败：" + e.message, "error");
     }
   });
 
@@ -350,12 +350,12 @@ export default function CounselorPanel(props: Props) {
                 d.name === "web_search" ? "联网检索" :
                 d.name === "recall_user_history" ? "历史分析召回" :
                 d.name === "query_match_rate" ? "匹配度评估" : `工具 ${d.name}`;
-              auth.triggerToast(`⚠️ ${label}失败，继续基于已有信息回答`);
+              auth.triggerToast(`⚠️ ${label}失败，继续基于已有信息回答`, "error");
             }
           }
         } else if (ev.event === "error") {
           errored = true;
-          auth.triggerToast("AI 出错了：" + ev.data.message);
+          auth.triggerToast("AI 出错了：" + ev.data.message, "error");
         }
       }
     } catch (e: any) {
@@ -364,7 +364,7 @@ export default function CounselorPanel(props: Props) {
         wasStopped = true;
       } else {
         errored = true;
-        auth.triggerToast("发送失败：" + (e?.message || String(e)));
+        auth.triggerToast("发送失败：" + (e?.message || String(e)), "error");
       }
     } finally {
       // 任何终止路径（done / stopped / error / abort）都把当前 partial 落进 messages

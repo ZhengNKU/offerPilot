@@ -24,6 +24,7 @@ from app.services.quota import (
 )
 
 from app.utils.privacy import desensitize_text
+from app.utils.moderation_dep import moderated
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,7 @@ async def check_limit(
 @router.post("/create_session")
 async def create_session(
     req: CreateSessionRequest,
+    _moderation: None = Depends(moderated("jd:audio", "job_description")),
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):
@@ -175,6 +177,7 @@ def parse_dialogue_to_segments(raw_text: str) -> list:
 @router.post("/create_record_session")
 async def create_record_session(
     req: CreateRecordSessionRequest,
+    _moderation: None = Depends(moderated("record", "paste_text", "job_description")),
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):

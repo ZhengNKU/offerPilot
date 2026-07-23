@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, audio, file, resume, live, counselor, feedback, guide
+from app.routers import auth, audio, file, resume, live, counselor, feedback, guide, admin_moderation, moderation_preview
 
 try:
     import app.routers.memory as _memory_router
@@ -150,6 +150,8 @@ app.include_router(live.router)
 app.include_router(counselor.router)
 app.include_router(feedback.router)
 app.include_router(guide.router)
+app.include_router(admin_moderation.router)
+app.include_router(moderation_preview.router)
 if _MEMORY_LOADED and _memory_router is not None:
     app.include_router(_memory_router.router)
     logging.info("[main] Memory router registered successfully")
@@ -183,6 +185,11 @@ async def startup_event():
     asyncio.create_task(_seed_project_tags())
     # 启动管理员账号初始化
     asyncio.create_task(_seed_admin_account())
+    # 启动内容审核后台巡检
+    from app.utils.content_moderation import run_periodic_rescan
+    asyncio.create_task(run_periodic_rescan())
+    logging.info("[main] 内容审核后台巡检已启用 (周期=%sh)",
+                 settings.CONTENT_MODERATION_RESCAN_HOURS)
 
 
 async def _startup_log_cleanup():

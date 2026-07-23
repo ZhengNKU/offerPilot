@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { API_BASE } from "@/lib/api";
 import { getQuotaStatus } from "@/lib/quotaClient";
@@ -132,7 +133,19 @@ export default function CareerDashboard() {
   // Verification states for security edits
   const [emailCountdown, setEmailCountdown] = useState(0);
   const [emailCode, setEmailCode] = useState("");
+  const [isSendingCode, setIsSendingCode] = useState(false);
 
+  // Saving loading states for buttons
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [isSavingGoal, setIsSavingGoal] = useState(false);
+  const [isSavingSecurity, setIsSavingSecurity] = useState(false);
+
+  // Phase 3: 内容审核 preview hint（仅自由文本字段，结构化字段不审）
+  const profileNameMod = useModerationPreview();
+
+  useEffect(() => {
+    if (profileNameMod.status === "block") auth.triggerToast("用户名涉嫌违规，请修改后提交", "error");
+  }, [profileNameMod.status]);
 
   // ── Modal open handlers (reset form state from current data) ──
   const handleOpenProfileModal = () => {
@@ -180,7 +193,7 @@ export default function CareerDashboard() {
     e.preventDefault();
     const token = localStorage.getItem("interviewVar_token");
     if (!token) {
-      auth.triggerToast("未登录或会话已过期，请重新登录！");
+      auth.triggerToast("未登录或会话已过期，请重新登录！", "error");
       return;
     }
 
@@ -189,17 +202,18 @@ export default function CareerDashboard() {
     const verify_code = isEmail ? emailCode : phoneCode;
 
     if (!value) {
-      auth.triggerToast(isEmail ? "请输入邮箱地址！" : "请输入手机号码！");
+      auth.triggerToast(isEmail ? "请输入邮箱地址！" : "请输入手机号码！", "error");
       return;
     }
     if (!verify_code) {
-      auth.triggerToast("请输入验证码！");
+      auth.triggerToast("请输入验证码！", "error");
       return;
     }
+    setIsSavingSecurity(true);
     try {
       const token = localStorage.getItem("interviewVar_token");
       if (!token) {
-        auth.triggerToast("未登录或会话已过期，请重新登录！");
+        auth.triggerToast("未登录或会话已过期，请重新登录！", "error");
         return;
       }
       const body = {
@@ -218,7 +232,7 @@ export default function CareerDashboard() {
       });
       if (!res.ok) {
         const errData = await res.json();
-        auth.triggerToast(errData.detail || "安全信息修改失败，请核对输入！");
+        auth.triggerToast(errData.detail || "安全信息修改失败，请核对输入！", "error");
         return;
       }
       setAccountSecurity(prev => ({
@@ -230,7 +244,9 @@ export default function CareerDashboard() {
       auth.triggerToast("修改成功！");
       handleCloseSecurityModal();
     } catch (err) {
-      auth.triggerToast("无法连接到后端服务！");
+      auth.triggerToast("无法连接到后端服务！", "error");
+    } finally {
+      setIsSavingSecurity(false);
     }
   };
 
@@ -432,120 +448,134 @@ export default function CareerDashboard() {
   // Handlers for Save actions
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanRoleVal = (profileForm.role && profileForm.level)
-      ? `${profileForm.role} · ${profileForm.level}`
-      : (profileForm.role || profileForm.level || "");
+    setIsSavingProfile(true);
 
-    // ── 无修改检测：避免无意义的 LLM 重算（每次 3-10s）──
-    // 注意：handleOpenProfileModal 会把 profile 中的 "暂无公司"/"暂无学校" 转为 ""，
-    // 所以这里把 profile 的字段归一化到同样的语义后再对比。
-    const normCompany = (v: string) => (v === "暂无公司" ? "" : v);
-    const normSchool = (v: string) => (v === "暂无学校" ? "" : v);
-    const profileUnchanged =
-      profileForm.name === profile.name &&
-      profileForm.status === profile.status &&
-      profileForm.experienceYears === profile.experienceYears &&
-      profileForm.experienceMonths === profile.experienceMonths &&
-      profileForm.role === profile.role &&
-      profileForm.level === profile.level &&
-      profileForm.company === normCompany(profile.company) &&
-      profileForm.salaryMin === profile.salaryMin &&
-      profileForm.salaryMax === profile.salaryMax &&
-      profileForm.gender === profile.gender &&
-      profileForm.age === profile.age &&
-      profileForm.school === normSchool(profile.school) &&
-      profileForm.degree === profile.degree &&
-      profileForm.gradYear === profile.gradYear &&
-      profileForm.tagsString === profile.tags.join(", ");
-    if (profileUnchanged) {
-      // 未做任何修改 → 直接关闭弹窗，不调用 updateUser 触发 LLM 重算
+    try {
+      const normCompany = (v: string) => (v === "暂无公司" ? "" : v);
+      const normSchool = (v: string) => (v === "暂无学校" ? "" : v);
+      const profileUnchanged =
+        profileForm.name === profile.name &&
+        profileForm.status === profile.status &&
+        profileForm.experienceYears === profile.experienceYears &&
+        profileForm.experienceMonths === profile.experienceMonths &&
+        profileForm.role === profile.role &&
+        profileForm.level === profile.level &&
+        profileForm.company === normCompany(profile.company) &&
+        profileForm.salaryMin === profile.salaryMin &&
+        profileForm.salaryMax === profile.salaryMax &&
+        profileForm.gender === profile.gender &&
+        profileForm.age === profile.age &&
+        profileForm.school === normSchool(profile.school) &&
+        profileForm.degree === profile.degree &&
+        profileForm.gradYear === profile.gradYear &&
+        profileForm.tagsString === profile.tags.join(", ");
+      if (profileUnchanged) {
+        setShowEditProfileModal(false);
+        return;
+      }
+
+      // 提交时发起即时敏感词校验，消除 500ms 防抖竞态问题
+      const nameRes = await profileNameMod.checkNow(profileForm.name, "profile_name_hint");
+
+      if (nameRes === "block") {
+        auth.triggerToast("用户名涉嫌违规，请修改后提交", "error");
+        return;
+      }
+
+      const cleanRoleVal = (profileForm.role && profileForm.level)
+        ? `${profileForm.role} · ${profileForm.level}`
+        : (profileForm.role || profileForm.level || "");
+
+      // 后端更新成功后才写入本地组件 state
+      await auth.updateUser({
+        name: profileForm.name,
+        status: profileForm.status,
+        years: `${profileForm.experienceYears}${profileForm.experienceMonths}`,
+        company: profileForm.company,
+        role: cleanRoleVal,
+        salary: (profileForm.salaryMin > 0 && profileForm.salaryMax > 0) ? `${profileForm.salaryMin}K - ${profileForm.salaryMax}K` : "",
+        gender: profileForm.gender,
+        age: profileForm.age,
+        school: profileForm.school,
+        degree: profileForm.degree,
+        gradYear: profileForm.gradYear
+      });
+
+      const updatedProfile = {
+        ...profileForm,
+        title: cleanRoleVal || "—",
+        tags: profileForm.tagsString.split(",").map(t => t.trim()).filter(Boolean)
+      };
+      setProfile(updatedProfile);
       setShowEditProfileModal(false);
-      return;
+      startMatchRatePolling(careerGoal.matchRate);
+    } catch (err) {
+      // 保持在弹窗界面，不做任何修改
+    } finally {
+      setIsSavingProfile(false);
     }
-
-    const updatedProfile = {
-      ...profileForm,
-      title: cleanRoleVal || "—",
-      tags: profileForm.tagsString.split(",").map(t => t.trim()).filter(Boolean)
-    };
-    setProfile(updatedProfile);
-
-    const realMatchRate = await auth.updateUser({
-      name: profileForm.name,
-      status: profileForm.status,
-      years: `${profileForm.experienceYears}${profileForm.experienceMonths}`,
-      company: profileForm.company,
-      role: cleanRoleVal,
-      salary: (profileForm.salaryMin > 0 && profileForm.salaryMax > 0) ? `${profileForm.salaryMin}K - ${profileForm.salaryMax}K` : "",
-      gender: profileForm.gender,
-      age: profileForm.age,
-      school: profileForm.school,
-      degree: profileForm.degree,
-      gradYear: profileForm.gradYear
-    });
-    // 立即关闭弹窗（不等 LLM）；后端已 fire-and-forget 触发匹配度重算
-    setShowEditProfileModal(false);
-    // 轮询直到后端生成完新的匹配度（pending=false 且值变化）
-    startMatchRatePolling(careerGoal.matchRate);
   };
 
   const handleSaveGoal = async (e: React.FormEvent) => {
     e.preventDefault();
-    // 校验期望薪资：最低不能高于最高 (只有在两者都存在的时候校验)
-    if (goalForm.salaryMin > 0 && goalForm.salaryMax > 0 && goalForm.salaryMin > goalForm.salaryMax) {
-      auth.triggerToast("最低薪资不能高于最高薪资，请重新输入！");
-      setGoalForm({ ...goalForm, salaryMin: careerGoal.salaryMin, salaryMax: careerGoal.salaryMax });
-      return;
-    }
-    // 校验目标城市：最多三个
-    const cities = goalForm.city.split(/[、,，]/).map(c => c.trim()).filter(Boolean);
-    if (cities.length > 3) {
-      auth.triggerToast("最多只能选择三个目标城市！");
-      setGoalForm({ ...goalForm, city: careerGoal.city });
-      return;
-    }
-    // 如果没有填写期望薪资，则传入空字符串以更新为空
-    const targetSalaryVal = (goalForm.salaryMin > 0 && goalForm.salaryMax > 0)
-      ? `${goalForm.salaryMin}K - ${goalForm.salaryMax}K`
-      : "";
+    setIsSavingGoal(true);
 
-    // ── 无修改检测：避免无意义的 LLM 重算（每次 3-10s）──
-    // 对比 goalForm 与 careerGoal 已存值；只有当所有字段都没动才跳过。
-    const goalUnchanged =
-      goalForm.role === careerGoal.role &&
-      goalForm.level === careerGoal.level &&
-      goalForm.salaryMin === careerGoal.salaryMin &&
-      goalForm.salaryMax === careerGoal.salaryMax &&
-      goalForm.city === careerGoal.city &&
-      goalForm.company === careerGoal.company;
-    if (goalUnchanged) {
+    try {
+      // 校验期望薪资：最低不能高于最高
+      if (goalForm.salaryMin > 0 && goalForm.salaryMax > 0 && goalForm.salaryMin > goalForm.salaryMax) {
+        auth.triggerToast("最低薪资不能高于最高薪资，请重新输入！", "error");
+        setGoalForm({ ...goalForm, salaryMin: careerGoal.salaryMin, salaryMax: careerGoal.salaryMax });
+        return;
+      }
+      // 校验目标城市：最多三个
+      const cities = goalForm.city.split(/[、,，]/).map(c => c.trim()).filter(Boolean);
+      if (cities.length > 3) {
+        auth.triggerToast("最多只能选择三个目标城市！", "error");
+        setGoalForm({ ...goalForm, city: careerGoal.city });
+        return;
+      }
+      const targetSalaryVal = (goalForm.salaryMin > 0 && goalForm.salaryMax > 0)
+        ? `${goalForm.salaryMin}K - ${goalForm.salaryMax}K`
+        : "";
+
+      const goalUnchanged =
+        goalForm.role === careerGoal.role &&
+        goalForm.level === careerGoal.level &&
+        goalForm.salaryMin === careerGoal.salaryMin &&
+        goalForm.salaryMax === careerGoal.salaryMax &&
+        goalForm.city === careerGoal.city &&
+        goalForm.company === careerGoal.company;
+      if (goalUnchanged) {
+        setShowEditGoalModal(false);
+        return;
+      }
+
+      await auth.updateUser({
+        targetRole: goalForm.role,
+        targetGrade: goalForm.level,
+        targetSalary: targetSalaryVal,
+        targetCompany: goalForm.company,
+        targetCity: goalForm.city
+      });
+
+      setCareerGoal({ ...goalForm });
       setShowEditGoalModal(false);
-      return;
+      startMatchRatePolling(careerGoal.matchRate);
+    } catch (err) {
+      // 保持在弹窗界面，不做任何修改
+    } finally {
+      setIsSavingGoal(false);
     }
-
-    // 先把目标值写到本地 careerGoal（让弹窗关闭后卡片立刻显示新内容）
-    setCareerGoal({ ...goalForm });
-    setShowEditGoalModal(false);
-    // 后端 fire-and-forget：不等 LLM，立即关弹窗
-    auth.updateUser({
-      targetRole: goalForm.role,
-      targetGrade: goalForm.level,
-      targetSalary: targetSalaryVal,
-      targetCompany: goalForm.company,
-      targetCity: goalForm.city
-    }).catch(() => { /* 网络错误时静默处理，loading 由轮询超时关闭 */ });
-    // 轮询直到后端生成完新的匹配度
-    startMatchRatePolling(careerGoal.matchRate);
   };
 
   const handleGetSecurityEmailCode = async () => {
     if (!securityForm.email) {
-      auth.triggerToast("请输入邮箱地址！");
+      auth.triggerToast("请输入邮箱地址！", "error");
       return;
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(securityForm.email)) {
-      auth.triggerToast("请输入正确的邮箱地址格式！");
+      auth.triggerToast("请输入正确的邮箱地址格式！", "error");
       return;
     }
     try {
@@ -556,13 +586,13 @@ export default function CareerDashboard() {
       });
       if (!res.ok) {
         const errData = await res.json();
-        auth.triggerToast(errData.detail || "发送验证码失败！");
+        auth.triggerToast(errData.detail || "发送验证码失败！", "error");
         return;
       }
       setEmailCountdown(60);
       auth.triggerToast("验证码已发送，请查收！");
     } catch (e) {
-      auth.triggerToast("无法连接到后端服务！");
+      auth.triggerToast("无法连接到后端服务！", "error");
     }
   };
 
@@ -1223,12 +1253,13 @@ export default function CareerDashboard() {
               <form onSubmit={handleSaveProfile} className="space-y-4 text-sm font-semibold text-white">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">姓名</label>
+                    <label className="text-on-surface-variant/60 font-bold block">用户名</label>
                     <input
                       type="text"
                       required
                       value={profileForm.name}
-                      onChange={(e) => setProfileForm({ ...profileForm, name: e.target.value })}
+                      onChange={(e) => { setProfileForm({ ...profileForm, name: e.target.value }); profileNameMod.reset(); }}
+                      onBlur={(e) => profileNameMod.check(e.target.value, "profile_name_hint")}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
                     />
                   </div>
@@ -1363,7 +1394,6 @@ export default function CareerDashboard() {
                     <label className="text-on-surface-variant/60 font-bold block">学校名称 (选填)</label>
                     <input
                       type="text"
-                      placeholder="例如：清华大学"
                       value={profileForm.school || ""}
                       onChange={(e) => setProfileForm({ ...profileForm, school: e.target.value })}
                       className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
@@ -1393,9 +1423,17 @@ export default function CareerDashboard() {
                   </button>
                   <button
                     type="submit"
-                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
+                    disabled={isSavingProfile}
+                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[100px]"
                   >
-                    保存资料
+                    {isSavingProfile ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                        <span>保存中...</span>
+                      </>
+                    ) : (
+                      <span>保存资料</span>
+                    )}
                   </button>
                 </div>
               </form>
@@ -1526,9 +1564,17 @@ export default function CareerDashboard() {
                   </button>
                   <button
                     type="submit"
-                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
+                    disabled={isSavingGoal}
+                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[100px]"
                   >
-                    保存更新
+                    {isSavingGoal ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                        <span>保存中...</span>
+                      </>
+                    ) : (
+                      <span>保存更新</span>
+                    )}
                   </button>
                 </div>
               </form>
@@ -1623,9 +1669,17 @@ export default function CareerDashboard() {
                   </button>
                   <button
                     type="submit"
-                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer"
+                    disabled={isSavingSecurity}
+                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[100px]"
                   >
-                    确认修改
+                    {isSavingSecurity ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                        <span>保存中...</span>
+                      </>
+                    ) : (
+                      <span>确认修改</span>
+                    )}
                   </button>
                 </div>
               </form>

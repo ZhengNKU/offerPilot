@@ -61,6 +61,9 @@ class UserProfile(Base):
     # LLM 是否正在异步生成匹配度（True 表示后台任务还在跑；前端轮询时可短路不重算）
     match_rate_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
+    # 用户自描述（求职意向、自我介绍等富文本字段），用于个人简介 + 内容审核覆盖
+    additional_desc: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user: Mapped["User"] = relationship("User", back_populates="profile")
@@ -773,4 +776,51 @@ class FeaturedGuide(Base):
     likes: Mapped[int] = mapped_column(Integer, default=86)
     favorites: Mapped[int] = mapped_column(Integer, default=42)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class ModerationAuditLog(Base):
+    """
+    内容审核审计日志
+
+    每条记录 = 一次审核调用(text / image),无论 Pass / Review / Block。
+    **不存原文、不存明文关键词**,仅存 SHA-256 哈希 + 元数据:
+    - content_hash: 原文 SHA-256(64 字符 hex),用于去重与"同一违规文本再发"的关联分析
+    - keywords_hash: 命中关键词的 SHA-256[:16] 数组,运营反查用 hash 不见明文
+    - content_length: 原文长度,用于统计"短句违规 vs 长文违规"
+
+    索引策略:
+    - 单列:user_id / scene / content_hash / created_at(高频查询)
+    - 组合:scene+time / user_id+time(管理端分页主路径)
+    """
+    __tablename__ = "moderation_audit_logs"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True,
+    )
+    scene: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    # 审核源类型:text / image
+    source_type: Mapped[str] = mapped_column(String(16), nullable=False, default="text")
+    # 关联业务 ID(feedback_id / comment_id / file_id),可选
+    target_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True, index=True)
+    # 审核结果:Suggestion 三态(Pass / Review / Block)
+    suggestion: Mapped[str] = mapped_column(String(16), nullable=False)
+    label: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    sub_label: Mapped[str] = mapped_column(String(64), default="", nullable=False)
+    score: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 原文 SHA-256(64 字符 hex);绝不存明文
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    content_length: Mapped[int] = mapped_column(Integer, nullable=False)
+    # 命中关键词的 SHA-256[:16] 数组(JSONB);不存明文
+    keywords_hash: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    # 标识:是否走了本地兜底词库(非 TMS 真审)
+    is_fallback: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # 失败时存放错误码(如 tms_error_open:timeout)
+    error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+
+    __table_args__ = (
+        Index("ix_mod_audit_scene_time", "scene", "created_at"),
+        Index("ix_mod_audit_user_time", "user_id", "created_at"),
+    )
 

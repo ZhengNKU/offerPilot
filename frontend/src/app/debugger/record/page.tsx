@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
@@ -57,6 +58,18 @@ export default function InterviewRecordAnalysisPage() {
     isOnJob: "在职",
     jobDescription: ""
   });
+
+  // Phase 3: JD 输入审核 preview hint
+  const jdMod = useModerationPreview();
+  const pasteTextMod = useModerationPreview();
+
+  useEffect(() => {
+    if (jdMod.status === "block") auth.triggerToast("岗位详情内容涉嫌违规，请修改后提交", "error");
+  }, [jdMod.status]);
+
+  useEffect(() => {
+    if (pasteTextMod.status === "block") auth.triggerToast("对话内容涉嫌违规，请修改后提交", "error");
+  }, [pasteTextMod.status]);
 
   // Parsed dialogues list
   const [dialogues, setDialogues] = useState<DialogueItem[]>([]);
@@ -276,7 +289,7 @@ export default function InterviewRecordAnalysisPage() {
       }));
     } catch (err) {
       console.error("Error generating advice:", err);
-      auth.triggerToast("生成优化话术失败，请稍后重试！");
+      auth.triggerToast("生成优化话术失败，请稍后重试！", "error");
     } finally {
       setOptimizingSections(prev => ({ ...prev, [sectionId]: false }));
     }
@@ -600,7 +613,7 @@ export default function InterviewRecordAnalysisPage() {
     // ── CHECK: Limit free users/guests to 1 analysis per type ──
     if (!auth.isLoggedIn) {
       if (localStorage.getItem("interviewVar_analyzed_text") === "true") {
-        auth.triggerToast("您的该项分析免费体验次数已达上限，请注册账号并升级至 PRO 会员解锁更多分析！");
+        auth.triggerToast("您的该项分析免费体验次数已达上限，请注册账号并升级至 PRO 会员解锁更多分析！", "error");
         return;
       }
     } else {
@@ -611,7 +624,7 @@ export default function InterviewRecordAnalysisPage() {
       try {
         const status = await getQuotaStatus();
         if (!status) {
-          auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！");
+          auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！", "error");
           return;
         }
         // 内测版本：test 与 free 都走"一次性永久累计"分支；只有 pro / max 走 30 天滚动窗口
@@ -620,29 +633,29 @@ export default function InterviewRecordAnalysisPage() {
           const detail = status.membership === "test"
             ? "您的内测面试记录分析额度已用完（一次性），内测期间无重置，敬请期待正式版！"
             : "您已使用过面试记录分析的免费体验（永久 1 次），请升级至 PRO 会员解锁更多！";
-          auth.triggerToast(detail);
+          auth.triggerToast(detail, "error");
           return;
         }
       } catch (err) {
-        auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！");
+        auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！", "error");
         return;
       }
     }
 
     if (!pasteText.trim()) {
-      auth.triggerToast("请填写或粘贴面试对话内容！");
+      auth.triggerToast("请填写或粘贴面试对话内容！", "error");
       return;
     }
     if (!metadataForm.company.trim()) {
-      auth.triggerToast("请填写面试公司名称！");
+      auth.triggerToast("请填写面试公司名称！", "error");
       return;
     }
     if (!metadataForm.role.trim()) {
-      auth.triggerToast("请填写岗位名称！");
+      auth.triggerToast("请填写岗位名称！", "error");
       return;
     }
     if (!metadataForm.round.trim()) {
-      auth.triggerToast("请填写面试轮次！");
+      auth.triggerToast("请填写面试轮次！", "error");
       return;
     }
 
@@ -731,7 +744,7 @@ export default function InterviewRecordAnalysisPage() {
       window.location.reload();
 
     } catch (e: any) {
-      auth.triggerToast(e.message || "启动分析失败，请重试！");
+      auth.triggerToast(e.message || "启动分析失败，请重试！", "error");
       setIsAnalyzing(false);
     }
   };
@@ -924,7 +937,8 @@ export default function InterviewRecordAnalysisPage() {
                     <label className="text-xs text-white/60 font-bold">请粘贴或填写您的面试对话片段：</label>
                     <textarea
                       value={pasteText}
-                      onChange={(e) => setPasteText(e.target.value)}
+                      onChange={(e) => { setPasteText(e.target.value); pasteTextMod.reset(); }}
+                      onBlur={(e) => pasteTextMod.check(e.target.value, "record_paste_hint")}
                       placeholder={`格式如：\n面试官：请先做个自我介绍。\n我：好的，我叫...`}
                       className="w-full h-64 bg-[#050B1A]/80 border border-white/5 rounded-2xl p-4 font-mono text-xs md:text-sm text-white focus:outline-none focus:border-[#AFA7FF]/40 transition-all leading-relaxed"
                     />
@@ -971,7 +985,7 @@ export default function InterviewRecordAnalysisPage() {
                       />
                     </div>
                     <div>
-                      <label className="block mb-1.5">职级级别</label>
+                      <label className="block mb-1.5">岗位职级</label>
                       <input
                         type="text"
                         value={metadataForm.grade}
@@ -1005,7 +1019,8 @@ export default function InterviewRecordAnalysisPage() {
                       placeholder="粘贴岗位 JD（最多 600 字），AI 会基于真实岗位画像分析..."
                       value={metadataForm.jobDescription}
                       maxLength={600}
-                      onChange={(e) => setMetadataForm({ ...metadataForm, jobDescription: e.target.value.slice(0, 600) })}
+                      onChange={(e) => { setMetadataForm({ ...metadataForm, jobDescription: e.target.value.slice(0, 600) }); jdMod.reset(); }}
+                      onBlur={(e) => jdMod.check(e.target.value, "jd_record_hint")}
                       className="w-full py-2.5 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 h-28 text-xs md:text-sm resize-none"
                     />
                   </div>

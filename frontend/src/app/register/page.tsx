@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
+import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { API_BASE } from "@/lib/api";
 
 const agreementMarkdown = `欢迎您使用 面试驾到 AI 面试教练系统（以下简称“本服务”）。本协议由您与 面试驾到 运营团队共同缔结。在注册或开始使用本服务前，请您务必仔细阅读并理解本《用户服务协议》。
@@ -103,6 +104,15 @@ export default function RegisterPage() {
   const [emailTimer, setEmailTimer] = useState(0);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
 
+  // Phase 3: 用户名输入审核 preview hint
+  const usernameMod = useModerationPreview();
+
+  useEffect(() => {
+    if (usernameMod.status === "block") {
+      auth.triggerToast("用户名涉嫌违规，请修改后提交", "error");
+    }
+  }, [usernameMod.status]);
+
   useEffect(() => {
     let t: NodeJS.Timeout;
     if (emailTimer > 0) {
@@ -116,13 +126,13 @@ export default function RegisterPage() {
     const target = email;
     if (!target) {
       setErrors(prev => ({ ...prev, email: true }));
-      auth.triggerToast("请输入邮箱地址！");
+      auth.triggerToast("请输入邮箱地址！", "error");
       return;
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(target)) {
       setErrors(prev => ({ ...prev, email: true }));
-      auth.triggerToast("请输入正确的邮箱地址格式！");
+      auth.triggerToast("请输入正确的邮箱地址格式！", "error");
       return;
     }
 
@@ -135,13 +145,13 @@ export default function RegisterPage() {
       });
       if (!res.ok) {
         const errData = await res.json();
-        auth.triggerToast(errData.detail || "发送验证码失败！");
+        auth.triggerToast(errData.detail || "发送验证码失败！", "error");
         return;
       }
       setEmailTimer(60);
       auth.triggerToast("验证码已发送，请查收！");
     } catch (err) {
-      auth.triggerToast("无法连接到后端服务！");
+      auth.triggerToast("无法连接到后端服务！", "error");
     } finally {
       setIsSendingCode(false);
     }
@@ -157,7 +167,7 @@ export default function RegisterPage() {
       if (!emailRegex.test(email)) {
         newErrors.email = true;
         setErrors(prev => ({ ...prev, email: true }));
-        auth.triggerToast("请输入正确的邮箱地址格式！");
+        auth.triggerToast("请输入正确的邮箱地址格式！", "error");
         return;
       }
     }
@@ -176,7 +186,7 @@ export default function RegisterPage() {
       if (password.length < 8 || !hasUppercase || !hasLowercase || !hasNumber) {
         newErrors.password = true;
         setErrors(prev => ({ ...prev, password: true }));
-        auth.triggerToast("密码长度不能少于8位，且必须包含大小写字母和数字！");
+        auth.triggerToast("密码长度不能少于8位，且必须包含大小写字母和数字！", "error");
         return;
       }
     }
@@ -185,7 +195,7 @@ export default function RegisterPage() {
     } else if (password !== confirmPassword) {
       newErrors.confirmPassword = true;
       setErrors(prev => ({ ...prev, confirmPassword: true }));
-      auth.triggerToast("两次输入的密码不一致！");
+      auth.triggerToast("两次输入的密码不一致！", "error");
       return;
     }
     if (!agreePolicy) {
@@ -196,9 +206,9 @@ export default function RegisterPage() {
 
     if (Object.keys(newErrors).length > 0) {
       if (newErrors.agreePolicy && Object.keys(newErrors).length === 1) {
-        auth.triggerToast("您需要同意《用户协议》和《隐私政策》才能继续！");
+        auth.triggerToast("您需要同意《用户协议》和《隐私政策》才能继续！", "error");
       } else {
-        auth.triggerToast("请填齐所有必填项！");
+        auth.triggerToast("请填齐所有必填项！", "error");
       }
       return;
     }
@@ -218,13 +228,13 @@ export default function RegisterPage() {
 
       if (!res.ok) {
         const errData = await res.json();
-        auth.triggerToast(errData.detail || "注册信息验证失败！");
+        auth.triggerToast(errData.detail || "注册信息验证失败！", "error");
         return;
       }
 
       setStep(2);
     } catch (err) {
-      auth.triggerToast("无法连接到后端服务！");
+      auth.triggerToast("无法连接到后端服务！", "error");
     }
   };
 
@@ -300,7 +310,7 @@ export default function RegisterPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 5 * 1025 * 1025) {
-      auth.triggerToast("上传头像文件大小不能超过 5MB！");
+      auth.triggerToast("上传头像文件大小不能超过 5MB！", "error");
       return;
     }
     const reader = new FileReader();
@@ -344,7 +354,7 @@ export default function RegisterPage() {
     if (!trimmed) return;
     if (!targetCities.includes(trimmed)) {
       if (targetCities.length >= 3) {
-        auth.triggerToast("最多只能选择三个目标城市！");
+        auth.triggerToast("最多只能选择三个目标城市！", "error");
         setCustomCityValue("");
         return;
       }
@@ -359,7 +369,7 @@ export default function RegisterPage() {
       setTargetCities(targetCities.filter((c) => c !== city));
     } else {
       if (targetCities.length >= 3) {
-        auth.triggerToast("最多只能选择三个目标城市！");
+        auth.triggerToast("最多只能选择三个目标城市！", "error");
         return;
       }
       setTargetCities([...targetCities, city]);
@@ -369,7 +379,7 @@ export default function RegisterPage() {
   const handleFinishRegister = () => {
     if (targetCities.length === 0) {
       setErrors(prev => ({ ...prev, targetCities: true }));
-      auth.triggerToast("请选择至少一个目标城市！");
+      auth.triggerToast("请选择至少一个目标城市！", "error");
       return;
     }
     // Generate cropped avatar from canvas
@@ -477,7 +487,7 @@ export default function RegisterPage() {
 
       if (!response.ok) {
         const errData = await response.json();
-        auth.triggerToast(errData.detail || "注册提交失败，请重试！");
+        auth.triggerToast(errData.detail || "注册提交失败，请重试！", "error");
         return;
       }
 
@@ -486,7 +496,7 @@ export default function RegisterPage() {
       auth.login(data.user);
       router.push("/debugger");
     } catch (err) {
-      auth.triggerToast("无法连接到后端服务！");
+      auth.triggerToast("无法连接到后端服务！", "error");
     }
   };
 
@@ -713,11 +723,13 @@ export default function RegisterPage() {
                                 value={username}
                                 onChange={(e) => {
                                   setUsername(e.target.value);
+                                  usernameMod.reset();
                                   if (errors.username) setErrors(prev => ({ ...prev, username: false }));
                                 }}
+                                onBlur={(e) => usernameMod.check(e.target.value, "register_username_hint")}
                                 className={`w-full py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
-                                  errors.username 
-                                    ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]" 
+                                  errors.username
+                                    ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]"
                                     : "border-white/10 focus:border-[#AFA7FF]/40"
                                 }`}
                               />

@@ -5,6 +5,7 @@ import uuid
 import asyncio
 import io
 from datetime import datetime
+import logging
 from typing import Optional
 from qcloud_cos import CosConfig, CosS3Client
 from pydantic import BaseModel
@@ -143,6 +144,36 @@ async def upload_file(
             detail=f"文件读取失败: {str(e)}"
         )
 
+    # ── 截图图片审核(同步阻塞,在 COS 上传之前) ──
+    # 只对 screenshot 走 IMS;audio / resume 不走。
+    # 审核通过后才进 COS,违规直接 raise 400,COS 完全不碰。
+    img_result = None
+    if file_type == "screenshot" and current_user is not None:
+        from app.utils.content_moderation import moderate_image_bytes, is_rejected, record_audit, should_audit
+        img_result = await moderate_image_bytes(content, current_user.id, scene="screenshot")
+        if is_rejected(img_result):
+            logging.info(
+                "screenshot rejected user=%s label=%s sub_label=%s",
+                current_user.id, img_result.label, img_result.sub_label,
+            )
+            # 违规也要写审计(用独立 session,避免和后续 upload 逻辑混在一起)
+            if should_audit(img_result):
+                try:
+                    from app.database import async_session
+                    async with async_session() as audit_db:
+                        await record_audit(
+                            audit_db,
+                            user_id=current_user.id,
+                            scene="screenshot",
+                            source_type="image",
+                            target_id=None,  # 违规没上传,没有 file_id
+                            result=img_result,
+                            raw_text=None,
+                        )
+                except Exception:
+                    logging.exception("[moderation] 截图违规审计写入失败(非阻塞)")
+            raise HTTPException(status_code=400, detail="图片内容违规,请重新上传")
+
     # Upload to COS via multipart-capable helper (auto-chunks files >= 10MB so a
     # single stalled chunk does not kill the entire upload on slow links).
     try:
@@ -191,6 +222,22 @@ async def upload_file(
     db.add(db_file)
     await db.commit()
     await db.refresh(db_file)
+
+    # ── 截图审核审计(非阻塞) ──
+    # 只在登录用户 + 走 IMS 审核 + 命中审计策略时写
+    if img_result is not None and should_audit(img_result):
+        try:
+            await record_audit(
+                db,
+                user_id=current_user.id if current_user else None,
+                scene="screenshot",
+                source_type="image",
+                target_id=db_file.id,
+                result=img_result,
+                raw_text=None,  # 图片无文本
+            )
+        except Exception:
+            logging.exception("[moderation] 截图审计写入失败(非阻塞)")
 
     return {
         "file_id": db_file.id,

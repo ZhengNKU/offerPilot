@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
@@ -139,6 +140,11 @@ export default function FeedbackPage() {
   const [targetModule, setTargetModule] = useState("");
   const [feedbackTitle, setFeedbackTitle] = useState("");
   const [content, setContent] = useState("");
+
+  // Phase 3: 输入审核 preview(只做 UI hint,不阻塞提交)
+  const titleMod = useModerationPreview();
+  const contentMod = useModerationPreview();
+  const commentMod = useModerationPreview();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
@@ -159,6 +165,25 @@ export default function FeedbackPage() {
   const [showCommentDeleteConfirm, setShowCommentDeleteConfirm] = useState(false);
   const [commentToDelete, setCommentToDelete] = useState<number | null>(null);
   const [isDeletingComment, setIsDeletingComment] = useState(false);
+  const [isAddingComment, setIsAddingComment] = useState(false);
+
+  useEffect(() => {
+    if (titleMod.status === "block") {
+      auth.triggerToast("内容涉嫌违规，请修改后发布", "error");
+    }
+  }, [titleMod.status]);
+
+  useEffect(() => {
+    if (contentMod.status === "block") {
+      auth.triggerToast("内容涉嫌违规，请修改后发布", "error");
+    }
+  }, [contentMod.status]);
+
+  useEffect(() => {
+    if (commentMod.status === "block") {
+      auth.triggerToast("内容涉嫌违规，请修改后发布", "error");
+    }
+  }, [commentMod.status]);
 
   // Select Options
   const typeOptions = ["问题反馈", "功能建议", "体验优化", "其他"];
@@ -255,7 +280,7 @@ export default function FeedbackPage() {
           auth.triggerToast("批量删除成功");
           setSelectedIds([]);
         } else {
-          auth.triggerToast("批量删除失败");
+          auth.triggerToast("批量删除失败", "error");
         }
       } else if (typeof deleteTarget === "number") {
         const res = await fetch(`http://localhost:8001/api/feedback/${deleteTarget}`, {
@@ -266,12 +291,12 @@ export default function FeedbackPage() {
           auth.triggerToast("删除成功");
           setSelectedIds(prev => prev.filter(x => x !== deleteTarget));
         } else {
-          auth.triggerToast("删除失败");
+          auth.triggerToast("删除失败", "error");
         }
       }
     } catch (err) {
       console.error("Failed to delete feedback:", err);
-      auth.triggerToast("删除操作失败");
+      auth.triggerToast("删除操作失败", "error");
     } finally {
       setIsDeleting(false);
       setShowDeleteConfirm(false);
@@ -287,7 +312,7 @@ export default function FeedbackPage() {
   const handleUpvote = async (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!auth.isLoggedIn) {
-      auth.triggerToast("请先登录再点赞！");
+      auth.triggerToast("请先登录再点赞！", "error");
       return;
     }
     try {
@@ -329,11 +354,16 @@ export default function FeedbackPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.isLoggedIn) {
-      auth.triggerToast("请先登录再提交反馈！");
+      auth.triggerToast("请先登录再提交反馈！", "error");
       return;
     }
     if (!feedbackType || !targetModule || !feedbackTitle.trim() || !content.trim()) {
-      auth.triggerToast("请填写必填项！");
+      auth.triggerToast("请填写必填项！", "error");
+      return;
+    }
+
+    if (titleMod.status === "block" || contentMod.status === "block") {
+      auth.triggerToast("内容涉嫌违规，请修改后发布", "error");
       return;
     }
 
@@ -365,13 +395,20 @@ export default function FeedbackPage() {
         setContent("");
         setUploadedFileUrl("");
         setUploadFile(null);
+        titleMod.reset();
+        contentMod.reset();
       } else {
-        const errorData = await res.json();
-        auth.triggerToast(errorData.detail || "提交失败，请重试！");
+        const errorData = await res.json().catch(() => ({}));
+        const detailStr = String(errorData.detail || "");
+        if (res.status === 400 || res.status === 422 || detailStr.includes("违规") || detailStr.includes("敏感字") || detailStr.includes("敏感词") || detailStr.includes("block")) {
+          auth.triggerToast("内容涉嫌违规，请修改后发布", "error");
+        } else {
+          auth.triggerToast(errorData.detail || "提交失败，请重试！", "error");
+        }
       }
     } catch (err) {
       console.error("Failed to submit feedback:", err);
-      auth.triggerToast("提交失败，请检查网络！");
+      auth.triggerToast("提交失败，请检查网络！", "error");
     } finally {
       setIsSubmitting(false);
     }
@@ -383,13 +420,13 @@ export default function FeedbackPage() {
     if (!file) return;
 
     if (!feedbackType) {
-      auth.triggerToast("请先选择反馈类型！");
+      auth.triggerToast("请先选择反馈类型！", "error");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      auth.triggerToast("图片不能超过 5MB！");
+      auth.triggerToast("图片不能超过 5MB！", "error");
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -440,19 +477,19 @@ export default function FeedbackPage() {
           setIsUploading(false);
           auth.triggerToast("截图上传成功！");
         } catch (err) {
-          auth.triggerToast("解析上传响应失败！");
+          auth.triggerToast("解析上传响应失败！", "error");
           setUploadFile(null);
           setIsUploading(false);
         }
       } else {
-        auth.triggerToast("截图上传失败！");
+        auth.triggerToast("截图上传失败！", "error");
         setUploadFile(null);
         setIsUploading(false);
       }
     };
 
     xhr.onerror = () => {
-      auth.triggerToast("网络错误，截图上传失败！");
+      auth.triggerToast("网络错误，截图上传失败！", "error");
       setUploadFile(null);
       setIsUploading(false);
     };
@@ -472,15 +509,20 @@ export default function FeedbackPage() {
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.isLoggedIn) {
-      auth.triggerToast("请先登录再发表评论！");
+      auth.triggerToast("请先登录再发表评论！", "error");
       return;
     }
     if (!newCommentText.trim() || !selectedFeedback) return;
     if (newCommentText.trim().length > 300) {
-      auth.triggerToast("评论不能超过300字符");
+      auth.triggerToast("评论不能超过300字符", "error");
+      return;
+    }
+    if (commentMod.status === "block") {
+      auth.triggerToast("内容涉嫌违规，请修改后发布", "error");
       return;
     }
 
+    setIsAddingComment(true);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
       const res = await fetch(`http://localhost:8001/api/feedback/${selectedFeedback.id}/comment`, {
@@ -528,13 +570,22 @@ export default function FeedbackPage() {
           };
         });
         setNewCommentText("");
+        commentMod.reset();
+        auth.triggerToast("发布成功！");
       } else {
-        const errorData = await res.json();
-        auth.triggerToast(errorData.detail || "发表评论失败，请重试！");
+        const errorData = await res.json().catch(() => ({}));
+        const detailStr = String(errorData.detail || "");
+        if (res.status === 400 || res.status === 422 || detailStr.includes("违规") || detailStr.includes("敏感字") || detailStr.includes("敏感词") || detailStr.includes("block")) {
+          auth.triggerToast("内容涉嫌违规，请修改后发布", "error");
+        } else {
+          auth.triggerToast(errorData.detail || "发表评论失败，请重试！", "error");
+        }
       }
     } catch (err) {
       console.error("Failed to add comment:", err);
-      auth.triggerToast("发表评论失败，请检查网络！");
+      auth.triggerToast("发表评论失败，请检查网络！", "error");
+    } finally {
+      setIsAddingComment(false);
     }
   };
 
@@ -589,22 +640,24 @@ export default function FeedbackPage() {
         auth.triggerToast(isPinned ? "评论已置顶！" : "评论已取消置顶。");
       } else {
         const errorData = await res.json();
-        auth.triggerToast(errorData.detail || "操作失败");
+        auth.triggerToast(errorData.detail || "操作失败", "error");
       }
     } catch (err) {
-      console.error("Failed to pin/unpin comment:", err);
-      auth.triggerToast("网络错误，操作失败");
+      console.error("Failed to toggle comment pin:", err);
+      auth.triggerToast("操作失败，请检查网络", "error");
     }
   };
 
   // Post Quick Comment (Admin Only)
   const postQuickComment = async (content: string) => {
     if (!auth.isLoggedIn) {
-      auth.triggerToast("请先登录再发表评论！");
+      auth.triggerToast("请先登录再发表评论！", "error");
       return;
     }
     if (!selectedFeedback) return;
+    if (isAddingComment) return;
 
+    setIsAddingComment(true);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
       const res = await fetch(`http://localhost:8001/api/feedback/${selectedFeedback.id}/comment`, {
@@ -653,12 +706,17 @@ export default function FeedbackPage() {
         });
         auth.triggerToast("快捷回复成功！");
       } else {
-        const errorData = await res.json();
-        auth.triggerToast(errorData.detail || "发表评论失败，请重试！");
+        const errorData = await res.json().catch(() => ({}));
+        const detailStr = String(errorData.detail || "");
+        if (res.status === 400 || res.status === 422 || detailStr.includes("违规") || detailStr.includes("敏感字") || detailStr.includes("敏感词") || detailStr.includes("block")) {
+          auth.triggerToast("内容涉嫌违规，请修改后发布", "error");
+        } else {
+          auth.triggerToast(errorData.detail || "发表评论失败，请重试！", "error");
+        }
       }
     } catch (err) {
       console.error("Failed to add comment:", err);
-      auth.triggerToast("发表评论失败，请检查网络！");
+      auth.triggerToast("发表评论失败，请检查网络！", "error");
     }
   };
 
@@ -730,11 +788,11 @@ export default function FeedbackPage() {
         auth.triggerToast("评论已成功删除！");
       } else {
         const errorData = await res.json();
-        auth.triggerToast(errorData.detail || "删除评论失败，请重试！");
+        auth.triggerToast(errorData.detail || "删除评论失败，请重试！", "error");
       }
     } catch (err) {
       console.error("Failed to delete comment:", err);
-      auth.triggerToast("网络错误，操作失败");
+      auth.triggerToast("网络错误，操作失败", "error");
     } finally {
       setIsDeletingComment(false);
       setShowCommentDeleteConfirm(false);
@@ -788,11 +846,11 @@ export default function FeedbackPage() {
         auth.triggerToast(`成功删除 ${idsArray.length} 条评论！`);
       } else {
         const errorData = await res.json();
-        auth.triggerToast(errorData.detail || "批量删除失败，请重试！");
+        auth.triggerToast(errorData.detail || "批量删除失败，请重试！", "error");
       }
     } catch (err) {
       console.error("Failed to batch delete comments:", err);
-      auth.triggerToast("网络错误，操作失败");
+      auth.triggerToast("网络错误，操作失败", "error");
     } finally {
       setIsDeletingComment(false);
       setShowCommentDeleteConfirm(false);
@@ -905,23 +963,6 @@ export default function FeedbackPage() {
               <p className="text-sm md:text-base text-on-surface-variant mt-1.5 font-medium">
                 你的反馈是我们前进的动力，帮助我们打造更好的面试驾到
               </p>
-            </div>
-          </div>
-
-          {/* 右侧帮助中心入口模块 */}
-          <div 
-            onClick={() => window.open("/helper", "_blank")}
-            className="relative z-10 hidden md:flex items-center gap-4 p-4 px-6 rounded-2xl bg-white/10 hover:bg-white/15 border border-white/20 hover:border-primary/50 backdrop-blur-xl cursor-pointer transition-all duration-300 group hover:scale-[1.02] shadow-xl shrink-0"
-          >
-            <div className="w-12 h-12 rounded-xl bg-primary/20 border border-primary/30 flex items-center justify-center text-primary group-hover:scale-110 transition-transform shrink-0">
-              <span className="material-symbols-outlined text-2xl">help_center</span>
-            </div>
-            <div className="text-left pr-1">
-              <div className="flex items-center gap-1.5">
-                <span className="text-base font-black text-white group-hover:text-primary transition-colors">帮助中心</span>
-                <span className="material-symbols-outlined text-sm text-primary group-hover:translate-x-1 transition-transform">arrow_forward</span>
-              </div>
-              <p className="text-xs text-on-surface-variant/90 font-semibold mt-0.5">五分钟快速上手，掌控 AI 复盘核心大招</p>
             </div>
           </div>
         </div>
@@ -1037,7 +1078,8 @@ export default function FeedbackPage() {
                   <input
                     type="text"
                     value={feedbackTitle}
-                    onChange={(e) => setFeedbackTitle(e.target.value.slice(0, 100))}
+                    onChange={(e) => { setFeedbackTitle(e.target.value.slice(0, 100)); titleMod.reset(); }}
+                    onBlur={(e) => titleMod.check(e.target.value, "feedback_title_hint")}
                     maxLength={100}
                     placeholder="请输入反馈标题..."
                     className="w-full px-4 py-3 bg-white/5 border border-white/10 hover:border-white/20 focus:border-primary-container/30 transition-all rounded-xl text-sm text-on-surface placeholder-on-surface-variant/35 focus:outline-none"
@@ -1056,7 +1098,8 @@ export default function FeedbackPage() {
                   </div>
                   <textarea
                     value={content}
-                    onChange={(e) => setContent(e.target.value.slice(0, 300))}
+                    onChange={(e) => { setContent(e.target.value.slice(0, 300)); contentMod.reset(); }}
+                    onBlur={(e) => contentMod.check(e.target.value, "feedback_content_hint")}
                     maxLength={300}
                     placeholder="请详细描述你的问题或建议..."
                     className="w-full flex-1 p-4 bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary-container/30 transition-all rounded-xl text-sm text-on-surface placeholder-on-surface-variant/35 resize-none focus:outline-none custom-scrollbar"
@@ -1144,15 +1187,6 @@ export default function FeedbackPage() {
                 </div>
                 
                 <div className="flex items-center gap-3">
-                  {/* 帮助中心按钮 */}
-                  <button
-                    onClick={() => window.open("/helper", "_blank")}
-                    className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-primary/10 border border-primary/25 hover:bg-primary/20 text-primary transition-all text-xs font-extrabold cursor-pointer shrink-0 shadow-sm"
-                  >
-                    <span className="material-symbols-outlined text-sm">help_center</span>
-                    帮助中心
-                  </button>
-
                   {/* Search Input */}
                   <div className="relative flex items-center">
                     <input
@@ -1686,25 +1720,35 @@ export default function FeedbackPage() {
                   </div>
                 )}
                 <form onSubmit={handleAddComment} className="flex gap-2 w-full">
-                  <div className="relative flex-1 flex items-center">
-                    <input
-                      type="text"
-                      value={newCommentText}
-                      onChange={(e) => setNewCommentText(e.target.value)}
-                      maxLength={300}
-                      placeholder="写下你的想法，一起交流讨论..."
-                      className="w-full bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary-container/30 transition-all pl-4 pr-16 py-2.5 rounded-xl text-xs text-on-surface placeholder-on-surface-variant/30 focus:outline-none"
-                    />
-                    <span className="absolute right-3 text-[10px] font-bold text-on-surface-variant/40 select-none">
-                      {newCommentText.length}/300
-                    </span>
+                  <div className="relative flex-1 flex flex-col">
+                    <div className="relative flex items-center">
+                      <input
+                        type="text"
+                        value={newCommentText}
+                        onChange={(e) => { setNewCommentText(e.target.value); commentMod.reset(); }}
+                        onBlur={(e) => commentMod.check(e.target.value, "comment_hint")}
+                        maxLength={300}
+                        placeholder="写下你的想法，一起交流讨论..."
+                        className="w-full bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary-container/30 transition-all pl-4 pr-16 py-2.5 rounded-xl text-xs text-on-surface placeholder-on-surface-variant/30 focus:outline-none"
+                      />
+                      <span className="absolute right-3 text-[10px] font-bold text-on-surface-variant/40 select-none">
+                        {newCommentText.length}/300
+                      </span>
+                    </div>
                   </div>
                   <button
                     type="submit"
-                    disabled={!newCommentText.trim() || newCommentText.length > 300}
-                    className="bg-primary text-on-primary font-bold px-4 rounded-xl text-sm hover:opacity-90 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:pointer-events-none"
+                    disabled={isAddingComment || !newCommentText.trim() || newCommentText.length > 300}
+                    className="bg-primary text-on-primary font-bold px-4 py-2 rounded-xl text-sm hover:opacity-90 active:scale-95 transition-all cursor-pointer disabled:opacity-50 disabled:pointer-events-none flex items-center justify-center gap-1.5 min-w-[72px]"
                   >
-                    发布
+                    {isAddingComment ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                        <span>发布中</span>
+                      </>
+                    ) : (
+                      <span>发布</span>
+                    )}
                   </button>
                 </form>
               </div>

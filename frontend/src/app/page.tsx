@@ -310,7 +310,7 @@ export default function Home() {
               开始免费分析
               <span className="material-symbols-outlined">arrow_forward</span>
             </button>
-            <button onClick={() => auth.triggerToast("模块开发中，敬请期待")} className="px-10 py-4 glass-panel text-on-surface text-lg font-extrabold rounded-xl border-white/10 hover:bg-white/5 active:scale-95 transition-all cursor-pointer">
+            <button onClick={() => window.open("/helper", "_blank")} className="px-10 py-4 glass-panel text-on-surface text-lg font-extrabold rounded-xl border-white/10 hover:bg-white/5 active:scale-95 transition-all cursor-pointer">
               观看真实案例
             </button>
           </div>

@@ -849,7 +849,7 @@ export default function CareerDashboard() {
               <form onSubmit={handleSaveProfile} className="space-y-4 text-xs font-semibold text-white">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">姓名</label>
+                    <label className="text-on-surface-variant/60 font-bold block">用户名</label>
                     <input
                       type="text"
                       required

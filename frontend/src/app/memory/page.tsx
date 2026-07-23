@@ -1134,7 +1134,7 @@ export default function CareerMemoryDashboard() {
     } catch (err: any) {
       console.error("Failed to fetch project memory:", err);
       setProjectsError(err.message || "加载项目记忆失败");
-      auth.triggerToast("项目记忆加载失败，请刷新重试");
+      auth.triggerToast("项目记忆加载失败，请刷新重试", "error");
     } finally {
       setIsLoadingProjects(false);
     }
@@ -1252,7 +1252,7 @@ export default function CareerMemoryDashboard() {
           await fetchProjects();
         } else {
           const errData = await res.json().catch(() => ({}));
-          auth.triggerToast(errData.detail || "删除失败");
+          auth.triggerToast(errData.detail || "删除失败", "error");
         }
       } else if (deleteTarget === "batch") {
         // Find which selected IDs are audio, resume, and live
@@ -1283,7 +1283,7 @@ export default function CareerMemoryDashboard() {
           });
           if (!res.ok) {
             const errData = await res.json();
-            auth.triggerToast(errData.detail || "语音会话批量删除失败");
+            auth.triggerToast(errData.detail || "语音会话批量删除失败", "error");
           }
         }
 
@@ -1307,7 +1307,7 @@ export default function CareerMemoryDashboard() {
           });
           if (!res.ok) {
             const errData = await res.json().catch(() => ({}));
-            auth.triggerToast(errData.detail || "实时面试批量删除失败");
+            auth.triggerToast(errData.detail || "实时面试批量删除失败", "error");
           } else {
             const data = await res.json().catch(() => ({}));
             if (data.skipped_count > 0) {
@@ -1343,7 +1343,7 @@ export default function CareerMemoryDashboard() {
             newCounselorSession();
           }
         } catch (e: any) {
-          auth.triggerToast("批量删除失败：" + e.message);
+          auth.triggerToast("批量删除失败：" + e.message, "error");
         }
       } else if (typeof deleteTarget === "string" && deleteTarget.startsWith("counselor-")) {
         const sid = parseInt(deleteTarget.replace("counselor-", ""), 10);
@@ -1363,7 +1363,7 @@ export default function CareerMemoryDashboard() {
           const stats = await getCounselorStats();
           setCounselorStats(stats);
         } catch (e: any) {
-          auth.triggerToast("删除失败：" + e.message);
+          auth.triggerToast("删除失败：" + e.message, "error");
         }
       } else if (deleteTarget) {
         const item = historyItems.find(x => x.id === deleteTarget);
@@ -1373,7 +1373,7 @@ export default function CareerMemoryDashboard() {
         } else if (item?.type === "live") {
           // PR6: 实时面试用 liveId 删（item.id 是 session_id，可能为空）
           if (!item.liveId) {
-            auth.triggerToast("该实时面试缺少 liveId，无法删除");
+            auth.triggerToast("该实时面试缺少 liveId，无法删除", "error");
             setIsDeleting(false);
             setDeleteTarget(null);
             return;
@@ -1393,12 +1393,12 @@ export default function CareerMemoryDashboard() {
             await fetchSessions();
           } else {
             const errData = await res.json();
-            auth.triggerToast(errData.detail || "删除失败");
+            auth.triggerToast(errData.detail || "删除失败", "error");
           }
       }
     } catch (err) {
       console.error("Deletion failed:", err);
-      auth.triggerToast("删除请求失败，请稍后重试");
+      auth.triggerToast("删除请求失败，请稍后重试", "error");
     } finally {
       setIsDeleting(false);
       setDeleteTarget(null);

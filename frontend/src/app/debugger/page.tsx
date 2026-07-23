@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, Suspense } from "react";
+import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
@@ -31,6 +32,7 @@ function NewAnalysisDebuggerContent() {
   })();
   const [activeMode, setActiveMode] = useState<"audio" | "text" | "resume">(initialMode);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isPreparingAnalysis, setIsPreparingAnalysis] = useState(false);
   const [taskProgress, setTaskProgress] = useState(0);
   const [taskStep, setTaskStep] = useState("");
   const [isDragging, setIsDragging] = useState(false);
@@ -108,6 +110,12 @@ function NewAnalysisDebuggerContent() {
     jobDescription: ""
   });
 
+  const jdMod = useModerationPreview();
+
+  useEffect(() => {
+    if (jdMod.status === "block") auth.triggerToast("岗位详情内容涉嫌违规，请修改后提交", "error");
+  }, [jdMod.status]);
+
   useEffect(() => {
     setAudioForm(prev => ({
       ...prev,
@@ -143,7 +151,7 @@ function NewAnalysisDebuggerContent() {
     if (activeMode === "audio") {
       const ext = file.name.split('.').pop()?.toLowerCase();
       if (ext !== "wav" && ext !== "mp3") {
-        auth.triggerToast("上传失败：录音仅支持 WAV 或 MP3 格式！");
+        auth.triggerToast("上传失败：录音仅支持 WAV 或 MP3 格式！", "error");
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
@@ -152,7 +160,7 @@ function NewAnalysisDebuggerContent() {
     } else if (activeMode === "resume") {
       const ext = file.name.split('.').pop()?.toLowerCase();
       if (ext !== "pdf" && ext !== "docx") {
-        auth.triggerToast("上传失败：简历仅支持 PDF 或 DOCX 格式！");
+        auth.triggerToast("上传失败：简历仅支持 PDF 或 DOCX 格式！", "error");
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
@@ -165,7 +173,8 @@ function NewAnalysisDebuggerContent() {
       auth.triggerToast(
         activeMode === "audio"
           ? "上传失败：录音文件大小不能超过 50MB！"
-          : "上传失败：简历文件大小不能超过 5MB！"
+          : "上传失败：简历文件大小不能超过 5MB！",
+        "error"
       );
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -202,7 +211,7 @@ function NewAnalysisDebuggerContent() {
       localStorage.setItem("interviewVar_session_audio_url", data.file_url);
       auth.triggerToast("文件已成功上传！");
     } catch (e: any) {
-      auth.triggerToast(e.message || "文件上传失败，请重试！");
+      auth.triggerToast(e.message || "文件上传失败，请重试！", "error");
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
@@ -266,7 +275,7 @@ function NewAnalysisDebuggerContent() {
         }
         auth.triggerToast("文件已删除！");
       } catch (e: any) {
-        auth.triggerToast(e.message || "文件删除失败！");
+        auth.triggerToast(e.message || "文件删除失败！", "error");
       } finally {
         setIsDeleting(false);
       }
@@ -300,7 +309,7 @@ function NewAnalysisDebuggerContent() {
     const hasAnalyzedKey = `interviewVar_analyzed_${activeMode}`;
     if (!auth.isLoggedIn) {
       if (localStorage.getItem(hasAnalyzedKey) === "true") {
-        auth.triggerToast("您的该项分析免费体验次数已达上限，请注册账号并升级至 PRO 会员解锁更多分析！");
+        auth.triggerToast("您的该项分析免费体验次数已达上限，请注册账号并升级至 PRO 会员解锁更多分析！", "error");
         return;
       }
     } else {
@@ -316,7 +325,7 @@ function NewAnalysisDebuggerContent() {
       try {
         const status = await getQuotaStatus();
         if (!status) {
-          auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！");
+          auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！", "error");
           return;
         }
         // 内测版本：test 与 free 都走"一次性永久累计"分支；只有 pro / max 走 30 天滚动窗口
@@ -329,11 +338,11 @@ function NewAnalysisDebuggerContent() {
           const detail = isTestUser
             ? `您的内测${featureLabel}额度已用完（一次性），内测期间无重置，敬请期待正式版！`
             : `您已使用过${featureLabel}的免费体验（永久 1 次），请升级至 PRO 会员解锁更多！`;
-          auth.triggerToast(detail);
+          auth.triggerToast(detail, "error");
           return;
         }
       } catch (err) {
-        auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！");
+        auth.triggerToast("无法连接服务器校验体验次数，请稍后再试！", "error");
         return;
       }
     }
@@ -347,38 +356,53 @@ function NewAnalysisDebuggerContent() {
         auth.triggerToast(
           activeMode === "audio"
             ? "请先上传面试录音文件！"
-            : "请先上传个人简历文档！"
+            : "请先上传个人简历文档！",
+          "error"
         );
         return;
       }
     } else {
       if (!pasteText.trim()) {
-        auth.triggerToast("请先输入或粘贴面试对话内容！");
+        auth.triggerToast("请先输入或粘贴面试对话内容！", "error");
         return;
       }
     }
 
     // Form validation checks for required fields when form is shown (activeMode !== "resume")
+    // Form validation checks for required fields when form is shown (activeMode !== "resume")
     if (activeMode !== "resume") {
       if (!audioForm.company.trim()) {
-        auth.triggerToast("请填写面试公司名称！");
+        auth.triggerToast("请填写面试公司名称！", "error");
         return;
       }
       if (!audioForm.role.trim()) {
-        auth.triggerToast("请填写岗位名称！");
+        auth.triggerToast("请填写岗位名称！", "error");
         return;
       }
       if (!audioForm.date.trim()) {
-        auth.triggerToast("请选择面试时间！");
+        auth.triggerToast("请选择面试时间！", "error");
         return;
       }
       if (!audioForm.round.trim()) {
-        auth.triggerToast("请填写面试轮次！");
+        auth.triggerToast("请填写面试轮次！", "error");
         return;
       }
     }
 
-    setIsAnalyzing(true);
+    // 开启按钮加载状态，在校验通过前保持按钮转圈，不进全屏进度条
+    setIsPreparingAnalysis(true);
+
+    // 前置敏感词即时校验（消除 500ms 防抖竞态问题）
+    if (activeMode !== "resume") {
+      if (audioForm.jobDescription && audioForm.jobDescription.trim().length >= 2) {
+        const jdRes = await jdMod.checkNow(audioForm.jobDescription, "jd_audio_hint");
+        if (jdRes === "block") {
+          auth.triggerToast("岗位详情内容涉嫌违规，请修改后提交", "error");
+          setIsPreparingAnalysis(false);
+          return;
+        }
+      }
+    }
 
     // Save form meta to localStorage so result pages can read them
     localStorage.setItem("interviewVar_report_mode", activeMode);
@@ -399,7 +423,9 @@ function NewAnalysisDebuggerContent() {
       if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
       const audioUrl = localStorage.getItem("interviewVar_session_audio_url") || "";
-      // title 仅为后端展示，不参与结构化数据传递（结构化字段走独立列）
+
+      let sessionId: number;
+      let taskId: string;
 
       try {
         // Step 1: Create InterviewSession from the already-uploaded COS file
@@ -411,7 +437,6 @@ function NewAnalysisDebuggerContent() {
             file_id: uploadedFileId,
             file_size: selectedFile?.size || 0,
             job_description: audioForm.jobDescription,
-            // 结构化元数据走独立字段，title 字段不参与
             company: audioForm.company,
             role: audioForm.role,
             round: audioForm.round,
@@ -420,12 +445,25 @@ function NewAnalysisDebuggerContent() {
             salary: audioForm.salary,
           })
         });
+
         if (!sessionRes.ok) {
-          const err = await sessionRes.json();
-          throw new Error(err.detail || "创建分析会话失败");
+          const err = await sessionRes.json().catch(() => ({}));
+          const detailStr = String(err.detail || "");
+          if (sessionRes.status === 400 || sessionRes.status === 422 || detailStr.includes("违规") || detailStr.includes("敏感")) {
+            if (detailStr.includes("岗位")) auth.triggerToast("岗位详情内容涉嫌违规，请修改后提交", "error");
+            else if (detailStr.includes("对话")) auth.triggerToast("对话内容涉嫌违规，请修改后提交", "error");
+            else if (detailStr.includes("公司")) auth.triggerToast("公司名称涉嫌违规，请修改后提交", "error");
+            else if (detailStr.includes("岗位")) auth.triggerToast("岗位名称涉嫌违规，请修改后提交", "error");
+            else auth.triggerToast(err.detail || "内容涉嫌违规，请修改后提交", "error");
+          } else {
+            auth.triggerToast(err.detail || "创建分析会话失败", "error");
+          }
+          setIsPreparingAnalysis(false);
+          return;
         }
+
         const sessionData = await sessionRes.json();
-        const sessionId: number = sessionData.session_id;
+        sessionId = sessionData.session_id;
         localStorage.setItem("interviewVar_session_id", String(sessionId));
 
         // Mark as analyzed for free users/guests
@@ -438,21 +476,34 @@ function NewAnalysisDebuggerContent() {
           body: JSON.stringify({ session_id: sessionId })
         });
         if (!analyzeRes.ok) {
-          const err = await analyzeRes.json();
-          throw new Error(err.detail || "启动分析任务失败");
+          const err = await analyzeRes.json().catch(() => ({}));
+          auth.triggerToast(err.detail || "启动分析任务失败", "error");
+          setIsPreparingAnalysis(false);
+          return;
         }
         const analyzeData = await analyzeRes.json();
-        const taskId: string = analyzeData.task_id;
+        taskId = analyzeData.task_id;
         localStorage.setItem("interviewVar_task_id", taskId);
 
-        // Step 3: Poll on THIS page until analysis completes, THEN navigate
-        const STEPS = [
-          "ASR 转写中——提取音频文字...",
-          "语义分段——判定说话人角色...",
-          "LLM 评估——对比用户画像与答题...",
-          "AI 话术重构——生成升级建议...",
-          "分析完成 — 正在生成报告..."
-        ];
+        // 会话创建且启动分析任务成功 -> 校验通过，此时真正进入进度条全屏页面！
+        setIsPreparingAnalysis(false);
+        setIsAnalyzing(true);
+      } catch (e: any) {
+        auth.triggerToast(e.message || "启动分析失败，请重试！", "error");
+        setIsPreparingAnalysis(false);
+        return;
+      }
+
+      // Step 3: Poll on THIS page until analysis completes, THEN navigate
+      const STEPS = [
+        "ASR 转写中——提取音频文字...",
+        "语义分段——判定说话人角色...",
+        "LLM 评估——对比用户画像与答题...",
+        "AI 话术重构——生成升级建议...",
+        "分析完成 — 正在生成报告..."
+      ];
+
+      try {
         await pollTaskUntilDone(taskId, {
           intervalMs: 2000,
           headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -467,9 +518,8 @@ function NewAnalysisDebuggerContent() {
         // Step 4: Navigate to voice analysis report page (data is ready)
         await checkRemainingLimit();
         router.push("/debugger/voice");
-
       } catch (e: any) {
-        auth.triggerToast(e.message || "启动分析失败，请重试！");
+        auth.triggerToast(e.message || "分析任务异常，请重试！", "error");
         setIsAnalyzing(false);
       }
 
@@ -479,11 +529,10 @@ function NewAnalysisDebuggerContent() {
       const authHeaders: Record<string, string> = { "Content-Type": "application/json" };
       if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
-      // title 仅为后端展示，不参与结构化数据传递
+      let sessionId: number;
+      let taskId: string;
 
       try {
-        setTaskStep("正在创建分析会话...");
-        setTaskProgress(10);
         // Step 1: Create InterviewSession from the pasted text
         const sessionRes = await fetch(`${API_BASE}/api/audio/create_record_session`, {
           method: "POST",
@@ -499,47 +548,70 @@ function NewAnalysisDebuggerContent() {
             job_description: audioForm.jobDescription
           })
         });
+
         if (!sessionRes.ok) {
-          const err = await sessionRes.json();
-          throw new Error(err.detail || "创建分析会话失败");
+          const err = await sessionRes.json().catch(() => ({}));
+          const detailStr = String(err.detail || "");
+          if (sessionRes.status === 400 || sessionRes.status === 422 || detailStr.includes("违规") || detailStr.includes("敏感")) {
+            if (detailStr.includes("岗位")) auth.triggerToast("岗位详情内容涉嫌违规，请修改后提交", "error");
+            else if (detailStr.includes("对话")) auth.triggerToast("对话内容涉嫌违规，请修改后提交", "error");
+            else if (detailStr.includes("公司")) auth.triggerToast("公司名称涉嫌违规，请修改后提交", "error");
+            else if (detailStr.includes("岗位")) auth.triggerToast("岗位名称涉嫌违规，请修改后提交", "error");
+            else auth.triggerToast(err.detail || "内容涉嫌违规，请修改后提交", "error");
+          } else {
+            auth.triggerToast(err.detail || "创建分析会话失败", "error");
+          }
+          setIsPreparingAnalysis(false);
+          return;
         }
+
         const sessionData = await sessionRes.json();
-        const sessionId: number = sessionData.session_id;
+        sessionId = sessionData.session_id;
         localStorage.setItem("interviewVar_session_id", String(sessionId));
 
         // Mark as analyzed
         localStorage.setItem("interviewVar_analyzed_text", "true");
 
         // Step 2: Trigger background analysis task
-        setTaskStep("正在发起智能评测分析...");
-        setTaskProgress(30);
         const analyzeRes = await fetch(`${API_BASE}/api/audio/analyze`, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ session_id: sessionId })
         });
         if (!analyzeRes.ok) {
-          const err = await analyzeRes.json();
-          throw new Error(err.detail || "启动分析任务失败");
+          const err = await analyzeRes.json().catch(() => ({}));
+          auth.triggerToast(err.detail || "启动分析任务失败", "error");
+          setIsPreparingAnalysis(false);
+          return;
         }
         const analyzeData = await analyzeRes.json();
-        const taskId: string = analyzeData.task_id;
+        taskId = analyzeData.task_id;
         localStorage.setItem("interviewVar_task_id", taskId);
 
-        const TEXT_STEPS = [
-          "文本解析中——载入对白记录...",
-          "语义分段——分析段落话题...",
-          "LLM 评估——匹配岗位 JD 与对白...",
-          "AI 话术重构——生成升级建议...",
-          "分析完成 — 正在生成报告..."
-        ];
+        // 校验通过，会话与任务创建成功！关闭按钮加载，真正进入进度条全屏页面！
+        setIsPreparingAnalysis(false);
+        setIsAnalyzing(true);
+        setTaskStep("正在发起智能评测分析...");
+        setTaskProgress(15);
+      } catch (e: any) {
+        auth.triggerToast(e.message || "启动分析失败，请重试！", "error");
+        setIsPreparingAnalysis(false);
+        return;
+      }
 
-        // Step 3: Poll progress until done — shared helper aborts the in-flight
-        // fetch on terminal status so no extra polls land after success.
+      const TEXT_STEPS = [
+        "文本解析中——载入对白记录...",
+        "语义分段——分析段落话题...",
+        "LLM 评估——匹配岗位 JD 与对白...",
+        "AI 话术重构——生成升级建议...",
+        "分析完成 — 正在生成报告..."
+      ];
+
+      try {
+        // Step 3: Poll progress until done
         await pollTaskUntilDone(taskId, {
           intervalMs: 2000,
           onProgress: (pollData) => {
-            // map 0-100% database progress to step labels
             const pct = pollData.progress || 0;
             setTaskProgress(pct);
 
@@ -548,20 +620,16 @@ function NewAnalysisDebuggerContent() {
           },
         });
 
-        // Step 4: Navigate to record report page — pass sessionId in URL so the
-        // target page reads from URL truth (avoids the localStorage handoff
-        // race that exists when sessionId lives only in storage).
         await checkRemainingLimit();
         router.push(`/debugger/record?sessionId=${sessionId}`);
-
       } catch (e: any) {
-        auth.triggerToast(e.message || "启动分析失败，请重试！");
+        auth.triggerToast(e.message || "分析任务异常，请重试！", "error");
         setIsAnalyzing(false);
       }
     } else {
       // Resume mode
       if (!uploadedFileId) {
-        auth.triggerToast("请先选择并上传您的简历文件！");
+        auth.triggerToast("请先选择并上传您的简历文件！", "error");
         return;
       }
       setIsAnalyzing(true);
@@ -625,7 +693,7 @@ function NewAnalysisDebuggerContent() {
         router.push(target);
       } catch (e: any) {
         clearInterval(progressInterval);
-        auth.triggerToast(e.message || "分析简历失败，请重试！");
+        auth.triggerToast(e.message || "分析简历失败，请重试！", "error");
         setIsAnalyzing(false);
       }
     }
@@ -1053,7 +1121,8 @@ function NewAnalysisDebuggerContent() {
                       placeholder="粘贴岗位 JD（最多 600 字），AI 会基于真实岗位画像分析..."
                       value={audioForm.jobDescription}
                       maxLength={600}
-                      onChange={(e) => setAudioForm({ ...audioForm, jobDescription: e.target.value.slice(0, 600) })}
+                      onChange={(e) => { setAudioForm({ ...audioForm, jobDescription: e.target.value.slice(0, 600) }); jdMod.reset(); }}
+                      onBlur={(e) => jdMod.check(e.target.value, "jd_audio_hint")}
                       className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-28 text-xs md:text-sm resize-none"
                     />
                   </div>
@@ -1063,10 +1132,20 @@ function NewAnalysisDebuggerContent() {
 
             <button
               onClick={triggerAnalysis}
-              className="w-full mt-6 py-4 bg-primary text-on-primary font-black rounded-2xl hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-primary/20"
+              disabled={isAnalyzing || isPreparingAnalysis}
+              className="w-full mt-6 py-4 bg-primary text-on-primary font-black rounded-2xl hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-primary/20 disabled:opacity-60 disabled:pointer-events-none"
             >
-              <span className="material-symbols-outlined text-sm">analytics</span>
-              开始 AI 智能调试分析
+              {isPreparingAnalysis ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                  <span>校验与准备分析会话中...</span>
+                </>
+              ) : (
+                <>
+                  <span className="material-symbols-outlined text-sm">analytics</span>
+                  <span>开启 AI 智能调试分析</span>
+                </>
+              )}
             </button>
           </div>
         </div>

@@ -44,7 +44,7 @@ interface AuthContextType {
   logout: () => void;
   deleteAccount: () => void;
   updateUser: (data: Partial<UserProfile>) => Promise<number | null>;
-  triggerToast: (msg: string) => void;
+  triggerToast: (msg: string, kind?: "info" | "error") => void;
 }
 
 const defaultUser: UserProfile = {
@@ -77,7 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [showLogin, setShowLogin] = useState(false);
   const [showLogout, setShowLogout] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
-  const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [toastMsg, setToastMsg] = useState<{ msg: string; kind: "info" | "error" } | null>(null);
   const userRef = useRef(user);
   userRef.current = user;
 
@@ -146,8 +146,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const triggerToast = (msg: string) => {
-    setToastMsg(msg);
+  const triggerToast = (msg: string, kind: "info" | "error" = "info") => {
+    setToastMsg({ msg, kind });
     setTimeout(() => {
       setToastMsg(null);
     }, 2500);
@@ -198,11 +198,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         });
         if (!res.ok) {
           const errData = await res.json();
-          triggerToast(errData.detail || "注销账号失败！");
+          triggerToast(errData.detail || "注销账号失败！", "error");
           return;
         }
       } catch (e) {
-        triggerToast("无法连接到后端服务！");
+        triggerToast("无法连接到后端服务！", "error");
         return;
       }
     }
@@ -218,99 +218,96 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateUser = async (data: Partial<UserProfile>): Promise<number | null> => {
+    const prevUser = { ...user };
+    const token = localStorage.getItem("interviewVar_token");
+    if (token) {
+      const body: any = {};
+      if (data.name !== undefined) body.username = data.name;
+      if (data.gender !== undefined) body.gender = data.gender;
+      if (data.age !== undefined) body.age = parseInt(data.age) || 0;
+      if (data.status !== undefined) {
+        body.job_status = 
+          data.status === "在职" ? "active" : 
+          data.status === "离职" ? "resigned" : 
+          (data.status === "应届" || data.status === "应届生") ? "fresh_grad" : 
+          "student";
+      }
+      if (data.avatar !== undefined) body.avatar_url = data.avatar;
+
+      if (data.years !== undefined) {
+        if (data.years.startsWith("在校")) {
+          body.experience_years = "在校";
+          body.experience_months = "0个月";
+        } else if (data.years.startsWith("应届")) {
+          body.experience_years = "应届";
+          body.experience_months = "0个月";
+        } else {
+          const matchedY = data.years.match(/(\d+年)/);
+          const matchedM = data.years.match(/(\d+个月)/);
+          body.experience_years = matchedY ? matchedY[1] : "在校";
+          body.experience_months = matchedM ? matchedM[1] : "0个月";
+        }
+      }
+      if (data.company !== undefined) body.company_name = data.company;
+      if (data.role !== undefined) body.role_name = data.role;
+
+      if (data.salary !== undefined) {
+        const salMatch = data.salary ? data.salary.match(/(\d+)K\s*-\s*(\d+)K/i) : null;
+        if (salMatch) {
+          body.salary_min = parseInt(salMatch[1]);
+          body.salary_max = parseInt(salMatch[2]);
+        } else {
+          body.salary_min = null;
+          body.salary_max = null;
+        }
+      }
+      if (data.school !== undefined) body.school = data.school;
+      if (data.degree !== undefined) body.degree = data.degree;
+      if (data.hasExp !== undefined) body.has_experience = data.hasExp;
+
+      if (data.targetCompany !== undefined) body.target_company = data.targetCompany;
+      if (data.targetRole !== undefined) body.target_role = data.targetRole;
+      if (data.targetGrade !== undefined) body.target_grade = data.targetGrade;
+      if (data.targetCity !== undefined) {
+        body.target_cities = data.targetCity ? data.targetCity.split(/[、,，]/).map(c => c.trim()).filter(Boolean) : [];
+      }
+      if (data.targetSalary !== undefined) {
+        const salMatch = data.targetSalary ? data.targetSalary.match(/(\d+)K\s*-\s*(\d+)K/i) : null;
+        if (salMatch) {
+          body.target_salary_min = parseInt(salMatch[1]);
+          body.target_salary_max = parseInt(salMatch[2]);
+        } else {
+          body.target_salary_min = null;
+          body.target_salary_max = null;
+        }
+      }
+
+      const res = await fetch(`${API_BASE}/api/auth/profile/update`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(body)
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.detail || "修改保存失败，请检查输入内容！";
+        triggerToast(errMsg, "error");
+        throw new Error(errMsg);
+      }
+      const backendData = await res.json();
+      const realMatchRate: number | null = backendData.matchRate ?? null;
+      const updatedUser = { ...user, ...data, ...(realMatchRate !== null ? { matchRate: realMatchRate } : {}) };
+      setUser(updatedUser);
+      localStorage.setItem("interviewVar_user", JSON.stringify(updatedUser));
+      window.dispatchEvent(new Event("storage"));
+      return realMatchRate;
+    }
     const newUser = { ...user, ...data };
     setUser(newUser);
     localStorage.setItem("interviewVar_user", JSON.stringify(newUser));
     window.dispatchEvent(new Event("storage"));
-
-    const token = localStorage.getItem("interviewVar_token");
-    if (token) {
-      try {
-        const body: any = {};
-        if (data.name !== undefined) body.username = data.name;
-        if (data.gender !== undefined) body.gender = data.gender;
-        if (data.age !== undefined) body.age = parseInt(data.age) || 0;
-        if (data.status !== undefined) {
-          body.job_status = 
-            data.status === "在职" ? "active" : 
-            data.status === "离职" ? "resigned" : 
-            (data.status === "应届" || data.status === "应届生") ? "fresh_grad" : 
-            "student";
-        }
-        if (data.avatar !== undefined) body.avatar_url = data.avatar;
-
-        if (data.years !== undefined) {
-          if (data.years.startsWith("在校")) {
-            body.experience_years = "在校";
-            body.experience_months = "0个月";
-          } else if (data.years.startsWith("应届")) {
-            body.experience_years = "应届";
-            body.experience_months = "0个月";
-          } else {
-            const matchedY = data.years.match(/(\d+年)/);
-            const matchedM = data.years.match(/(\d+个月)/);
-            body.experience_years = matchedY ? matchedY[1] : "在校";
-            body.experience_months = matchedM ? matchedM[1] : "0个月";
-          }
-        }
-        if (data.company !== undefined) body.company_name = data.company;
-        if (data.role !== undefined) body.role_name = data.role;
-
-        if (data.salary !== undefined) {
-          const salMatch = data.salary ? data.salary.match(/(\d+)K\s*-\s*(\d+)K/i) : null;
-          if (salMatch) {
-            body.salary_min = parseInt(salMatch[1]);
-            body.salary_max = parseInt(salMatch[2]);
-          } else {
-            body.salary_min = null;
-            body.salary_max = null;
-          }
-        }
-        if (data.school !== undefined) body.school = data.school;
-        if (data.degree !== undefined) body.degree = data.degree;
-        if (data.hasExp !== undefined) body.has_experience = data.hasExp;
-
-        if (data.targetCompany !== undefined) body.target_company = data.targetCompany;
-        if (data.targetRole !== undefined) body.target_role = data.targetRole;
-        if (data.targetGrade !== undefined) body.target_grade = data.targetGrade;
-        if (data.targetCity !== undefined) {
-          body.target_cities = data.targetCity ? data.targetCity.split(/[、,，]/).map(c => c.trim()).filter(Boolean) : [];
-        }
-        if (data.targetSalary !== undefined) {
-          const salMatch = data.targetSalary ? data.targetSalary.match(/(\d+)K\s*-\s*(\d+)K/i) : null;
-          if (salMatch) {
-            body.target_salary_min = parseInt(salMatch[1]);
-            body.target_salary_max = parseInt(salMatch[2]);
-          } else {
-            body.target_salary_min = null;
-            body.target_salary_max = null;
-          }
-        }
-
-        const res = await fetch(`${API_BASE}/api/auth/profile/update`, {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${token}`
-          },
-          body: JSON.stringify(body)
-        });
-        if (res.ok) {
-          const backendData = await res.json();
-          // 使用后端算法计算出的真实 matchRate（0 也是有效值，不能跳过）
-          const realMatchRate: number | null = backendData.matchRate ?? null;
-          if (realMatchRate !== null && realMatchRate !== undefined) {
-            const updatedUser = { ...newUser, matchRate: realMatchRate };
-            setUser(updatedUser);
-            localStorage.setItem("interviewVar_user", JSON.stringify(updatedUser));
-            window.dispatchEvent(new Event("storage"));
-          }
-          return realMatchRate;
-        }
-      } catch (e) {
-        console.error("Failed to sync profile to backend", e);
-      }
-    }
     return null;
   };
 
@@ -465,8 +462,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             exit={{ opacity: 0, y: -20, x: "-50%" }}
             className="fixed top-10 left-1/2 z-[9999] px-6 py-3.5 bg-[#131b2e]/95 backdrop-blur-md border border-[#AFA7FF]/20 shadow-2xl rounded-2xl flex items-center gap-2.5 select-none"
           >
-            <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg">check_circle</span>
-            <span className="text-sm md:text-base font-extrabold text-white">{toastMsg}</span>
+            {toastMsg.kind === "error" ? (
+              <span className="material-symbols-outlined text-[#FF6B7A] text-base md:text-lg">error</span>
+            ) : (
+              <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg">check_circle</span>
+            )}
+            <span className="text-sm md:text-base font-extrabold text-white">{toastMsg.msg}</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -528,7 +529,7 @@ function AuthModals() {
     if (isLoggingIn) return;
     // 内测版本：只支持密码登录（验证码登录已禁用）
     if (!username || !password) {
-      auth.triggerToast("请输入邮箱和密码！");
+      auth.triggerToast("请输入邮箱和密码！", "error");
       return;
     }
     try {
@@ -546,7 +547,7 @@ function AuthModals() {
 
       if (!res.ok) {
         const errData = await res.json();
-        auth.triggerToast(errData.detail || "登录失败，请检查账号密码！");
+        auth.triggerToast(errData.detail || "登录失败，请检查账号密码！", "error");
         setIsLoggingIn(false);
         return;
       }
@@ -566,7 +567,7 @@ function AuthModals() {
       // 登录成功 → 跳转到落地页
       router.push("/");
     } catch (err) {
-      auth.triggerToast("无法连接到后端服务！");
+      auth.triggerToast("无法连接到后端服务！", "error");
     } finally {
       setIsLoggingIn(false);
     }
@@ -576,12 +577,12 @@ function AuthModals() {
     // 内测版本：只支持邮箱找回密码
     const target = forgotEmail;
     if (!target) {
-      auth.triggerToast("请输入邮箱地址！");
+      auth.triggerToast("请输入邮箱地址！", "error");
       return;
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(target)) {
-      auth.triggerToast("请输入正确的邮箱地址格式！");
+      auth.triggerToast("请输入正确的邮箱地址格式！", "error");
       return;
     }
 
@@ -593,13 +594,13 @@ function AuthModals() {
       });
       if (!res.ok) {
         const errData = await res.json();
-        auth.triggerToast(errData.detail || "发送验证码失败！");
+        auth.triggerToast(errData.detail || "发送验证码失败！", "error");
         return;
       }
       setForgotCountdown(60);
       auth.triggerToast("验证码已发送，请查收！");
     } catch (err) {
-      auth.triggerToast("无法连接到后端服务！");
+      auth.triggerToast("无法连接到后端服务！", "error");
     }
   };
 
@@ -610,12 +611,12 @@ function AuthModals() {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(target)) {
-      auth.triggerToast("请输入正确的邮箱地址格式！");
+      auth.triggerToast("请输入正确的邮箱地址格式！", "error");
       return;
     }
 
     if (!forgotCode) {
-      auth.triggerToast("请输入验证码！");
+      auth.triggerToast("请输入验证码！", "error");
       return;
     }
 
@@ -623,12 +624,12 @@ function AuthModals() {
     const hasLowercase = /[a-z]/.test(forgotPassword);
     const hasNumber = /\d/.test(forgotPassword);
     if (forgotPassword.length < 8 || !hasUppercase || !hasLowercase || !hasNumber) {
-      auth.triggerToast("新密码长度不能少于8位，且必须包含大小写字母和数字！");
+      auth.triggerToast("新密码长度不能少于8位，且必须包含大小写字母和数字！", "error");
       return;
     }
 
     if (forgotPassword !== forgotConfirmPassword) {
-      auth.triggerToast("两次输入的密码不一致！");
+      auth.triggerToast("两次输入的密码不一致！", "error");
       return;
     }
 
@@ -646,7 +647,7 @@ function AuthModals() {
 
       if (!res.ok) {
         const errData = await res.json();
-        auth.triggerToast(errData.detail || "密码重置失败，请检查验证码！");
+        auth.triggerToast(errData.detail || "密码重置失败，请检查验证码！", "error");
         return;
       }
 
@@ -658,7 +659,7 @@ function AuthModals() {
       setForgotConfirmPassword("");
       setForgotCountdown(0);
     } catch (err) {
-      auth.triggerToast("无法连接到后端服务！");
+      auth.triggerToast("无法连接到后端服务！", "error");
     }
   };
 

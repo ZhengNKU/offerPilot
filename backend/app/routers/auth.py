@@ -27,6 +27,7 @@ from app.utils.security import (
 )
 from app.utils.sms import sms_helper
 from app.utils.email import email_helper
+from app.utils.moderation_dep import moderated
 
 logger = logging.getLogger(__name__)
 
@@ -339,6 +340,7 @@ async def send_code(
 @router.post("/register/step1")
 async def register_step1(
     req: schemas.RegisterStep1Request,
+    _moderation: None = Depends(moderated("register", "username")),
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
@@ -388,6 +390,7 @@ async def register_step1(
 async def register_complete(
     req: schemas.RegisterCompleteRequest,
     background_tasks: BackgroundTasks,
+    _moderation: None = Depends(moderated("register", "account.username")),
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
@@ -785,6 +788,7 @@ async def get_match_rate(
 async def profile_update(
     req: schemas.ProfileUpdateReq,
     background_tasks: BackgroundTasks,
+    _moderation: None = Depends(moderated("profile", "username", "additional_desc")),
     current_user: models.User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -819,7 +823,9 @@ async def profile_update(
     if req.school is not None: p.school = req.school
     if req.degree is not None: p.degree = req.degree
     if req.has_experience is not None: p.has_experience = req.has_experience
-    
+    # additional_desc 字段写入(审核已由 @moderated Depends 完成)
+    if req.additional_desc is not None: p.additional_desc = req.additional_desc
+
     # 校验目标薪资范围
     target_min = req.target_salary_min if req.target_salary_min is not None else p.target_salary_min
     target_max = req.target_salary_max if req.target_salary_max is not None else p.target_salary_max

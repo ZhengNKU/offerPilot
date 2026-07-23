@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { useRealtimeSession } from "@/app/utils/useRealtimeSession";
 import { useRealtimeAudio } from "./hooks/useRealtimeAudio";
@@ -82,6 +83,22 @@ function InterviewTrainingPageContent() {
   // JD 字符上限：与面试调试器统一为 600 字（避免过长 JD 引发表单性能问题）
   const JD_MAX_LENGTH = 600;
 
+  // Phase 3: 内容审核 preview hint
+  const jobDescMod = useModerationPreview();
+  const feedbackMod = useModerationPreview();
+
+  useEffect(() => {
+    if (jobDescMod.status === "block") {
+      auth.triggerToast("岗位详情内容涉嫌违规，请修改后提交", "error");
+    }
+  }, [jobDescMod.status]);
+
+  useEffect(() => {
+    if (feedbackMod.status === "block") {
+      auth.triggerToast("反馈内容涉嫌违规，请修改后提交", "error");
+    }
+  }, [feedbackMod.status]);
+
   // 同步用户资料中的目标岗位默认值
   useEffect(() => {
     if (auth.user?.targetRole) {
@@ -103,6 +120,7 @@ function InterviewTrainingPageContent() {
   const speakerMuted = live.speakerMuted;
 
   // ---------- UI 状态 ----------
+  const [isPreparingTraining, setIsPreparingTraining] = useState(false);
   const [isCountingDown, setIsCountingDown] = useState(false);
   const [countdownNum, setCountdownNum] = useState(3);
   const [showEndConfirm, setShowEndConfirm] = useState(false);
@@ -372,21 +390,23 @@ function InterviewTrainingPageContent() {
 
   const handleStartTraining = async () => {
     if (!targetRole.trim()) {
-      auth.triggerToast("请填写目标岗位！");
+      auth.triggerToast("请填写目标岗位！", "error");
       return;
     }
 
-    setIsCountingDown(true);
-    setCountdownNum(3);
-    for (let i = 3; i >= 1; i--) {
-      setCountdownNum(i);
-      await new Promise((r) => setTimeout(r, 1000));
-    }
-    setBootState("loading"); // 倒计时结束，立刻进入加载状态，防止创建会话的网络请求期间闪现“配置完成，准备就绪”页面
-    setIsCountingDown(false);
-
-    // POST /api/live/sessions
+    setIsPreparingTraining(true);
     try {
+      // 1. 提交前发起即时敏感词校验（消除 500ms 防抖竞态）
+      if (jobDescription && jobDescription.trim().length >= 2) {
+        const jdStatus = await jobDescMod.checkNow(jobDescription, "training_jd_hint");
+        if (jdStatus === "block") {
+          auth.triggerToast("岗位详情内容涉嫌违规，请修改后提交", "error");
+          setIsPreparingTraining(false);
+          return;
+        }
+      }
+
+      // 2. 在按钮 Loading 状态下发起创建面试会话请求
       const config = { targetRole, jobDescription, interviewType, difficulty, durationMin, followupRounds };
       localStorage.setItem("interviewVar_live_config", JSON.stringify(config));
       const res = await fetch(`${apiBase}/api/live/sessions`, {
@@ -398,30 +418,38 @@ function InterviewTrainingPageContent() {
           duration_min: durationMin,
           followup_rounds: followupRounds,
           target_role: targetRole,
-          // job_level 从 auth.user.targetGrade 拿（如 "P7"），缺省 "P6"
           job_level: auth.user?.targetGrade || "P6",
-          // company_style 从 auth.user.targetCompany 拿（如 "腾讯/美团"），缺省 "通用"
           company_style: auth.user?.targetCompany || "通用",
           job_description: jobDescription || null,
         }),
       });
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         if (res.status === 409) {
-          auth.triggerToast("已有进行中的实时面试，请先结束或等待");
+          auth.triggerToast("已有进行中的实时面试，请先结束或等待", "error");
         } else {
-          auth.triggerToast(err.detail || "创建面试失败");
+          auth.triggerToast(err.detail || "岗位详情内容涉嫌违规，请修改后提交", "error");
         }
-        setBootState("idle");
+        setIsPreparingTraining(false);
         return;
       }
+
       const sess: LiveSession = await res.json();
       setLiveSession(sess);
       localStorage.setItem("interviewVar_live_id", String(sess.live_session_id));
-      // URL 保持干净（不写 ?liveId=）：新建面试态不应污染 URL
-      // 中途刷新靠 localStorage 静默恢复；URL 仅在报告态（showReport）才写
+      setIsPreparingTraining(false);
+
+      // 3. 校验与创建完全成功后，才开始 3, 2, 1 倒计时
+      setIsCountingDown(true);
+      setCountdownNum(3);
+      for (let i = 3; i >= 1; i--) {
+        setCountdownNum(i);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      setIsCountingDown(false);
+
       setBootState("live");
-      // PR5: 用 hook 启动 WS（已含自动重连）
       if (sess.ws_url) {
         const token = localStorage.getItem("interviewVar_token") || "";
         const targetLiveId = sess.live_session_id;
@@ -451,7 +479,7 @@ function InterviewTrainingPageContent() {
         );
       }
     } catch (e) {
-      auth.triggerToast("无法连接到后端服务");
+      auth.triggerToast("无法连接到后端服务", "error");
       setBootState("idle");
     }
   };
@@ -466,7 +494,7 @@ function InterviewTrainingPageContent() {
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        auth.triggerToast(err.detail || "结束失败");
+        auth.triggerToast(err.detail || "结束失败", "error");
         setBootState("error");
         return;
       }
@@ -484,7 +512,7 @@ function InterviewTrainingPageContent() {
         .catch(() => {});
       void pollUntilCompleted(sess.live_session_id);
     } catch (e) {
-      auth.triggerToast("无法结束面试");
+      auth.triggerToast("无法结束面试", "error");
       setBootState("error");
     }
   };
@@ -534,7 +562,7 @@ function InterviewTrainingPageContent() {
         setCameraOn(true);
       } catch (err) {
         console.error("Failed to access camera:", err);
-        auth.triggerToast("无法访问摄像头，请检查权限/连接设备");
+        auth.triggerToast("无法访问摄像头，请检查权限/连接设备", "error");
       }
     }
   };
@@ -607,10 +635,16 @@ function InterviewTrainingPageContent() {
     flashActive("feedback");
   };
 
+  const [isSubmittingTrainingFeedback, setIsSubmittingTrainingFeedback] = useState(false);
+
   const submitFeedback = async () => {
     const content = feedbackText.trim();
     if (!content) {
-      auth.triggerToast("请输入反馈内容。");
+      auth.triggerToast("请输入反馈内容。", "error");
+      return;
+    }
+    if (feedbackMod.status === "block") {
+      auth.triggerToast("内容违规，无法发布", "error");
       return;
     }
     if (!liveSession) {
@@ -620,6 +654,7 @@ function InterviewTrainingPageContent() {
       setShowFeedbackModal(false);
       return;
     }
+    setIsSubmittingTrainingFeedback(true);
     try {
       const res = await fetch(
         `${apiBase}/api/live/sessions/${liveSession.live_session_id}/feedback`,
@@ -629,14 +664,25 @@ function InterviewTrainingPageContent() {
           body: JSON.stringify({ kind: feedbackKind, content }),
         }
       );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        const detailStr = String(errorData.detail || "");
+        if (res.status === 400 || res.status === 422 || detailStr.includes("违规") || detailStr.includes("敏感词") || detailStr.includes("block")) {
+          auth.triggerToast("反馈内容涉嫌违规，请修改后提交", "error");
+        } else {
+          auth.triggerToast("提交失败，请稍后重试", "error");
+        }
+        return;
+      }
       auth.triggerToast(`反馈已提交`);
       setFeedbackText("");
+      feedbackMod.reset();
       setShowFeedbackModal(false);
     } catch (e) {
       console.error("submit feedback failed", e);
-      auth.triggerToast("提交失败，请稍后重试");
+      auth.triggerToast("提交失败，请稍后重试", "error");
+    } finally {
+      setIsSubmittingTrainingFeedback(false);
     }
   };
 
@@ -1006,7 +1052,8 @@ function InterviewTrainingPageContent() {
                       disabled={isLive}
                       value={jobDescription}
                       maxLength={JD_MAX_LENGTH}
-                      onChange={(e) => setJobDescription(e.target.value.slice(0, JD_MAX_LENGTH))}
+                      onChange={(e) => { setJobDescription(e.target.value.slice(0, JD_MAX_LENGTH)); jobDescMod.reset(); }}
+                      onBlur={(e) => jobDescMod.check(e.target.value, "training_jd_hint")}
                       placeholder="粘贴岗位 JD（最多 600 字），AI 面试官会基于真实岗位画像出题..."
                       className="w-full py-3 px-4 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl text-xs md:text-sm font-semibold focus:outline-none transition-all placeholder:text-white/20 h-28 resize-none scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent overflow-y-auto"
                     />
@@ -1104,12 +1151,21 @@ function InterviewTrainingPageContent() {
 
                 <div className="space-y-3 shrink-0">
                   <button
-                    disabled={bootState !== "idle" || isCountingDown}
+                    disabled={bootState !== "idle" || isCountingDown || isPreparingTraining}
                     onClick={handleStartTraining}
                     className="w-full py-3.5 bg-gradient-to-r from-secondary to-primary text-on-primary text-base font-black rounded-xl hover:scale-[1.01] active:scale-98 disabled:opacity-50 disabled:scale-100 transition-all shadow-lg shadow-secondary/20 cursor-pointer flex items-center justify-center gap-2 group"
                   >
-                    <span className="material-symbols-outlined text-base animate-pulse">play_arrow</span>
-                    {isLive ? "正在进行模拟面试" : "开始模拟面试"}
+                    {isPreparingTraining ? (
+                      <>
+                        <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                        <span>校验与准备面试会话中...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-base animate-pulse">play_arrow</span>
+                        <span>{isLive ? "正在进行模拟面试" : "开始模拟面试"}</span>
+                      </>
+                    )}
                   </button>
                   {bootState === "error" && (
                     <button onClick={handleReset} className="w-full py-2 bg-white/5 border border-white/10 text-on-surface text-xs font-bold rounded-xl hover:bg-white/10 transition-all cursor-pointer">
@@ -1599,7 +1655,8 @@ function InterviewTrainingPageContent() {
                   <textarea
                     rows={4}
                     value={feedbackText}
-                    onChange={(e) => setFeedbackText(e.target.value)}
+                    onChange={(e) => { setFeedbackText(e.target.value); feedbackMod.reset(); }}
+                    onBlur={(e) => feedbackMod.check(e.target.value, "training_feedback_hint")}
                     placeholder="例如：AI 面试官声音异常，语速过快，或者建议增加某一类场景考查..."
                     className="w-full bg-white/[0.02] border border-white/10 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-xs font-semibold focus:outline-none transition-all placeholder:text-on-surface-variant/30"
                   />
@@ -1607,7 +1664,20 @@ function InterviewTrainingPageContent() {
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button onClick={() => setShowFeedbackModal(false)} className="px-4 py-2 bg-white/5 hover:bg-white/10 text-white text-xs font-black rounded-lg border border-white/10 transition-all cursor-pointer">取消</button>
-                <button onClick={submitFeedback} className="px-4.5 py-2 bg-primary text-on-primary text-xs font-black rounded-lg shadow-md cursor-pointer">提交反馈</button>
+                <button
+                  onClick={submitFeedback}
+                  disabled={isSubmittingTrainingFeedback}
+                  className="px-4.5 py-2 bg-primary text-on-primary text-xs font-black rounded-lg shadow-md cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5 min-w-[80px]"
+                >
+                  {isSubmittingTrainingFeedback ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
+                      <span>提交中</span>
+                    </>
+                  ) : (
+                    <span>提交反馈</span>
+                  )}
+                </button>
               </div>
             </motion.div>
           </div>

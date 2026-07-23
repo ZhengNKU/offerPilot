@@ -150,7 +150,7 @@ function ResumeAnalysisPageContent() {
       } catch (e: any) {
         if (cancelled) return;
         console.error("Failed to load historical resume analysis:", e);
-        auth.triggerToast(e?.message || "加载历史报告失败");
+        auth.triggerToast(e?.message || "加载历史报告失败", "error");
         // Failure path: also unblock so the user isn't stuck on the spinner.
         setIsHydrating(false);
       }
@@ -169,7 +169,7 @@ function ResumeAnalysisPageContent() {
   const handleDownloadPDF = async () => {
     const analysisId = analysisResult?.id;
     if (!analysisId) {
-      triggerToast("未找到分析记录，请刷新后重试");
+      triggerToast("未找到分析记录，请刷新后重试", "error");
       setDownloadState("error");
       setTimeout(() => setDownloadState("idle"), 2500);
       return;
@@ -193,7 +193,7 @@ function ResumeAnalysisPageContent() {
         // 鉴权失败：弹登录引导（用 .detail 文案但不抛 error，避免通用 catch 噪音）
         if (res.status === 401 || res.status === 403) {
           setDownloadState("error");
-          triggerToast("登录已失效，请重新登录后再下载");
+          triggerToast("登录已失效，请重新登录后再下载", "error");
           // 同时唤起登录弹窗（如果有 AuthProvider 暴露的方法）
           try {
             auth.setShowLogin?.(true);
@@ -252,7 +252,7 @@ function ResumeAnalysisPageContent() {
     } catch (e: any) {
       console.error("Download DOCX failed:", e);
       setDownloadState("error");
-      triggerToast(e?.message || "下载失败，请稍后重试");
+      triggerToast(e?.message || "下载失败，请稍后重试", "error");
       setTimeout(() => setDownloadState("idle"), 2500);
     }
   };
@@ -1747,7 +1747,7 @@ function ResumeAnalysisPageContent() {
             <form onSubmit={handleEditProfile} className="space-y-4 text-xs font-semibold text-white/60">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block mb-1.5">姓名 *</label>
+                  <label className="block mb-1.5">用户名 *</label>
                   <input
                     type="text"
                     required
