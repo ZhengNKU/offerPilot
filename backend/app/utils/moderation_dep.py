@@ -154,7 +154,7 @@ def moderated(scene: str, *fields: str) -> Callable:
                         logger.exception("[moderation] @moderated 审计写入失败(非阻塞)")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="发布内容包含违规信息,请修改后重新发布",
+                    detail="提交内容包含违规信息,请修改后重新提交",
                 )
 
     return _dep
@@ -214,5 +214,5 @@ async def enforce_moderation(
                     logger.exception("[moderation] enforce 审计写入失败(非阻塞)")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="发布内容包含违规信息,请修改后重新发布",
+                detail="提交内容包含违规信息,请修改后重新提交",
             )

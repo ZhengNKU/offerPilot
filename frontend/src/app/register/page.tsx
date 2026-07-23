@@ -104,6 +104,11 @@ export default function RegisterPage() {
   const [emailTimer, setEmailTimer] = useState(0);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
 
+  // Loading states for register steps
+  const [isSubmittingStep1, setIsSubmittingStep1] = useState(false);
+  const [isSubmittingStep2, setIsSubmittingStep2] = useState(false);
+  const [isCompletingRegister, setIsCompletingRegister] = useState(false);
+
   // Phase 3: 用户名输入审核 preview hint
   const usernameMod = useModerationPreview();
 
@@ -213,7 +218,17 @@ export default function RegisterPage() {
       return;
     }
 
+    setIsSubmittingStep1(true);
     try {
+      // 敏感词零延迟即时校验
+      if (username && username.trim().length >= 2) {
+        const uStatus = await usernameMod.checkNow(username, "username_hint");
+        if (uStatus === "block") {
+          auth.triggerToast("用户名涉嫌违规，请修改后提交", "error");
+          return;
+        }
+      }
+
       const res = await fetch(`${API_BASE}/api/auth/register/step1`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -235,6 +250,8 @@ export default function RegisterPage() {
       setStep(2);
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！", "error");
+    } finally {
+      setIsSubmittingStep1(false);
     }
   };
 
@@ -478,6 +495,7 @@ export default function RegisterPage() {
       }
     };
 
+    setIsCompletingRegister(true);
     try {
       const response = await fetch(`${API_BASE}/api/auth/register/complete`, {
         method: "POST",
@@ -497,6 +515,8 @@ export default function RegisterPage() {
       router.push("/debugger");
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！", "error");
+    } finally {
+      setIsCompletingRegister(false);
     }
   };
 
@@ -838,13 +858,23 @@ export default function RegisterPage() {
                         {/* Actions */}
                         <div className="pt-6 w-full">
                           <button
+                            disabled={isSubmittingStep1}
                             onClick={handleNextToStep2}
-                            className="w-full py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] !text-base rounded-xl font-black text-base md:text-sm hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center shadow-lg shadow-[#AFA7FF]/15 group"
+                            className="w-full py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] !text-base rounded-xl font-black text-base md:text-sm hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-2 text-center shadow-lg shadow-[#AFA7FF]/15 group disabled:opacity-60 disabled:pointer-events-none"
                           >
-                            下一步：完善职业信息
-                            <span className="material-symbols-outlined text-lg leading-none transform transition-transform duration-200 group-hover:translate-x-0.5 select-none">
-                              arrow_forward
-                            </span>
+                            {isSubmittingStep1 ? (
+                              <>
+                                <div className="w-4 h-4 border-2 border-[#050B1A] border-t-transparent rounded-full animate-spin shrink-0" />
+                                <span>验证与保存中...</span>
+                              </>
+                            ) : (
+                              <>
+                                <span>下一步：完善职业信息</span>
+                                <span className="material-symbols-outlined text-lg leading-none transform transition-transform duration-200 group-hover:translate-x-0.5 select-none">
+                                  arrow_forward
+                                </span>
+                              </>
+                            )}
                           </button>
                           <span className="text-[10px] md:text-xs text-white/20 font-bold block text-center mt-2.5 select-none">
                             注册即表示同意，我们将严格保护您的隐私安全
@@ -1237,13 +1267,23 @@ export default function RegisterPage() {
                           上一步
                         </button>
                         <button
+                          disabled={isSubmittingStep2}
                           onClick={handleNextToStep3}
-                          className="flex-1 py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] rounded-xl hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex !text-base items-center justify-center gap-1.5 text-center shadow-lg shadow-[#AFA7FF]/15 group"
+                          className="flex-1 py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] rounded-xl hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex !text-base items-center justify-center gap-2 text-center shadow-lg shadow-[#AFA7FF]/15 group disabled:opacity-60 disabled:pointer-events-none"
                         >
-                          下一步：设定求职目标
-                          <span className="material-symbols-outlined text-lg leading-none transform transition-transform duration-200 group-hover:translate-x-0.5 select-none">
-                            arrow_forward
-                          </span>
+                          {isSubmittingStep2 ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-[#050B1A] border-t-transparent rounded-full animate-spin shrink-0" />
+                              <span>保存中...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>下一步：设定求职目标</span>
+                              <span className="material-symbols-outlined text-lg leading-none transform transition-transform duration-200 group-hover:translate-x-0.5 select-none">
+                                arrow_forward
+                              </span>
+                            </>
+                          )}
                         </button>
                       </div>
                     </motion.div>
@@ -1567,13 +1607,23 @@ export default function RegisterPage() {
                           上一步
                         </button>
                         <button
+                          disabled={isCompletingRegister}
                           onClick={handleFinishRegister}
-                          className="flex-1 py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] text-base rounded-xl hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-1.5 text-center shadow-lg shadow-[#AFA7FF]/15 group"
+                          className="flex-1 py-4 bg-gradient-to-r from-[#AFA7FF] to-[#c0c1ff] text-[#050B1A] text-base rounded-xl hover:scale-[1.01] active:scale-98 transition-all cursor-pointer flex items-center justify-center gap-2 text-center shadow-lg shadow-[#AFA7FF]/15 group disabled:opacity-60 disabled:pointer-events-none"
                         >
-                          完成，进入 面试驾到
-                          <span className="material-symbols-outlined text-lg leading-none transform transition-transform duration-200 group-hover:translate-x-0.5 select-none">
-                            arrow_forward
-                          </span>
+                          {isCompletingRegister ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-[#050B1A] border-t-transparent rounded-full animate-spin shrink-0" />
+                              <span>提交并注册中...</span>
+                            </>
+                          ) : (
+                            <>
+                              <span>完成，进入 面试驾到</span>
+                              <span className="material-symbols-outlined text-lg leading-none transform transition-transform duration-200 group-hover:translate-x-0.5 select-none">
+                                arrow_forward
+                              </span>
+                            </>
+                          )}
                         </button>
                       </div>
                     </motion.div>

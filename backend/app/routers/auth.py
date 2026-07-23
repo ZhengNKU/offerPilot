@@ -509,11 +509,17 @@ async def register_complete(
     # Generate token
     token = create_access_token(data={"sub": str(new_user.id)})
 
-    # 注册即视为首次登录，同样要走一遍单点登录登记（虽然不可能有旧 token，
-    # 但保持所有"签发 token 后"的逻辑统一在一处）
-    # 豁免名单账号（如 admin）跳过，不挤下线
-    if not _is_multi_session_exempt(new_user.username):
-        await enforce_single_session(redis_client, new_user.id, token)
+    # 注意：注册时**不**写单点登录 session 标记。
+    # 原因：新用户 Redis 中按理没有旧 token，但如果在这里写 auth:session:{user_id}，
+    # 用户紧接着再调一次 /api/auth/login（前端常见链路：注册成功 → 自动跳首页 →
+    # useEffect 触发一次 /me 或被 AuthProvider 拉一次 /api/auth/profile 之类），
+    # enforce_single_session 会看到 session:{user_id} 已是刚签发的 token，
+    # "新 token != 旧 token" → 把注册返回的 token 拉黑 → 前端 setInterval 60s 轮询
+    # 打到 401 → 触发"您的账号已在其他设备登录，已自动退出"的误提示。
+    # 修法：把 session 标记的写入推迟到 login() 端点；注册返回的 token 在 24h 内
+    # 仍然有效，用户只要不主动 logout / 不主动重新登录就一直可用。
+    # 豁免名单账号（如 admin）原本就不挤下线，但为保持与 login() 行为一致，这里
+    # 也直接跳过 session 写入——admin 多端登录本来就是预期行为。
 
     # 异步为新注册用户生成基于目标岗位的行业基准建议
     if new_profile and new_profile.target_role:
