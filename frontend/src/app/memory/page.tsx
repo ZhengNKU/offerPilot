@@ -1444,26 +1444,26 @@ export default function CareerMemoryDashboard() {
             面试驾到
           </div>
 
-          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
-            <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-3 lg:gap-5 xl:gap-8 whitespace-nowrap">
+            <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               面试调试器
             </a>
-            <a onClick={() => handleTabChange("overview")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
+            <a onClick={() => handleTabChange("overview")} className="text-primary transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer relative whitespace-nowrap shrink-0 after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
               职业记忆看板
             </a>
-            <a onClick={() => router.push("/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               面试训练场
             </a>
-            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               职业驾驶舱
             </a>
-            <a onClick={() => router.push("/guide")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/guide")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               面试指南
             </a>
-            <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               体验反馈中心
             </a>
-            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               帮助中心
             </a>
           </div>
@@ -1602,9 +1602,9 @@ export default function CareerMemoryDashboard() {
                   </div>
                 )}
               </div>
-              <div className="overflow-y-auto max-h-[280px] flex-1 min-h-0 pr-1 flex flex-col gap-1.5">
+              <div className="overflow-y-auto max-h-[280px] flex-1 min-h-0 pr-1 flex flex-col">
                 {counselorSessions.length === 0 ? (
-                  <div className="text-center py-8 text-sm text-on-surface-variant/40">
+                  <div className="text-center flex-1 flex items-center justify-center py-12 text-base text-on-surface-variant/40">
                     暂无历史会话
                   </div>
                 ) : (
@@ -1869,7 +1869,7 @@ export default function CareerMemoryDashboard() {
                           </h4>
                           <button
                             onClick={() => handleTabChange("timeline")}
-                            className="text-xs text-on-surface-variant/60 hover:text-white flex items-center gap-0.5 cursor-pointer transition-colors font-bold"
+                            className="text-sm text-on-surface-variant/60 hover:text-white flex items-center gap-0.5 cursor-pointer transition-colors font-bold"
                           >
                             查看全部
                             <span className="material-symbols-outlined text-sm leading-none">chevron_right</span>
@@ -1952,7 +1952,7 @@ export default function CareerMemoryDashboard() {
                               );
                             });
                           })() : (
-                            <div className="text-sm text-on-surface-variant/50 text-center py-4">
+                            <div className="text-base text-on-surface-variant/50 text-center flex-1 min-h-[140px] flex items-center justify-center py-8">
                               {auth.isLoggedIn ? "暂无历史面试记录" : "请先登录查看历史记录"}
                             </div>
                           )}
@@ -2127,9 +2127,9 @@ export default function CareerMemoryDashboard() {
                               </div>
                             ))
                           ) : projects.length === 0 ? (
-                            <div className="py-6 text-center">
-                              <span className="material-symbols-outlined text-3xl text-on-surface-variant/30 mb-1 block">folder_off</span>
-                              <p className="text-xs text-on-surface-variant/40 font-semibold">暂无项目记忆</p>
+                            <div className="flex-1 flex flex-col items-center justify-center min-h-[140px] py-6 text-center">
+                              <span className="material-symbols-outlined !text-4xl text-on-surface-variant/30 mb-1 block">folder_off</span>
+                              <p className="text-base text-on-surface-variant/40 font-semibold">暂无项目记忆</p>
                             </div>
                           ) : (
                             projects.slice(0, 3).map((proj) => {
@@ -2176,7 +2176,7 @@ export default function CareerMemoryDashboard() {
 
                       <button
                         onClick={() => handleTabChange("projects")}
-                        className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
+                        className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-sm font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         查看全部项目 ({projectTotal}) <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                       </button>
@@ -2246,7 +2246,7 @@ export default function CareerMemoryDashboard() {
 
                       <button
                         onClick={() => handleTabChange("knowledge")}
-                        className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-xs font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
+                        className="w-full py-2.5 bg-white/5 hover:bg-white/10 text-sm font-black text-white rounded-xl border border-white/10 transition-all text-center cursor-pointer flex items-center justify-center gap-1.5"
                       >
                         查看全部知识点 ({knowledgeAbilities.reduce((sum, ca) => sum + ca.sub_abilities.length, 0)}) <span className="material-symbols-outlined text-xs">keyboard_arrow_right</span>
                       </button>
@@ -2324,7 +2324,7 @@ export default function CareerMemoryDashboard() {
                               <div className="w-5 h-5 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
                             </div>
                           ) : offerTrendPoints.length === 0 ? (
-                            <div className="flex items-center justify-center h-full text-[11px] text-on-surface-variant/40 font-semibold">
+                            <div className="flex items-center justify-center w-full h-full min-h-[95px] text-[11px] text-on-surface-variant/40 font-semibold text-center">
                               暂无实时模拟面试数据
                             </div>
                           ) : (

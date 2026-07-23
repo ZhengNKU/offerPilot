@@ -43,80 +43,6 @@ interface FeedbackItem {
   module?: string;
 }
 
-const initialFeedbacks: FeedbackItem[] = [
-  {
-    id: 1,
-    title: "希望增加面试问题的难度选择",
-    description: "在模拟面试时，可以根据求职者的经验和目标岗位选择初级、中级、高级难度",
-    author: "张同学",
-    type: "功能建议",
-    upvotes: 128,
-    time: "2小时前",
-    commentsCount: 12,
-    comments: [
-      { author: "张同学", avatar: "/debugger-2.jpg", content: "同感，目前直接给的难度有些时候太难了。" },
-      { author: "李同学", avatar: "/debugger-1.jpg", content: "希望能快点上线这个功能，特别需要！" },
-      { author: "王同学", avatar: "/debugger-2.jpg", content: "高级难度的深度最好能对标大厂的专家级架构面试。" }
-    ]
-  },
-  {
-    id: 2,
-    title: "AI 回答分析有时不够准确",
-    description: "在分析我的回答时，有些技术点没有识别出来，希望优化识别算法",
-    author: "李同学",
-    type: "问题反馈",
-    upvotes: 96,
-    time: "5小时前",
-    commentsCount: 8,
-    comments: [
-      { author: "周同学", avatar: "/debugger-1.jpg", content: "对的，特别是涉及特定冷门技术框架时，AI会解释偏。" },
-      { author: "吴同学", avatar: "/debugger-2.jpg", content: "希望能够自定义专业名词库，让 AI 更好地针对性分析。" }
-    ]
-  },
-  {
-    id: 3,
-    title: "希望支持更多行业的面试题库",
-    description: "目前主要是互联网行业，希望增加金融、制造业等行业的题库",
-    author: "王同学",
-    type: "功能建议",
-    upvotes: 78,
-    time: "1天前",
-    commentsCount: 15,
-    comments: [
-      { author: "郑同学", avatar: "/debugger-2.jpg", content: "想看金融量化分析岗位的面试题！" },
-      { author: "孙同学", avatar: "/debugger-1.jpg", content: "制造业的项目管理 and 质量控制面试题也希望能涵盖。" }
-    ]
-  },
-  {
-    id: 4,
-    title: "界面可以更简洁一些",
-    description: "部分页面信息有点多，希望可以优化布局，突出重点内容",
-    author: "陈同学",
-    type: "体验优化",
-    upvotes: 65,
-    time: "1天前",
-    commentsCount: 6,
-    comments: [
-      { author: "胡同学", avatar: "/debugger-1.jpg", content: "确实，第一次用稍微找了一下入口。" },
-      { author: "林同学", avatar: "/debugger-2.jpg", content: "总览看板的视觉可以做得更有科技感、呼吸感一些。" }
-    ]
-  },
-  {
-    id: 5,
-    title: "希望增加简历优化的具体建议",
-    description: "简历分析结果太笼统，希望能给出更具体的优化建议",
-    author: "赵同学",
-    type: "功能建议",
-    upvotes: 42,
-    time: "2天前",
-    commentsCount: 9,
-    comments: [
-      { author: "马同学", avatar: "/debugger-2.jpg", content: "非常赞同，现在的修改建议偏话术，缺具体的技术项目提炼。" },
-      { author: "朱同学", avatar: "/debugger-1.jpg", content: "希望可以直接给出修改前后的对比段落样例。" }
-    ]
-  }
-];
-
 export default function FeedbackPage() {
   const router = useRouter();
   const auth = useAuth();
@@ -879,26 +805,26 @@ export default function FeedbackPage() {
             面试驾到
           </div>
 
-          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-8">
-            <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+          <div className="absolute left-1/2 -translate-x-1/2 hidden md:flex items-center gap-3 lg:gap-5 xl:gap-8 whitespace-nowrap">
+            <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               面试调试器
             </a>
-            <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               职业记忆看板
             </a>
-            <a onClick={() => router.push("/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               面试训练场
             </a>
-            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               职业驾驶舱
             </a>
-            <a onClick={() => router.push("/guide")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/guide")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               面试指南
             </a>
-            <a onClick={() => router.push("/feedback")} className="text-primary transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer relative after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
+            <a onClick={() => router.push("/feedback")} className="text-primary transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer relative whitespace-nowrap shrink-0 after:content-[''] after:absolute after:bottom-[-26px] after:left-0 after:right-0 after:h-[2px] after:bg-primary">
               体验反馈中心
             </a>
-            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               帮助中心
             </a>
           </div>

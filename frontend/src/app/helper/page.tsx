@@ -176,14 +176,7 @@ export default function HelperPage() {
                   <h2 className="text-2xl font-black text-white">面试录音分析</h2>
                 </div>
                 <button
-                  onClick={() => {
-                    if (window.opener) {
-                      window.opener.focus();
-                      window.opener.location.href = "/debugger?mode=audio";
-                    } else {
-                      router.push("/debugger?mode=audio");
-                    }
-                  }}
+                  onClick={() => router.push("/debugger?mode=audio")}
                   className="self-start sm:self-center px-4 py-1.5 bg-primary/10 border border-primary/20 hover:bg-primary/20 text-[#AFA7FF] hover:text-white rounded-xl text-base font-bold transition-all cursor-pointer"
                 >
                   前往体验
@@ -238,14 +231,7 @@ export default function HelperPage() {
                   <h2 className="text-2xl font-black text-white">面试记录分析</h2>
                 </div>
                 <button
-                  onClick={() => {
-                    if (window.opener) {
-                      window.opener.focus();
-                      window.opener.location.href = "/debugger?mode=audio";
-                    } else {
-                      router.push("/debugger?mode=audio");
-                    }
-                  }}
+                  onClick={() => router.push("/debugger?mode=text")}
                   className="self-start sm:self-center px-4 py-1.5 bg-primary/10 border border-primary/20 hover:bg-primary/20 text-[#AFA7FF] hover:text-white rounded-xl text-base font-bold transition-all cursor-pointer"
                 >
                   前往体验
@@ -300,14 +286,7 @@ export default function HelperPage() {
                   <h2 className="text-2xl font-black text-white">简历深度分析</h2>
                 </div>
                 <button
-                  onClick={() => {
-                    if (window.opener) {
-                      window.opener.focus();
-                      window.opener.location.href = "/debugger?mode=resume";
-                    } else {
-                      router.push("/debugger?mode=resume");
-                    }
-                  }}
+                  onClick={() => router.push("/debugger?mode=resume")}
                   className="self-start sm:self-center px-4 py-1.5 bg-primary/10 border border-primary/20 hover:bg-primary/20 text-[#AFA7FF] hover:text-white rounded-xl text-base font-bold transition-all cursor-pointer"
                 >
                   前往体验
@@ -362,14 +341,7 @@ export default function HelperPage() {
                   <h2 className="text-2xl font-black text-white">AI模拟面试</h2>
                 </div>
                 <button
-                  onClick={() => {
-                    if (window.opener) {
-                      window.opener.focus();
-                      window.opener.location.href = "/training";
-                    } else {
-                      router.push("/training");
-                    }
-                  }}
+                  onClick={() => router.push("/training")}
                   className="self-start sm:self-center px-4 py-1.5 bg-primary/10 border border-primary/20 hover:bg-primary/20 text-[#AFA7FF] hover:text-white rounded-xl text-base font-bold transition-all cursor-pointer"
                 >
                   前往体验
@@ -424,14 +396,7 @@ export default function HelperPage() {
                   <h2 className="text-2xl font-black text-white">AI职业顾问</h2>
                 </div>
                 <button
-                  onClick={() => {
-                    if (window.opener) {
-                      window.opener.focus();
-                      window.opener.location.href = "/memory?tab=advisor";
-                    } else {
-                      router.push("/memory?tab=advisor");
-                    }
-                  }}
+                  onClick={() => router.push("/memory?tab=advisor")}
                   className="self-start sm:self-center px-4 py-1.5 bg-primary/10 border border-primary/20 hover:bg-primary/20 text-[#AFA7FF] hover:text-white rounded-xl text-base font-bold transition-all cursor-pointer"
                 >
                   前往体验

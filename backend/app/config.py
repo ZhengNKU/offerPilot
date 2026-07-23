@@ -40,9 +40,13 @@ class Settings(BaseSettings):
     IMS_REGION: str = "ap-guangzhou"            # IMS 地域
     # 失败策略：秘钥缺失时自动 fail-open（dev 模式），秘钥配齐后由本开关控制
     # False = fail-closed（TMS 故障时 503 拦截）；True = fail-open（仅灰度期建议）
-    CONTENT_MODERATION_FAIL_OPEN: bool = False
+    # 默认开启兜底,避免 IMS/TMS 偶发超时阻塞用户上传;后台
+    # 巡检任务 (run_periodic_rescan, 默认每 6h) 会兜底复查。
+    CONTENT_MODERATION_FAIL_OPEN: bool = True
     # TMS / IMS 调用超时（asyncio.wait_for 包裹），防 SDK hang
-    TMS_TIMEOUT_S: float = 4.0
+    # 同时覆盖文本 (TMS) 与图片 (IMS) 两种调用。IMS 走 ≤5MB base64 跨地域，
+    # 生产环境从 4.0s 提到 8.0s 以兼容 ap-guangzhou 跨区冷连接。
+    TMS_TIMEOUT_S: float = 8.0
     # 本地兜底词库开关；True=开启（默认）；False=跳过本地匹配（全靠 TMS）
     CONTENT_MODERATION_LOCAL_WORDS_ENABLED: bool = True
     # 审计写入策略：False=仅 Review/Block 写审计（默认，省空间）；True=连 Pass 也写

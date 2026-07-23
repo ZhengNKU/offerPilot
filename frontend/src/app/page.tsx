@@ -218,26 +218,26 @@ export default function Home() {
             面试驾到
           </div>
 
-          <div className="absolute left-1/2 -translate-x-1/2 hidden lg:flex items-center gap-8">
-            <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+          <div className="absolute left-1/2 -translate-x-1/2 hidden lg:flex items-center gap-3 lg:gap-5 xl:gap-8 whitespace-nowrap">
+            <a onClick={() => router.push("/debugger")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               面试调试器
             </a>
-            <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/memory")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               职业记忆看板
             </a>
-            <a onClick={() => router.push("/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/training")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               面试训练场
             </a>
-            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/home")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               职业驾驶舱
             </a>
-            <a onClick={() => router.push("/guide")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/guide")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               面试指南
             </a>
-            <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => router.push("/feedback")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               体验反馈中心
             </a>
-            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[16px] md:text-[17px] font-extrabold cursor-pointer">
+            <a onClick={() => window.open("/helper", "_blank")} className="text-on-surface-variant hover:text-on-surface transition-colors text-[15px] lg:text-[16px] xl:text-[17px] font-extrabold cursor-pointer whitespace-nowrap shrink-0">
               帮助中心
             </a>
           </div>
@@ -736,19 +736,19 @@ export default function Home() {
               <ul className="space-y-5 mb-10 flex-1 font-semibold text-left max-w-xl mx-auto w-full">
                 <li className="flex items-center gap-3 text-base text-on-surface">
                   <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">2 次</span> 面试录音分析（一次性）</span>
+                  <span><span className="text-tertiary font-black">2 次</span> 面试录音分析</span>
                 </li>
                 <li className="flex items-center gap-3 text-base text-on-surface">
                   <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">5 次</span> 面试记录分析（一次性）</span>
+                  <span><span className="text-tertiary font-black">5 次</span> 面试记录分析</span>
                 </li>
                 <li className="flex items-center gap-3 text-base text-on-surface">
                   <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">5 次</span> 简历分析（一次性）</span>
+                  <span><span className="text-tertiary font-black">5 次</span> 简历分析</span>
                 </li>
                 <li className="flex items-center gap-3 text-base text-on-surface">
                   <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">20 分钟</span> AI 模拟面试（一次性）</span>
+                  <span><span className="text-tertiary font-black">20 分钟</span> AI 模拟面试</span>
                 </li>
                 <li className="flex items-center gap-3 text-base text-on-surface">
                   <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>

@@ -237,7 +237,7 @@ export default function GrowthCurveChart({
   // ── 空状态 ─────────────────────────────────────────
   if (total === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-xs text-on-surface-variant/50 font-semibold select-none">
+      <div className="flex items-center justify-center w-full h-full min-h-[220px] text-base text-on-surface-variant/50 font-semibold select-none text-center">
         暂无面试分析数据
       </div>
     );

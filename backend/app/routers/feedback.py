@@ -39,95 +39,6 @@ def truncate_name(name: str) -> str:
     return name
 
 
-async def check_and_seed_feedbacks(db: AsyncSession):
-    # Check if empty
-    res = await db.execute(select(models.Feedback))
-    if res.scalars().first() is not None:
-        return
-
-    # Seed mock data
-    mock_data = [
-        {
-            "title": "希望增加面试问题的难度选择",
-            "description": "在模拟面试时，可以根据求职者的经验和目标岗位选择初级、中级、高级难度",
-            "author_name": "张同学",
-            "type": "功能建议",
-            "upvotes": 128,
-            "comments": [
-                {"author_name": "张同学", "avatar": "/debugger-2.jpg", "content": "同感，目前直接给的难度有些时候太难了。"},
-                {"author_name": "李同学", "avatar": "/debugger-1.jpg", "content": "希望能快点上线这个功能，特别需要！"},
-                {"author_name": "王同学", "avatar": "/debugger-2.jpg", "content": "高级难度的深度最好能对标大厂的专家级架构面试。"}
-            ]
-        },
-        {
-            "title": "AI 回答分析有时不够准确",
-            "description": "在分析我的回答时，有些技术点没有识别出来，希望优化识别算法",
-            "author_name": "李同学",
-            "type": "问题反馈",
-            "upvotes": 96,
-            "comments": [
-                {"author_name": "周同学", "avatar": "/debugger-1.jpg", "content": "对的，特别是涉及特定冷门技术框架时，AI会解释偏。"},
-                {"author_name": "吴同学", "avatar": "/debugger-2.jpg", "content": "希望能够自定义专业名词库，让 AI 更好地针对性分析。"}
-            ]
-        },
-        {
-            "title": "希望支持更多行业的面试题库",
-            "description": "目前主要是互联网行业，希望增加金融、制造业等行业的题库",
-            "author_name": "王同学",
-            "type": "功能建议",
-            "upvotes": 78,
-            "comments": [
-                {"author_name": "郑同学", "avatar": "/debugger-2.jpg", "content": "想看金融量化分析岗位的面试题！"},
-                {"author_name": "孙同学", "avatar": "/debugger-1.jpg", "content": "制造业的项目管理 and 质量控制面试题也希望能涵盖。"}
-            ]
-        },
-        {
-            "title": "界面可以更简洁一些",
-            "description": "部分页面信息有点多，希望可以优化布局，突出重点内容",
-            "author_name": "陈同学",
-            "type": "体验优化",
-            "upvotes": 65,
-            "comments": [
-                {"author_name": "胡同学", "avatar": "/debugger-1.jpg", "content": "确实，第一次用稍微找了一下入口。"},
-                {"author_name": "林同学", "avatar": "/debugger-2.jpg", "content": "总览看板 of 视觉可以做得更有科技感、呼吸感一些。"}
-            ]
-        },
-        {
-            "title": "希望增加简历优化的具体建议",
-            "description": "简历分析结果太笼统，希望能给出更具体的优化建议",
-            "author_name": "赵同学",
-            "type": "功能建议",
-            "upvotes": 42,
-            "comments": [
-                {"author_name": "马同学", "avatar": "/debugger-2.jpg", "content": "非常赞同，现在的修改建议偏话术，缺具体的技术项目提炼。"},
-                {"author_name": "朱同学", "avatar": "/debugger-1.jpg", "content": "希望可以直接给出修改前后的对比段落样例。"}
-            ]
-        }
-    ]
-
-    for item in mock_data:
-        fb = models.Feedback(
-            title=item["title"],
-            description=item["description"],
-            author_name=item["author_name"],
-            type=item["type"],
-            upvotes=item["upvotes"]
-        )
-        db.add(fb)
-        await db.flush()  # to get fb.id
-        
-        for c in item["comments"]:
-            comment = models.FeedbackComment(
-                feedback_id=fb.id,
-                author_name=c["author_name"],
-                author_avatar=c["avatar"],
-                content=c["content"]
-            )
-            db.add(comment)
-
-    await db.commit()
-
-
 @router.get("", response_model=schemas.FeedbackListResponse)
 async def list_feedbacks(
     type: Optional[str] = None,
@@ -139,7 +50,6 @@ async def list_feedbacks(
     current_user: Optional[models.User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db)
 ):
-    await check_and_seed_feedbacks(db)
     from sqlalchemy import func, or_
 
     # Build query

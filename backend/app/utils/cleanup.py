@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import models
 from app.config import settings
 from app.database import async_session
-from app.routers.file import delete_file_from_storage
+from app.routers.file import get_cos_client
+from app.routers.file import bucket as cos_bucket
 
 logger = logging.getLogger(__name__)
 
@@ -198,37 +199,34 @@ async def find_expired_files(db: AsyncSession) -> list[models.UploadedFile]:
         select(models.UploadedFile)
         .outerjoin(models.User, models.UploadedFile.user_id == models.User.id)
         .where(
-            or_(
-                # 访客没有登录 -> 不保存，立即删除
-                models.UploadedFile.user_id.is_(None),
-                # 用户当前未在线/未登录 (is_online 为 False) -> 不保存，立即删除
-                and_(
-                    models.UploadedFile.user_id.is_not(None),
-                    models.User.is_online.is_(False),
-                ),
-                # 已登录且在线的免费用户 (membership IS NULL) -> 免费档
-                and_(
-                    models.User.is_online.is_(True),
-                    models.User.membership.is_(None),
-                    models.UploadedFile.created_at < free_cutoff,
-                ),
-                # 已登录且在线的内测档用户 (membership = "test") -> 内测档 30 天
-                and_(
-                    models.User.is_online.is_(True),
-                    models.User.membership == "test",
-                    models.UploadedFile.created_at < test_cutoff,
-                ),
-                # 已登录且在线的 Pro 用户
-                and_(
-                    models.User.is_online.is_(True),
-                    models.User.membership == "pro",
-                    models.UploadedFile.created_at < pro_cutoff,
-                ),
-                # 已登录且在线的 Max 用户
-                and_(
-                    models.User.is_online.is_(True),
-                    models.User.membership == "max",
-                    models.UploadedFile.created_at < max_cutoff,
+            # 反馈截图 (screenshot) 不参与自动清理 —— 仅随用户主动删除反馈时同步清除
+            # cos_key != '' 跳过已被清理过的行,避免下一轮 sweep 重复打 COS
+            and_(
+                models.UploadedFile.file_type != "screenshot",
+                models.UploadedFile.cos_key != "",
+                or_(
+                    # 访客没有登录 -> 不保存，立即删除
+                    models.UploadedFile.user_id.is_(None),
+                    # 免费用户 (membership IS NULL) -> 免费档
+                    and_(
+                        models.User.membership.is_(None),
+                        models.UploadedFile.created_at < free_cutoff,
+                    ),
+                    # 内测档用户 (membership = "test") -> 内测档 30 天
+                    and_(
+                        models.User.membership == "test",
+                        models.UploadedFile.created_at < test_cutoff,
+                    ),
+                    # Pro 用户
+                    and_(
+                        models.User.membership == "pro",
+                        models.UploadedFile.created_at < pro_cutoff,
+                    ),
+                    # Max 用户
+                    and_(
+                        models.User.membership == "max",
+                        models.UploadedFile.created_at < max_cutoff,
+                    ),
                 ),
             )
         )
@@ -253,15 +251,25 @@ async def cleanup_expired_files() -> int:
         deleted = 0
         for db_file in expired:
             try:
-                await delete_file_from_storage(db, db_file)
+                # 仅删 COS 对象,DB 行保留(下游 session / feedback / analysis
+                # 仍按字符串 url 引用,清行会留下孤儿引用)。删完后把 cos_key
+                # 置空,下一轮 sweep 通过 cos_key != '' 过滤自动跳过。
+                client = get_cos_client()
+                await asyncio.to_thread(
+                    client.delete_object,
+                    Bucket=cos_bucket,
+                    Key=db_file.cos_key,
+                )
+                db_file.cos_key = ""
+                await db.commit()
                 deleted += 1
                 logger.info(
-                    "已清理过期文件 file_id=%s user_id=%s cos_key=%s",
-                    db_file.id, db_file.user_id, db_file.cos_key,
+                    "已清 COS 文件 (DB 行保留) file_id=%s user_id=%s",
+                    db_file.id, db_file.user_id,
                 )
             except Exception:
                 logger.exception("删除过期文件失败 file_id=%s", db_file.id)
-        logger.info("文件清理任务完成，共删除 %s 条", deleted)
+        logger.info("文件清理任务完成，共清 %s 条 COS 对象", deleted)
         return deleted
 
 
