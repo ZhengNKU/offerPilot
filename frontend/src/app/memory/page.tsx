@@ -539,7 +539,7 @@ export default function CareerMemoryDashboard() {
     }
     setIsLoadingAdvisorInsights(true);
     try {
-      const res = await fetch("http://localhost:8001/api/counselor/advisor-insights", {
+      const res = await fetch(`${API_BASE}/api/counselor/advisor-insights`, {
         headers: {
           "Authorization": `Bearer ${token}`
         }
@@ -690,7 +690,7 @@ export default function CareerMemoryDashboard() {
     }
 
     try {
-      const res = await fetch("http://localhost:8001/api/memory/knowledge/questions", {
+      const res = await fetch(`${API_BASE}/api/memory/knowledge/questions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -779,7 +779,7 @@ export default function CareerMemoryDashboard() {
     if (!auth.isLoggedIn || !token) return;
     setIsLoadingAbilities(true);
     try {
-      const res = await fetch("http://localhost:8001/api/memory/knowledge/abilities", {
+      const res = await fetch(`${API_BASE}/api/memory/knowledge/abilities`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {

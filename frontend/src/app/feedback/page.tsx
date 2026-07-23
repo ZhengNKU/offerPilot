@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
+import { API_BASE } from "@/lib/api";
 
 const buildPageList = (cur: number, total: number): (number | "…")[] => {
   if (total <= 1) return [1];
@@ -206,7 +207,7 @@ export default function FeedbackPage() {
       if (token) {
         headers["Authorization"] = `Bearer ${token}`;
       }
-      let url = `http://localhost:8001/api/feedback?sort=${sortBy}&page=${currentPage}&page_size=10`;
+      let url = `${API_BASE}/api/feedback?sort=${sortBy}&page=${currentPage}&page_size=10`;
       if (activeTab === "我的反馈") {
         url += `&user_only=true`;
       } else if (activeTab !== "全部") {
@@ -271,7 +272,7 @@ export default function FeedbackPage() {
       }
 
       if (deleteTarget === "batch") {
-        const res = await fetch("http://localhost:8001/api/feedback/batch-delete", {
+        const res = await fetch(`${API_BASE}/api/feedback/batch-delete`, {
           method: "POST",
           headers,
           body: JSON.stringify({ ids: selectedIds }),
@@ -283,7 +284,7 @@ export default function FeedbackPage() {
           auth.triggerToast("批量删除失败", "error");
         }
       } else if (typeof deleteTarget === "number") {
-        const res = await fetch(`http://localhost:8001/api/feedback/${deleteTarget}`, {
+        const res = await fetch(`${API_BASE}/api/feedback/${deleteTarget}`, {
           method: "DELETE",
           headers,
         });
@@ -317,7 +318,7 @@ export default function FeedbackPage() {
     }
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
-      const res = await fetch(`http://localhost:8001/api/feedback/${id}/vote`, {
+      const res = await fetch(`${API_BASE}/api/feedback/${id}/vote`, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${token}`
@@ -370,7 +371,7 @@ export default function FeedbackPage() {
     setIsSubmitting(true);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
-      const res = await fetch("http://localhost:8001/api/feedback", {
+      const res = await fetch(`${API_BASE}/api/feedback`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -456,7 +457,7 @@ export default function FeedbackPage() {
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
 
     const xhr = new XMLHttpRequest();
-    xhr.open("POST", "http://localhost:8001/api/file/upload");
+    xhr.open("POST", `${API_BASE}/api/file/upload`);
     if (token) {
       xhr.setRequestHeader("Authorization", `Bearer ${token}`);
     }
@@ -525,7 +526,7 @@ export default function FeedbackPage() {
     setIsAddingComment(true);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
-      const res = await fetch(`http://localhost:8001/api/feedback/${selectedFeedback.id}/comment`, {
+      const res = await fetch(`${API_BASE}/api/feedback/${selectedFeedback.id}/comment`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -594,7 +595,7 @@ export default function FeedbackPage() {
     if (!selectedFeedback) return;
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
-      const res = await fetch(`http://localhost:8001/api/feedback/comment/${commentId}/pin?is_pinned=${isPinned}`, {
+      const res = await fetch(`${API_BASE}/api/feedback/comment/${commentId}/pin?is_pinned=${isPinned}`, {
         method: "PUT",
         headers: {
           "Authorization": `Bearer ${token}`
@@ -660,7 +661,7 @@ export default function FeedbackPage() {
     setIsAddingComment(true);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
-      const res = await fetch(`http://localhost:8001/api/feedback/${selectedFeedback.id}/comment`, {
+      const res = await fetch(`${API_BASE}/api/feedback/${selectedFeedback.id}/comment`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -747,7 +748,7 @@ export default function FeedbackPage() {
     setIsDeletingComment(true);
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
-      const res = await fetch(`http://localhost:8001/api/feedback/comment/${commentId}`, {
+      const res = await fetch(`${API_BASE}/api/feedback/comment/${commentId}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${token}`
@@ -807,7 +808,7 @@ export default function FeedbackPage() {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
       const idsArray = Array.from(selectedCommentIds);
-      const res = await fetch(`http://localhost:8001/api/feedback/comment/batch`, {
+      const res = await fetch(`${API_BASE}/api/feedback/comment/batch`, {
         method: "DELETE",
         headers: {
           "Content-Type": "application/json",

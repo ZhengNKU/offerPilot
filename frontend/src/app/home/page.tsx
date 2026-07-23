@@ -362,7 +362,7 @@ export default function CareerDashboard() {
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
       if (!token) return { rate: null, pending: false };
-      const res = await fetch("http://localhost:8001/api/auth/match-rate", {
+      const res = await fetch(`${API_BASE}/api/auth/match-rate`, {
         method: "GET",
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -405,7 +405,7 @@ export default function CareerDashboard() {
         try {
           const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
           if (token) {
-            await fetch("http://localhost:8001/api/auth/match-rate?force_rules=true", {
+            await fetch(`${API_BASE}/api/auth/match-rate?force_rules=true`, {
               method: "GET",
               headers: { Authorization: `Bearer ${token}` }
             });

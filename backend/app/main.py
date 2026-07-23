@@ -135,6 +135,11 @@ app.add_middleware(
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://124.223.185.108",
+        # 生产域名（http 用于备案期 ip 直连测试，https 用于域名访问）
+        "http://interviewvar.com",
+        "https://interviewvar.com",
+        "http://www.interviewvar.com",
+        "https://www.interviewvar.com",
     ],
     allow_credentials=True,
     allow_methods=["*"],

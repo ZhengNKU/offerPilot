@@ -3,12 +3,15 @@ from pydantic import model_validator
 
 class Settings(BaseSettings):
     PROJECT_VERSION: str = "V0.0.0"
-    DATABASE_URL: str = "postgresql+asyncpg://offerpilot:offerPilot%402026@localhost:5432/offerpilot"
-    REDIS_URL: str = "redis://:offerPilot%402026@localhost:6379/0"
+    DATABASE_URL: str = "postgresql+asyncpg://offerpilot:offerPilot%402026@postgres:5432/offerpilot"
+    REDIS_URL: str = "redis://:offerPilot%402026@redis:6379/0"
     
     JWT_SECRET: str = "super-secret-key-change-me"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+
+    # ── 对外可访问的 base URL ──
+    PUBLIC_BASE_URL: str = ""
     
     TENCENT_SECRET_ID: str = ""
     TENCENT_SECRET_KEY: str = ""

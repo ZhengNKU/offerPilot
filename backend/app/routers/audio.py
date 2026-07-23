@@ -889,9 +889,13 @@ async def upload_audio(
         )
 
     # Save the session with optional user association
+    from app.config import settings as _settings
+    base = (_settings.PUBLIC_BASE_URL or "").rstrip("/")
+    audio_url = f"{base}/uploads/{uuid.uuid4()}_{file.filename}" if base else f"/uploads/{uuid.uuid4()}_{file.filename}"
+
     session = models.InterviewSession(
         user_id=current_user.id if current_user else None,
-        audio_url=f"http://localhost:8000/static/uploads/{uuid.uuid4()}_{file.filename}",
+        audio_url=audio_url,
         duration=1822, # Simulated 30 mins
         file_size=file.size or 0,
         status="uploaded"

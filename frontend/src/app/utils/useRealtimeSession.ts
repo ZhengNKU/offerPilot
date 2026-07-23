@@ -58,7 +58,7 @@ export interface StartOpts {
   liveId: number;
   wsPath: string;
   token: string;
-  apiBase?: string; // 默认 http://localhost:8001
+  apiBase?: string; // 默认取 lib/api 中的 API_BASE
   /** 收到服务端 tts_audio 二进制帧时回调（火山 24kHz/mono PCM16） */
   onAudioFrame?: (pcm16: ArrayBuffer) => void;
   /**

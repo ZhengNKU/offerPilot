@@ -376,7 +376,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const isLoginAttempt = url.includes("/api/auth/login") ||
           url.includes("/api/auth/send-code");
         if (isApi && !isLoginAttempt && res.status === 401) {
-          forceLogoutDueToEviction();
+          // 不是所有 401 都是"被踢"
+          let isRealEviction = true;
+          try {
+            const cloned = res.clone();
+            const body = await cloned.json().catch(() => null);
+            const detail: unknown = body?.detail;
+            if (typeof detail === "string") {
+              isRealEviction =
+                detail.includes("Token已废弃") ||
+                detail.includes("会话无效") ||
+                detail.includes("已在其他设备");
+            }
+          } catch {
+            // 解析 body 失败就保守按真被踢处理（保持旧的 fail-closed 行为）
+          }
+          if (isRealEviction) {
+            forceLogoutDueToEviction();
+          }
         }
       } catch {
         // 解析 URL 失败不影响正常响应返回
