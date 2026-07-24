@@ -928,9 +928,8 @@ export default function CareerDashboard() {
                 {/* Circular Quota meters in 2x2 grids */}
                 <div className="grid grid-cols-2 gap-3.5 flex-1 items-center">
                   {(() => {
-                    // 内测版本：fallback 统一用 test 档额度（2 / 5 / 5 / 20 分钟），
-                    // 避免未登录或接口异常时回退到 FREE 1 次让用户误以为额度极小。
-                    const TEST_QUOTA = { audio: 2, record: 5, resume: 5, live: 20 };
+                    // fallback 统一用 test 档额度，避免接口异常时显示 0
+                    const TEST_QUOTA = { audio: 2, record: 3, resume: 3, live: 10 };
                     const audioRemaining = quotaStatus?.audio?.remaining ?? TEST_QUOTA.audio;
                     const audioTotal = quotaStatus?.audio?.max ?? TEST_QUOTA.audio;
 
@@ -976,10 +975,10 @@ export default function CareerDashboard() {
                             </div>
                           </div>
                           <div className="text-left min-w-0 flex-1">
-                            <span className="text-[12px] text-white font-black block truncate leading-none">{quota.label}</span>
-                            <span className="text-[10px] text-on-surface-variant/30 font-bold block mt-1 scale-90 -ml-1">剩余额度</span>
-                            <span className="text-[13.5px] font-black text-white block mt-0.5 font-label-mono whitespace-nowrap">
-                              {quota.remaining} <span className="text-on-surface-variant/35 font-normal text-[10px]">/ {quota.total}{quota.unit}</span>
+                            <span className="text-sm text-white font-black block truncate leading-none">{quota.label}</span>
+                            <span className="text-xs text-on-surface-variant/30 font-bold block mt-1 scale-90 -ml-1">剩余额度</span>
+                            <span className="text-xs font-black text-white block mt-0.5 font-label-mono whitespace-nowrap">
+                              {quota.remaining} <span className="text-on-surface-variant/35 font-normal text-xs">/ {quota.total}{quota.unit}</span>
                             </span>
                           </div>
                         </div>
@@ -1108,7 +1107,7 @@ export default function CareerDashboard() {
                       </div>
                       <div className="min-w-0">
                         <span className="text-sm font-black text-white block group-hover:text-primary transition-colors leading-snug">{act.label}</span>
-                        <span className="text-[10px] text-on-surface-variant/30 font-bold block truncate mt-1">{act.sub}</span>
+                        <span className="text-xs text-on-surface-variant/30 font-bold block truncate mt-1">{act.sub}</span>
                       </div>
                     </button>
                   ))}

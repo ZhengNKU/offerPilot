@@ -79,10 +79,8 @@ class SessionDetail(BaseModel):
 # ============================================================================
 
 DAILY_LIMIT = {
-    None: 20,    # 免费
-    "test": 100,  # 内测：100 次/天（介于 free 和 pro 之间）
-    "pro": 200,
-    "max": 200,
+    None: 1,     # 免费：1 次/天（≈30次/月）
+    "test": 30,   # 内测：30 次/天；注册起 30 天后过期降级为免费
 }
 
 
@@ -174,11 +172,17 @@ async def chat(
       - error   → {"message": "..."}
     """
     # 1. 速率限制
-    remaining = await _check_rate_limit(redis_client, current_user.id, current_user.membership)
+    # 内测用户超 30 天试用期 → 按免费算
+    eff_membership = current_user.membership
+    if eff_membership and eff_membership.lower() == "test":
+        from app.services.quota import _is_trial_expired
+        if _is_trial_expired(current_user):
+            eff_membership = None
+    remaining = await _check_rate_limit(redis_client, current_user.id, eff_membership)
     if remaining < 0:
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"今日咨询次数已用完（{DAILY_LIMIT.get(current_user.membership, 20)} 次/天），明天再来或升级会员",
+            detail=f"今日咨询次数已用完（{DAILY_LIMIT.get(eff_membership, 20)} 次/天），明天再来或升级会员",
         )
 
     # 2. 获取/创建 session

@@ -39,9 +39,7 @@ router = APIRouter(prefix="/api/live", tags=["Live Interview"])
 MEMBERSHIP_MONTHLY_MINUTES = {
     None: 0,      # 免费用户：0 分钟（不可使用实时模拟面试；只能试文本/录音分析）
     "free": 0,
-    "test": 20,   # 内测用户：20 分钟/月（统一）
-    "pro": 60,    # PRO：60 分钟/月
-    "max": 120,   # MAX：120 分钟/月
+    "test": 10,   # 内测用户：10 分钟/月（统一）；注册起 30 天后过期降级为 0
 }
 
 
@@ -201,7 +199,12 @@ async def create_live_session(
 
     # PR6 定价限额：登录用户按会员等级查当月已用
     if current_user:
-        membership = current_user.membership  # NULL/None/'pro'/'max'
+        membership = current_user.membership  # NULL/None/'test'
+        # 内测用户超 30 天试用期 → 降级为免费（0 分钟）
+        if membership and membership.lower() == "test":
+            from app.services.quota import _is_trial_expired
+            if _is_trial_expired(current_user):
+                membership = None
         limit_min = MEMBERSHIP_MONTHLY_MINUTES.get(membership, 0)
         if limit_min <= 60:  # 不超过 60 的才有"分钟"语义；>60 视为不限
             now = datetime.now(timezone.utc).replace(tzinfo=None)  # DB 用 naive

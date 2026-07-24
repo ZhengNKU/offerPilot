@@ -293,7 +293,7 @@ async def _seed_admin_account():
                 admin = models.User(
                     username="admin",
                     password_hash=hashed_pwd,
-                    membership="max",
+                    membership="test",
                     is_online=False
                 )
                 db.add(admin)

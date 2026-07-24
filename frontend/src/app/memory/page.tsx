@@ -2689,7 +2689,7 @@ export default function CareerMemoryDashboard() {
                           })
                         ) : (
                           <div className="py-12 text-center w-full">
-                            <span className="material-symbols-outlined text-4xl text-on-surface-variant/35 mb-2 block">
+                            <span className="material-symbols-outlined !text-4xl text-on-surface-variant/35 mb-2 block">
                               folder_open
                             </span>
                             <p className="text-base text-on-surface-variant/50">未找到符合搜索条件的面试分析历史记录。</p>

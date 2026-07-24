@@ -40,7 +40,7 @@ function NewAnalysisDebuggerContent() {
   const [isUploading, setIsUploading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const [remainingCount, setRemainingCount] = useState<number | "unlimited" | null>(null);
+  const [remainingCount, setRemainingCount] = useState<number | null>(null);
 
   // 内测版本：删除 PricingModal 相关 state（付费功能屏蔽后不再需要）
   // const [showUpgradeModal, setShowUpgradeModal] = useState(false);
@@ -84,10 +84,6 @@ function NewAnalysisDebuggerContent() {
     if (!status) {
       // 接口失败时按 test 档额度兜底，避免误显示为 FREE 1 次
       setRemainingCount(TEST_QUOTA[feature] ?? 1);
-      return;
-    }
-    if (status.membership === "max") {
-      setRemainingCount("unlimited");
       return;
     }
     setRemainingCount(status[feature]?.remaining ?? 0);
@@ -309,7 +305,7 @@ function NewAnalysisDebuggerContent() {
     const hasAnalyzedKey = `interviewVar_analyzed_${activeMode}`;
     if (!auth.isLoggedIn) {
       if (localStorage.getItem(hasAnalyzedKey) === "true") {
-        auth.triggerToast("您的该项分析免费体验次数已达上限，请注册账号并升级至 PRO 会员解锁更多分析！", "error");
+        auth.triggerToast("您的该项分析免费体验次数已达上限，请注册或登录后使用更多功能！", "error");
         return;
       }
     } else {
@@ -337,7 +333,7 @@ function NewAnalysisDebuggerContent() {
           const isTestUser = status.membership === "test";
           const detail = isTestUser
             ? `您的内测${featureLabel}额度已用完（一次性），内测期间无重置，敬请期待正式版！`
-            : `您已使用过${featureLabel}的免费体验（永久 1 次），请升级至 PRO 会员解锁更多！`;
+            : `您已使用过${featureLabel}的免费体验，剩余次数不足，敬请期待后续更多功能！`;
           auth.triggerToast(detail, "error");
           return;
         }
@@ -908,17 +904,11 @@ function NewAnalysisDebuggerContent() {
 
                 {remainingCount !== null && (
                   <div className={`px-3.5 py-1.5 rounded font-label-mono text-sm font-bold uppercase transition-all duration-300 ${
-                    remainingCount === "unlimited"
-                      ? "bg-tertiary/10 border border-tertiary/20 text-tertiary"
-                      : remainingCount === 0
+                    remainingCount === 0
                       ? "bg-secondary/10 border border-secondary/20 text-secondary"
                       : "bg-primary/10 border border-primary/20 text-primary animate-pulse"
                   }`}>
-                    {remainingCount === "unlimited"
-                      ? "MAX会员：无限体验"
-                      : auth.user?.membership === "pro"
-                      ? `PRO会员 · 剩余体验：${remainingCount}次`
-                      : auth.user?.membership === "test"
+                    {auth.user?.membership === "test"
                       ? `内测档 · 剩余体验：${remainingCount}次`
                       : `免费体验剩余：${remainingCount}次`}
                   </div>
@@ -1172,12 +1162,8 @@ function NewAnalysisDebuggerContent() {
               {!auth.isLoggedIn
                 ? "登录后即可把本次面试分析记录安全保存到云端，持续追踪每一次成长。"
                 : auth.user?.membership === "test"
-                ? "内测体验版已为你解锁 2 次录音分析 / 5 次记录分析 / 5 次简历分析 / 20 分钟 AI 模拟面试。一次性额度，用完即止。"
-                : auth.user?.membership === "max"
-                ? "MAX 档已解锁全部无限分析额度与特权功能。"
-                : auth.user?.membership === "pro"
-                ? "PRO 档已解锁 30 天内 10 次录音/记录/简历分析 + 5 次 AI 模拟面试 + 60 分钟/月实时面试。"
-                : "免费版仅可使用 1 次录音分析 / 1 次记录分析 / 1 次简历分析。"}
+                ? "内测体验版已为你解锁 2 次录音分析 / 3 次记录分析 / 3 次简历分析 / 10 分钟 AI 模拟面试。一次性额度，用完即止。"
+                : "免费版仅可使用 1 次简历分析 / 1 次面试记录分析。"}
             </p>
           </div>
 

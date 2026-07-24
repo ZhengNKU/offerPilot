@@ -16,7 +16,7 @@ class User(Base):
     phone: Mapped[Optional[str]] = mapped_column(String(20), unique=True, nullable=True, index=True)
     email: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True, index=True)
     is_online: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # 会员等级: NULL=免费, "pro", "max"。决定文件保留时长。
+    # 会员等级: NULL=免费, "test"=内测。PRO/MAX 暂未上线。
     membership: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

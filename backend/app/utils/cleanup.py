@@ -178,10 +178,6 @@ async def run_periodic_log_cleanup():
 
 def _retention_days_for(membership: str | None) -> int:
     """根据会员等级返回对应的文件保留天数。免费档包括未登录访客。"""
-    if membership == "max":
-        return settings.FILE_RETENTION_DAYS_MAX
-    if membership == "pro":
-        return settings.FILE_RETENTION_DAYS_PRO
     if membership == "test":
         return settings.FILE_RETENTION_DAYS_TEST
     return settings.FILE_RETENTION_DAYS_FREE
@@ -192,8 +188,6 @@ async def find_expired_files(db: AsyncSession) -> list[models.UploadedFile]:
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     free_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_FREE)
     test_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_TEST)
-    pro_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_PRO)
-    max_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_MAX)
 
     stmt = (
         select(models.UploadedFile)
@@ -207,25 +201,15 @@ async def find_expired_files(db: AsyncSession) -> list[models.UploadedFile]:
                 or_(
                     # 访客没有登录 -> 不保存，立即删除
                     models.UploadedFile.user_id.is_(None),
-                    # 免费用户 (membership IS NULL) -> 免费档
+                    # 免费用户 (membership IS NULL / "free") -> 免费档 30 天
                     and_(
                         models.User.membership.is_(None),
                         models.UploadedFile.created_at < free_cutoff,
                     ),
-                    # 内测档用户 (membership = "test") -> 内测档 30 天
+                    # 内测档用户 (membership = "test") -> 内测档 60 天
                     and_(
                         models.User.membership == "test",
                         models.UploadedFile.created_at < test_cutoff,
-                    ),
-                    # Pro 用户
-                    and_(
-                        models.User.membership == "pro",
-                        models.UploadedFile.created_at < pro_cutoff,
-                    ),
-                    # Max 用户
-                    and_(
-                        models.User.membership == "max",
-                        models.UploadedFile.created_at < max_cutoff,
                     ),
                 ),
             )

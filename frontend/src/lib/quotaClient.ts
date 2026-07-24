@@ -1,13 +1,9 @@
 /**
  * 配额客户端 —— 后端 GET /api/audio/quota/status 的前端封装。
  *
- * 替代旧的 /api/audio/check_limit：旧接口只回答"非会员是否还有 1 次免费"，
- * 新接口返回结构化的 {used, max, remaining}，覆盖 audio/record/resume 三个功能。
- *
+ * PRO/MAX 暂未上线（2026-07-24），toDisplayRemaining 不再返回 "unlimited"。
  * UI 适配提示：
- *   - PRO/MAX 仍然可以传 "unlimited" 给显示层（虽然有 10/30 次上限，但相对
- *     用户认知来说等同于无限）
- *   - remaining <= 0 时调用方应触发升级弹窗 + 阻止操作继续
+ *   - remaining <= 0 时调用方应阻止操作继续
  */
 import { API_BASE } from "@/lib/api";
 
@@ -20,7 +16,6 @@ export type FeatureQuota = {
 };
 
 export type QuotaStatus = {
-  // 内测版本（2026-07-18+）：新增 "test" 档，所有内测用户默认 test 档
   membership: "free" | "test" | "pro" | "max";
   audio: FeatureQuota;
   record: FeatureQuota;
@@ -43,15 +38,11 @@ export async function getQuotaStatus(): Promise<QuotaStatus | null> {
   }
 }
 
-/** 把 remaining 转为 UI 层习惯的 number | "unlimited" 表示。 */
+/** 把 remaining 转为 UI 层习惯的 number 表示。PRO/MAX 暂未上线，不再返回 "unlimited"。 */
 export function toDisplayRemaining(
   status: QuotaStatus | null,
   feature: Feature,
-): number | "unlimited" {
+): number {
   if (!status) return 1; // 网络失败默认乐观显示 1 次
-  // 内测版本：test 档按真实次数显示（不视为 unlimited）
-  if (status.membership === "max") {
-    return "unlimited";
-  }
   return status[feature]?.remaining ?? 0;
 }

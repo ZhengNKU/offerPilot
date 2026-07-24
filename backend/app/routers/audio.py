@@ -1262,7 +1262,7 @@ async def quota_status(
 
     返回结构：
       {
-        "membership": "free" | "pro" | "max",
+        "membership": "free" | "test",
         "audio":   {"used": N, "max": N, "remaining": N},
         "record":  {"used": N, "max": N, "remaining": N},
         "resume":  {"used": N, "max": N, "remaining": N}

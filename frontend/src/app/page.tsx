@@ -740,19 +740,19 @@ export default function Home() {
                 </li>
                 <li className="flex items-center gap-3 text-base text-on-surface">
                   <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">5 次</span> 面试记录分析</span>
+                  <span><span className="text-tertiary font-black">3 次</span> 面试记录分析</span>
                 </li>
                 <li className="flex items-center gap-3 text-base text-on-surface">
                   <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">5 次</span> 简历分析</span>
+                  <span><span className="text-tertiary font-black">3 次</span> 简历分析</span>
                 </li>
                 <li className="flex items-center gap-3 text-base text-on-surface">
                   <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">20 分钟</span> AI 模拟面试</span>
+                  <span><span className="text-tertiary font-black">10 分钟</span> AI 模拟面试</span>
                 </li>
                 <li className="flex items-center gap-3 text-base text-on-surface">
                   <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span>100 次/天 AI 职业顾问</span>
+                  <span>30 次/天 AI 职业顾问</span>
                 </li>
               </ul>
 

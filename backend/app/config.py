@@ -119,12 +119,10 @@ class Settings(BaseSettings):
     LIVE_HEARTBEAT_INTERVAL_S: int = 15
     LIVE_WS_TOKEN_EXPIRE_MIN: int = 60
 
-    # 文件保留策略（按会员等级），单位：天。
-    # 内测档 test 30 天；免费档 7 天给未来非内测用户保留；pro/max 是付费档保留策略。
-    FILE_RETENTION_DAYS_TEST: int = 30
-    FILE_RETENTION_DAYS_FREE: int = 7
-    FILE_RETENTION_DAYS_PRO: int = 30
-    FILE_RETENTION_DAYS_MAX: int = 120
+    # 文件保留策略，单位：天。
+    # 内测档 test 60 天；免费档 30 天。PRO/MAX 暂未上线。
+    FILE_RETENTION_DAYS_TEST: int = 60
+    FILE_RETENTION_DAYS_FREE: int = 30
     # 过期文件清理任务运行周期，单位：小时
     FILE_CLEANUP_INTERVAL_HOURS: int = 24
 
@@ -153,12 +151,12 @@ class Settings(BaseSettings):
     #   "record"  —— 面试记录分析（粘贴文本或重跑已有 session）
     #   "resume"  —— 简历分析
     QUOTA_WINDOW_DAYS: int = 30
-    QUOTA_FREE: dict = {"audio": 1, "record": 1, "resume": 1}
+    # 正式上线免费档：录音 0（关闭）/ 记录 1 / 简历 1
+    QUOTA_FREE: dict = {"audio": 0, "record": 1, "resume": 1}
     # 内测版本统一为 test 档（2026-07-18+）：所有内测用户（包括 admin）均为 test
-    # 内测额度：面试录音分析 2 次 / 面试记录分析 5 次 / 简历分析 5 次 / 模拟面试 20 分钟（live.py MEMBERSHIP_MONTHLY_MINUTES）
-    QUOTA_TEST: dict = {"audio": 2, "record": 5, "resume": 5}
-    QUOTA_PRO:  dict = {"audio": 10, "record": 10, "resume": 10}
-    QUOTA_MAX:  dict = {"audio": 30, "record": 30, "resume": 30}
+    # 内测额度：面试录音分析 2 次 / 面试记录分析 3 次 / 简历分析 3 次 / 模拟面试 10 分钟（live.py MEMBERSHIP_MONTHLY_MINUTES）/ AI 职业顾问 30 次/天（counselor.py DAILY_LIMIT）
+    # 注册起 30 天后自动降级为 FREE 配额（quota.py _is_trial_expired 控制）
+    QUOTA_TEST: dict = {"audio": 2, "record": 3, "resume": 3}
 
     # Aliyun Bailian DASHSCOPE_API_KEY
     DASHSCOPE_API_KEY: str = ""
