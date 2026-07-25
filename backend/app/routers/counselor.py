@@ -240,15 +240,27 @@ async def chat(
             raise
         except Exception as e:
             logger.error(f"[counselor] SSE 顶层异常: {e!r}")
-            yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+            # 2026-07-25+: 统一报错文案
+            try:
+                from app.utils.error_messages import (
+                    FEATURE_COUNSEL as FEATURE_NAME_COUNSEL,
+                    format_failure,
+                )
+                reason = str(e) or "未知原因"
+                if len(reason) > 200:
+                    reason = reason[:200] + "..."
+                user_message = format_failure(FEATURE_NAME_COUNSEL, reason)
+            except Exception:
+                user_message = "AI 职业顾问失败：未知原因"
+            yield f"event: error\ndata: {json.dumps({'message': user_message}, ensure_ascii=False)}\n\n"
             # 兜底写入 failed
             try:
                 sess2 = await db.get(models.CounselorSession, session_id)
                 if sess2:
                     sess2.status = "failed"
                     await db.commit()
-            except Exception:
-                pass
+            except Exception as db_e:
+                logger.error(f"[counselor] 写 failed 状态到 DB 失败 session_id={session_id}: {db_e}")
         finally:
             _stop_signals.pop(session_id, None)
             logger.debug(f"[counselor] stop_signal cleared for session={session_id}, final={final_status['value']}")
@@ -380,10 +392,14 @@ async def get_session(
                     "reasoning_content": "",
                     "created_at": m.created_at.isoformat() if m.created_at else None,
                 })
-        except Exception:
+        except Exception as json_e:
+            logger.warning(
+                f"[counselor] JSON 解析消息失败 session_id={session_id} "
+                f"msg_id={m.id} role={m.role}: {json_e}"
+            )
             frontend_messages.append({
                 "id": m.id,
-                "role": "user",
+                "role": m.role or "user",  # 保留原始 role,不硬编码 user
                 "content": m.content,
                 "citations": m.citations or [],
                 "recalled_chunks": m.recalled_chunks or [],

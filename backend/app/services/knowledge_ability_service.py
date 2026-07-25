@@ -864,7 +864,7 @@ async def trigger_knowledge_generation(user_id: int):
                     db, user_id, sa_list,
                     target_role, target_grade, experience_years,
                     redis_client,
-                    enable_network=False,  # 后台任务关闭联网搜索，避免 web_search 超时阻塞
+                    enable_network=True,  # 知识库高频面试题：联网搜索真实面经再生成
                 )
                 if not result:
                     raise ValueError("question generation returned empty")

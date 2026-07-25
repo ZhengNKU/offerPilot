@@ -44,18 +44,19 @@ export default function InterviewRecordAnalysisPage() {
 
   // Search filter query
   const [searchQuery, setSearchQuery] = useState("");
+  const fetchedSessionIdRef = useRef<string | null>(null);
 
   // Form State
   const [pasteText, setPasteText] = useState("");
   const [metadataForm, setMetadataForm] = useState({
-    company: "字节跳动",
-    role: "后端开发工程师",
-    round: "二面",
-    date: "2025-06-01",
+    company: "",
+    role: "",
+    round: "",
+    date: "",
     grade: "",
-    salary: "35-40K",
-    years: "3-5年",
-    isOnJob: "在职",
+    salary: "",
+    years: "",
+    isOnJob: "",
     jobDescription: ""
   });
 
@@ -331,20 +332,23 @@ export default function InterviewRecordAnalysisPage() {
     }
     const token = localStorage.getItem("interviewVar_token");
 
-    if (savedCompany !== null || savedRole !== null || savedRound !== null || savedJobDescription !== null) {
+    if (savedCompany !== null || savedRole !== null || savedRound !== null || savedDate !== null || savedJobDescription !== null || savedGrade !== null || savedSalary !== null || savedYears !== null) {
       setMetadataForm(prev => ({
         ...prev,
-        company: savedCompany !== null ? savedCompany : prev.company,
-        role: savedRole !== null ? savedRole : prev.role,
-        round: savedRound !== null ? savedRound : prev.round,
-        date: savedDate !== null ? savedDate : prev.date,
-        grade: savedGrade !== null ? savedGrade : prev.grade,
-        salary: savedSalary !== null ? savedSalary : prev.salary,
-        jobDescription: savedJobDescription !== null ? savedJobDescription : prev.jobDescription
+        company: savedCompany ? savedCompany : "",
+        role: savedRole ? savedRole : "",
+        round: savedRound ? savedRound : "",
+        date: savedDate ? savedDate : "",
+        grade: savedGrade ? savedGrade : "",
+        salary: savedSalary ? savedSalary : "",
+        jobDescription: savedJobDescription ? savedJobDescription : ""
       }));
     }
 
     if (sessionId) {
+      if (fetchedSessionIdRef.current === String(sessionId)) return;
+      fetchedSessionIdRef.current = String(sessionId);
+
       setIsLoading(true);
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
@@ -357,6 +361,14 @@ export default function InterviewRecordAnalysisPage() {
           const report = await reportRes.json();
           const sectionsData = await sectionsRes.json();
           setReportData(report);
+          
+          // 2026-07-25+: 后端分析失败时直接报错,不渲染假数据
+          if (report.status === "failed") {
+            auth.triggerToast(report.error_message || "面试记录分析失败，请重试", "error");
+            setIsLoading(false);
+            localStorage.removeItem("interviewVar_session_id");
+            return;
+          }
           
           if (report.job_description) {
             setMetadataForm(prev => ({
@@ -827,12 +839,6 @@ export default function InterviewRecordAnalysisPage() {
 
           <div className="flex items-center gap-4">
             <button
-              onClick={() => router.push("/debugger")}
-              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-base">add</span>新建分析
-            </button>
-            <button
               onClick={() => router.push("/memory?tab=timeline")}
               className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
             >
@@ -1084,36 +1090,36 @@ export default function InterviewRecordAnalysisPage() {
                   <div className="flex justify-between items-center">
                     <span>是否在职</span>
                     <span className="px-2 py-0.5 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/20 text-xs font-extrabold">
-                      {metadataForm.isOnJob || "—"}
+                      {metadataForm.isOnJob && metadataForm.isOnJob.trim() ? metadataForm.isOnJob : (auth.user.status || "-")}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>工作年限</span>
-                    <span className="text-white font-extrabold">{metadataForm.years || "—"}</span>
+                    <span className="text-white font-extrabold">{metadataForm.years && metadataForm.years.trim() ? metadataForm.years : (auth.user.years || "-")}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>面试公司</span>
-                    <span className="text-white font-extrabold">{metadataForm.company || "—"}</span>
+                    <span className="text-white font-extrabold">{metadataForm.company && metadataForm.company.trim() ? metadataForm.company : "-"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>面试岗位</span>
-                    <span className="text-white font-extrabold">{metadataForm.role || "—"}</span>
+                    <span className="text-white font-extrabold">{metadataForm.role && metadataForm.role.trim() ? metadataForm.role : "-"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>面试轮次</span>
-                    <span className="text-white font-extrabold">{metadataForm.round || "—"}</span>
+                    <span className="text-white font-extrabold">{metadataForm.round && metadataForm.round.trim() ? metadataForm.round : "-"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>面试时间</span>
-                    <span className="text-white font-extrabold">{metadataForm.date || "—"}</span>
+                    <span className="text-white font-extrabold">{metadataForm.date && metadataForm.date.trim() ? metadataForm.date : "-"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>岗位职级</span>
-                    <span className="text-white font-extrabold">{metadataForm.grade || "—"}</span>
+                    <span className="text-white font-extrabold">{metadataForm.grade && metadataForm.grade.trim() ? metadataForm.grade : "-"}</span>
                   </div>
                   <div className="flex justify-between items-center">
                     <span>期望薪资</span>
-                    <span className="text-white font-extrabold">{metadataForm.salary || "—"}</span>
+                    <span className="text-white font-extrabold">{metadataForm.salary && metadataForm.salary.trim() ? metadataForm.salary : "-"}</span>
                   </div>
                 </div>
               </div>

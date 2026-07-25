@@ -833,14 +833,21 @@ export default function CareerMemoryDashboard() {
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [selectedProject, setSelectedProject] = useState<any | null>(null);
 
+  const tagsFetchedRef = useRef(false);
+  const fetchingProjectsRef = useRef(false);
+  const fetchingSessionsRef = useRef(false);
+
   const handleDeleteProject = (projectId: number) => {
     handleDeleteClick(`project-${projectId}`);
   };
 
   const fetchSessions = async () => {
+    if (fetchingSessionsRef.current) return;
+    fetchingSessionsRef.current = true;
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
     if (!auth.isLoggedIn || !token) {
       setHistoryItems([]);
+      fetchingSessionsRef.current = false;
       return;
     }
     setIsLoadingHistory(true);
@@ -1009,6 +1016,7 @@ export default function CareerMemoryDashboard() {
     } catch (err) {
       console.error("Failed to fetch history sessions:", err);
     } finally {
+      fetchingSessionsRef.current = false;
       setIsLoadingHistory(false);
     }
   };
@@ -1090,10 +1098,13 @@ export default function CareerMemoryDashboard() {
   };
 
   const fetchProjects = async () => {
+    if (fetchingProjectsRef.current) return;
+    fetchingProjectsRef.current = true;
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
     if (!auth.isLoggedIn || !token) {
       setProjects([]);
       setProjectTotal(0);
+      fetchingProjectsRef.current = false;
       return;
     }
     setIsLoadingProjects(true);
@@ -1111,6 +1122,7 @@ export default function CareerMemoryDashboard() {
       if (res.status === 401) {
         localStorage.removeItem("interviewVar_token");
         auth.logout();
+        fetchingProjectsRef.current = false;
         return;
       }
       if (!res.ok) {
@@ -1121,21 +1133,25 @@ export default function CareerMemoryDashboard() {
       setProjects(data.projects || []);
       setProjectTotal(data.total || 0);
 
-      // Fetch tags (no auth required per backend)
-      try {
-        const tagsRes = await fetch(`${API_BASE}/api/memory/projects/tags`);
-        if (tagsRes.ok) {
-          const tagsData = await tagsRes.json();
-          setProjectCategories([tagsData.categories || [], tagsData.sub_tags || []]);
+      // Fetch tags (only fetch once per page session)
+      if (!tagsFetchedRef.current) {
+        try {
+          const tagsRes = await fetch(`${API_BASE}/api/memory/projects/tags`);
+          if (tagsRes.ok) {
+            const tagsData = await tagsRes.json();
+            setProjectCategories([tagsData.categories || [], tagsData.sub_tags || []]);
+            tagsFetchedRef.current = true;
+          }
+        } catch (tagErr) {
+          console.error("Failed to fetch project tags:", tagErr);
         }
-      } catch (tagErr) {
-        console.error("Failed to fetch project tags:", tagErr);
       }
     } catch (err: any) {
       console.error("Failed to fetch project memory:", err);
       setProjectsError(err.message || "加载项目记忆失败");
       auth.triggerToast("项目记忆加载失败，请刷新重试", "error");
     } finally {
+      fetchingProjectsRef.current = false;
       setIsLoadingProjects(false);
     }
   };
@@ -1184,13 +1200,13 @@ export default function CareerMemoryDashboard() {
 
   const handleViewDetails = (item: SessionHistoryItem) => {
     localStorage.setItem("interviewVar_report_mode", item.type);
-    localStorage.setItem("interviewVar_session_company", item.company);
-    localStorage.setItem("interviewVar_session_role", item.role);
-    localStorage.setItem("interviewVar_session_years", "3-5年");
-    localStorage.setItem("interviewVar_session_round", item.round);
-    localStorage.setItem("interviewVar_session_date", item.date.split(" ")[0]);
-    localStorage.setItem("interviewVar_session_grade", item.type === "resume" ? "L8 / P7" : "P6");
-    localStorage.setItem("interviewVar_session_salary", item.type === "resume" ? "35K-45K" : "35-40K");
+    localStorage.setItem("interviewVar_session_company", item.company && item.company !== "—" ? item.company : "");
+    localStorage.setItem("interviewVar_session_role", item.role && item.role !== "—" ? item.role : "");
+    localStorage.setItem("interviewVar_session_years", auth.user?.years || "");
+    localStorage.setItem("interviewVar_session_round", item.round && item.round !== "—" ? item.round : "");
+    localStorage.setItem("interviewVar_session_date", item.date ? item.date.split(" ")[0] : "");
+    localStorage.removeItem("interviewVar_session_grade");
+    localStorage.removeItem("interviewVar_session_salary");
     localStorage.setItem("interviewVar_viewing_session", "true");
     localStorage.setItem("interviewVar_session_id", item.id);
     localStorage.removeItem("interviewVar_task_id");
@@ -1469,12 +1485,6 @@ export default function CareerMemoryDashboard() {
           </div>
 
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push("/debugger")}
-              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-base">add</span>新建分析
-            </button>
             {auth.isLoggedIn ? (
               <UserMenu />
             ) : (

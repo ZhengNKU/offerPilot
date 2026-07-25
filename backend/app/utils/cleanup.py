@@ -1,3 +1,5 @@
+"""后台清理任务：日志 + 过期文件 + 孤儿 COS 对象。"""
+
 import asyncio
 import glob
 import logging
@@ -6,7 +8,7 @@ import re
 import time
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models
@@ -17,24 +19,14 @@ from app.routers.file import bucket as cos_bucket
 
 logger = logging.getLogger(__name__)
 
-# ────────────────────────────────────────────────────────────────────────────
-#  日志清理（与文件清理分开，独立的轮转节奏）
-# ────────────────────────────────────────────────────────────────────────────
 
-# 不删除当前正在被 TimedRotatingFileHandler 写入的活动日志文件
+# ──────────── 日志清理 ────────────
+
 _PROTECTED_LOG_NAMES = {"backend.log", "backend-error.log"}
-
-# 匹配带日期段后缀的轮转后日志：backend-2026-07-10.log 等
 _DATE_SUFFIX_RE = re.compile(r"^(?P<base>.+?)-(?P<date>\d{4}-\d{2}-\d{2})\.(?P<ext>log|out|err)$")
 
 
 def _default_log_dir() -> str:
-    """默认日志目录：项目内的 logs/ 目录（与 main.py 中的 log_dir 路径一致）。
-
-    容器内为 `/app/logs`，与 docker-compose 中 `/data/logs:/app/logs` 挂载点对齐；
-    此时容器内清掉的文件会立即反映到宿主机 /data/logs，无需也无法感知宿主机路径。
-    裸机/直接进程跑的场景可由 LOG_CLEANUP_DIRS 显式追加（如 /data/logs）。
-    """
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
         "logs",
@@ -42,21 +34,14 @@ def _default_log_dir() -> str:
 
 
 def _all_log_dirs() -> list[str]:
-    """汇总本次要扫描的日志目录：默认目录 + LOG_CLEANUP_DIRS 环境变量追加的额外目录。
-
-    Docker 部署留空即可 —— `/app/logs` 已经覆盖宿主机 `/data/logs`。
-    裸机部署可在 .env 里加 `LOG_CLEANUP_DIRS=/data/logs`。
-    """
-    dirs: list[str] = [_default_log_dir()]
+    dirs = [_default_log_dir()]
     extra = settings.LOG_CLEANUP_DIRS.strip()
     if extra:
-        for raw in extra.split(","):
-            d = raw.strip()
+        for d in extra.split(","):
+            d = d.strip()
             if d:
                 dirs.append(d)
-    # 去重保序
-    seen: set[str] = set()
-    out: list[str] = []
+    seen, out = set(), []
     for d in dirs:
         if d not in seen:
             seen.add(d)
@@ -65,205 +50,229 @@ def _all_log_dirs() -> list[str]:
 
 
 def _looks_like_rotated_log(filename: str) -> bool:
-    """判断文件名是否为可清理的日志文件。"""
-    if not filename.endswith((".log", ".out", ".err")):
-        return False
-    if filename in _PROTECTED_LOG_NAMES:
-        return False
-    return True
+    return filename.endswith((".log", ".out", ".err")) and filename not in _PROTECTED_LOG_NAMES
 
 
 def cleanup_old_logs(retention_days: int | None = None) -> int:
-    """清理保留天数之外的旧日志文件。
-
-    扫描路径（按出现顺序，去重）：
-      1. 项目内 logs/ 目录（默认）—— 容器内为 `/app/logs`，通过 docker-compose
-         映射到宿主机 `/data/logs`，容器内清理即可生效
-      2. LOG_CLEANUP_DIRS 指定的额外目录（可选，逗号分隔，用于裸机部署）
-
-    只删 .log/.out/.err 文件，且跳过仍在被实时写入的 backend.log 与 backend-error.log。
-    """
+    """删 retention_days 天前的 .log/.out/.err 文件。跳过正在被写入的活动日志。"""
     days = retention_days if retention_days is not None else settings.LOG_RETENTION_DAYS
     cutoff = time.time() - days * 86400
-
-    scanned_dirs = _all_log_dirs()
     deleted = 0
     seen_dirs: set[str] = set()
-    for log_dir in scanned_dirs:
+    for log_dir in _all_log_dirs():
         if not os.path.isdir(log_dir) or log_dir in seen_dirs:
             continue
         seen_dirs.add(log_dir)
 
-        # 1) 带日期段后缀的轮转文件：按文件名里的日期段判定
+        # 带日期后缀的轮转文件
         rotated_pattern = os.path.join(log_dir, "*-[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].log")
         for path in glob.glob(rotated_pattern):
-            name = os.path.basename(path)
-            m = _DATE_SUFFIX_RE.match(name)
+            m = _DATE_SUFFIX_RE.match(os.path.basename(path))
             if not m:
                 continue
             try:
                 file_date = datetime.strptime(m.group("date"), "%Y-%m-%d").timestamp()
             except ValueError:
                 continue
-            if file_date < cutoff:
-                try:
-                    os.remove(path)
-                    deleted += 1
-                    logger.info("已清理过期日志文件: %s (日期早于 %d 天)", path, days)
-                except OSError as e:
-                    logger.warning("删除日志文件失败 %s: %s", path, e)
-
-        # 2) 无日期段的孤立日志（如 uvicorn.log / uvicorn.out.log / restart.out.log）：
-        #    按文件 mtime 判定
-        for name in os.listdir(log_dir):
-            if not _looks_like_rotated_log(name):
+            if file_date >= cutoff:
                 continue
-            if _DATE_SUFFIX_RE.match(name):
-                # 上一步 glob 已覆盖（防御性二次过滤，避免重复删）
+            try:
+                os.remove(path)
+                deleted += 1
+            except OSError as e:
+                logger.warning("删日志失败 %s: %s", path, e)
+
+        # 无日期段的孤立日志按 mtime 判定
+        for name in os.listdir(log_dir):
+            if not _looks_like_rotated_log(name) or _DATE_SUFFIX_RE.match(name):
                 continue
             path = os.path.join(log_dir, name)
             if not os.path.isfile(path):
                 continue
             try:
-                mtime = os.path.getmtime(path)
+                if os.path.getmtime(path) >= cutoff:
+                    continue
             except OSError:
                 continue
-            if mtime < cutoff:
-                try:
-                    os.remove(path)
-                    deleted += 1
-                    logger.info("已清理孤立旧日志 (mtime 早于 %d 天): %s", days, path)
-                except OSError as e:
-                    logger.warning("删除孤立旧日志失败 %s: %s", path, e)
+            try:
+                os.remove(path)
+                deleted += 1
+            except OSError as e:
+                logger.warning("删孤立日志失败 %s: %s", path, e)
 
-    if deleted == 0:
-        logger.info(
-            "日志清理任务：未发现过期日志文件（扫描目录=%s, 保留=%d 天）",
-            scanned_dirs, days,
-        )
+    if deleted:
+        logger.info("日志清理: 删 %d 个（保留 %d 天）", deleted, days)
     else:
-        logger.info(
-            "日志清理任务完成，共删除 %d 个过期日志文件（保留 %d 天，扫描目录=%s）",
-            deleted, days, scanned_dirs,
-        )
+        logger.info("日志清理: 无过期（保留 %d 天）", days)
     return deleted
 
 
 async def run_periodic_log_cleanup():
-    """在后台永久运行，每天清理一次超过 LOG_RETENTION_DAYS 天的旧日志文件。
-
-    设计要点：
-      - 与文件清理任务解耦，互不影响（一个失败不会拖死另一个）
-      - cleanup_old_logs() 是同步 IO，丢到默认 executor 跑避免阻塞事件循环
-    """
+    """每 LOG_CLEANUP_INTERVAL_HOURS 小时清一次旧日志。"""
     interval_seconds = max(60, settings.LOG_CLEANUP_INTERVAL_HOURS * 3600)
-    scanned_dirs = _all_log_dirs()
-    logger.info(
-        "日志清理任务已启动，周期 %s 小时，保留 %d 天，扫描目录=%s",
-        settings.LOG_CLEANUP_INTERVAL_HOURS, settings.LOG_RETENTION_DAYS, scanned_dirs,
-    )
+    logger.info("日志清理任务已启动，周期 %s 小时", settings.LOG_CLEANUP_INTERVAL_HOURS)
     while True:
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, cleanup_old_logs)
         except Exception:
-            logger.exception("日志清理任务执行异常")
+            logger.exception("日志清理任务异常")
         await asyncio.sleep(interval_seconds)
 
 
-# ────────────────────────────────────────────────────────────────────────────
-#  过期上传文件清理（已有逻辑保留）
-# ────────────────────────────────────────────────────────────────────────────
+# ──────────── 过期文件 + 孤儿 COS 兜底 ────────────
 
-
-def _retention_days_for(membership: str | None) -> int:
-    """根据会员等级返回对应的文件保留天数。免费档包括未登录访客。"""
-    if membership == "test":
-        return settings.FILE_RETENTION_DAYS_TEST
-    return settings.FILE_RETENTION_DAYS_FREE
+# 孤儿扫描时跳过最近 1h 的对象，避免删掉"上传到 COS 但 DB INSERT 还没 commit"的 in-flight 文件
+ORPHAN_SKIP_RECENT_SECONDS = 3600
 
 
 async def find_expired_files(db: AsyncSession) -> list[models.UploadedFile]:
-    """查找所有已超过保留期限的文件，按用户当前会员等级判定。"""
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    free_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_FREE)
-    test_cutoff = now - timedelta(days=settings.FILE_RETENTION_DAYS_TEST)
+    """按 UploadedFile.retention_days 字段（上传时锁定的）找出过期文件。
 
-    stmt = (
-        select(models.UploadedFile)
-        .outerjoin(models.User, models.UploadedFile.user_id == models.User.id)
-        .where(
-            # 反馈截图 (screenshot) 不参与自动清理 —— 仅随用户主动删除反馈时同步清除
-            # cos_key != '' 跳过已被清理过的行,避免下一轮 sweep 重复打 COS
-            and_(
-                models.UploadedFile.file_type != "screenshot",
-                models.UploadedFile.cos_key != "",
-                or_(
-                    # 访客没有登录 -> 不保存，立即删除
-                    models.UploadedFile.user_id.is_(None),
-                    # 免费用户 (membership IS NULL / "free") -> 免费档 30 天
-                    and_(
-                        models.User.membership.is_(None),
-                        models.UploadedFile.created_at < free_cutoff,
-                    ),
-                    # 内测档用户 (membership = "test") -> 内测档 60 天
-                    and_(
-                        models.User.membership == "test",
-                        models.UploadedFile.created_at < test_cutoff,
-                    ),
-                ),
-            )
+    排除项：
+      - file_type == "screenshot"  → 截图不参与自动清理
+      - cos_key == ""              → 已清过的行，避免重复打 COS
+      - created_at 较新            → 按最长保留期预过滤，减少 result set
+    """
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    max_retention = max(settings.FILE_RETENTION_DAYS_TEST, settings.FILE_RETENTION_DAYS_FREE)
+    oldest_relevant = now - timedelta(days=max_retention)
+
+    stmt = select(models.UploadedFile).where(
+        and_(
+            models.UploadedFile.file_type != "screenshot",
+            models.UploadedFile.cos_key != "",
+            models.UploadedFile.created_at < oldest_relevant,
         )
     )
-    result = await db.execute(stmt)
-    return list(result.scalars().all())
+    candidates = list((await db.execute(stmt)).scalars().all())
+
+    expired: list[models.UploadedFile] = []
+    for f in candidates:
+        # 访客文件：立即删
+        if f.user_id is None:  
+            expired.append(f)
+            continue
+        days = f.retention_days if f.retention_days is not None else settings.FILE_RETENTION_DAYS_FREE
+        if days <= 0 or (now - timedelta(days=days)) > f.created_at:
+            expired.append(f)
+    return expired
+
+
+async def _list_cos_uploads(client, skip_recent_seconds: int = 0) -> set[str]:
+    """列 COS uploads/ 前缀所有对象。skip_recent_seconds > 0 时跳过最近 N 秒的对象。"""
+    keys: set[str] = set()
+    marker = ""
+    threshold = (
+        datetime.now(timezone.utc) - timedelta(seconds=skip_recent_seconds)
+        if skip_recent_seconds > 0 else None
+    )
+    while True:
+        resp = await asyncio.to_thread(
+            client.list_objects,
+            Bucket=cos_bucket,
+            Prefix="uploads/",
+            Marker=marker,
+            MaxKeys=1000,
+        )
+        for obj in resp.get("Contents", []):
+            if threshold and obj.get("LastModified"):
+                lm_raw = obj["LastModified"]
+                # COS SDK 在不同版本下 LastModified 可能是 datetime 或 ISO 字符串
+                if isinstance(lm_raw, str):
+                    lm = datetime.fromisoformat(lm_raw.replace("Z", "+00:00"))
+                else:
+                    lm = lm_raw
+                    if lm.tzinfo is None:
+                        lm = lm.replace(tzinfo=timezone.utc)
+                if lm > threshold:
+                    continue
+            keys.add(obj["Key"])
+        if not resp.get("IsTruncated"):
+            break
+        marker = resp.get("NextMarker") or ""
+        if not marker:
+            break
+    return keys
+
+
+async def _db_cos_keys(db: AsyncSession) -> set[str]:
+    res = await db.execute(
+        select(models.UploadedFile.cos_key).where(models.UploadedFile.cos_key != "")
+    )
+    return {row[0] for row in res.all()}
 
 
 async def cleanup_expired_files() -> int:
-    """清理一次过期文件，返回删除条数。出错不会抛出，由调用方记录日志。"""
+    """清两类 COS 对象：
+      1) retention_days 已过期的 UploadedFile  → 删 COS + 删 DB 行
+      2) 孤儿：COS 里有但 DB 里没的          → 删 COS
+
+    DB 行删除的级联影响（由 FK 约束处理，无需代码介入）：
+      - resume_analyses.file_id          → SET NULL（保留 LLM 报告）
+      - project_memories.source_file_id  → SET NULL（保留项目记忆）
+    """
+    client = get_cos_client()
+
+    # 第一步：清过期文件
+    deleted = 0
     async with async_session() as db:
         try:
             expired = await find_expired_files(db)
         except Exception:
             logger.exception("查询过期文件失败")
-            return 0
+            expired = []
 
-        if not expired:
-            logger.info("文件清理任务：未发现过期文件")
-            return 0
-
-        deleted = 0
         for db_file in expired:
             try:
-                # 仅删 COS 对象,DB 行保留(下游 session / feedback / analysis
-                # 仍按字符串 url 引用,清行会留下孤儿引用)。删完后把 cos_key
-                # 置空,下一轮 sweep 通过 cos_key != '' 过滤自动跳过。
-                client = get_cos_client()
                 await asyncio.to_thread(
-                    client.delete_object,
-                    Bucket=cos_bucket,
-                    Key=db_file.cos_key,
+                    client.delete_object, Bucket=cos_bucket, Key=db_file.cos_key
                 )
-                db_file.cos_key = ""
+                file_id, file_user = db_file.id, db_file.user_id
+                await db.delete(db_file)
                 await db.commit()
                 deleted += 1
-                logger.info(
-                    "已清 COS 文件 (DB 行保留) file_id=%s user_id=%s",
-                    db_file.id, db_file.user_id,
-                )
+                logger.info("已清过期文件 file_id=%s user_id=%s", file_id, file_user)
             except Exception:
-                logger.exception("删除过期文件失败 file_id=%s", db_file.id)
-        logger.info("文件清理任务完成，共清 %s 条 COS 对象", deleted)
-        return deleted
+                logger.exception("删过期文件失败 file_id=%s", db_file.id)
+
+    # 第二步：扫孤儿（DB 没有但 COS 还在的对象）
+    # 非生产环境跳过，防止本地和线上共用 COS 桶时误删线上文件
+    try:
+        if settings.ENVIRONMENT != "production":
+            logger.info(
+                "ENVIRONMENT=%s, 跳过孤儿扫描（仅 production 执行）",
+                settings.ENVIRONMENT,
+            )
+        else:
+            cos_keys = await _list_cos_uploads(client, skip_recent_seconds=ORPHAN_SKIP_RECENT_SECONDS)
+            async with async_session() as db:
+                db_keys = await _db_cos_keys(db)
+            orphans = cos_keys - db_keys
+            if orphans:
+                logger.warning("孤儿扫描: %d 个（COS=%d, DB=%d）", len(orphans), len(cos_keys), len(db_keys))
+                for k in orphans:
+                    try:
+                        await asyncio.to_thread(client.delete_object, Bucket=cos_bucket, Key=k)
+                        deleted += 1
+                        logger.info("孤儿已删: %s", k)
+                    except Exception:
+                        logger.exception("孤儿删除失败: %s", k)
+            else:
+                logger.info("孤儿扫描: 无孤儿（COS=%d, DB=%d）", len(cos_keys), len(db_keys))
+    except Exception:
+        logger.exception("孤儿扫描异常")
+
+    return deleted
 
 
 async def run_periodic_cleanup():
-    """在后台永久运行，每隔 FILE_CLEANUP_INTERVAL_HOURS 小时清理一次过期上传文件。"""
+    """每 FILE_CLEANUP_INTERVAL_HOURS 小时跑一次：过期文件 + 孤儿 COS。"""
     interval_seconds = max(60, settings.FILE_CLEANUP_INTERVAL_HOURS * 3600)
     logger.info("文件清理任务已启动，周期 %s 小时", settings.FILE_CLEANUP_INTERVAL_HOURS)
     while True:
         try:
             await cleanup_expired_files()
         except Exception:
-            logger.exception("文件清理任务执行异常")
+            logger.exception("文件清理任务异常")
         await asyncio.sleep(interval_seconds)

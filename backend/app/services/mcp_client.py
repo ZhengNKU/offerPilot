@@ -38,7 +38,7 @@ async def search_web(query: str, count: int = 5) -> str:
         "id": 1
     }
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(url, headers=headers, json=payload)
             if resp.status_code != 200:
                 logger.error(f"[mcp] 阿里 WebSearch MCP 响应非 200: {resp.status_code} {resp.text}")

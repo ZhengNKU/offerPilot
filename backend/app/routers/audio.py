@@ -22,6 +22,12 @@ from app.services.quota import (
     get_remaining,
     get_status,
 )
+from app.utils.error_messages import (
+    FEATURE_AUDIO as FEATURE_NAME_AUDIO,
+    FEATURE_RECORD as FEATURE_NAME_RECORD,
+    format_failure,
+    REASON_UNKNOWN,
+)
 
 from app.utils.privacy import desensitize_text
 from app.utils.moderation_dep import moderated
@@ -77,16 +83,32 @@ async def create_session(
     This avoids re-uploading the file binary — the frontend calls /api/file/upload
     first, then calls this endpoint with the returned file_url.
     """
-    # ── CHECK: 配额（30 天滚动窗口） ──
-    # 旧实现仅对非会员（membership is None）做 1 次免费限制；新实现按会员等级
-    # 差异化配额（FREE=1 / PRO=10 / MAX=30）。check_and_consume 内部会写入
-    # user_quota_usage，删除 InterviewSession 不会重置配额。
+    # ── 配额扣减移到 _run_real_analysis_impl 分析成功之后再扣 ──
+    # 2026-07-25+ 改为"分析成功才扣"模型:
+    #   失败(ASR 失败 / LLM 失败)→ 不扣,用户能立刻重试不浪费额度
+    #   重跑已成功的分析 → 看 session.quota_charged,不重复扣
     if current_user:
-        await check_and_consume(db, current_user, FEATURE_AUDIO)
+        pass  # quota_charged 会在 run_real_analysis 成功后置 True
+
+    # req.file_url 可能是三种格式之一，统一抽出 cos_key 后再存：
+    #   1) 老数据：签名 URL (https://...?sign=...) → 抽 path
+    #   2) 新数据：非签名 cos 路径 (https://bucket.cos.region.myqcloud.com/uploads/xxx)
+    #   3) 纯 cos_key (uploads/xxx)
+    # 存 cos_key 即可：① 消除"DB 泄漏 = 1h 签名 URL 即明文"风险
+    #                 ② 后续 audio.py 报告页 re-sign 逻辑按 path 解析也对得上
+    # 最后统一 unquote 一次，兼容"uploads/abc%20def.wav"这种 URL-encoded 形式
+    import urllib.parse
+    raw = req.file_url
+    if raw.startswith("uploads/") or "/" not in raw:
+        cos_key = urllib.parse.unquote(raw)
+    else:
+        parsed = urllib.parse.urlparse(raw)
+        path = parsed.path.lstrip("/")
+        cos_key = urllib.parse.unquote(path) if path else raw
 
     session = models.InterviewSession(
         user_id=current_user.id if current_user else None,
-        audio_url=req.file_url,
+        audio_url=cos_key,  # 存 cos_key 而非签名 URL，**不再有 1h-bomb**
         duration=0,
         file_size=req.file_size or 0,
         status="uploaded",
@@ -104,7 +126,7 @@ async def create_session(
     await db.refresh(session)
     return {
         "session_id": session.id,
-        "audio_url": session.audio_url,
+        "audio_url": session.audio_url,  # 此时已是 cos_key
         "status": session.status,
     }
 
@@ -192,12 +214,9 @@ async def create_record_session(
         )
         session = result.scalars().first()
         if session:
-            # ── 配额检查（重分析分支） ──
-            # 旧代码此处完全没有免费次数判断 → 任何免费用户拿到任意 session_id
-            # 都能无限重跑分析。这是比"删除绕过"更严重的漏洞，本次一并修。
-            # 只对"自己的 session"扣配额；越权访问由后续 ownership 检查兜底。
-            if current_user and session.user_id == current_user.id:
-                await check_and_consume(db, current_user, FEATURE_RECORD)
+            # ── 配额扣减移到分析成功之后(由 _run_real_analysis_impl 统一处理) ──
+            # 2026-07-25+ 不再在入口 check_and_consume,改为在 ASR+LLM 成功后再扣
+            # 重分析时通过 session.quota_charged 标志判断是否已扣过
             # Update fields of the existing session
             session.company = req.company or session.company
             session.role = req.role or session.role
@@ -247,10 +266,11 @@ async def create_record_session(
 
     if not session:
         # Create a new session
-        # 配额检查：30 天滚动窗口，按会员等级差异化（FREE=1 / PRO=10 / MAX=30）。
-        # 与 create_session 一致；check_and_consume 会在检查通过后写入 user_quota_usage。
+        # 2026-07-25+: 配额扣减移到分析成功之后(由 _run_real_analysis_impl 统一处理)
+        # 这里不再 check_and_consume,避免"上传就扣一次但分析失败额度白扔"
         if current_user:
-            await check_and_consume(db, current_user, FEATURE_RECORD)
+            pass  # quota_charged 会在 run_real_analysis 成功后置 True
+
 
         session = models.InterviewSession(
             user_id=current_user.id if current_user else None,
@@ -295,12 +315,80 @@ task_store: Dict[str, Dict[str, Any]] = {}
 async def run_real_analysis(session_id: int, task_id: str, profile_data: Optional[dict]):
     """
     Real analysis pipeline:
-      1. ASR  — call Volc Engine ASR on the COS audio URL
+      1. ASR  — call Volc Engine ASR on the COS audio URL (cos_key 需先 presign 成可下载 URL)
       2. LLM  — call DeepSeek (reasoning model) to evaluate the real transcript
       3. DB   — persist transcript segments, scores, risks, improvements
-    Falls back to safe mock data if any API call fails.
-    """
 
+    失败策略（2026-07-25+）:
+      - ASR 失败（提交失败/轮询失败/返回 0 段）→ task=failed + 退额度 + 报错文案,不写 mock
+      - LLM 任一调用失败 → 同上
+      - 段数/评分/亮点等任何缺漏 → 同上
+      - 不再使用 safe mock dialogue / safe fallback scores / 启发式 section / 兜底 mock transcript
+    """
+    # 上层 try/except 兜住所有未捕获异常：失败一律走 _fail_analysis
+    try:
+        await _run_real_analysis_impl(session_id, task_id, profile_data)
+    except Exception as e:
+        logger.exception(
+            f"[task={task_id}] 面试分析失败 session_id={session_id}: {e!r}"
+        )
+        # 根据 session 类型决定"录音分析"还是"记录分析"前缀
+        feature_label = FEATURE_NAME_AUDIO
+        try:
+            async with async_session() as db:
+                sess_res = await db.execute(
+                    select(models.InterviewSession).where(models.InterviewSession.id == session_id)
+                )
+                sess = sess_res.scalars().first()
+                if sess and sess.audio_url in ("text_mode", "live"):
+                    feature_label = FEATURE_NAME_RECORD
+        except Exception:
+            pass
+        # 把具体异常 reason 透出来,避免"请稍后重试"这种假大空
+        reason = str(e) or REASON_UNKNOWN
+        # 截断过长的 reason(LLM/SDK 异常堆栈可能很长)
+        if len(reason) > 200:
+            reason = reason[:200] + "..."
+        await _fail_analysis(
+            session_id=session_id,
+            task_id=task_id,
+            user_message=format_failure(feature_label, reason),
+            log_prefix=f"[task={task_id}]",
+        )
+
+
+async def _fail_analysis(
+    *,
+    session_id: int,
+    task_id: str,
+    user_message: str,
+    log_prefix: str,
+) -> None:
+    """
+    统一的失败处理：标 task=failed、写 session.status=failed。
+
+    2026-07-25+ 改为"分析成功才扣额度"模型,失败不扣,所以这里不再 refund_quota。
+    """
+    task_store[task_id]["status"] = "failed"
+    task_store[task_id]["error_message"] = user_message
+
+    try:
+        async with async_session() as db:
+            sess_res = await db.execute(
+                select(models.InterviewSession).where(models.InterviewSession.id == session_id)
+            )
+            sess = sess_res.scalars().first()
+            if sess:
+                # 2026-07-25+: 同时把标准格式的 error_message 写到 session,
+                # 让前端调 get_session_report 时能直接拿到失败原因
+                sess.status = "failed"
+                sess.error_message = user_message
+                await db.commit()
+    except Exception as e:
+        logger.error(f"{log_prefix} 写 session.status=failed 失败: {e!r}")
+
+
+async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: Optional[dict]):
     def _set_progress(pct: int, status_str: str = "processing"):
         task_store[task_id]["progress"] = pct
         task_store[task_id]["status"] = status_str
@@ -323,9 +411,7 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             await db.commit()
 
     if not audio_url:
-        task_store[task_id]["status"] = "failed"
-        task_store[task_id]["error_message"] = "找不到音频文件 URL"
-        return
+        raise RuntimeError("找不到对应的面试记录")
 
     _set_progress(15, "processing")
 
@@ -344,34 +430,62 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
         logger.info(
             f"[task={task_id}] Loaded {len(raw_segments)} segments from DB for {audio_url} session"
         )
+        # 记录/实时模式：raw_segments 必须非空(空说明用户没贴文本或 bridge 没回填)
+        if not raw_segments:
+            raise RuntimeError("没有可分析的对话内容(请检查文本是否粘贴或面试是否正常结束)")
     else:
-        logger.info(f"[task={task_id}] Starting ASR for session {session_id}, url={audio_url}")
+        # 录音模式：DB 里存的是 cos_key(uploads/xxx),火山 ASR 没法直接 GET,必须先 presign
+        from app.routers.file import get_cos_client, bucket
+        import urllib.parse
+        parsed = urllib.parse.urlparse(audio_url)
+        cos_key = urllib.parse.unquote(parsed.path.lstrip("/")) if parsed.path else audio_url
+        if not cos_key.startswith("uploads/"):
+            raise RuntimeError("音频文件路径不合法")
+        try:
+            cos_client = get_cos_client()
+            presigned_url: str = await asyncio.to_thread(
+                cos_client.get_presigned_download_url,
+                Bucket=bucket,
+                Key=cos_key,
+                Expired=3600,  # 1h,ASR 通常 30-60s,余量足够
+            )
+        except Exception as e:
+            logger.exception(f"{log_prefix} COS presign 失败: {e!r}")
+            raise RuntimeError("音频文件无法访问") from e
+
+        logger.info(
+            f"[task={task_id}] Starting ASR for session {session_id}, "
+            f"cos_key={cos_key} (presigned)"
+        )
         # ── ASR 是阻塞调用（典型 30-60s），期间前端只能看到 15% 卡住。
         #    在后台开一个"虚拟进度"协程，每隔几秒推一点进度（不超过 45%），
         #    ASR 真正完成后取消它，立刻 _set_progress(45)。
         async def _fake_asr_progress():
             try:
-                checkpoints = [(20, 4), (27, 5), (33, 5), (39, 5)]  # (pct, delay_sec)
-                for pct, delay in checkpoints:
-                    await asyncio.sleep(delay)
-                    _set_progress(pct, "processing")
+                curr = 15
+                while curr < 44:
+                    await asyncio.sleep(2.5)
+                    inc = 3 if curr < 30 else (2 if curr < 40 else 1)
+                    curr = min(44, curr + inc)
+                    _set_progress(curr, "processing")
             except asyncio.CancelledError:
                 pass
 
         fake_progress_task = asyncio.create_task(_fake_asr_progress())
         try:
-            try:
-                raw_segments = await asyncio.to_thread(call_volc_asr, audio_url)
-                logger.info(f"[task={task_id}] ASR returned {len(raw_segments)} segments")
-            except Exception as e:
-                logger.warning(f"[task={task_id}] ASR failed, will use mock transcript: {e}")
-                raw_segments = []
+            # 失败直接抛出,由外层 _run_real_analysis 走 _fail_analysis
+            raw_segments = await asyncio.to_thread(call_volc_asr, presigned_url)
+            logger.info(f"[task={task_id}] ASR returned {len(raw_segments)} segments")
         finally:
             fake_progress_task.cancel()
             try:
                 await fake_progress_task
             except asyncio.CancelledError:
                 pass
+
+        if not raw_segments:
+            # ASR 调用本身没抛,但返回空段(典型场景:火山下载成功但音频无语音/损坏)
+            raise RuntimeError("音频无有效语音内容")
 
     _set_progress(45, "processing")
 
@@ -393,15 +507,8 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             lines.append(f"{role}：{seg['content']}")
         dialogue_text = "\n".join(lines)
     else:
-        # Fallback mock dialogue so LLM always gets something
-        dialogue_text = (
-            "面试官：你好，欢迎参加技术面试，请先做一个简短的自我介绍吧。\n"
-            "候选人：面试官您好，我拥有多年后端高并发开发经验，熟悉分布式架构设计。\n"
-            "面试官：为什么使用 Redis？\n"
-            "候选人：因为 Redis 性能高，可以做缓存，提升接口响应速度。\n"
-            "面试官：如果数据和数据库不一致怎么办？\n"
-            "候选人：可以用双删策略，先删缓存，再更新数据库，最后再删一次缓存。\n"
-        )
+        # raw_segments 在上面已经被强校验非空,这里只是兜底
+        raise RuntimeError("dialogue_text 构造时 raw_segments 为空,逻辑异常")
 
     # 查询用户已有项目记忆(供 LLM 匹配 mentioned_projects)
     existing_projects: list[dict] = []
@@ -431,102 +538,52 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
     #              改造前:highlights+sectionize → analyze 串行 3 段
     #              改造后:max(highlights, sectionize, analyze) 单段
     #              实测 13 段录音:从 ~90s 降到 ~40s(主要省掉 analyze 的 30-90s)。
+    #              2026-07-25+: 任一 LLM 失败直接 raise,不再有 safe fallback
     highlights: list = []
     sections: list = []
-    section_count = 0
     llm_result: dict = {}
     mentioned_projects: list[dict] = []  # P0 优化(#3): 独立 LLM 调用,与 gather 并发
 
-    # Safe fallback scores (在 LLM 调用前预设,失败时使用)
-    ipi_score = 65
-    offer_probability = 40
-    strengths    = ["表达流利，问题应答迅速", "了解核心技术特性"]
-    weaknesses   = ["技术深度有待提升", "方案细节描述不够完整"]
-    suggestions  = ["深化系统设计知识体系", "回答中加入量化数据背书"]
-    executive_summary = "整体表现中等，建议加强技术深度与方案细节的描述。"
-    score_expression = 75
-    score_logic = 80
-    score_project_depth = 70
-    score_ownership = 65
-    score_system_design = 60
-
     t_import = time.monotonic()  # 用于日志对比改造前后耗时
 
-    async def _safe_highlights():
-        try:
-            t0 = time.monotonic()
-            result = await generate_transcript_highlights(raw_segments)
-            logger.info(
-                f"[task={task_id}] Highlights API returned {len(result)} items "
-                f"in {time.monotonic() - t0:.2f}s"
-            )
-            return result or []
-        except Exception as e:
-            logger.warning(f"[task={task_id}] Highlights generation failed: {e}")
-            return []
+    async def _call_highlights():
+        t0 = time.monotonic()
+        result = await generate_transcript_highlights(raw_segments)
+        logger.info(
+            f"[task={task_id}] Highlights API returned {len(result)} items "
+            f"in {time.monotonic() - t0:.2f}s"
+        )
+        return result or []
 
-    async def _safe_sectionize():
-        try:
-            t0 = time.monotonic()
-            result = await sectionize_transcript(raw_segments)
-            logger.info(
-                f"[task={task_id}] Sectionize returned {len(result)} sections "
-                f"in {time.monotonic() - t0:.2f}s"
-            )
-            return result or []
-        except Exception as e:
-            logger.warning(f"[task={task_id}] sectionize failed: {e}")
-            return []
+    async def _call_sectionize():
+        t0 = time.monotonic()
+        result = await sectionize_transcript(raw_segments)
+        logger.info(
+            f"[task={task_id}] Sectionize returned {len(result)} sections "
+            f"in {time.monotonic() - t0:.2f}s"
+        )
+        return result or []
 
-    async def _safe_dialogue_eval():
-        nonlocal llm_result, ipi_score, offer_probability
-        nonlocal strengths, weaknesses, suggestions, executive_summary
-        nonlocal score_expression, score_logic, score_project_depth
-        nonlocal score_ownership, score_system_design
-        try:
-            t0 = time.monotonic()
-            res = await analyze_interview_dialogue(
-                dialogue_text, profile_data, job_description, existing_projects
-            )
-            logger.info(
-                f"[task={task_id}] analyze_interview_dialogue returned "
-                f"in {time.monotonic() - t0:.2f}s"
-            )
-            if res:
-                ipi_score         = res.get("ipi_score",          ipi_score)
-                offer_probability = res.get("offer_probability",   offer_probability)
-                strengths         = res.get("summary_strengths",   strengths)
-                weaknesses        = res.get("summary_weaknesses",  weaknesses)
-                suggestions       = res.get("summary_suggestions",  suggestions)
-                executive_summary = res.get("executive_summary",   executive_summary)
-                if "scores" not in res or not isinstance(res["scores"], dict):
-                    res["scores"] = {
-                        "expression": res.get("score_expression") or res.get("expression") or score_expression,
-                        "logic": res.get("score_logic") or res.get("logic") or score_logic,
-                        "project_depth": res.get("score_project_depth") or res.get("project_depth") or score_project_depth,
-                        "ownership": res.get("score_ownership") or res.get("ownership") or score_ownership,
-                        "system_design": res.get("score_system_design") or res.get("system_design") or score_system_design,
-                    }
-                logger.info(f"[task={task_id}] LLM returned ipi={ipi_score}, offer_prob={offer_probability}")
-                return res
-        except Exception as e:
-            logger.warning(f"[task={task_id}] LLM evaluation failed, using fallback: {e}")
-        return {}
+    async def _call_dialogue_eval():
+        t0 = time.monotonic()
+        res = await analyze_interview_dialogue(
+            dialogue_text, profile_data, job_description, existing_projects
+        )
+        logger.info(
+            f"[task={task_id}] analyze_interview_dialogue returned "
+            f"in {time.monotonic() - t0:.2f}s"
+        )
+        return res or {}
 
-    async def _safe_extract_mentions():
+    async def _call_extract_mentions():
         """P0 优化(#3): mentioned_projects 独立 LLM 调用,与 3 个主调用并发。"""
-        nonlocal mentioned_projects
-        try:
-            t0 = time.monotonic()
-            items = await extract_mentioned_projects(dialogue_text, existing_projects)
-            logger.info(
-                f"[task={task_id}] extract_mentioned_projects returned "
-                f"{len(items)} items in {time.monotonic() - t0:.2f}s"
-            )
-            return items
-        except Exception as e:
-            logger.warning(f"[task={task_id}] extract_mentioned_projects failed: {e}")
-            return []
+        t0 = time.monotonic()
+        items = await extract_mentioned_projects(dialogue_text, existing_projects)
+        logger.info(
+            f"[task={task_id}] extract_mentioned_projects returned "
+            f"{len(items)} items in {time.monotonic() - t0:.2f}s"
+        )
+        return items or []
 
     if raw_segments:
         logger.info(
@@ -538,21 +595,24 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
         #    同样开 fake_progress 协程模拟（从 45 → 60），gather 完成时取消它。
         async def _fake_llm_progress():
             try:
-                # 15s 内推到 53%，再 10s 推到 57%，给前端可感知的"在动"信号
-                checkpoints = [(48, 4), (52, 5), (55, 6), (58, 8)]
-                for pct, delay in checkpoints:
-                    await asyncio.sleep(delay)
-                    _set_progress(pct, "processing")
+                curr = 46
+                _set_progress(curr, "processing")
+                while curr < 64:
+                    await asyncio.sleep(1.8)
+                    inc = 2 if curr < 54 else 1
+                    curr = min(64, curr + inc)
+                    _set_progress(curr, "processing")
             except asyncio.CancelledError:
                 pass
 
         llm_fake_task = asyncio.create_task(_fake_llm_progress())
         try:
+            # gather 任一异常会直接 raise 到外层 _run_real_analysis 走 _fail_analysis
             highlights, sections, llm_result, mentioned_projects = await asyncio.gather(
-                _safe_highlights(),
-                _safe_sectionize(),
-                _safe_dialogue_eval(),
-                _safe_extract_mentions(),
+                _call_highlights(),
+                _call_sectionize(),
+                _call_dialogue_eval(),
+                _call_extract_mentions(),
             )
         finally:
             llm_fake_task.cancel()
@@ -568,32 +628,32 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             f"llm_result_keys={list(llm_result.keys()) if llm_result else []})"
         )
 
-        # If sectionize returned empty, generate heuristic fallback sections grouped by Interviewer questions
+        # 关键校验:4 个 LLM 结果必须都有内容,否则视为失败
+        # 不再用启发式 / mock 数据填充,直接抛错让外层走失败处理
+        if not llm_result:
+            raise RuntimeError("AI 评估返回为空")
         if not sections:
-            logger.warning(f"[task={task_id}] sectionize returned no sections. Generating heuristic fallback sections.")
-            current_sec = None
-            sec_idx = 1
-            for s in raw_segments:
-                is_interviewer = s.get("speaker") == "Interviewer"
-                t = float(s.get("start_time", 0.0))
-                if is_interviewer or current_sec is None:
-                    if current_sec:
-                        sections.append(current_sec)
-                    current_sec = {
-                        "title": (s.get("content") or "")[:15] + "..." if is_interviewer else f"对话分段 {sec_idx}",
-                        "category": "tech",
-                        "tag": "一般",
-                        "start_time": t,
-                        "end_time": t + 10.0,
-                        "summary": "面试提问与解答。"
-                    }
-                    sec_idx += 1
-                else:
-                    current_sec["end_time"] = t + 10.0
-            if current_sec:
-                sections.append(current_sec)
+            raise RuntimeError("AI 章节切分返回为空")
 
-        section_count = len(sections)
+        # 从 llm_result 提取各项指标(没有再报错,不再 fallback 到硬编码值)
+        ipi_score = llm_result.get("ipi_score")
+        offer_probability = llm_result.get("offer_probability")
+        strengths = llm_result.get("summary_strengths")
+        weaknesses = llm_result.get("summary_weaknesses")
+        suggestions = llm_result.get("summary_suggestions")
+        executive_summary = llm_result.get("executive_summary")
+        scores_dict = llm_result.get("scores")
+        for name, val in [
+            ("ipi_score", ipi_score),
+            ("offer_probability", offer_probability),
+            ("summary_strengths", strengths),
+            ("summary_weaknesses", weaknesses),
+            ("summary_suggestions", suggestions),
+            ("executive_summary", executive_summary),
+            ("scores", scores_dict),
+        ]:
+            if val is None or val == "" or val == [] or val == {}:
+                raise RuntimeError(f"AI 返回缺少关键字段：{name}")
 
         # Merge highlights into raw_segments (same logic as before, but on the
         # in-memory list we already have — no extra await needed).
@@ -615,23 +675,22 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             except Exception as ex:
                 logger.warning(f"Error merging highlight: {ex}")
 
-    # ── Step 3: Persist the whole transcript as a single JSONB row.
-    #             One session → one InterviewTranscript row → one data JSONB array.
-    #             Also clear any prior sections from a previous analysis run.
+    _set_progress(65, "processing")
+
+    # 把 transcript/sections 写入 + 配额扣减 + scores 写入放在同一个事务里，
+    # 任一步失败都不会有脏数据残留在数据库。
     async with async_session() as db:
-        # Wipe prior transcript (PK = session_id, so DELETE-and-INSERT pattern)
+        # ── Wipe prior data ──
         await db.execute(
             models.InterviewTranscript.__table__.delete().where(
                 models.InterviewTranscript.session_id == session_id
             )
         )
-        # Clear old sections from a previous analysis run
         await db.execute(
             models.TranscriptSection.__table__.delete().where(
                 models.TranscriptSection.session_id == session_id
             )
         )
-        # Clear old risks, questions, improvements
         await db.execute(
             models.InterviewRisk.__table__.delete().where(
                 models.InterviewRisk.session_id == session_id
@@ -647,46 +706,14 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
                 models.InterviewQuestion.session_id == session_id
             )
         )
+
+        # ── Insert transcript ──
         if raw_segments:
             db.add(models.InterviewTranscript(session_id=session_id, data=raw_segments))
         else:
-            # Minimal fallback transcript with mock highlights so the frontend has something to show
-            db.add(models.InterviewTranscript(session_id=session_id, data=[
-                {"start_time": 0.0,   "end_time": 15.0,  "speaker": "Interviewer", "content": "你好，欢迎参加技术面试，请先做一个简短的自我介绍吧。"},
-                {
-                    "start_time": 15.0,
-                    "end_time": 135.0,
-                    "speaker": "Candidate",
-                    "content": "面试官您好，我拥有多年后端高并发开发经验，熟悉分布式架构设计与缓存体系。",
-                    "highlights": [
-                        {"text": "多年后端高并发开发经验", "type": "strength", "tip": "💡 核心闪光点：突出了架构方向的工作积累，给人留下专业的第一印象。"},
-                        {"text": "分布式架构设计", "type": "tech", "tip": "🔧 核心技能：代表有复杂分布式系统的规划和开发技能。"}
-                    ]
-                },
-                {"start_time": 341.0, "end_time": 374.0, "speaker": "Interviewer", "content": "为什么使用 Redis？"},
-                {
-                    "start_time": 352.0,
-                    "end_time": 374.0,
-                    "speaker": "Candidate",
-                    "content": "因为 Redis 性能高，可以做缓存，提升接口响应速度。",
-                    "highlights": [
-                        {"text": "做缓存，提升接口响应速度", "type": "strength", "tip": "💡 亮点：正确指出了缓存的核心应用场景及响应性能优势。"}
-                    ]
-                },
-                {"start_time": 375.0, "end_time": 422.0, "speaker": "Interviewer", "content": "如果数据和数据库不一致怎么办？"},
-                {
-                    "start_time": 382.0,
-                    "end_time": 422.0,
-                    "speaker": "Candidate",
-                    "content": "可以用双删策略，先删缓存，再更新数据库，最后再删一次缓存。",
-                    "highlights": [
-                        {"text": "双删策略", "type": "risk", "tip": "⚠️ 表达风险：双删策略是教科书式的八股文方案，存在并发写一致性漏洞，在实际高并发项目中通常不会被采用，会被面试官追问致死。建议升级为 Binlog + Canal + 延时双删或读写锁。"}
-                    ]
-                },
-            ]))
+            raise RuntimeError("写 transcript 时 raw_segments 为空,逻辑异常")
 
-        # Persist sections in the same session — they were produced concurrently
-        # with highlights above and are ready to insert together.
+        # ── Insert sections ──
         for idx, sec in enumerate(sections):
             db.add(models.TranscriptSection(
                 session_id=session_id,
@@ -701,99 +728,37 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
                 shortcomings=sec.get("shortcomings") or [],
                 review_points=sec.get("review_points") or [],
             ))
-        await db.commit()
 
-    _set_progress(60, "processing")
-
-    # ── Step 4: Build dialogue text for LLM evaluation ────────────────────
-    if raw_segments:
-        lines = []
-        for seg in raw_segments:
-            role = "面试官" if seg["speaker"] == "Interviewer" else "候选人"
-            lines.append(f"{role}：{seg['content']}")
-        dialogue_text = "\n".join(lines)
-    else:
-        # Fallback mock dialogue so LLM always gets something
-        dialogue_text = (
-            "面试官：你好，欢迎参加技术面试，请先做一个简短的自我介绍吧。\n"
-            "候选人：面试官您好，我拥有多年后端高并发开发经验，熟悉分布式架构设计。\n"
-            "面试官：为什么使用 Redis？\n"
-            "候选人：因为 Redis 性能高，可以做缓存，提升接口响应速度。\n"
-            "面试官：如果数据和数据库不一致怎么办？\n"
-            "候选人：可以用双删策略，先删缓存，再更新数据库，最后再删一次缓存。\n"
-        )
-
-    _set_progress(70, "processing")
-
-    _set_progress(88, "processing")
-
-    # ── 兜底:三方 LLM 全失败时,填充完整 mock 结构,保证前端能看到东西 ──
-    if not llm_result:
-        # 三方 LLM 全失败时的最简兜底:用预设分数填充,前端可继续展示,
-        # 但 max_lose_points/interviewer_perspective/question_deconstruction/
-        # followup_paths 这些结构化字段不填充(后端不臆造)。
-        llm_result = {
-            "ipi_score": ipi_score,
-            "offer_probability": offer_probability,
-            "summary_strengths": strengths,
-            "summary_weaknesses": weaknesses,
-            "summary_suggestions": suggestions,
-            "executive_summary": executive_summary,
-            "scores": {
-                "expression": score_expression,
-                "logic": score_logic,
-                "project_depth": score_project_depth,
-                "ownership": score_ownership,
-                "system_design": score_system_design,
-            },
-            "max_lose_points": [],
-            "interviewer_perspective": [],
-            "question_deconstruction": [],
-            "followup_paths": [],
-        }
-        logger.warning(
-            f"[task={task_id}] All 3 LLM calls failed; using static fallback scores"
-        )
-
-    # ── Step 4.5: 同步项目提及次数 ─────────────────────────────────────
-    async with async_session() as db:
-        sess_mention_result = await db.execute(
+        # ── Load session ──
+        sess_result = await db.execute(
             select(models.InterviewSession).where(models.InterviewSession.id == session_id)
         )
-        sess_mention = sess_mention_result.scalars().first()
-        user_id_for_mention = sess_mention.user_id if sess_mention else None
-
-    if user_id_for_mention is not None:
-        # P0 优化(#3): mentioned_projects 已由独立 LLM 调用产出,直接读本地变量
-        if mentioned_projects:
-            try:
-                from app.services.project_mention_service import sync_project_mentions
-                mention_stats = await sync_project_mentions(
-                    user_id=user_id_for_mention,
-                    mentioned_projects=mentioned_projects,
-                    session_id=session_id,
-                )
-                logger.info(
-                    f"[task={task_id}] 项目提及同步完成: "
-                    f"matched={mention_stats['matched']} "
-                    f"unmatched={mention_stats['unmatched']}"
-                )
-            except Exception as e:
-                logger.error(
-                    f"[task={task_id}] 项目提及同步失败（不影响主流程）: {e}"
-                )
-
-    # ── Step 5: Persist scores + risk to DB ──────────────────────────────
-    async with async_session() as db:
-        result = await db.execute(
-            select(models.InterviewSession).where(models.InterviewSession.id == session_id)
-        )
-        session = result.scalars().first()
+        session = sess_result.scalars().first()
         if not session:
-            task_store[task_id]["status"] = "failed"
-            return
+            raise RuntimeError("结果保存失败：记录已不存在")
 
-        # Save scores & summary
+        # ── 配额扣减(分析成功才扣) ──
+        if session.user_id and not session.quota_charged:
+            feature = (
+                FEATURE_RECORD
+                if session.audio_url in ("text_mode", "live")
+                else FEATURE_AUDIO
+            )
+            user_for_quota = await db.get(models.User, session.user_id)
+            if user_for_quota:
+                try:
+                    await check_and_consume(db, user_for_quota, feature)
+                    session.quota_charged = True
+                    logger.info(
+                        f"[task={task_id}] 分析成功,扣额度 user_id={session.user_id} "
+                        f"feature={feature} session.quota_charged=True"
+                    )
+                except HTTPException as quota_exc:
+                    raise RuntimeError(
+                        f"本次分析已完成但额度已用完,本次不计入消耗（{quota_exc.detail}）"
+                    ) from quota_exc
+
+        # ── 写入 scores & summary ──
         session.ipi_score         = ipi_score
         session.offer_probability = offer_probability
         session.summary_strengths    = strengths
@@ -803,9 +768,9 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
         session.analysis_result      = llm_result
         session.status = "completed"
 
-        # Risk & improvement from LLM weaknesses
+        # ── Risk ──
         risk_desc = weaknesses[0] if weaknesses else "表达简短，技术深度不足"
-        risk = models.InterviewRisk(
+        db.add(models.InterviewRisk(
             session_id=session_id,
             risk_type="answer_quality",
             severity="high" if ipi_score < 70 else "medium",
@@ -813,10 +778,38 @@ async def run_real_analysis(session_id: int, task_id: str, profile_data: Optiona
             evidence=dialogue_text[:200],
             suggestion=suggestions[0] if suggestions else "加强技术深度",
             occurrence_time=382.0
-        )
-        db.add(risk)
+        ))
 
+        # ── 统一提交：以上任一步抛异常都不会落库 ──
         await db.commit()
+
+    # ── Step 4.5: 同步项目提及次数（fire-and-forget，失败不影响主流程） ────
+    async with async_session() as db:
+        sess_mention_result = await db.execute(
+            select(models.InterviewSession).where(models.InterviewSession.id == session_id)
+        )
+        sess_mention = sess_mention_result.scalars().first()
+        user_id_for_mention = sess_mention.user_id if sess_mention else None
+
+    if user_id_for_mention is not None and mentioned_projects:
+        try:
+            from app.services.project_mention_service import sync_project_mentions
+            mention_stats = await sync_project_mentions(
+                user_id=user_id_for_mention,
+                mentioned_projects=mentioned_projects,
+                session_id=session_id,
+            )
+            logger.info(
+                f"[task={task_id}] 项目提及同步完成: "
+                f"matched={mention_stats['matched']} "
+                f"unmatched={mention_stats['unmatched']}"
+            )
+        except Exception as e:
+            logger.error(
+                f"[task={task_id}] 项目提及同步失败（不影响主流程）: {e}"
+            )
+
+    _set_progress(85, "processing")
 
     # 触发 AI 职业顾问索引（fire-and-forget；失败不影响主流程）
     if session.user_id:
@@ -1092,7 +1085,7 @@ async def get_session_report(id: int, db: AsyncSession = Depends(get_db)):
         if path.startswith("/"):
             path = path[1:]
         cos_key = urllib.parse.unquote(path)
-        
+
         # Verify it's a COS key uploads
         if cos_key.startswith("uploads/"):
             client = get_cos_client()
@@ -1107,22 +1100,59 @@ async def get_session_report(id: int, db: AsyncSession = Depends(get_db)):
 
     analysis_res = getattr(session, "analysis_result", None) or {}
     llm_scores = analysis_res.get("scores", {}) if isinstance(analysis_res, dict) else {}
-    
+
     ipi = session.ipi_score
     offer_prob = session.offer_probability
-    
-    expression_score = llm_scores.get("expression") or llm_scores.get("score_expression") or (ipi + 10 if ipi > 0 else 0)
-    logic_score = llm_scores.get("logic") or llm_scores.get("score_logic") or (ipi + 3 if ipi > 0 else 0)
-    project_depth_score = llm_scores.get("project_depth") or llm_scores.get("score_project_depth") or (ipi - 4 if ipi > 0 else 0)
-    ownership_score = llm_scores.get("ownership") or llm_scores.get("score_ownership") or (ipi - 12 if ipi > 0 else 0)
-    system_design_score = llm_scores.get("system_design") or llm_scores.get("score_system_design") or (ipi - 2 if ipi > 0 else 0)
-    communication_score = ipi + 13 if ipi > 0 else 0
+
+    # 2026-07-25+: 失败状态时,显式返回 error_message,不再合成假分数 / 假摘要
+    # 前端应当根据 status == "failed" 走错误展示分支,而不是渲染"零分报告"
+    if session.status == "failed":
+        return {
+            "session_id": session.id,
+            "audio_url": fresh_audio_url,
+            "duration": session.duration,
+            "status": "failed",
+            "error_message": session.error_message or "录音分析失败",
+            "job_description": session.job_description,
+            "company": session.company or "",
+            "role": session.role or "",
+            "round": session.round or "",
+            "date": session.date or "",
+            "display_title": " · ".join(
+                x for x in [session.company, session.role, session.round] if x
+            ) or "未命名面试分析",
+            # 失败时所有分数/摘要字段显式置 None,绝不用 0 / "报告处理中" 之类兜底
+            "scores": None,
+            "summary": None,
+            "analysis_result": None,
+            "transcript": [],
+        }
+
+    # 成功状态:从 LLM 真实结果取分数,缺失即 None(不再用 ipi 合成假分数)
+    expression_score = (
+        llm_scores.get("expression") or llm_scores.get("score_expression")
+    ) if llm_scores else None
+    logic_score = (
+        llm_scores.get("logic") or llm_scores.get("score_logic")
+    ) if llm_scores else None
+    project_depth_score = (
+        llm_scores.get("project_depth") or llm_scores.get("score_project_depth")
+    ) if llm_scores else None
+    ownership_score = (
+        llm_scores.get("ownership") or llm_scores.get("score_ownership")
+    ) if llm_scores else None
+    system_design_score = (
+        llm_scores.get("system_design") or llm_scores.get("score_system_design")
+    ) if llm_scores else None
+    # communication 不在 5 维度 LLM 输出里,直接 None,前端应当按 LLM 的 5 维度展示
+    communication_score = None
 
     return {
         "session_id": session.id,
         "audio_url": fresh_audio_url,
         "duration": session.duration,
         "status": session.status,
+        "error_message": session.error_message,  # 成功时为 None
         "job_description": session.job_description,
         "company": session.company or "",
         "role": session.role or "",
@@ -1142,7 +1172,7 @@ async def get_session_report(id: int, db: AsyncSession = Depends(get_db)):
             "system_design": system_design_score
         },
         "summary": {
-            "executive_summary": session.executive_summary or "报告处理中",
+            "executive_summary": session.executive_summary,
             "strengths": session.summary_strengths,
             "weaknesses": session.summary_weaknesses,
             "suggestions": session.summary_suggestions
@@ -1475,7 +1505,7 @@ async def delete_session_audio_file(audio_url: str, db: AsyncSession):
         if path.startswith("/"):
             path = path[1:]
         cos_key = urllib.parse.unquote(path)
-        
+
         if cos_key.startswith("uploads/"):
             from app.routers.file import get_cos_client, bucket
             # 1. Delete from COS S3 client
@@ -1489,7 +1519,7 @@ async def delete_session_audio_file(audio_url: str, db: AsyncSession):
                 logger.info(f"Successfully deleted COS object: {cos_key}")
             except Exception as e:
                 logger.warning(f"Failed to delete COS object {cos_key}: {e}")
-            
+
             # 2. Delete from database UploadedFile records
             uploaded_res = await db.execute(
                 select(models.UploadedFile).where(models.UploadedFile.cos_key == cos_key)

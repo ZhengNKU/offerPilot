@@ -628,7 +628,7 @@ async def analyze_interview_dialogue(
     profile_data: Optional[dict] = None,
     job_description: Optional[str] = None,
     existing_projects: Optional[list[dict]] = None,
-    enable_network: bool = True
+    enable_network: bool = False
 ) -> Dict[str, Any]:
     """
     Calls DeepSeek reasoning model API to analyze the interview dialogue and return evaluation results in JSON.
@@ -696,24 +696,17 @@ async def analyze_interview_dialogue(
         "response_format": {"type": "json_object"}
     }
     
-    try:
-        # P0 优化(#2): 改用流式调用 call_llm_stream。
-        # DeepSeek reasoning model 在大 JSON 输出场景下偶发网关断连(RemoteDisconnected),
-        # 流式可以降低断连概率 + 内置指数退避重试。
-        res_data = await _run_with_optional_tools(
-            payload, enable_network, sync=False, timeout=180.0
-        )
-        content = res_data["choices"][0]["message"]["content"]
-        content_clean = _strip_codeblock(content)
-        parsed_data = _safe_json_parse(content_clean, log_label="dialogue")
-        if parsed_data is None:
-            logger.error("[dialogue] unable to parse DeepSeek response as JSON after repair")
-            return {}
-        return parsed_data
-    except Exception as e:
-        logger.error(f"Failed calling DeepSeek API: {str(e)}")
-
-    return {}
+    # 不再静默返回 {}——失败直接向上抛,外层 run_real_analysis 会走 _fail_analysis
+    # 给出带具体原因的报错文案,而不是"AI 评估返回为空"这种无信息提示
+    res_data = await _run_with_optional_tools(
+        payload, enable_network, sync=False, timeout=180.0
+    )
+    content = res_data["choices"][0]["message"]["content"]
+    content_clean = _strip_codeblock(content)
+    parsed_data = _safe_json_parse(content_clean, log_label="dialogue")
+    if parsed_data is None:
+        raise RuntimeError("AI 评估返回结果无法解析")
+    return parsed_data
 
 
 async def generate_match_rate_via_llm(
@@ -819,7 +812,7 @@ async def generate_match_rate_via_llm(
 async def extract_mentioned_projects(
     dialogue_text: str,
     existing_projects: Optional[list[dict]] = None,
-    enable_network: bool = True
+    enable_network: bool = False
 ) -> list[dict]:
     """
     P0 优化(#3): 从面试对话中识别候选人讨论到的项目经历。
@@ -922,7 +915,7 @@ async def extract_mentioned_projects(
 
 async def sectionize_transcript(
     segments: List[Dict[str, Any]],
-    enable_network: bool = True,
+    enable_network: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Use DeepSeek reasoning model to semantically split a transcript (list of ASR segments)
@@ -1112,7 +1105,7 @@ def _snap_to_segments(t: float, segments: List[Dict[str, Any]]) -> float:
 
 async def generate_section_optimization_advice(
     dialogue_text: str,
-    enable_network: bool = True
+    enable_network: bool = False
 ) -> Dict[str, Any]:
     """
     Generate diagnostic conclusion, candidate original answer, and high-score answer recommendation.
@@ -1148,33 +1141,20 @@ async def generate_section_optimization_advice(
         "response_format": {"type": "json_object"}
     }
 
-    try:
-        # 优化建议是"一次性返回 JSON 给前端"的场景，不需要服务端流式。
-        # 走 sync 路径省掉 SSE/stream chunk 装配开销，DeepSeek 直连超时也更可控。
-        res_data = await _run_with_optional_tools(payload, enable_network, sync=True)
-        content = res_data["choices"][0]["message"]["content"]
-        content_clean = _strip_codeblock(content)
-        parsed_data = _safe_json_parse(content_clean, log_label="optimize")
-        if parsed_data is None:
-            logger.error("[optimize] unable to parse DeepSeek response as JSON after repair")
-            return {
-                "conclusion": "分析失败，请稍后重试",
-                "original": "无法提取原版回答",
-                "optimized": "暂无高分话术推荐",
-            }
-        return parsed_data
-    except Exception as e:
-        logger.error(f"Failed to generate optimization advice: {e}")
-        return {
-            "conclusion": "分析失败，请稍后重试",
-            "original": "无法提取原版回答",
-            "optimized": "暂无高分话术推荐"
-        }
+    # 失败直接向上抛,不再返回 fallback 兜底 JSON
+    # sync=True 走 call_llm_sync_with_tools,同步阻塞,简单可靠
+    res_data = await _run_with_optional_tools(payload, enable_network, sync=True)
+    content = res_data["choices"][0]["message"]["content"]
+    content_clean = _strip_codeblock(content)
+    parsed_data = _safe_json_parse(content_clean, log_label="optimize")
+    if parsed_data is None:
+        raise RuntimeError("AI 优化建议返回结果无法解析")
+    return parsed_data
 
 
 async def generate_transcript_highlights(
     segments: List[Dict[str, Any]],
-    enable_network: bool = True
+    enable_network: bool = False
 ) -> List[Dict[str, Any]]:
     """
     Calls DeepSeek reasoning model LLM to analyze candidate's utterances, returning highlights
@@ -1234,18 +1214,14 @@ async def generate_transcript_highlights(
         "response_format": {"type": "json_object"}
     }
 
-    try:
-        res_data = await _run_with_optional_tools(payload, enable_network)
-        content = res_data["choices"][0]["message"]["content"]
-        content_clean = _strip_codeblock(content)
-        parsed = _safe_json_parse(content_clean, log_label="highlights")
-        if parsed is None:
-            logger.error("[highlights] unable to parse DeepSeek response as JSON after repair")
-            return []
-        return parsed.get("highlights") or []
-    except Exception as e:
-        logger.error(f"Failed to generate highlights: {e}")
-        return []
+    # 失败直接向上抛,不再静默返回 []
+    res_data = await _run_with_optional_tools(payload, enable_network)
+    content = res_data["choices"][0]["message"]["content"]
+    content_clean = _strip_codeblock(content)
+    parsed = _safe_json_parse(content_clean, log_label="highlights")
+    if parsed is None:
+        raise RuntimeError("AI 高亮分析返回结果无法解析")
+    return parsed.get("highlights") or []
 
 
 def call_llm_stream(payload: dict, timeout: float = 300.0) -> dict:
@@ -1415,7 +1391,7 @@ async def analyze_resume_text(
     resume_text: str,
     profile_data: Optional[dict] = None,
     parsed_structure: Optional[dict] = None,
-    enable_network: bool = True,
+    enable_network: bool = False,
 ) -> Dict[str, Any]:
     """
     Calls DeepSeek (reasoning model) to analyze the extracted resume text and return structured analysis in JSON.
@@ -1588,18 +1564,24 @@ async def analyze_resume_text(
         parsed_data = _safe_json_parse(content_clean, log_label="resume")
         if parsed_data is None:
             logger.error("[resume] unable to parse DeepSeek response as JSON after repair")
-            return {}
+            raise RuntimeError("AI 返回 JSON 解析失败")
+        if not isinstance(parsed_data, dict) or not parsed_data:
+            raise RuntimeError("AI 返回为空")
         return parsed_data
+    except RuntimeError:
+        # 已经是我们自己定义的语义化错误,直接抛
+        raise
     except Exception as e:
         logger.error(f"Failed to analyze resume via DeepSeek: {e}")
-        return {}
+        # 把 SDK 原始异常包装成我们的语义化错误
+        raise RuntimeError(f"AI 调用失败：{type(e).__name__}") from e
 
 
 async def extract_project_experiences(
     resume_text: str,
     parsed_structure: dict,
     existing_projects: list[dict],
-    enable_network: bool = True
+    enable_network: bool = False
 ) -> list[dict]:
     """
     从简历原文中提取项目经历的结构化信息。

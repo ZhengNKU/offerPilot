@@ -97,9 +97,16 @@ class InterviewSession(Base):
     summary_weaknesses: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     summary_suggestions: Mapped[List[str]] = mapped_column(ARRAY(String), default=list)
     executive_summary: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    
+
     analysis_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    
+
+    # 2026-07-25+:本 session 是否已成功扣过配额。
+    # 扣额度在分析成功(ASR+LLM 全部完成)后才发生,失败不扣;防止重跑分析时重复扣。
+    quota_charged: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+
+    # 2026-07-25+: 分析失败时写入标准格式的报错文案(给前端展示用)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
@@ -233,12 +240,20 @@ class UploadedFile(Base):
     file_size: Mapped[int] = mapped_column(BigInteger, default=0)
     file_type: Mapped[str] = mapped_column(String(50), nullable=False) # audio, resume
 
+    # 上传时锁定的 COS 保留天数（与用户后续升降级无关）。
+    retention_days: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, default=None,
+        comment="上传时锁定的保留天数；NULL=老数据/兜底30天"
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user: Mapped[Optional["User"]] = relationship("User", back_populates="files")
+    # passive_deletes=True：删 UploadedFile 时不主动 delete ResumeAnalysis，
+    # 让 DB 的 ON DELETE SET NULL 自己把 file_id 置空（保留 LLM 报告）
     resume_analyses: Mapped[List["ResumeAnalysis"]] = relationship(
-        "ResumeAnalysis", back_populates="file", cascade="all, delete-orphan"
+        "ResumeAnalysis", back_populates="file", passive_deletes=True
     )
 
 
@@ -255,8 +270,12 @@ class ResumeAnalysis(Base):
     user_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    file_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True
+    # file_id 从 NOT NULL + CASCADE 改成 nullable + SET NULL：
+    # 原始 PDF/DOCX 简历文件被定期清理（30/60 天）时，LLM 生成的分析结果
+    # （result_json）必须保留给用户回看。如果 CASCADE 会把整个分析报告一起删。
+    # SET NULL 后 file_id 置空，前端"查看原文件"按钮可降级为禁用，分析报告本身仍在。
+    file_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True, index=True
     )
     score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     optimized_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -267,7 +286,11 @@ class ResumeAnalysis(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
     user: Mapped[Optional["User"]] = relationship("User")
-    file: Mapped["UploadedFile"] = relationship("UploadedFile", back_populates="resume_analyses")
+    # passive_deletes=True：让数据库 ON DELETE SET NULL 自己处理，
+    # SQLAlchemy 不再尝试逐行 delete 子对象（避免 O(N) roundtrip）
+    file: Mapped[Optional["UploadedFile"]] = relationship(
+        "UploadedFile", back_populates="resume_analyses", passive_deletes=True
+    )
 
 
 class ProjectMemory(Base):
@@ -356,8 +379,9 @@ class InterviewLiveSession(Base):
     session_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("interview_sessions.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # user_id 由 SET NULL 改 CASCADE：实时面试记录属于个人数据，注销必须删
     user_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
     # 4 选 1 面试类型
     interview_type: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -391,7 +415,10 @@ class InterviewLiveSession(Base):
     transcript: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
     # PR-N: 候选人在面试过程中提交的反馈（type: tech_question/voice/ux/other + content + ts）
     feedback: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True, default=list)
-    
+
+    # 2026-07-25+: 分析失败时写入标准格式的报错文案(给前端展示用)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -713,6 +740,8 @@ class Feedback(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
+    # 注销时保留 feedback（user_id 置 NULL，文本/作者名/截图保留），
+    # 视为匿名反馈继续展示，给社区留价值
     user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     author_name: Mapped[str] = mapped_column(String(50), nullable=False)
     type: Mapped[str] = mapped_column(String(50), nullable=False) # 问题反馈, 功能建议, 体验优化, 其他
@@ -736,6 +765,7 @@ class FeedbackComment(Base):
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     feedback_id: Mapped[int] = mapped_column(Integer, ForeignKey("feedbacks.id", ondelete="CASCADE"), nullable=False, index=True)
+    # 注销时保留评论（user_id 置 NULL，文本保留）
     user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     author_name: Mapped[str] = mapped_column(String(100), nullable=False)
     author_avatar: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -749,12 +779,26 @@ class FeedbackComment(Base):
 class FeedbackVote(Base):
     """反馈的点赞记录"""
     __tablename__ = "feedback_votes"
-    
-    feedback_id: Mapped[int] = mapped_column(Integer, ForeignKey("feedbacks.id", ondelete="CASCADE"), primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+
+    # surrogate id 主键：原 (feedback_id, user_id) 复合 PK 让 user_id 不能 NULL
+    # 也无法 SET NULL。改用 id 主键后 user_id 变 nullable，注销账号时投票记录
+    # 保留（user_id 置 NULL → 匿名投票），Feedback.upvotes 计数也不会漂移
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    feedback_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("feedbacks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    
+
     feedback: Mapped["Feedback"] = relationship("Feedback", back_populates="votes")
+
+    __table_args__ = (
+        # (feedback_id, user_id) 唯一：同一用户对同一 feedback 只能投一次
+        # user_id IS NULL 时多个匿名投票可共存（PG UNIQUE 默认 NULLs distinct）
+        UniqueConstraint("feedback_id", "user_id", name="uq_feedback_vote"),
+    )
 
 
 class FeaturedGuide(Base):

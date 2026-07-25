@@ -135,6 +135,9 @@ function InterviewTrainingPageContent() {
 
   const [cameraOn, setCameraOn] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
+  const fetchedLiveIdRef = useRef<number | null>(null);
+  const restoredLiveIdRef = useRef<string | null>(null);
+  const quotaFetchedRef = useRef<boolean>(false);
   const [reportData, setReportData] = useState<any>(null);
   const [reportTranscript, setReportTranscript] = useState<any[]>([]);
   // 快捷操作：暂停倒计时
@@ -196,11 +199,14 @@ function InterviewTrainingPageContent() {
     const lsLiveId = typeof window !== "undefined" ? localStorage.getItem("interviewVar_live_id") : null;
     const liveId = urlLiveId || lsLiveId;
 
-    // PR6: 拉配额信息
-    fetch(`${apiBase}/api/live/quota`, { headers: authHeaders() })
-      .then((r) => r.ok ? r.json() : null)
-      .then((q) => { if (q) setQuota(q); })
-      .catch(() => { /* 匿名/网络错误时静默 */ });
+    // PR6: 拉配额信息 (防重加锁)
+    if (!quotaFetchedRef.current) {
+      quotaFetchedRef.current = true;
+      fetch(`${apiBase}/api/live/quota`, { headers: authHeaders() })
+        .then((r) => r.ok ? r.json() : null)
+        .then((q) => { if (q) setQuota(q); })
+        .catch(() => { quotaFetchedRef.current = false; });
+    }
 
     if (!liveId) {
       setBootState("idle");
@@ -223,8 +229,18 @@ function InterviewTrainingPageContent() {
       }
       return;
     }
-    // 注意：不要把 localStorage 的 liveId 回写到 URL —— 新建页应保持 URL 干净
-    // 只有 showReport 进入报告态时才把 liveId 写进 URL
+
+    // 强防重锁：针对同一个 liveId 无论挂载多少次，绝不重复拉取 restore 或 showReport
+    if (restoredLiveIdRef.current === liveId) return;
+    restoredLiveIdRef.current = liveId;
+
+    // 优化：从历史记录带 ?liveId=N 打开时直接获取 report 接口，不再额外先请求 /sessions/N 避免双重网络开销
+    if (urlLiveId) {
+      setBootState("loading");
+      void showReport(Number(urlLiveId));
+      return;
+    }
+
     setBootState("loading");
     void restoreSession(Number(liveId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -297,6 +313,8 @@ function InterviewTrainingPageContent() {
   };
 
   const showReport = async (liveId: number) => {
+    if (fetchedLiveIdRef.current === liveId) return;
+    fetchedLiveIdRef.current = liveId;
     try {
       const res = await fetch(`${apiBase}/api/live/sessions/${liveId}/report`, { headers: authHeaders() });
       if (res.ok) {
@@ -307,10 +325,12 @@ function InterviewTrainingPageContent() {
         // 进入报告态：把 liveId 写进 URL（可分享、可刷新回到报告页）
         window.history.replaceState(null, "", `/training?liveId=${liveId}`);
       } else {
+        fetchedLiveIdRef.current = null;
         setErrorMsg("获取面试报告失败");
         setBootState("error");
       }
     } catch (e) {
+      fetchedLiveIdRef.current = null;
       console.error("Failed to load report:", e);
       setErrorMsg("加载面试报告出错");
       setBootState("error");
@@ -767,7 +787,7 @@ function InterviewTrainingPageContent() {
                   AI 模拟面试分析报告
                 </h2>
                 <p className="text-xs text-on-surface-variant/60 font-semibold">
-                  目标岗位：<strong className="text-white">{targetRole}</strong> · 难度：<strong className="text-white">{DIFFICULTIES.find(d => d.value === difficulty)?.label}</strong> · 时长：<strong className="text-white">{durationMin} 分钟</strong>
+                  目标岗位：<strong className="text-white">{reportData.target_role || targetRole}</strong> · 面试类型：<strong className="text-white">{INTERVIEW_TYPES.find(t => t.value === (reportData.interview_type || interviewType))?.label || INTERVIEW_TYPES.find(t => t.value === interviewType)?.label}</strong> · 难度：<strong className="text-white">{DIFFICULTIES.find(d => d.value === (reportData.difficulty || difficulty))?.label}</strong> · 时长：<strong className="text-white">{reportData.duration_min || durationMin} 分钟</strong>
                 </p>
               </div>
               <button
@@ -784,7 +804,7 @@ function InterviewTrainingPageContent() {
               {/* Score Panel */}
               <div className="col-span-12 lg:col-span-4 glass-panel p-6 rounded-3xl border-white/10 flex flex-col justify-between items-center text-center gap-6">
                 <div className="w-full pb-3 border-b border-white/5 text-left">
-                  <h3 className="text-sm font-black text-white uppercase tracking-wider">评测得分</h3>
+                  <h3 className="text-base font-black text-white uppercase tracking-wider">评测得分</h3>
                 </div>
                 
                 {/* Radial Progress Score */}
@@ -814,13 +834,13 @@ function InterviewTrainingPageContent() {
                     <span className="text-4xl font-black text-white font-label-mono tracking-tighter">
                       {reportData.scores?.ipi ?? 70}
                     </span>
-                    <span className="text-[10px] text-on-surface-variant/40 font-bold uppercase tracking-wider mt-1">IPI 综合得分</span>
+                    <span className="text-xs text-on-surface-variant/40 font-bold uppercase tracking-wider mt-1">IPI 综合得分</span>
                   </div>
                 </div>
 
                 {/* Offer Probability Badge */}
                 <div className="w-full p-4 rounded-2xl bg-white/[0.01] border border-white/5 space-y-1.5 text-left">
-                  <div className="flex justify-between items-center text-xs font-bold text-on-surface-variant/70">
+                  <div className="flex justify-between items-center text-sm font-bold text-on-surface-variant/70">
                     <span>Offer 获得概率</span>
                     <span className="text-tertiary font-label-mono font-black">{reportData.scores?.offer_probability ?? 0}%</span>
                   </div>
@@ -836,7 +856,7 @@ function InterviewTrainingPageContent() {
               {/* Executive Summary */}
               <div className="col-span-12 lg:col-span-8 glass-panel p-6 rounded-3xl border-white/10 flex flex-col justify-start gap-4">
                 <div className="pb-3 border-b border-white/5">
-                  <h3 className="text-sm font-black text-white uppercase tracking-wider">总评摘要</h3>
+                  <h3 className="text-base font-black text-white uppercase tracking-wider">总评摘要</h3>
                 </div>
                 <p className="text-sm leading-relaxed text-on-surface-variant/80 font-medium">
                   {reportData.summary?.executive_summary || "暂无总评摘要"}
@@ -845,7 +865,7 @@ function InterviewTrainingPageContent() {
                 {/* Strengths & Weaknesses Quick View */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
                   <div className="space-y-2">
-                    <span className="text-xs text-primary font-black flex items-center gap-1">
+                    <span className="text-base text-primary font-black flex items-center gap-1">
                       <span className="material-symbols-outlined text-sm">check_circle</span>
                       核心优势
                     </span>
@@ -856,7 +876,7 @@ function InterviewTrainingPageContent() {
                     </ul>
                   </div>
                   <div className="space-y-2">
-                    <span className="text-xs text-secondary font-black flex items-center gap-1">
+                    <span className="text-base text-secondary font-black flex items-center gap-1">
                       <span className="material-symbols-outlined text-sm">warning</span>
                       薄弱环节
                     </span>
@@ -875,7 +895,7 @@ function InterviewTrainingPageContent() {
               {/* Dimension Scores */}
               <div className="col-span-12 lg:col-span-6 glass-panel p-6 rounded-3xl border-white/10 flex flex-col gap-5">
                 <div className="pb-3 border-b border-white/5">
-                  <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <h3 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-base text-primary">analytics</span>
                     维度细分表现
                   </h3>
@@ -892,7 +912,7 @@ function InterviewTrainingPageContent() {
                     const scoreVal = reportData.scores?.[dim.key] ?? 70;
                     return (
                       <div key={dim.key} className="space-y-1.5">
-                        <div className="flex justify-between items-center text-xs">
+                        <div className="flex justify-between items-center text-sm">
                           <span className="text-white/80 font-bold flex items-center gap-1.5">
                             <span className="material-symbols-outlined text-sm text-on-surface-variant/50">{dim.icon}</span>
                             {dim.label}
@@ -914,7 +934,7 @@ function InterviewTrainingPageContent() {
               {/* Suggestions & Action Plan */}
               <div className="col-span-12 lg:col-span-6 glass-panel p-6 rounded-3xl border-white/10 flex flex-col gap-4">
                 <div className="pb-3 border-b border-white/5">
-                  <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <h3 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-base text-tertiary">lightbulb</span>
                     针对性改进建议
                   </h3>
@@ -926,7 +946,7 @@ function InterviewTrainingPageContent() {
                       <div className="w-6 h-6 rounded-full bg-tertiary/10 border border-tertiary/20 shrink-0 flex items-center justify-center font-bold text-xs text-tertiary">
                         {idx + 1}
                       </div>
-                      <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
+                      <p className="text-sm md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
                         {s}
                       </p>
                     </div>
@@ -941,7 +961,7 @@ function InterviewTrainingPageContent() {
             {/* Dialogue Review Section */}
             <div className="glass-panel p-6 rounded-3xl border-white/10 flex flex-col gap-5 w-full text-left">
               <div className="pb-3 border-b border-white/5">
-                <h3 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                <h3 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                   <span className="material-symbols-outlined text-base text-primary">chat</span>
                   面试对话复盘回顾
                 </h3>
@@ -996,186 +1016,215 @@ function InterviewTrainingPageContent() {
               </div>
             </div>
           </div>
+        ) : searchParams.get("liveId") && bootState !== "error" ? (
+          /* 当从 URL 或历史记录显式打开报告，但在异步加载完成之前，绝不闪现 Configure 表单和 Live 舞台 */
+          <div className="w-full flex-1 min-h-[60vh] flex flex-col items-center justify-center p-12 text-center gap-6 glass-panel rounded-3xl border-white/10">
+            <div className="relative w-16 h-16">
+              <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+              <div className="absolute inset-2 rounded-full border-4 border-tertiary/10 border-t-tertiary animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.1s" }} />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-3xl font-black text-white animate-pulse tracking-wide">正在加载模拟面试复盘报告...</h3>
+              <p className="text-sm text-on-surface-variant/50 font-bold">正在提取会话记录与 DeepSeek 智能评估结果</p>
+            </div>
+          </div>
         ) : (
           <div className="grid grid-cols-12 gap-6 items-stretch w-full">
 
             {/* ============ 左：ConfigPanel ============ */}
-            <div className="col-span-12 lg:col-span-3 flex flex-col justify-between gap-6 h-full">
-              <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col h-full gap-5.5 text-left">
-                <div className="pb-3 border-b border-white/5 shrink-0">
-                  <div className="flex justify-between items-start gap-2">
-                    <div>
-                      <h3 className="text-lg font-black text-white">开始模拟面试</h3>
-                      <p className="text-[11px] text-on-surface-variant/40 font-bold mt-1 uppercase tracking-wider">Configure your training</p>
-                    </div>
-                    {/* PR6: 配额 chip */}
-                    {quota && auth.isLoggedIn && (
-                      <div className="shrink-0 px-2.5 py-1 rounded-full border border-tertiary/30 bg-tertiary/10 text-tertiary text-[10px] font-black flex items-center gap-1">
-                        <span className="material-symbols-outlined text-xs">science</span>
-                        内测 · {quota.used_min}/{quota.limit_min} 分钟
+            {(() => {
+              const isQuotaExhausted = quota !== null && quota.remaining_min <= 0;
+              return (
+                <div className="col-span-12 lg:col-span-3 flex flex-col justify-between gap-6 h-full">
+                  <div className="glass-panel p-5.5 rounded-3xl border-white/10 flex flex-col h-full gap-5.5 text-left">
+                    <div className="pb-3 border-b border-white/5 shrink-0">
+                      <div className="flex justify-between items-start gap-2">
+                        <div>
+                          <h3 className="text-lg font-black text-white">开始模拟面试</h3>
+                          <p className="text-[11px] text-on-surface-variant/40 font-bold mt-1 uppercase tracking-wider">Configure your training</p>
+                        </div>
+                        {/* PR6: 配额 chip */}
+                        {quota && auth.isLoggedIn && (
+                          <div className={`shrink-0 px-2.5 py-1 rounded-full border text-[10px] font-black flex items-center gap-1 ${
+                            isQuotaExhausted
+                              ? "border-secondary/30 bg-secondary/10 text-secondary"
+                              : "border-tertiary/30 bg-tertiary/10 text-tertiary"
+                          }`}>
+                            <span className="material-symbols-outlined text-xs">{isQuotaExhausted ? "block" : "science"}</span>
+                            {isQuotaExhausted ? "配额已耗尽 · 0 分钟" : `内测 · ${quota.used_min}/${quota.limit_min} 分钟`}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="space-y-4 flex-1 overflow-y-auto pr-1">
-                  {/* 1. 目标岗位（必填） */}
-                  <div className="space-y-1.5">
-                    <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">
-                      目标岗位 <span className="text-red-400">*</span>
-                    </label>
-                    <input
-                      type="text"
-                      disabled={isLive}
-                      value={targetRole}
-                      onChange={(e) => setTargetRole(e.target.value)}
-                      placeholder="如 后端开发工程师"
-                      className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black focus:outline-none transition-all placeholder:text-white/20"
-                    />
-                  </div>
-
-                  {/* 1.5 岗位详情（选填） */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between items-center">
-                      <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold">
-                        岗位详情 [选填]
-                      </label>
-                      <span className={`text-[10px] font-mono ${
-                        jobDescription.length > JD_MAX_LENGTH * 0.9
-                          ? jobDescription.length >= JD_MAX_LENGTH ? "text-secondary font-black" : "text-amber-400"
-                          : "text-on-surface-variant/30"
-                      }`}>
-                        {jobDescription.length}/{JD_MAX_LENGTH}
-                      </span>
                     </div>
-                    <textarea
-                      disabled={isLive}
-                      value={jobDescription}
-                      maxLength={JD_MAX_LENGTH}
-                      onChange={(e) => { setJobDescription(e.target.value.slice(0, JD_MAX_LENGTH)); jobDescMod.reset(); }}
-                      onBlur={(e) => jobDescMod.check(e.target.value, "training_jd_hint")}
-                      placeholder="粘贴岗位 JD（最多 600 字），AI 面试官会基于真实岗位画像出题..."
-                      className="w-full py-3 px-4 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl text-xs md:text-sm font-semibold focus:outline-none transition-all placeholder:text-white/20 h-28 resize-none scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent overflow-y-auto"
-                    />
-                  </div>
 
-                  {/* 2. 面试类型（下拉框） */}
-                  <div className="space-y-1.5">
-                    <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">
-                      面试类型
-                    </label>
-                    <select
-                      disabled={isLive}
-                      value={interviewType}
-                      onChange={(e) => setInterviewType(e.target.value as InterviewType)}
-                      className="w-full px-4 py-3 bg-[#060e20] border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-xs md:text-sm text-white font-black"
-                    >
-                      {INTERVIEW_TYPES.map((t) => (
-                        <option key={t.value} className="bg-[#0e1626]" value={t.value}>
-                          {t.label} · {t.persona}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                    <div className="space-y-4 flex-1 overflow-y-auto pr-1">
+                      {/* 1. 目标岗位（必填） */}
+                      <div className="space-y-1.5">
+                        <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">
+                          目标岗位 <span className="text-red-400">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          disabled={isLive || isQuotaExhausted}
+                          value={targetRole}
+                          onChange={(e) => setTargetRole(e.target.value)}
+                          placeholder={isQuotaExhausted ? "体验额度已用尽..." : "如 后端开发工程师"}
+                          className="w-full bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl py-3 px-4 text-sm font-black focus:outline-none transition-all placeholder:text-white/20 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.01]"
+                        />
+                      </div>
 
-                  {/* 3. 难度等级（PR4 §8.4.1 4 选 1） */}
-                  <div className="space-y-1.5">
-                    <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">难度等级</label>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {DIFFICULTIES.map((d) => (
-                        <button
-                          key={d.value}
-                          disabled={isLive}
-                          onClick={() => setDifficulty(d.value)}
-                          className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
-                            difficulty === d.value
-                              ? "bg-secondary/15 border-secondary/50 text-white"
-                              : "bg-white/[0.02] border-white/5 text-on-surface-variant hover:bg-white/[0.05]"
-                          }`}
+                      {/* 1.5 岗位详情（选填） */}
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold">
+                            岗位详情 [选填]
+                          </label>
+                          <span className={`text-[10px] font-mono ${
+                            jobDescription.length > JD_MAX_LENGTH * 0.9
+                              ? jobDescription.length >= JD_MAX_LENGTH ? "text-secondary font-black" : "text-amber-400"
+                              : "text-on-surface-variant/30"
+                          }`}>
+                            {jobDescription.length}/{JD_MAX_LENGTH}
+                          </span>
+                        </div>
+                        <textarea
+                          disabled={isLive || isQuotaExhausted}
+                          value={jobDescription}
+                          maxLength={JD_MAX_LENGTH}
+                          onChange={(e) => { setJobDescription(e.target.value.slice(0, JD_MAX_LENGTH)); jobDescMod.reset(); }}
+                          onBlur={(e) => jobDescMod.check(e.target.value, "training_jd_hint")}
+                          placeholder={isQuotaExhausted ? "体验额度已用尽，暂无法录入岗位 JD..." : "粘贴岗位 JD（最多 600 字），AI 面试官会基于真实岗位画像出题..."}
+                          className="w-full py-3 px-4 bg-white/[0.02] hover:bg-white/[0.04] border border-white/5 focus:border-primary/50 text-white rounded-xl text-xs md:text-sm font-semibold focus:outline-none transition-all placeholder:text-white/20 h-28 resize-none scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent overflow-y-auto disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.01]"
+                        />
+                      </div>
+
+                      {/* 2. 面试类型（下拉框） */}
+                      <div className="space-y-1.5">
+                        <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">
+                          面试类型
+                        </label>
+                        <select
+                          disabled={isLive || isQuotaExhausted}
+                          value={interviewType}
+                          onChange={(e) => setInterviewType(e.target.value as InterviewType)}
+                          className="w-full px-4 py-3 bg-[#060e20] border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-xs md:text-sm text-white font-black disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <div className="text-sm font-black">{d.label}</div>
-                          <div className="text-sm text-on-surface-variant/50 font-bold mt-0.5">{d.speed}</div>
+                          {INTERVIEW_TYPES.map((t) => (
+                            <option key={t.value} className="bg-[#0e1626]" value={t.value}>
+                              {t.label} · {t.persona}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* 3. 难度等级（PR4 §8.4.1 4 选 1） */}
+                      <div className="space-y-1.5">
+                        <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">难度等级</label>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {DIFFICULTIES.map((d) => (
+                            <button
+                              key={d.value}
+                              disabled={isLive || isQuotaExhausted}
+                              onClick={() => setDifficulty(d.value)}
+                              className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+                                difficulty === d.value
+                                  ? "bg-secondary/15 border-secondary/50 text-white"
+                                  : "bg-white/[0.02] border-white/5 text-on-surface-variant hover:bg-white/[0.05]"
+                              }`}
+                            >
+                              <div className="text-sm font-black">{d.label}</div>
+                              <div className="text-sm text-on-surface-variant/50 font-bold mt-0.5">{d.speed}</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 4. 面试时长（PR4 §8.4.1 3 选 1） */}
+                      <div className="space-y-1.5">
+                        <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">面试时长</label>
+                        <div className="grid grid-cols-3 gap-1.5">
+                          {DURATIONS.map((d) => (
+                            <button
+                              key={d.value}
+                              disabled={isLive || isQuotaExhausted || (interviewType === "hr_comprehensive" && d.value === 20)}
+                              onClick={() => setDurationMin(d.value)}
+                              className={`p-2 rounded-xl border text-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
+                                durationMin === d.value
+                                  ? "bg-tertiary/15 border-tertiary/50 text-white"
+                                  : "bg-white/[0.02] border-white/5 text-on-surface-variant hover:bg-white/[0.05]"
+                              }`}
+                            >
+                              <div className="text-sm font-black">{d.value} 分</div>
+                              <div className="text-sm text-on-surface-variant/50 font-bold mt-0.5">{d.qRange}题</div>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* 5. 追问轮数（PR4 §8.4.1 slider 1-3） */}
+                      <div className="space-y-1.5">
+                        <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">追问轮数</label>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="range" min={1} max={3} step={1}
+                            disabled={isLive || isQuotaExhausted}
+                            value={followupRounds}
+                            onChange={(e) => setFollowupRounds(Number(e.target.value) as FollowupRounds)}
+                            className="flex-1 accent-primary cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                          />
+                          <span className="text-sm font-black text-white w-8 text-right font-label-mono">{FOLLOWUP_RANGES[followupRounds]}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 本次训练信息预览 */}
+                    <div className="p-4 rounded-2xl bg-white/[0.01] border border-white/5 space-y-2 shrink-0">
+                      <span className="text-sm text-on-surface-variant/40 font-label-mono tracking-widest uppercase block font-extrabold">本次训练信息</span>
+                      <div className="space-y-1.5 text-xs text-on-surface-variant/80 font-bold">
+                        <p className="flex justify-between"><span>预计时长:</span><span className="text-white font-black font-label-mono">{durationMin} 分钟</span></p>
+                        <p className="flex justify-between"><span>问题数量:</span><span className="text-white font-black font-label-mono">{questionRange} 道</span></p>
+                        <p className="flex justify-between"><span>包含追问:</span><span className="text-white font-black font-label-mono">{FOLLOWUP_RANGES[followupRounds]}追问</span></p>
+                        <p className="flex justify-between"><span>AI 面试官:</span><span className="text-tertiary font-black">{INTERVIEW_TYPES.find(t => t.value === interviewType)?.persona}</span></p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3 shrink-0">
+                      <button
+                        disabled={bootState !== "idle" || isCountingDown || isPreparingTraining || isQuotaExhausted}
+                        onClick={handleStartTraining}
+                        className={`w-full py-3.5 text-base font-black rounded-xl transition-all flex items-center justify-center gap-2 group ${
+                          isQuotaExhausted
+                            ? "bg-white/10 text-on-surface-variant/40 border border-white/10 cursor-not-allowed shadow-none"
+                            : "bg-gradient-to-r from-secondary to-primary text-on-primary hover:scale-[1.01] active:scale-98 disabled:opacity-50 disabled:scale-100 shadow-lg shadow-secondary/20 cursor-pointer"
+                        }`}
+                      >
+                        {isPreparingTraining ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                            <span>校验与准备面试会话中...</span>
+                          </>
+                        ) : isQuotaExhausted ? (
+                          <>
+                            <span className="material-symbols-outlined text-base">block</span>
+                            <span>体验额度已用尽，无法开始面试</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="material-symbols-outlined text-base animate-pulse">play_arrow</span>
+                            <span>{isLive ? "正在进行模拟面试" : "开始模拟面试"}</span>
+                          </>
+                        )}
+                      </button>
+                      {bootState === "error" && (
+                        <button onClick={handleReset} className="w-full py-2 bg-white/5 border border-white/10 text-on-surface text-xs font-bold rounded-xl hover:bg-white/10 transition-all cursor-pointer">
+                          重新开始
                         </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 4. 面试时长（PR4 §8.4.1 3 选 1） */}
-                  <div className="space-y-1.5">
-                    <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">面试时长</label>
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {DURATIONS.map((d) => (
-                        <button
-                          key={d.value}
-                          disabled={isLive || (interviewType === "hr_comprehensive" && d.value === 20)}
-                          onClick={() => setDurationMin(d.value)}
-                          className={`p-2 rounded-xl border text-center transition-all cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${
-                            durationMin === d.value
-                              ? "bg-tertiary/15 border-tertiary/50 text-white"
-                              : "bg-white/[0.02] border-white/5 text-on-surface-variant hover:bg-white/[0.05]"
-                          }`}
-                        >
-                          <div className="text-sm font-black">{d.value} 分</div>
-                          <div className="text-sm text-on-surface-variant/50 font-bold mt-0.5">{d.qRange}题</div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 5. 追问轮数（PR4 §8.4.1 slider 1-3） */}
-                  <div className="space-y-1.5">
-                    <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block">追问轮数</label>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range" min={1} max={3} step={1}
-                        disabled={isLive}
-                        value={followupRounds}
-                        onChange={(e) => setFollowupRounds(Number(e.target.value) as FollowupRounds)}
-                        className="flex-1 accent-primary cursor-pointer disabled:opacity-50"
-                      />
-                      <span className="text-sm font-black text-white w-8 text-right font-label-mono">{FOLLOWUP_RANGES[followupRounds]}</span>
+                      )}
                     </div>
                   </div>
                 </div>
-
-                {/* 本次训练信息预览 */}
-                <div className="p-4 rounded-2xl bg-white/[0.01] border border-white/5 space-y-2 shrink-0">
-                  <span className="text-sm text-on-surface-variant/40 font-label-mono tracking-widest uppercase block font-extrabold">本次训练信息</span>
-                  <div className="space-y-1.5 text-xs text-on-surface-variant/80 font-bold">
-                    <p className="flex justify-between"><span>预计时长:</span><span className="text-white font-black font-label-mono">{durationMin} 分钟</span></p>
-                    <p className="flex justify-between"><span>问题数量:</span><span className="text-white font-black font-label-mono">{questionRange} 道</span></p>
-                    <p className="flex justify-between"><span>包含追问:</span><span className="text-white font-black font-label-mono">{FOLLOWUP_RANGES[followupRounds]}追问</span></p>
-                    <p className="flex justify-between"><span>AI 面试官:</span><span className="text-tertiary font-black">{INTERVIEW_TYPES.find(t => t.value === interviewType)?.persona}</span></p>
-                  </div>
-                </div>
-
-                <div className="space-y-3 shrink-0">
-                  <button
-                    disabled={bootState !== "idle" || isCountingDown || isPreparingTraining}
-                    onClick={handleStartTraining}
-                    className="w-full py-3.5 bg-gradient-to-r from-secondary to-primary text-on-primary text-base font-black rounded-xl hover:scale-[1.01] active:scale-98 disabled:opacity-50 disabled:scale-100 transition-all shadow-lg shadow-secondary/20 cursor-pointer flex items-center justify-center gap-2 group"
-                  >
-                    {isPreparingTraining ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
-                        <span>校验与准备面试会话中...</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="material-symbols-outlined text-base animate-pulse">play_arrow</span>
-                        <span>{isLive ? "正在进行模拟面试" : "开始模拟面试"}</span>
-                      </>
-                    )}
-                  </button>
-                  {bootState === "error" && (
-                    <button onClick={handleReset} className="w-full py-2 bg-white/5 border border-white/10 text-on-surface text-xs font-bold rounded-xl hover:bg-white/10 transition-all cursor-pointer">
-                      重新开始
-                    </button>
-                  )}
-                  {/* 内测版本：删除"开始即表示同意 训练规范与用户权益" 文本（对应 modal 已删除） */}
-                </div>
-              </div>
-            </div>
+              );
+            })()}
 
             {/* ============ 中：LiveStage ============ */}
             <div className="col-span-12 lg:col-span-6 flex flex-col justify-between gap-6 h-full min-w-0">
@@ -1282,11 +1331,6 @@ function InterviewTrainingPageContent() {
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <button onClick={toggleCamera} className={`px-3 py-1.5 rounded-xl border text-[11px] font-black flex items-center gap-1 cursor-pointer transition-all ${
-                          cameraOn ? "bg-primary/10 border-primary text-primary" : "bg-white/5 border-white/5 text-on-surface-variant/50"
-                        }`}>
-                          <span className="material-symbols-outlined text-sm">{cameraOn ? "videocam" : "videocam_off"}</span>摄像头
-                        </button>
                         <button onClick={() => { live.toggleMic(); audio.mute(!micMuted); }} className={`px-3 py-1.5 rounded-xl border text-[11px] font-black flex items-center gap-1 cursor-pointer transition-all ${
                           micMuted ? "bg-white/5 border-white/5 text-on-surface-variant/50" : "bg-tertiary/10 border-tertiary text-tertiary"
                         }`}>
@@ -1339,20 +1383,19 @@ function InterviewTrainingPageContent() {
                         </div>
                       ) : (
                         <div
-                          onClick={toggleCamera}
-                          className="relative aspect-video w-full rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl group cursor-pointer hover:border-primary/40 transition-colors"
+                          className="relative aspect-video w-full rounded-2xl bg-slate-900 border border-white/10 overflow-hidden flex items-center justify-center shadow-2xl group"
                         >
                           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center bg-gradient-to-b from-[#141b2e] to-slate-950 gap-3 select-none">
-                            <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center bg-white/[0.01] group-hover:scale-105 transition-transform">
-                              <span className="material-symbols-outlined text-2xl text-on-surface-variant/40 animate-pulse">videocam_off</span>
+                            <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center bg-white/[0.01]">
+                              <span className="material-symbols-outlined text-2xl text-on-surface-variant/40">videocam_off</span>
                             </div>
                             <p className="text-[10px] text-on-surface-variant/45 font-bold leading-normal max-w-[180px]">
-                              候选人画面已关闭，点击开启摄像头。
+                              语音面试模式中
                             </p>
                           </div>
                           <span className="absolute left-3.5 top-3 px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md text-[10px] text-white/90 font-bold border border-white/5 z-10 flex items-center gap-1">
-                            <span className="w-1.5 h-1.5 bg-white/30 rounded-full" />
-                            你 (未开启)
+                            <span className="w-1.5 h-1.5 bg-tertiary rounded-full animate-ping" />
+                            你
                           </span>
                         </div>
                       )}

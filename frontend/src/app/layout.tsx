@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { AuthProvider } from "@/components/AuthProvider";
 import LegalModals from "@/components/LegalModals";
+import AutoCleanupUploads from "@/components/AutoCleanupUploads";
 
 export const metadata: Metadata = {
   title: "面试驾到 - AI 面试分析专家",
@@ -33,6 +34,8 @@ export default function RootLayout({
           {/* 全局法务弹窗：用户协议 / 隐私政策 / 联系我们。
               各页面 footer 调用 openLegalTerms() / openLegalPrivacy() / openLegalContact() 触发。 */}
           <LegalModals />
+          {/* 切屏/刷新/关闭时自动清理已上传但未关联到 session 的孤儿文件 */}
+          <AutoCleanupUploads />
         </AuthProvider>
       </body>
     </html>

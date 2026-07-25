@@ -130,6 +130,8 @@ class LiveSessionResponse(BaseModel):
     session_id: Optional[int] = None
     # PR2 起填充：浏览器可重连的 ws_url
     ws_url: Optional[str] = None
+    # 2026-07-25+: 分析失败时填入标准格式报错文案
+    error_message: Optional[str] = None
 
 
 # ---------- Endpoints ----------
@@ -271,7 +273,8 @@ async def create_live_session(
         started_at=row.started_at,
         ended_at=row.ended_at,
         session_id=row.session_id,
-        ws_url=f"/api/live/ws/{row.id}",  # PR2: 浏览器连此地址
+        ws_url=f"/api/live/ws/{row.id}",
+        error_message=row.error_message,
     )
 
 
@@ -316,6 +319,7 @@ async def get_live_session(
         ended_at=row.ended_at,
         session_id=row.session_id,
         ws_url=f"/api/live/ws/{row.id}",
+        error_message=row.error_message,
     )
 
 
@@ -341,20 +345,45 @@ async def get_live_session_report(
         )
         
     analysis_res = row.analysis_result or {}
+
+    # 2026-07-25+: 分析失败时直接返回报错,不再合成假分数
+    if row.status == "failed":
+        return {
+            "status": "failed",
+            "error_message": row.error_message or "模拟面试分析失败",
+            "scores": None,
+            "summary": None,
+            "transcript": row.transcript or [],
+            "analysis_result": None,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "target_role": row.target_role,
+            "difficulty": row.difficulty,
+            "duration_min": row.duration_min,
+            "interview_type": row.interview_type,
+        }
+
+    # 分析尚未完成(analyzing/ended 等)同样不合成假分数
+    if row.status not in ("completed",):
+        return {
+            "status": row.status,
+            "error_message": None,
+            "scores": None,
+            "summary": None,
+            "transcript": row.transcript or [],
+            "analysis_result": None,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "target_role": row.target_role,
+            "difficulty": row.difficulty,
+            "duration_min": row.duration_min,
+            "interview_type": row.interview_type,
+        }
+
     scores = {
-        "ipi": row.ipi_score or 70,
-        "offer_probability": row.offer_probability or 0
+        "ipi": row.ipi_score,
+        "offer_probability": row.offer_probability,
     }
     if analysis_res and isinstance(analysis_res.get("scores"), dict):
         scores.update(analysis_res["scores"])
-    else:
-        scores.update({
-            "expression": 75,
-            "logic": 80,
-            "project_depth": 70,
-            "ownership": 65,
-            "system_design": 60
-        })
 
     return {
         "scores": scores,
@@ -459,6 +488,7 @@ async def end_live_session(
             ended_at=row.ended_at,
             session_id=row.session_id,
             ws_url=None,
+            error_message=row.error_message,
         )
 
     # 触发结束
@@ -564,81 +594,34 @@ async def _run_analysis_for_live(
         dialogue_text = "\n".join(dialogue_parts)
         
         # 4. 调用 LLM 评估 (DeepSeek)
+        # 2026-07-25+: 失败直接 raise 到外层 try/except,不再用任何 safe mock 兜底
         from app.routers.audio import analyze_interview_dialogue
-        
-        # Safe fallback scores
-        ipi_score = 65
-        offer_probability = 40
-        strengths = ["表达流利，问题应答迅速", "了解核心技术特性"]
-        weaknesses = ["技术深度有待提升", "方案细节描述不够完整"]
-        suggestions = ["深化系统设计知识体系", "回答中加入量化数据背书"]
-        executive_summary = "整体表现中等，建议加强技术深度与方案细节的描述。"
-        
-        score_expression = 75
-        score_logic = 80
-        score_project_depth = 70
-        score_ownership = 65
-        score_system_design = 60
-        
-        llm_result = {}
-        try:
-            if dialogue_text.strip():
-                llm_result = await analyze_interview_dialogue(dialogue_text, profile_data, job_description)
-            if llm_result:
-                ipi_score = llm_result.get("ipi_score", ipi_score)
-                offer_probability = llm_result.get("offer_probability", offer_probability)
-                strengths = llm_result.get("summary_strengths", strengths)
-                weaknesses = llm_result.get("summary_weaknesses", weaknesses)
-                suggestions = llm_result.get("summary_suggestions", suggestions)
-                executive_summary = llm_result.get("executive_summary", executive_summary)
-                
-                if "scores" not in llm_result or not isinstance(llm_result["scores"], dict):
-                    llm_result["scores"] = {
-                        "expression": llm_result.get("score_expression") or llm_result.get("expression") or score_expression,
-                        "logic": llm_result.get("score_logic") or llm_result.get("logic") or score_logic,
-                        "project_depth": llm_result.get("score_project_depth") or llm_result.get("project_depth") or score_project_depth,
-                        "ownership": llm_result.get("score_ownership") or llm_result.get("ownership") or score_ownership,
-                        "system_design": llm_result.get("score_system_design") or llm_result.get("system_design") or score_system_design,
-                    }
-        except Exception as e:
-            logger.warning(f"[live] LLM evaluation failed, using fallback: {e}")
-            
+        if not dialogue_text.strip():
+            raise RuntimeError("没有可分析的对话内容(面试可能没有正常进行)")
+        llm_result = await analyze_interview_dialogue(dialogue_text, profile_data, job_description)
         if not llm_result:
-            llm_result = {
-                "ipi_score": ipi_score,
-                "offer_probability": offer_probability,
-                "summary_strengths": strengths,
-                "summary_weaknesses": weaknesses,
-                "summary_suggestions": suggestions,
-                "executive_summary": executive_summary,
-                "scores": {
-                    "expression": score_expression,
-                    "logic": score_logic,
-                    "project_depth": score_project_depth,
-                    "ownership": score_ownership,
-                    "system_design": score_system_design
-                },
-                "max_lose_points": [
-                    { "rank": 1, "label": "选型依据不足", "tag": "高风险", "desc": "缺少问题背景和选型对比，无法体现技术决策能力" },
-                    { "rank": 2, "label": "没有 Trade-off 分析", "tag": "中风险", "desc": "回答较表面，缺乏权衡思考和方案对比" },
-                    { "rank": 3, "label": "项目贡献模糊", "tag": "中风险", "desc": "未突出个人贡献并负责的核心模块" }
-                ],
-                "interviewer_perspective": [
-                    { "label": "Redis 相关问题", "val": "验证缓存设计能力" },
-                    { "label": "一致性问题", "val": "验证分布式系统架构能力" },
-                    { "label": "项目真实度", "val": "验证真实项目经验" }
-                ],
-                "question_deconstruction": [
-                    { "stage": "第 1 关 · 基础引入", "title": "为什么使用 Redis？", "desc": "考查求职者是否知道 Redis 在项目中的具体角色..." },
-                    { "stage": "第 2 关 · 方案对比", "title": "为什么不用本地缓存？", "desc": "深度考查对进程内缓存与分布式缓存的对比..." }
-                ],
-                "followup_paths": [
-                    { "title": "Q1 自我介绍 · 引导切入", "desc": "抛出“做过分布式系统与中间件开发”，成功引导进入中间件板块。", "tag": "良好" },
-                    { "title": "Q3 Redis 选型 · 主动深挖", "desc": "核心漏洞点：“因为 Redis 性能高” ➔ 引出细节追问。", "tag": "一般" },
-                    { "title": "Q5 双写一致性 · 重试质感", "desc": "最终瓶颈：“定时双删”的答法暴露了高并发和真实落地经验的不足。", "tag": "风险" }
-                ]
-            }
-            
+            raise RuntimeError("AI 评估返回为空")
+
+        # 校验关键字段(任一为空/缺失即视为 LLM 输出异常,直接 raise)
+        for name, val in [
+            ("ipi_score", llm_result.get("ipi_score")),
+            ("offer_probability", llm_result.get("offer_probability")),
+            ("summary_strengths", llm_result.get("summary_strengths")),
+            ("summary_weaknesses", llm_result.get("summary_weaknesses")),
+            ("summary_suggestions", llm_result.get("summary_suggestions")),
+            ("executive_summary", llm_result.get("executive_summary")),
+            ("scores", llm_result.get("scores")),
+        ]:
+            if val is None or val == "" or val == [] or val == {}:
+                raise RuntimeError(f"AI 返回缺少关键字段：{name}")
+
+        ipi_score         = llm_result["ipi_score"]
+        offer_probability = llm_result["offer_probability"]
+        strengths         = llm_result["summary_strengths"]
+        weaknesses        = llm_result["summary_weaknesses"]
+        suggestions       = llm_result["summary_suggestions"]
+        executive_summary = llm_result["executive_summary"]
+
         # 5. 保存结果到 InterviewLiveSession 并完成
         # transcript 字段不再此处更新：live_bridge._on_close 已在面试结束时一次性写入大 JSON，
         # 这里只需追加分析结果（ipi / summary / analysis_result）即可
@@ -698,18 +681,30 @@ async def _run_analysis_for_live(
         logger.info(f"[live] analysis complete for live_id={live_id}")
     except Exception as e:
         logger.exception(f"[live] _run_analysis_for_live 失败 live_id={live_id}: {e}")
-        # 标记 failed
+        # 标记 failed,并写入标准格式的 error_message 给前端展示
+        try:
+            from app.utils.error_messages import (
+                FEATURE_LIVE as FEATURE_NAME_LIVE,
+                format_failure,
+            )
+            reason = str(e) or "未知原因"
+            if len(reason) > 200:
+                reason = reason[:200] + "..."
+            user_message = format_failure(FEATURE_NAME_LIVE, reason)
+        except Exception as fmt_err:
+            logger.error(f"[live] format_failure 自身异常: {fmt_err}")
+            user_message = "模拟面试失败：未知原因"
         try:
             from app.database import async_session
             async with async_session() as db:
                 await db.execute(
                     update(models.InterviewLiveSession)
                     .where(models.InterviewLiveSession.id == live_id)
-                    .values(status="failed")
+                    .values(status="failed", error_message=user_message)
                 )
                 await db.commit()
-        except Exception:
-            pass
+        except Exception as db_err:
+            logger.error(f"[live] 写 failed 状态到 DB 失败 live_id={live_id}: {db_err}")
 
 
 # ---------- PR6 端点：统计 / 列表 / 配额 ----------

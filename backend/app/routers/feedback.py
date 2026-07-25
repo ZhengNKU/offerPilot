@@ -291,7 +291,19 @@ async def delete_feedback(
     # Delete associated screenshot from COS and database
     if fb.screenshot_url:
         from app.routers.file import delete_file_from_storage
-        file_res = await db.execute(select(models.UploadedFile).where(models.UploadedFile.file_url == fb.screenshot_url))
+        # fb.screenshot_url 可能是签名 URL / 非签名 cos 路径 / 纯 cos_key，统一抽 cos_key 反查
+        # （UploadedFile.file_url 现在存非签名路径，screenshot_url 可能是老格式的签名 URL）
+        import urllib.parse
+        raw = fb.screenshot_url
+        if raw.startswith("uploads/") or "/" not in raw:
+            cos_key = urllib.parse.unquote(raw)
+        else:
+            parsed = urllib.parse.urlparse(raw)
+            path = parsed.path.lstrip("/")
+            cos_key = urllib.parse.unquote(path) if path else raw
+        file_res = await db.execute(
+            select(models.UploadedFile).where(models.UploadedFile.cos_key == cos_key)
+        )
         db_file = file_res.scalars().first()
         if db_file:
             await delete_file_from_storage(db, db_file)
@@ -329,9 +341,20 @@ async def batch_delete_feedbacks(
     
     # Delete associated screenshots from COS and database
     from app.routers.file import delete_file_from_storage
+    import urllib.parse
     for fb in fbs:
         if fb.screenshot_url:
-            file_res = await db.execute(select(models.UploadedFile).where(models.UploadedFile.file_url == fb.screenshot_url))
+            # 兼容三种格式：签名 URL / 非签名 cos 路径 / 纯 cos_key，最后都 unquote 一次
+            raw = fb.screenshot_url
+            if raw.startswith("uploads/") or "/" not in raw:
+                cos_key = urllib.parse.unquote(raw)
+            else:
+                parsed = urllib.parse.urlparse(raw)
+                path = parsed.path.lstrip("/")
+                cos_key = urllib.parse.unquote(path) if path else raw
+            file_res = await db.execute(
+                select(models.UploadedFile).where(models.UploadedFile.cos_key == cos_key)
+            )
             db_file = file_res.scalars().first()
             if db_file:
                 await delete_file_from_storage(db, db_file)

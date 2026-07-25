@@ -212,6 +212,8 @@ async def check_and_consume(
         )
 
     # 通过：记录本次使用
+    # 注意：只用 flush 不 commit，让调用方控制事务边界，
+    # 避免调用方同一 session 里的其他 pending 更改被提前提交。
     db.add(models.UserQuotaUsage(user_id=user.id, feature=feature))
-    await db.commit()
+    await db.flush()
     return max_count - used - 1

@@ -79,7 +79,13 @@ export async function pollTaskUntilDone(
         lastData = data;
         opts.onProgress?.(data);
 
-        if (TERMINAL_STATUSES.has(String(data.status))) {
+        if (String(data.status) === "failed") {
+          stop();
+          reject(new Error((data as any).error_message || "分析任务失败，请重试"));
+          return;
+        }
+
+        if (String(data.status) === "completed") {
           stop();
           resolve({ finalData: data, iterations });
           return;

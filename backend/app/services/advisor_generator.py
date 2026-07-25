@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app import models
+from app.config import settings
 from app.utils.llm import call_llm_stream, _strip_codeblock
 
 logger = logging.getLogger(__name__)
@@ -137,7 +138,7 @@ async def generate_general_advisor_insights(db: AsyncSession, user_id: int, targ
 """
 
     payload = {
-        "model": "deepseek-chat",
+        "model": settings.DEEPSEEK_MODEL_FAST,
         "messages": [
             {"role": "system", "content": "You are a professional AI career advisor. Output raw JSON only."},
             {"role": "user", "content": prompt}
@@ -284,7 +285,7 @@ async def generate_custom_advisor_insights(db: AsyncSession, user_id: int):
 """
 
     payload = {
-        "model": "deepseek-chat",
+        "model": settings.DEEPSEEK_MODEL_FAST,
         "messages": [
             {"role": "system", "content": "You are a professional AI career advisor. Output raw JSON only."},
             {"role": "user", "content": prompt}
@@ -418,7 +419,7 @@ async def generate_weekly_focus_areas(db: AsyncSession, user_id: int):
 """
 
     payload = {
-        "model": "deepseek-chat",
+        "model": settings.DEEPSEEK_MODEL_FAST,
         "messages": [
             {"role": "system", "content": "You are a professional AI career advisor. Output raw JSON only."},
             {"role": "user", "content": prompt}

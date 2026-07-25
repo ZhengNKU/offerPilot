@@ -9,6 +9,7 @@ import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
 import { API_BASE } from "@/lib/api";
 import { getQuotaStatus, type Feature } from "@/lib/quotaClient";
+import { trackPendingFile, untrackPendingFile } from "@/utils/pendingUploads";
 
 const getTodayString = () => {
   const d = new Date();
@@ -205,6 +206,8 @@ function NewAnalysisDebuggerContent() {
       setUploadedFileId(data.file_id);
       setSelectedFile(file);
       localStorage.setItem("interviewVar_session_audio_url", data.file_url);
+      // 2026-07-25+: 跟踪 pending 文件,切屏/刷新会被 AutoCleanupUploads 自动 DELETE
+      trackPendingFile(data.file_id);
       auth.triggerToast("文件已成功上传！");
     } catch (e: any) {
       auth.triggerToast(e.message || "文件上传失败，请重试！", "error");
@@ -269,6 +272,9 @@ function NewAnalysisDebuggerContent() {
           const err = await res.json();
           throw new Error(err.detail || "删除失败");
         }
+        // 2026-07-25+: 用户手动删除成功 → 从 pending 列表移除
+        // (避免 AutoCleanupUploads 再发一次 DELETE)
+        untrackPendingFile(uploadedFileId);
         auth.triggerToast("文件已删除！");
       } catch (e: any) {
         auth.triggerToast(e.message || "文件删除失败！", "error");
@@ -402,10 +408,10 @@ function NewAnalysisDebuggerContent() {
 
     // Save form meta to localStorage so result pages can read them
     localStorage.setItem("interviewVar_report_mode", activeMode);
-    localStorage.setItem("interviewVar_session_company", audioForm.company || "字节跳动");
-    localStorage.setItem("interviewVar_session_role", audioForm.role || "后端开发工程师");
-    localStorage.setItem("interviewVar_session_years", "3-5年");
-    localStorage.setItem("interviewVar_session_round", audioForm.round || "二面 - 技术面");
+    localStorage.setItem("interviewVar_session_company", audioForm.company || "");
+    localStorage.setItem("interviewVar_session_role", audioForm.role || "");
+    localStorage.setItem("interviewVar_session_years", auth.user?.years || "");
+    localStorage.setItem("interviewVar_session_round", audioForm.round || "");
     localStorage.setItem("interviewVar_session_date", audioForm.date || getTodayString());
     localStorage.setItem("interviewVar_session_grade", audioForm.grade || "");
     localStorage.setItem("interviewVar_session_salary", audioForm.salary || "");
@@ -462,6 +468,10 @@ function NewAnalysisDebuggerContent() {
         sessionId = sessionData.session_id;
         localStorage.setItem("interviewVar_session_id", String(sessionId));
 
+        // 2026-07-25+: session 创建成功 → 文件已"提交",从 pending 列表移除
+        // (切屏/刷新时不再自动 DELETE)
+        if (uploadedFileId) untrackPendingFile(uploadedFileId);
+
         // Mark as analyzed for free users/guests
         localStorage.setItem("interviewVar_analyzed_audio", "true");
 
@@ -500,7 +510,7 @@ function NewAnalysisDebuggerContent() {
       ];
 
       try {
-        await pollTaskUntilDone(taskId, {
+        const pollResult = await pollTaskUntilDone(taskId, {
           intervalMs: 2000,
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           onProgress: (pollData) => {
@@ -510,6 +520,15 @@ function NewAnalysisDebuggerContent() {
             setTaskStep(STEPS[si]);
           },
         });
+
+        // 2026-07-25+: 检查任务是否以 failed 结束,不导航到报告页
+        if (pollResult.finalData.status === "failed") {
+          const errMsg = (pollResult.finalData as any).error_message || "录音分析失败，请重试";
+          auth.triggerToast(errMsg, "error");
+          setIsAnalyzing(false);
+          localStorage.removeItem("interviewVar_task_id");
+          return;
+        }
 
         // Step 4: Navigate to voice analysis report page (data is ready)
         await checkRemainingLimit();
@@ -605,7 +624,7 @@ function NewAnalysisDebuggerContent() {
 
       try {
         // Step 3: Poll progress until done
-        await pollTaskUntilDone(taskId, {
+        const pollResult = await pollTaskUntilDone(taskId, {
           intervalMs: 2000,
           onProgress: (pollData) => {
             const pct = pollData.progress || 0;
@@ -615,6 +634,15 @@ function NewAnalysisDebuggerContent() {
             setTaskStep(TEXT_STEPS[si]);
           },
         });
+
+        // 2026-07-25+: 检查任务是否以 failed 结束
+        if (pollResult.finalData.status === "failed") {
+          const errMsg = (pollResult.finalData as any).error_message || "面试记录分析失败，请重试";
+          auth.triggerToast(errMsg, "error");
+          setIsAnalyzing(false);
+          localStorage.removeItem("interviewVar_task_id");
+          return;
+        }
 
         await checkRemainingLimit();
         router.push(`/debugger/record?sessionId=${sessionId}`);
@@ -638,17 +666,18 @@ function NewAnalysisDebuggerContent() {
 
       let progress = 15;
       const progressSteps = [
-        { limit: 40, step: "正在深度解析简历结构与技术栈...", rate: 0.5 },
-        { limit: 65, step: "正在对比目标岗位画像，评估匹配契合度...", rate: 0.3 },
-        { limit: 85, step: "正在实施大厂 STAR 原则，深度优化工作经历...", rate: 0.15 },
-        { limit: 95, step: "正在诊断简历雷区与 ATS 机器人可读性...", rate: 0.05 }
+        { limit: 45, step: "正在深度解析简历结构与技术栈..." },
+        { limit: 70, step: "正在对比目标岗位画像，评估匹配契合度..." },
+        { limit: 88, step: "正在实施大厂 STAR 原则，深度优化工作经历..." },
+        { limit: 97, step: "正在诊断简历雷区与 ATS 机器人可读性..." }
       ];
       
       let currentStepIdx = 0;
       const progressInterval = setInterval(() => {
-        if (progress < 95) {
+        if (progress < 98) {
           const currentStep = progressSteps[currentStepIdx];
-          progress += currentStep.rate;
+          const inc = progress < 45 ? 1.2 : (progress < 70 ? 0.8 : (progress < 88 ? 0.5 : 0.2));
+          progress = Math.min(98, progress + inc);
           setTaskProgress(Math.floor(progress));
           setTaskStep(currentStep.step);
           
@@ -656,7 +685,7 @@ function NewAnalysisDebuggerContent() {
             currentStepIdx++;
           }
         }
-      }, 1000);
+      }, 400);
 
       try {
         const analyzeRes = await fetch(`${API_BASE}/api/resume/analyze`, {
@@ -675,6 +704,9 @@ function NewAnalysisDebuggerContent() {
         setTaskProgress(98);
         setTaskStep("完成分析 — 正在生成高维诊断报告...");
         const analysisData = await analyzeRes.json();
+
+        // 2026-07-25+: 简历分析请求成功 → 文件已"提交",从 pending 列表移除
+        if (uploadedFileId) untrackPendingFile(uploadedFileId);
 
         // Cache the analysis data to localStorage
         localStorage.setItem("interviewVar_resume_analysis_result", JSON.stringify(analysisData));
@@ -815,6 +847,8 @@ function NewAnalysisDebuggerContent() {
                             method: "DELETE",
                             headers
                           }).catch(() => {});
+                          // 2026-07-25+: 模式切换时显式删除 → 从 pending 移除
+                          untrackPendingFile(uploadedFileId);
                         }
                         setActiveMode(item.mode as any);
                         setSelectedFile(null);
@@ -916,227 +950,272 @@ function NewAnalysisDebuggerContent() {
               </div>
 
               {/* Upload drag drop areas */}
-              {activeMode !== "text" ? (
-                <div
-                  onClick={selectedFile ? undefined : handleUploadClick}
-                  onDragOver={handleDragOver}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop}
-                  className={`border-2 border-dashed py-20 md:py-28 rounded-2xl flex flex-col items-center justify-center text-center transition-all duration-300 min-h-[380px] group relative ${
-                    selectedFile ? "cursor-default" : "cursor-pointer"
-                  } ${
-                    isDragging
-                      ? "border-primary bg-primary/10 scale-[1.01] shadow-[0_0_25px_rgba(192,193,255,0.1)]"
-                      : "border-white/10 hover:border-primary/50 hover:bg-white/[0.01]"
-                  }`}
-                >
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileChange}
-                    accept={activeMode === "audio" ? ".wav,.mp3" : ".pdf,.docx"}
-                    className="hidden"
-                  />
-                  {isUploading ? (
-                    <div className="flex flex-col items-center justify-center space-y-4">
-                      <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin mb-4" />
-                      <h4 className="font-extrabold text-white text-base animate-pulse">文件上传中...</h4>
-                    </div>
-                  ) : isDeleting ? (
-                    <div className="flex flex-col items-center justify-center space-y-4">
-                      <div className="w-16 h-16 rounded-full border-4 border-red-500/20 border-t-red-500 animate-spin mb-4" />
-                      <h4 className="font-extrabold text-white text-base animate-pulse">正在删除文件...</h4>
-                    </div>
-                  ) : selectedFile ? (
-                    <div className="flex flex-col items-center justify-center space-y-4">
-                      <div className="w-24 h-24 rounded-3xl bg-primary/10 text-primary flex items-center justify-center relative group/icon mb-2 transition-all">
-                        <span className="material-symbols-outlined" style={{ fontSize: "56px" }}>
-                          {activeMode === "audio" ? "library_music" : "description"}
-                        </span>
-                        {/* Always visible close button */}
-                        <button
-                          onClick={handleRemoveFile}
-                          className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-all shadow-md cursor-pointer z-10"
-                          title="删除文件"
-                        >
-                          <span className="material-symbols-outlined text-[16px] font-black">close</span>
-                        </button>
+              {(() => {
+                const isQuotaExhausted = remainingCount !== null && remainingCount <= 0;
+                return (
+                  <>
+                    {activeMode !== "text" ? (
+                      <div
+                        onClick={selectedFile || isQuotaExhausted ? undefined : handleUploadClick}
+                        onDragOver={isQuotaExhausted ? undefined : handleDragOver}
+                        onDragLeave={isQuotaExhausted ? undefined : handleDragLeave}
+                        onDrop={isQuotaExhausted ? undefined : handleDrop}
+                        className={`border-2 border-dashed py-20 md:py-28 rounded-2xl flex flex-col items-center justify-center text-center transition-all duration-300 min-h-[380px] group relative ${
+                          selectedFile || isQuotaExhausted ? "cursor-not-allowed opacity-60 bg-white/[0.01]" : "cursor-pointer"
+                        } ${
+                          isDragging && !isQuotaExhausted
+                            ? "border-primary bg-primary/10 scale-[1.01] shadow-[0_0_25px_rgba(192,193,255,0.1)]"
+                            : "border-white/10 hover:border-primary/50 hover:bg-white/[0.01]"
+                        }`}
+                      >
+                        <input
+                          type="file"
+                          ref={fileInputRef}
+                          onChange={handleFileChange}
+                          disabled={isQuotaExhausted}
+                          accept={activeMode === "audio" ? ".wav,.mp3" : ".pdf,.docx"}
+                          className="hidden"
+                        />
+                        {isUploading ? (
+                          <div className="flex flex-col items-center justify-center space-y-4">
+                            <div className="w-16 h-16 rounded-full border-4 border-primary/20 border-t-primary animate-spin mb-4" />
+                            <h4 className="font-extrabold text-white text-base animate-pulse">文件上传中...</h4>
+                          </div>
+                        ) : isDeleting ? (
+                          <div className="flex flex-col items-center justify-center space-y-4">
+                            <div className="w-16 h-16 rounded-full border-4 border-red-500/20 border-t-red-500 animate-spin mb-4" />
+                            <h4 className="font-extrabold text-white text-base animate-pulse">正在删除文件...</h4>
+                          </div>
+                        ) : selectedFile ? (
+                          <div className="flex flex-col items-center justify-center space-y-4">
+                            <div className="w-24 h-24 rounded-3xl bg-primary/10 text-primary flex items-center justify-center relative group/icon mb-2 transition-all">
+                              <span className="material-symbols-outlined" style={{ fontSize: "56px" }}>
+                                {activeMode === "audio" ? "library_music" : "description"}
+                              </span>
+                              {/* Always visible close button */}
+                              <button
+                                onClick={handleRemoveFile}
+                                disabled={isQuotaExhausted}
+                                className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-all shadow-md cursor-pointer z-10 disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="删除文件"
+                              >
+                                <span className="material-symbols-outlined text-[16px] font-black">close</span>
+                              </button>
+                            </div>
+                            <div>
+                              <h4 className="font-extrabold text-white text-base md:text-lg mb-1 max-w-md truncate">
+                                已选择: {selectedFile.name}
+                              </h4>
+                              <p className="text-xs text-on-surface-variant/60 font-mono font-semibold">
+                                大小: {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-3 mt-2">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleUploadClick();
+                                }}
+                                disabled={isQuotaExhausted}
+                                className="px-4.5 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-bold text-white transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <span className="material-symbols-outlined text-sm">cloud_upload</span>
+                                选择其他文件
+                              </button>
+                            </div>
+                          </div>
+                        ) : isQuotaExhausted ? (
+                          <div className="flex flex-col items-center justify-center space-y-3">
+                            <div className="w-20 h-20 rounded-3xl bg-secondary/10 border border-secondary/20 text-secondary flex items-center justify-center mb-2">
+                              <span className="material-symbols-outlined" style={{ fontSize: "48px" }}>block</span>
+                            </div>
+                            <h4 className="font-extrabold text-white text-base md:text-lg">
+                              体验次数已用完，暂时无法上传文件
+                            </h4>
+                            <p className="text-xs md:text-sm text-secondary/80 font-bold">
+                              当前剩余体验次数为 0 次，请升级会员或充值体验配额
+                            </p>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="w-24 h-24 rounded-3xl bg-primary/10 group-hover:scale-110 transition-transform text-primary flex items-center justify-center mb-6">
+                              <span className="material-symbols-outlined" style={{ fontSize: "56px" }}>
+                                {activeMode === "audio" ? "cloud_upload" : "folder_zip"}
+                              </span>
+                            </div>
+                            <h4 className="font-extrabold text-white text-base md:text-lg mb-2">
+                              {activeMode === "audio" ? "拖拽录音文件到此处，或点击浏览上传" : "拖拽简历文档到此处，或点击浏览上传"}
+                            </h4>
+                            <p className="text-xs md:text-sm text-on-surface-variant/60">
+                              {activeMode === "audio" ? "支持 wav, mp3 格式，最大 50MB (时长限30分钟)" : "支持 PDF, DOCX 格式，最大 5MB"}
+                            </p>
+                          </>
+                        )}
                       </div>
-                      <div>
-                        <h4 className="font-extrabold text-white text-base md:text-lg mb-1 max-w-md truncate">
-                          已选择: {selectedFile.name}
+                    ) : (
+                      /* paste transcript area */
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs text-on-surface-variant/80 font-bold">
+                            请在下方输入框粘贴或填写您的真实面试对话日志：
+                          </label>
+                          <button
+                            onClick={loadFailTemplate}
+                            disabled={isQuotaExhausted}
+                            className="text-xs text-primary font-bold cursor-pointer flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            <span className="material-symbols-outlined text-xs">bolt</span>载入经典失败分析模板
+                          </button>
+                        </div>
+                        <textarea
+                          value={pasteText}
+                          onChange={(e) => setPasteText(e.target.value)}
+                          disabled={isQuotaExhausted}
+                          placeholder={isQuotaExhausted ? "体验次数已用完，暂无法录入分析文本..." : "面试官：请问你们的系统是怎么做微服务架构解耦的？&#10;我：就是简单用了一个消息队列，人工对账补数据..."}
+                          className="w-full h-56 bg-surface-container-low border border-white/5 rounded-2xl p-4 font-mono text-sm text-on-surface focus:outline-none focus:border-primary/40 transition-all leading-relaxed min-h-[220px] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.02] disabled:border-white/5"
+                        />
+                      </div>
+                    )}
+
+                    {/* Pre-Analysis Form (ALL TEXT INPUTS except Date and IsOnJob) */}
+                    {activeMode !== "resume" && (
+                      <div className="p-6 rounded-2xl bg-surface-container/50 border border-white/5 space-y-4">
+                        <h4 className="text-xs text-primary font-label-mono uppercase tracking-widest font-extrabold mb-3">
+                          分析前填写面试信息 (*必填)
                         </h4>
-                        <p className="text-xs text-on-surface-variant/60 font-mono font-semibold">
-                          大小: {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
-                        </p>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-on-surface-variant">
+                          <div>
+                            <label className="block mb-2">面试公司名称 *</label>
+                            <input
+                              type="text"
+                              placeholder="如 字节跳动"
+                              value={audioForm.company}
+                              disabled={isQuotaExhausted}
+                              onChange={(e) => setAudioForm({ ...audioForm, company: e.target.value })}
+                              className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.02]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block mb-2">岗位名称 *</label>
+                            <input
+                              type="text"
+                              placeholder="如 后端开发工程师"
+                              value={audioForm.role}
+                              disabled={isQuotaExhausted}
+                              onChange={(e) => setAudioForm({ ...audioForm, role: e.target.value })}
+                              className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.02]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block mb-2">面试时间 *</label>
+                            <input
+                              type="date"
+                              value={audioForm.date}
+                              disabled={isQuotaExhausted}
+                              onChange={(e) => setAudioForm({ ...audioForm, date: e.target.value })}
+                              className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-primary/40 cursor-pointer h-12 text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.02]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block mb-2">面试轮次 *</label>
+                            <input
+                              type="text"
+                              placeholder="如 二面 - 技术面"
+                              value={audioForm.round}
+                              disabled={isQuotaExhausted}
+                              onChange={(e) => setAudioForm({ ...audioForm, round: e.target.value })}
+                              className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.02]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block mb-2">岗位职级 [选填]</label>
+                            <input
+                              type="text"
+                              placeholder="如 P6 / L5"
+                              value={audioForm.grade}
+                              disabled={isQuotaExhausted}
+                              onChange={(e) => setAudioForm({ ...audioForm, grade: e.target.value })}
+                              className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.02]"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block mb-2">期望薪资 [选填]</label>
+                            <input
+                              type="text"
+                              placeholder="如 25K * 16薪"
+                              value={audioForm.salary}
+                              disabled={isQuotaExhausted}
+                              onChange={(e) => setAudioForm({ ...audioForm, salary: e.target.value })}
+                              className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.02]"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between items-center mb-2">
+                            <label className="text-xs font-semibold text-on-surface-variant">岗位详情 [选填]</label>
+                            <span className={`text-[10px] font-mono ${
+                              audioForm.jobDescription.length > 540
+                                ? audioForm.jobDescription.length >= 600 ? "text-secondary font-black" : "text-amber-400"
+                                : "text-on-surface-variant/30"
+                            }`}>
+                              {audioForm.jobDescription.length}/600
+                            </span>
+                          </div>
+                          <textarea
+                            placeholder="粘贴岗位 JD（最多 600 字），AI 会基于真实岗位画像分析..."
+                            value={audioForm.jobDescription}
+                            maxLength={600}
+                            disabled={isQuotaExhausted}
+                            onChange={(e) => { setAudioForm({ ...audioForm, jobDescription: e.target.value.slice(0, 600) }); jdMod.reset(); }}
+                            onBlur={(e) => jdMod.check(e.target.value, "jd_audio_hint")}
+                            className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-28 text-xs md:text-sm resize-none disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.02]"
+                          />
+                        </div>
                       </div>
-                      <div className="flex items-center gap-3 mt-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleUploadClick();
-                          }}
-                          className="px-4.5 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-xs font-bold text-white transition-all flex items-center gap-1.5 cursor-pointer"
-                        >
-                          <span className="material-symbols-outlined text-sm">cloud_upload</span>
-                          选择其他文件
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="w-24 h-24 rounded-3xl bg-primary/10 group-hover:scale-110 transition-transform text-primary flex items-center justify-center mb-6">
-                        <span className="material-symbols-outlined" style={{ fontSize: "56px" }}>
-                          {activeMode === "audio" ? "cloud_upload" : "folder_zip"}
-                        </span>
-                      </div>
-                      <h4 className="font-extrabold text-white text-base md:text-lg mb-2">
-                        {activeMode === "audio" ? "拖拽录音文件到此处，或点击浏览上传" : "拖拽简历文档到此处，或点击浏览上传"}
-                      </h4>
-                      <p className="text-xs md:text-sm text-on-surface-variant/60">
-                        {activeMode === "audio" ? "支持 wav, mp3 格式，最大 50MB (时长限30分钟)" : "支持 PDF, DOCX 格式，最大 5MB"}
-                      </p>
-                    </>
-                  )}
-                </div>
-              ) : (
-                /* paste transcript area */
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center">
-                    <label className="text-xs text-on-surface-variant/80 font-bold">
-                      请在下方输入框粘贴或填写您的真实面试对话日志：
-                    </label>
-                    <button
-                      onClick={loadFailTemplate}
-                      className="text-xs text-primary font-bold cursor-pointer flex items-center gap-1"
-                    >
-                      <span className="material-symbols-outlined text-xs">bolt</span>载入经典失败分析模板
-                    </button>
-                  </div>
-                  <textarea
-                    value={pasteText}
-                    onChange={(e) => setPasteText(e.target.value)}
-                    placeholder="面试官：请问你们的系统是怎么做微服务架构解耦的？&#10;我：就是简单用了一个消息队列，人工对账补数据..."
-                    className="w-full h-56 bg-surface-container-low border border-white/5 rounded-2xl p-4 font-mono text-sm text-on-surface focus:outline-none focus:border-primary/40 transition-all leading-relaxed min-h-[220px]"
-                  />
-                </div>
-              )}
-
-              {/* Pre-Analysis Form (ALL TEXT INPUTS except Date and IsOnJob) */}
-              {activeMode !== "resume" && (
-                <div className="p-6 rounded-2xl bg-surface-container/50 border border-white/5 space-y-4">
-                  <h4 className="text-xs text-primary font-label-mono uppercase tracking-widest font-extrabold mb-3">
-                    分析前填写面试信息 (*必填)
-                  </h4>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-on-surface-variant">
-                    <div>
-                      <label className="block mb-2">面试公司名称 *</label>
-                      <input
-                        type="text"
-                        placeholder="如 字节跳动"
-                        value={audioForm.company}
-                        onChange={(e) => setAudioForm({ ...audioForm, company: e.target.value })}
-                        className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block mb-2">岗位名称 *</label>
-                      <input
-                        type="text"
-                        placeholder="如 后端开发工程师"
-                        value={audioForm.role}
-                        onChange={(e) => setAudioForm({ ...audioForm, role: e.target.value })}
-                        className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block mb-2">面试时间 *</label>
-                      <input
-                        type="date"
-                        value={audioForm.date}
-                        onChange={(e) => setAudioForm({ ...audioForm, date: e.target.value })}
-                        className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-primary/40 cursor-pointer h-12 text-xs md:text-sm"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block mb-2">面试轮次 *</label>
-                      <input
-                        type="text"
-                        placeholder="如 二面 - 技术面"
-                        value={audioForm.round}
-                        onChange={(e) => setAudioForm({ ...audioForm, round: e.target.value })}
-                        className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block mb-2">岗位职级 [选填]</label>
-                      <input
-                        type="text"
-                        placeholder="如 P6 / L5"
-                        value={audioForm.grade}
-                        onChange={(e) => setAudioForm({ ...audioForm, grade: e.target.value })}
-                        className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block mb-2">期望薪资 [选填]</label>
-                      <input
-                        type="text"
-                        placeholder="如 25K * 16薪"
-                        value={audioForm.salary}
-                        onChange={(e) => setAudioForm({ ...audioForm, salary: e.target.value })}
-                        className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-12 text-xs md:text-sm"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <label className="text-xs font-semibold text-on-surface-variant">岗位详情 [选填]</label>
-                      <span className={`text-[10px] font-mono ${
-                        audioForm.jobDescription.length > 540
-                          ? audioForm.jobDescription.length >= 600 ? "text-secondary font-black" : "text-amber-400"
-                          : "text-on-surface-variant/30"
-                      }`}>
-                        {audioForm.jobDescription.length}/600
-                      </span>
-                    </div>
-                    <textarea
-                      placeholder="粘贴岗位 JD（最多 600 字），AI 会基于真实岗位画像分析..."
-                      value={audioForm.jobDescription}
-                      maxLength={600}
-                      onChange={(e) => { setAudioForm({ ...audioForm, jobDescription: e.target.value.slice(0, 600) }); jdMod.reset(); }}
-                      onBlur={(e) => jdMod.check(e.target.value, "jd_audio_hint")}
-                      className="w-full py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white placeholder-on-surface-variant/30 focus:outline-none focus:border-primary/40 h-28 text-xs md:text-sm resize-none"
-                    />
-                  </div>
-                </div>
-              )}
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
-            <button
-              onClick={triggerAnalysis}
-              disabled={isAnalyzing || isPreparingAnalysis}
-              className="w-full mt-6 py-4 bg-primary text-on-primary font-black rounded-2xl hover:scale-[1.01] active:scale-[0.99] transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-primary/20 disabled:opacity-60 disabled:pointer-events-none"
-            >
-              {isPreparingAnalysis ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
-                  <span>校验与准备分析会话中...</span>
-                </>
-              ) : (
-                <>
-                  <span className="material-symbols-outlined text-sm">analytics</span>
-                  <span>开启 AI 智能调试分析</span>
-                </>
-              )}
-            </button>
+            {(() => {
+              const isQuotaExhausted = remainingCount !== null && remainingCount <= 0;
+              return (
+                <button
+                  onClick={triggerAnalysis}
+                  disabled={isAnalyzing || isPreparingAnalysis || isQuotaExhausted}
+                  className={`w-full mt-6 py-4 font-black rounded-2xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg ${
+                    isQuotaExhausted
+                      ? "bg-white/10 text-on-surface-variant/40 border border-white/10 shadow-none cursor-not-allowed"
+                      : "bg-primary text-on-primary hover:scale-[1.01] active:scale-[0.99] shadow-primary/20 disabled:opacity-60 disabled:pointer-events-none"
+                  }`}
+                >
+                  {isPreparingAnalysis ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                      <span>校验与准备分析会话中...</span>
+                    </>
+                  ) : isQuotaExhausted ? (
+                    <>
+                      <span className="material-symbols-outlined text-sm">block</span>
+                      <span>体验额度已用尽，无法提交分析</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="material-symbols-outlined text-sm">analytics</span>
+                      <span>开启 AI 智能调试分析</span>
+                    </>
+                  )}
+                </button>
+              );
+            })()}
           </div>
         </div>
 

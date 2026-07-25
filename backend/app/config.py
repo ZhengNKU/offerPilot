@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
+    # 运行环境：production / development。从 .env 读取，默认 development。
+    # 影响：孤儿 COS 扫描只在 production 执行，防止本地和线上共用桶时误删。
+    ENVIRONMENT: str = "development"
+
     # ── 对外可访问的 base URL ──
     PUBLIC_BASE_URL: str = ""
     
@@ -62,7 +66,7 @@ class Settings(BaseSettings):
     DEEPSEEK_MODEL: str = "deepseek-v4-flash"
     # 快速模型（chat，用于结构化抽取/分类/分段）
     # P0 优化 O2：把结构化抽取类任务从 reasoning 切到 chat，预计提速 3-5x
-    DEEPSEEK_MODEL_FAST: str = "deepseek-chat"
+    DEEPSEEK_MODEL_FAST: str = "deepseek-v4-flash"
 
     # ── Embedding（阿里百炼 Qwen3-Embedding text-embedding-v4）────────────────
     # 走 OpenAI 兼容协议 /v1/embeddings；复用同一把 DASHSCOPE_API_KEY（与 MCP 联网搜索同 key）。

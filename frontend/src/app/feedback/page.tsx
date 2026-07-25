@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { API_BASE } from "@/lib/api";
+import { trackPendingFile, untrackPendingFile } from "@/utils/pendingUploads";
 
 const buildPageList = (cur: number, total: number): (number | "…")[] => {
   if (total <= 1) return [1];
@@ -80,6 +81,7 @@ export default function FeedbackPage() {
   // Upload States
   const [uploadFile, setUploadFile] = useState<{ name: string; size: string; progress: number } | null>(null);
   const [uploadedFileUrl, setUploadedFileUrl] = useState("");
+  const [uploadedScreenshotFileId, setUploadedScreenshotFileId] = useState<number | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const uploadTimerRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -315,6 +317,11 @@ export default function FeedbackPage() {
         const newFeedback = await res.json();
         setFeedbacks(prev => [newFeedback, ...prev]);
         setShowSuccessModal(true);
+        // 2026-07-25+: 反馈提交成功 → 截图已"提交"到 feedback,从 pending 移除
+        if (uploadedScreenshotFileId) {
+          untrackPendingFile(uploadedScreenshotFileId);
+          setUploadedScreenshotFileId(null);
+        }
         // Reset Form
         setFeedbackType("");
         setTargetModule("");
@@ -400,6 +407,11 @@ export default function FeedbackPage() {
         try {
           const response = JSON.parse(xhr.responseText);
           setUploadedFileUrl(response.file_url);
+          // 2026-07-25+: 跟踪 pending 截图,切屏/刷新会被 AutoCleanupUploads 自动 DELETE
+          if (response.file_id) {
+            setUploadedScreenshotFileId(response.file_id);
+            trackPendingFile(response.file_id);
+          }
           setUploadFile(prev => prev ? { ...prev, progress: 100 } : null);
           setIsUploading(false);
           auth.triggerToast("截图上传成功！");
@@ -426,6 +438,11 @@ export default function FeedbackPage() {
 
   const removeUploadFile = (e: React.MouseEvent) => {
     e.stopPropagation();
+    // 2026-07-25+: 用户主动移除截图 → 从 pending 移除(避免 AutoCleanupUploads 再发 DELETE)
+    if (uploadedScreenshotFileId) {
+      untrackPendingFile(uploadedScreenshotFileId);
+      setUploadedScreenshotFileId(null);
+    }
     setUploadFile(null);
     setUploadedFileUrl("");
     setIsUploading(false);

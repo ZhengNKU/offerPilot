@@ -710,7 +710,43 @@ async def delete_account(
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
-    # Cascade delete is handled by relationship cascade option, deleting Profile
+    # ── 第一步：先清 COS 对象 ──
+    # 必须先删 COS 再删 user；因为 user 一旦 delete，cascade 会把 UploadedFile
+    # 行也删掉，我们就丢失了 cos_key，无法定位要清的 COS 对象。
+    # 失败时只 log 不抛出：孤儿 COS 会由 6h 一次的 run_periodic_orphan_cleanup 兜底扫到
+    from app.routers.file import get_cos_client
+    files_res = await db.execute(
+        select(models.UploadedFile).where(
+            models.UploadedFile.user_id == current_user.id,
+            models.UploadedFile.cos_key != "",
+        )
+    )
+    user_files = files_res.scalars().all()
+    if user_files:
+        client = get_cos_client()
+        from app.routers.file import bucket as cos_bucket
+        ok = 0
+        failed = 0
+        for f in user_files:
+            try:
+                await asyncio.to_thread(
+                    client.delete_object, Bucket=cos_bucket, Key=f.cos_key
+                )
+                ok += 1
+            except Exception:
+                failed += 1
+                logging.exception(
+                    "[delete-account] 删 COS 失败 file_id=%s cos_key=%s（孤儿 worker 兜底）",
+                    f.id, f.cos_key,
+                )
+        logging.info(
+            "[delete-account] COS 清理完成 user_id=%s ok=%d failed=%d",
+            current_user.id, ok, failed,
+        )
+
+    # ── 第二步：删 user，cascade 干掉所有 DB 行 ──
+    # UploadedFile / UserProfile / InterviewSession / ResumeAnalysis(file_id SET NULL 保留报告) /
+    # ProjectMemory(source_file_id SET NULL) / 等
     await db.delete(current_user)
     await db.commit()
 

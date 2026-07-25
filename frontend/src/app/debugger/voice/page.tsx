@@ -707,10 +707,11 @@ export default function InterviewVoiceAnalysisPage() {
   const auth = useAuth();
 
   // ── Analysis polling state ─────────────────────────────────────────────
-  // pageStatus: "analyzing" = polling in progress (block dashboard)
-  //             "ready"     = analysis done, show real data
+  // pageStatus: "ready"      = analysis done, show real data
   //             "no_session" = no task found, redirect
-  const [pageStatus, setPageStatus] = useState<"analyzing" | "ready" | "no_session">("analyzing");
+  //             "failed"     = analysis failed
+  const [pageStatus, setPageStatus] = useState<"analyzing" | "ready" | "no_session" | "failed">("ready");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [analysisProgress, setAnalysisProgress] = useState(0);
   const [analysisStep, setAnalysisStep] = useState(0);
   const [hasActiveTask, setHasActiveTask] = useState(false);
@@ -723,6 +724,8 @@ export default function InterviewVoiceAnalysisPage() {
     suggestions: string[];
   } | null>(null);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const fetchedSessionIdRef = useRef<string | null>(null);
+  const isManualClickRef = useRef<boolean>(false);
 
   // Live segments: starts as mock, replaced with real transcript once analysis completes
   const [liveSegmentsData, setLiveSegmentsData] = useState(SEGMENTS_DATA);
@@ -785,14 +788,14 @@ export default function InterviewVoiceAnalysisPage() {
 
   // Edit / Form states
   const [interviewInfo, setInterviewInfo] = useState({
-    company: "字节跳动",
-    role: "后端开发工程师",
-    round: "技术一面",
+    company: "",
+    role: "",
+    round: "",
     time: "",
     level: "",
-    salary: "35-40K",
-    years: "3-5年",
-    isOnJob: "在职"
+    salary: "",
+    years: "",
+    isOnJob: ""
   });
 
   // ── Mount: page gate + polling ──────────────────────────────────────────
@@ -810,17 +813,18 @@ export default function InterviewVoiceAnalysisPage() {
     const savedSalary  = localStorage.getItem("interviewVar_session_salary");
     const savedYears   = localStorage.getItem("interviewVar_session_years");
 
-    if (savedCompany || savedRole || savedRound) {
-      setInterviewInfo(prev => ({
-        ...prev,
-        company: savedCompany || prev.company,
-        role:    savedRole    || prev.role,
-        round:   savedRound   || prev.round,
-        time:    savedDate    || prev.time,
-        level:   savedGrade !== null ? savedGrade : prev.level,
-        salary:  savedSalary !== null ? savedSalary : prev.salary,
-        years:   savedYears   || prev.years
-      }));
+    if (savedCompany !== null || savedRole !== null || savedRound !== null || savedDate !== null || savedGrade !== null || savedSalary !== null || savedYears !== null) {
+    setInterviewInfo(prev => ({
+      ...prev,
+      company: savedCompany ? savedCompany : "",
+      role:    savedRole    ? savedRole    : "",
+      round:   savedRound   ? savedRound   : "",
+      time:    savedDate    ? savedDate    : "",
+      level:   savedGrade   ? savedGrade   : "",
+      salary:  savedSalary  ? savedSalary  : "",
+      years:   (savedYears && savedYears !== "3-5年" && savedYears.trim() !== "") ? savedYears : (auth.user.years || ""),
+      isOnJob: auth.user.status || (auth.user as any).job_status || ""
+    }));
     }
 
     const taskId    = localStorage.getItem("interviewVar_task_id");
@@ -850,6 +854,10 @@ export default function InterviewVoiceAnalysisPage() {
     };
 
     const loadReport = async () => {
+      const lockKey = `${sessionId}_${taskId || ""}`;
+      if (fetchedSessionIdRef.current === lockKey) return;
+      fetchedSessionIdRef.current = lockKey;
+
       try {
         const token = localStorage.getItem("interviewVar_token");
         const headers: Record<string, string> = {};
@@ -870,10 +878,10 @@ export default function InterviewVoiceAnalysisPage() {
               },
             });
             localStorage.removeItem("interviewVar_task_id");
-          } catch {
-            // pollTaskUntilDone only rejects on hard timeout — surface that as
-            // "no_session" so the user lands back on the entry page.
-            setPageStatus("no_session");
+          } catch (pollErr: any) {
+            localStorage.removeItem("interviewVar_task_id");
+            setErrorMessage(pollErr?.message || "录音分析失败，请重试");
+            setPageStatus("failed");
             return;
           }
         }
@@ -890,6 +898,17 @@ export default function InterviewVoiceAnalysisPage() {
           return;
         }
         const report = await reportRes.json();
+
+        // ── 2026-07-25+: 后端分析失败时直接展示报错,不再用兜底分数 ──
+        if (report.status === "failed") {
+          setErrorMessage(report.error_message || "录音分析失败");
+          setPageStatus("failed");
+          // 清理 task 标志
+          localStorage.removeItem("interviewVar_task_id");
+          localStorage.removeItem("interviewVar_session_id");
+          return;
+        }
+
         if (report.audio_url) {
           setAudioUrl(report.audio_url);
         }
@@ -900,8 +919,8 @@ export default function InterviewVoiceAnalysisPage() {
           dbSections = sectionsData.sections || [];
         }
 
-        // Set scores + summary
-        const overallIpi = report.scores?.ipi ?? 70;
+        // Set scores + summary — 不再使用 ?? 兜底值,后端 failed 分支已被拦截
+        const overallIpi = report.scores?.ipi ?? 0;
         setReportData({
           ipi_score:         overallIpi,
           offer_probability: report.scores?.offer_probability ?? 0,
@@ -1139,6 +1158,9 @@ export default function InterviewVoiceAnalysisPage() {
     const onTimeUpdate = () => {
       const t = Math.floor(audio.currentTime);
       setPlaybackTime(t);
+
+      // 如果用户刚刚主动点击了侧边栏片段，避开 timeupdate 误判定将 activeSegIdx 洗掉
+      if (isManualClickRef.current) return;
 
       // Auto-switch active segment as audio plays through timeline
       const newSegIdx = liveSegmentsData.findIndex((s, idx) => {
@@ -1551,56 +1573,6 @@ export default function InterviewVoiceAnalysisPage() {
           PAGE STATE OVERLAYS
          ============================================================ */}
 
-      {/* ── ANALYZING: full-screen loading while polling ────────────── */}
-      {pageStatus === "analyzing" && (
-        <div className="fixed inset-0 z-50 bg-[#050B1A] flex flex-col items-center justify-center gap-8">
-          {hasActiveTask ? (
-            <div className="flex flex-col items-center gap-5 max-w-md w-full px-8">
-              {/* Dual-ring Spinner */}
-              <div className="relative w-20 h-20">
-                <div className="absolute inset-0 rounded-full border-4 border-[#AFA7FF]/20 border-t-[#AFA7FF] animate-spin" />
-                <div className="absolute inset-3 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.2s" }} />
-              </div>
-
-              <div className="text-center space-y-3">
-                <h3 className="text-white font-black text-2xl md:text-xl animate-pulse tracking-wide">{ANALYSIS_STEPS[analysisStep]}</h3>
-                <p className="text-base md:text-lg text-white/70 font-semibold">AI 智能分析中，分析完成后自动进入报告页面…</p>
-              </div>
-
-              <div className="w-full bg-white/5 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-gradient-to-r from-[#AFA7FF] to-[#5DECCB] transition-all duration-700"
-                  style={{ width: `${analysisProgress}%` }}
-                />
-              </div>
-              <p className="text-[#5DECCB] text-2xl md:text-3xl font-black font-mono tracking-wider drop-shadow-[0_0_10px_rgba(93,236,203,0.5)] mt-2">{analysisProgress}%</p>
-
-              <div className="w-full space-y-2">
-                {ANALYSIS_STEPS.slice(0, -1).map((step, idx) => (
-                  <div key={idx} className={`flex items-center gap-2.5 text-xs font-semibold transition-all ${
-                    idx < analysisStep ? "text-[#5DECCB]" :
-                    idx === analysisStep ? "text-white animate-pulse" :
-                    "text-white/20"
-                  }`}>
-                    <span className="material-symbols-outlined text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>
-                      {idx < analysisStep ? "check_circle" : idx === analysisStep ? "radio_button_checked" : "radio_button_unchecked"}
-                    </span>
-                    {step}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col items-center gap-4">
-              <div className="relative w-16 h-16">
-                <div className="absolute inset-0 rounded-full border-4 border-[#AFA7FF]/20 border-t-[#AFA7FF] animate-spin" />
-              </div>
-              <p className="text-white/70 font-bold text-sm tracking-wide animate-pulse">正在加载历史分析报告...</p>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* ── NO_SESSION: redirect message ──────────────────────────── */}
       {pageStatus === "no_session" && (
         <div className="fixed inset-0 z-50 bg-[#050B1A] flex flex-col items-center justify-center gap-5">
@@ -1613,6 +1585,31 @@ export default function InterviewVoiceAnalysisPage() {
           >
             返回调试器
           </button>
+        </div>
+      )}
+
+      {/* ── FAILED: analysis failed, show error ──────────────────── */}
+      {pageStatus === "failed" && (
+        <div className="fixed inset-0 z-50 bg-[#050B1A] flex flex-col items-center justify-center gap-5 px-6">
+          <span className="material-symbols-outlined text-[#FF7A95]" style={{ fontSize: "72px", fontVariationSettings: "'FILL' 1" }}>error</span>
+          <h2 className="text-white font-black text-xl">分析失败</h2>
+          <p className="text-white/70 text-sm text-center max-w-md leading-relaxed">
+            {errorMessage || "录音分析过程中发生未知错误，请稍后重试"}
+          </p>
+          <div className="flex flex-col items-center gap-2 mt-2">
+            <button
+              onClick={() => router.push("/debugger")}
+              className="px-6 py-2.5 bg-[#AFA7FF] text-[#050B1A] font-black rounded-full hover:bg-white transition-all"
+            >
+              返回调试器
+            </button>
+            <button
+              onClick={() => router.back()}
+              className="px-4 py-2 text-white/50 hover:text-white text-sm transition-colors"
+            >
+              返回上一步
+            </button>
+          </div>
         </div>
       )}
 
@@ -1661,12 +1658,6 @@ export default function InterviewVoiceAnalysisPage() {
           </div>
 
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push("/debugger")}
-              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-base">add</span>新建分析
-            </button>
             <button
               onClick={() => router.push("/memory?tab=timeline")}
               className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
@@ -1741,36 +1732,36 @@ export default function InterviewVoiceAnalysisPage() {
                     <div className="flex justify-between items-center">
                       <span>是否在职</span>
                       <span className="px-2 py-0.5 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/20 text-xs font-extrabold">
-                        {interviewInfo.isOnJob || "—"}
+                        {interviewInfo.isOnJob && interviewInfo.isOnJob.trim() ? interviewInfo.isOnJob : (auth.user.status || "-")}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>工作年限</span>
-                      <span className="text-white font-extrabold">{interviewInfo.years || "—"}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.years && interviewInfo.years.trim() ? interviewInfo.years : (auth.user.years || "-")}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>面试公司</span>
-                      <span className="text-white font-extrabold">{interviewInfo.company || "—"}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.company && interviewInfo.company.trim() ? interviewInfo.company : "-"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>面试岗位</span>
-                      <span className="text-white font-extrabold">{interviewInfo.role || "—"}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.role && interviewInfo.role.trim() ? interviewInfo.role : "-"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>面试轮次</span>
-                      <span className="text-white font-extrabold">{interviewInfo.round || "—"}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.round && interviewInfo.round.trim() ? interviewInfo.round : "-"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>面试时间</span>
-                      <span className="text-white font-extrabold">{interviewInfo.time || "—"}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.time && interviewInfo.time.trim() ? interviewInfo.time : "-"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>岗位职级</span>
-                      <span className="text-white font-extrabold">{interviewInfo.level || "—"}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.level && interviewInfo.level.trim() ? interviewInfo.level : "-"}</span>
                     </div>
                     <div className="flex justify-between items-center">
                       <span>期望薪资</span>
-                      <span className="text-white font-extrabold">{interviewInfo.salary || "—"}</span>
+                      <span className="text-white font-extrabold">{interviewInfo.salary && interviewInfo.salary.trim() ? interviewInfo.salary : "-"}</span>
                     </div>
                   </div>
                 </div>
@@ -1806,10 +1797,12 @@ export default function InterviewVoiceAnalysisPage() {
                         <div
                           key={seg.id}
                           onClick={() => {
+                            isManualClickRef.current = true;
                             setActiveSegIdx(idx);
                             setPlaybackTime(seg.secondsStart);
                             // Ensure the clicked section is expanded
                             setCollapsedSections(prev => ({ ...prev, [seg.id]: false }));
+                            setTimeout(() => { isManualClickRef.current = false; }, 300);
                           }}
                           className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all duration-300 relative flex items-center justify-between gap-3 ${
                             isSelected

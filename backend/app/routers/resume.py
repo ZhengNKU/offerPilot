@@ -22,6 +22,17 @@ from app.utils.docx_resume_writer import rewrite_resume_docx, BulletMatchError
 from app.utils.pdf_to_docx import convert_pdf_to_docx
 from app.services.quota import FEATURE_RESUME, check_and_consume
 from app.utils.privacy import desensitize_text, desensitize_parsed_structure
+from app.utils.error_messages import (
+    FEATURE_RESUME as FEATURE_NAME_RESUME,
+    format_failure,
+    REASON_COS_DOWNLOAD_FAILED,
+    REASON_FILE_PARSE_FAILED,
+    REASON_FILE_EMPTY,
+    REASON_LLM_EMPTY,
+    REASON_LLM_JSON_PARSE,
+    REASON_LLM_TIMEOUT,
+    REASON_LLM_MISSING_FIELD,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +62,10 @@ async def analyze_resume(
             detail="该文件不是简历文件"
         )
 
-    # 1.5 配额检查（30 天滚动窗口，按会员等级 FREE=1 / PRO=10 / MAX=30）
-    # 旧代码此处完全没有免费次数判断，所有用户（包括非会员）都能无限分析。
-    # 新逻辑：check_and_consume 会写一条 user_quota_usage，删除历史 ResumeAnalysis
-    # 不会重置配额。仅"自己的简历"扣配额，跨用户访问由下面的 ownership 检查兜底。
-    if current_user and db_file.user_id == current_user.id:
-        await check_and_consume(db, current_user, FEATURE_RESUME)
+    # 1.5 配额扣减已移到第 6 步 LLM 分析成功之后(2026-07-25+)
+    # 旧代码在入口 check_and_consume,但 COS 下载 / 解析 / LLM 任一失败会
+    # 让用户白扔一次额度。改为"成功才扣":失败统一不扣,成功后才写 user_quota_usage。
+    # 重分析通过"该 file_id 已有 ResumeAnalysis 记录"识别,不重复扣。
 
     # 2. Permission check: if file belongs to a user, check ownership
     if db_file.user_id is not None:
@@ -80,29 +89,32 @@ async def analyze_resume(
         else:
             content_bytes = body_stream.read()
     except Exception as e:
+        logger.exception(f"[resume] COS 下载失败 file_id={db_file.id}: {e!r}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"从云存储下载简历失败: {str(e)}"
+            detail=format_failure(FEATURE_NAME_RESUME, REASON_COS_DOWNLOAD_FAILED)
         )
 
     # 4. Parse file to text
     try:
         resume_text = extract_resume_text(content_bytes, db_file.filename)
     except ValueError as ve:
+        # 文件格式错误属于用户输入问题,直接显示 ve 信息
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(ve)
+            detail=format_failure(FEATURE_NAME_RESUME, f"文件格式不支持：{ve}")
         )
     except Exception as e:
+        logger.exception(f"[resume] 解析失败 file_id={db_file.id}: {e!r}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"解析简历内容失败: {str(e)}。请确保文件未损坏，或尝试将其导出为标准格式后重试。"
+            detail=format_failure(FEATURE_NAME_RESUME, REASON_FILE_PARSE_FAILED)
         )
 
     if not resume_text.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="未能从简历文件中提取出有效的文本，请检查文件排版或转换方式。"
+            detail=format_failure(FEATURE_NAME_RESUME, REASON_FILE_EMPTY)
         )
 
     # 5.5 服务端解析简历结构并进行隐私脱敏处理
@@ -139,13 +151,25 @@ async def analyze_resume(
         }
 
     # 6. Analyze resume text using LLM（传 parsed_structure 让 LLM 只优化 bullets、保持结构不变）
-    analysis_result = await analyze_resume_text(
-        resume_text, profile_data, parsed_structure=parsed_structure
-    )
+    # 2026-07-25+: analyze_resume_text 失败会 raise,这里捕获并把 reason 透出
+    try:
+        analysis_result = await analyze_resume_text(
+            resume_text, profile_data, parsed_structure=parsed_structure
+        )
+    except Exception as e:
+        logger.exception(f"[resume] LLM 分析失败 file_id={db_file.id}: {e!r}")
+        # e 可能是我们自己包的 "AI 返回 JSON 解析失败" 或 "AI 返回为空" 等
+        reason = str(e) or "AI 调用失败"
+        if len(reason) > 200:
+            reason = reason[:200] + "..."
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=format_failure(FEATURE_NAME_RESUME, reason)
+        )
     if not analysis_result:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="大模型简历诊断任务失败，请稍后重试。"
+            detail=format_failure(FEATURE_NAME_RESUME, REASON_LLM_EMPTY)
         )
 
     # 6.5 把服务端解析出的原文结构覆盖回 LLM 输出（LLM 只负责 bullet 诊断，结构必须原文回填）
@@ -212,6 +236,31 @@ async def analyze_resume(
 
     # 6.9 计算并补充四大核心指标（总字数、风险点、优化建议数、岗位匹配度）
     _enrich_metrics(analysis_result, resume_text=resume_text)
+
+    # ── 配额扣减:仅本文件第一次分析成功才扣,重分析免费 ──
+    # 2026-07-25+ 改为"分析成功才扣"模型
+    if current_user and db_file.user_id == current_user.id:
+        from sqlalchemy import func as _func
+        prev_count_res = await db.execute(
+            select(_func.count(models.ResumeAnalysis.id)).where(
+                models.ResumeAnalysis.file_id == db_file.id
+            )
+        )
+        prev_count = prev_count_res.scalar() or 0
+        if prev_count == 0:
+            try:
+                await check_and_consume(db, current_user, FEATURE_RESUME)
+                logger.info(
+                    f"[resume] 简历分析成功,扣额度 user_id={current_user.id} "
+                    f"file_id={db_file.id}"
+                )
+            except HTTPException as quota_exc:
+                # 配额耗尽 — 标 403 让前端展示升级提示
+                raise quota_exc
+        else:
+            logger.info(
+                f"[resume] 简历重分析(file_id={db_file.id} 已有 {prev_count} 条历史),不重复扣"
+            )
 
     # 7. Persist to DB
     record = models.ResumeAnalysis(
@@ -363,13 +412,16 @@ async def download_resume_analysis(
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="简历排版与诊断结果不匹配，DOCX 改写失败。请检查简历后重新上传分析。",
+            detail=format_failure(FEATURE_NAME_RESUME, "简历排版与诊断结果不匹配，请重新上传简历"),
         ) from e
     except Exception as e:
         logger.exception("[docx_writer] failed for analysis_id=%s", analysis_id)
+        reason = str(e) or "DOCX 生成失败"
+        if len(reason) > 200:
+            reason = reason[:200] + "..."
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="DOCX 生成失败，请稍后重试"
+            detail=format_failure(FEATURE_NAME_RESUME, reason),
         ) from e
 
     return _make_file_response(docx_bytes, safe_name, today)
@@ -600,7 +652,11 @@ def _merge_parsed_structure(analysis_result: dict, parsed_structure: dict) -> No
 
 
 def _enrich_metrics(analysis_result: dict, resume_text: Optional[str] = None) -> None:
-    """计算并挂载四大核心指标：word_count, risks_count, suggestions_count, match_score"""
+    """计算并挂载四大核心指标：word_count, risks_count, suggestions_count, match_score。
+
+    2026-07-25+: 不再使用硬编码魔数回退。数据缺失时保持原字段为 None,
+    让前端根据字段是否为 null 来决定展示"暂无"而不是伪造数字。
+    """
     if not isinstance(analysis_result, dict):
         return
 
@@ -615,7 +671,7 @@ def _enrich_metrics(analysis_result: dict, resume_text: Optional[str] = None) ->
         for proj in analysis_result.get("projects") or []:
             for b in proj.get("bullets") or []:
                 t_len += len(b.get("originalText") or b.get("optimizedText") or "")
-        analysis_result["word_count"] = t_len if t_len > 0 else 3821
+        analysis_result["word_count"] = t_len if t_len > 0 else None
 
     # 2. 风险点数量
     risks = analysis_result.get("risks")
@@ -629,21 +685,21 @@ def _enrich_metrics(analysis_result: dict, resume_text: Optional[str] = None) ->
             for b in exp.get("bullets") or []:
                 if b.get("originalTag") == "风险":
                     r_cnt += 1
-        analysis_result["risks_count"] = r_cnt if r_cnt > 0 else 7
+        analysis_result["risks_count"] = r_cnt if r_cnt > 0 else None
 
-    # 3. 优化建议数量（严格对应 AI 优化建议 Tab 中的建议条数）
+    # 3. 优化建议数量
     opt_suggs = analysis_result.get("optimization_suggestions") or analysis_result.get("ai_suggestions")
     if isinstance(opt_suggs, list) and len(opt_suggs) > 0:
         analysis_result["suggestions_count"] = len(opt_suggs)
     else:
-        analysis_result["suggestions_count"] = 5
+        analysis_result["suggestions_count"] = None
 
     # 4. 岗位匹配度
     match_score = (analysis_result.get("match_analysis") or {}).get("match_score")
     if match_score is None and isinstance(analysis_result.get("score_breakdown"), dict):
         match_score = (analysis_result["score_breakdown"].get("keyword_match") or {}).get("score")
     if match_score is None:
-        match_score = analysis_result.get("score") or 83
+        match_score = analysis_result.get("score")  # 也可能是 None
     analysis_result["match_score"] = match_score
 
 

@@ -15,25 +15,26 @@ function ResumeAnalysisPageContent() {
   // STATE MANAGEMENT
   // =========================================================================
   const [profile, setProfile] = useState({
-    name: "张三",
-    status: "在职",
-    title: "后端开发工程师 · P6",
-    years: "5 年",
-    company: "字节跳动",
-    role: "后端开发工程师",
-    salary: "35K * 16",
-    targetCompany: "阿里巴巴",
-    targetRole: "高级后端开发工程师",
-    targetGrade: "P7",
-    targetSalary: "45K * 16",
-    school: "清华大学",
-    version: "v3",
-    uploadTime: "2026-06-01 14:30"
+    name: "",
+    status: "",
+    title: "",
+    years: "",
+    company: "",
+    role: "",
+    salary: "",
+    targetCompany: "",
+    targetRole: "",
+    targetGrade: "",
+    targetSalary: "",
+    school: "",
+    version: "v1",
+    uploadTime: ""
   });
 
   const [activeTab, setActiveTab] = useState<
     "preview" | "risk" | "match" | "optimization" | "keywords" | "ats"
   >("preview");
+  const fetchedIdRef = useRef<string | null>(null);
 
   const [viewMode, setViewMode] = useState<"original" | "optimized">("original");
 
@@ -81,15 +82,16 @@ function ResumeAnalysisPageContent() {
       const storedYears = localStorage.getItem("interviewVar_session_years");
       const storedDate = localStorage.getItem("interviewVar_session_date");
 
-      if (storedCompany || storedRole || storedGrade || storedSalary) {
+      if (storedCompany !== null || storedRole !== null || storedGrade !== null || storedSalary !== null || storedYears !== null) {
         setProfile((prev) => ({
           ...prev,
-          targetCompany: storedCompany || prev.targetCompany,
-          targetRole: storedRole || prev.targetRole,
-          targetGrade: storedGrade || prev.targetGrade,
-          targetSalary: storedSalary || prev.targetSalary,
-          years: storedYears ? `${storedYears}` : prev.years,
-          uploadTime: storedDate ? `${storedDate} 14:30` : prev.uploadTime
+          targetCompany: storedCompany ? storedCompany : "",
+          targetRole: storedRole ? storedRole : "",
+          targetGrade: storedGrade ? storedGrade : "",
+          targetSalary: storedSalary ? storedSalary : "",
+          years: (storedYears && String(storedYears).trim() !== "") ? `${storedYears}` : (auth.user.years || ""),
+          status: auth.user.status || (auth.user as any).job_status || "",
+          uploadTime: storedDate ? `${storedDate}` : ""
         }));
       }
     }
@@ -123,6 +125,8 @@ function ResumeAnalysisPageContent() {
   useEffect(() => {
     const id = searchParams?.get("id");
     if (!id) return;
+    if (fetchedIdRef.current === id) return;
+    fetchedIdRef.current = id;
 
     const token = typeof window !== "undefined"
       ? localStorage.getItem("interviewVar_token")
@@ -757,12 +761,6 @@ function ResumeAnalysisPageContent() {
 
           <div className="flex items-center gap-4">
             <button
-              onClick={() => router.push("/debugger")}
-              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-base">add</span>新建分析
-            </button>
-            <button
               onClick={() => router.push("/memory?tab=timeline")}
               className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
             >
@@ -843,7 +841,7 @@ function ResumeAnalysisPageContent() {
                         <div className="flex items-center gap-1.5">
                           <span className="text-base font-black text-white">{displayName}</span>
                           <span className="px-1.5 py-0.2 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/25 text-xs font-black uppercase">
-                            {profile.status}
+                            {profile.status && profile.status.trim() ? profile.status : (auth.user.status || "-")}
                           </span>
                         </div>
                         {displayRole && displayRole !== "-" && (
@@ -856,36 +854,36 @@ function ResumeAnalysisPageContent() {
                     <div className="space-y-2.5 text-xs font-bold text-white/60">
                       <div className="flex justify-between items-start gap-3">
                         <span className="shrink-0">工作年限</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.years}</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.years && profile.years.trim() ? profile.years : (auth.user.years || "-")}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
                         <span className="shrink-0">当前公司</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{displayCompany}</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{displayCompany && displayCompany.trim() ? displayCompany : "-"}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
                         <span className="shrink-0">当前岗位</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{displayRole}</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{displayRole && displayRole.trim() ? displayRole : "-"}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
                         <span className="shrink-0">当前薪资</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.salary}</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.salary && profile.salary.trim() ? profile.salary : "-"}</span>
                       </div>
                       <div className="h-px bg-white/5 my-1" />
                       <div className="flex justify-between items-start gap-3">
                         <span className="shrink-0">目标公司</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetCompany}</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetCompany && profile.targetCompany.trim() ? profile.targetCompany : "-"}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
                         <span className="shrink-0">目标岗位</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetRole}</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetRole && profile.targetRole.trim() ? profile.targetRole : "-"}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
                         <span className="shrink-0">目标职级</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetGrade}</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetGrade && profile.targetGrade.trim() ? profile.targetGrade : "-"}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
                         <span className="shrink-0">目标薪资</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetSalary}</span>
+                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetSalary && profile.targetSalary.trim() ? profile.targetSalary : "-"}</span>
                       </div>
                     </div>
                   </>
