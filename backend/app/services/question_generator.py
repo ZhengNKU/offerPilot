@@ -59,8 +59,9 @@ def _build_batch_prompt(
         ability_lines.append(f"  - {item['core']} → {item['sub']}")
     ability_list = "\n".join(ability_lines)
 
-    # 联网工具说明仅在启用时注入，避免污染 prompt
-    if enable_network:
+    # 联网指示仅在"启用联网且未预取上下文"时注入；已预取 web_context 时不再让 LLM 自己联网，
+    # 避免走 tool 循环（也避免把 prompt 污染成"请调用 web_search"）
+    if enable_network and not web_context:
         tool_block = (
             "\n联网检索真实面经（推荐使用）：为了让生成的题目更具代表性、更贴近当下"
             "招聘考察侧重点，请在生成前调用 `web_search(query, count=5)` 工具搜索目标"

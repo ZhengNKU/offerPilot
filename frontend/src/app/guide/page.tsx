@@ -1701,9 +1701,9 @@ export default function InterviewGuidePage() {
                             {/* Top Left Platform SVG Icon (Replacing text badge per user request) */}
                             <div className="absolute top-2.5 left-2.5 z-10">
                               {item.platform === "小红书" ? (
-                                <img src="/guide/redbook.svg" alt="小红书" className="w-6 h-6 object-contain drop-shadow-md rounded-md" />
+                                <img src="/guide/redbook.svg" alt="小红书" className="w-8 h-8 object-contain drop-shadow-md rounded-md" />
                               ) : item.platform === "抖音" ? (
-                                <img src="/guide/douyin.svg" alt="抖音" className="w-6 h-6 object-contain drop-shadow-md rounded-md" />
+                                <img src="/guide/douyin.svg" alt="抖音" className="w-8 h-8 object-contain drop-shadow-md rounded-md" />
                               ) : (
                                 <span className={`px-2 py-0.5 rounded-md text-[10px] font-black border backdrop-blur-md ${item.platformBadgeBg}`}>
                                   {item.platform}

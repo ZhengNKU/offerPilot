@@ -11,6 +11,8 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+_NO_PROXIES: dict = {"http": None, "https": None}
+
 
 def _build_resilient_session() -> requests.Session:
     """构造一个能扛瞬时 SSL / 连接抖动的 requests Session。
