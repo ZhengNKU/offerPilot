@@ -78,34 +78,34 @@ export default function CareerDashboard() {
       .catch(() => {});
   }, [auth.isLoggedIn]);
   const [profile, setProfile] = useState({
-    name: "张三",
-    status: "在职",
-    title: "高级后端工程师",
-    experienceYears: "6年",
-    experienceMonths: "0个月",
-    city: "深圳",
-    joinDays: 128,
+    name: "候选人",
+    status: "-",
+    title: "-",
+    experienceYears: "-",
+    experienceMonths: "",
+    city: "-",
+    joinDays: 1,
     tags: [] as string[],
-    company: "腾讯科技",
-    role: "高级后端工程师",
-    level: "高级",
-    salaryMin: 25,
-    salaryMax: 35,
-    gender: "male",
-    age: "26",
-    school: "清华大学",
-    degree: "本科",
-    gradYear: "2018"
+    company: "-",
+    role: "-",
+    level: "-",
+    salaryMin: 0,
+    salaryMax: 0,
+    gender: "-",
+    age: "-",
+    school: "-",
+    degree: "-",
+    gradYear: "-"
   });
 
   const [careerGoal, setCareerGoal] = useState({
-    role: "架构师",
-    level: "P7",
-    salaryMin: 50,
-    salaryMax: 70,
-    city: "深圳",
-    company: "腾讯/美团等 (目标)",
-    matchRate: 72
+    role: "",
+    level: "",
+    salaryMin: 0,
+    salaryMax: 0,
+    city: "",
+    company: "",
+    matchRate: 0
   });
 
   // 目标匹配度正在由后端 LLM 综合生成（通常 3-10s），期间圆环中央显示 spinner
@@ -328,11 +328,11 @@ export default function CareerDashboard() {
     });
     setCareerGoal(prev => {
       const next: any = {
-        role: auth.user.targetRole !== undefined ? (auth.user.targetRole || "") : prev.role,
-        level: auth.user.targetGrade !== undefined ? (auth.user.targetGrade || "") : prev.level,
-        company: auth.user.targetCompany !== undefined ? (auth.user.targetCompany || "") : prev.company,
-        city: auth.user.targetCity !== undefined ? (auth.user.targetCity || "") : prev.city,
-        matchRate: auth.user.matchRate ?? prev.matchRate
+        role: auth.user.targetRole || "",
+        level: auth.user.targetGrade || "",
+        company: auth.user.targetCompany || "",
+        city: auth.user.targetCity || "",
+        matchRate: auth.user.matchRate ?? 0
       };
       const salStr = auth.user.targetSalary || "";
       const salMatch = salStr ? salStr.match(/(\d+)\s*K/i) : null;

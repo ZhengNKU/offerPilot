@@ -1071,7 +1071,7 @@ function NewAnalysisDebuggerContent() {
                           value={pasteText}
                           onChange={(e) => setPasteText(e.target.value)}
                           disabled={isQuotaExhausted}
-                          placeholder={isQuotaExhausted ? "体验次数已用完，暂无法录入分析文本..." : "面试官：请问你们的系统是怎么做微服务架构解耦的？&#10;我：就是简单用了一个消息队列，人工对账补数据..."}
+                          placeholder={isQuotaExhausted ? "体验次数已用完，暂无法录入分析文本..." : "面试官：请问你们的系统是怎么做微服务架构解耦的？我：就是简单用了一个消息队列，人工对账补数据..."}
                           className="w-full h-56 bg-surface-container-low border border-white/5 rounded-2xl p-4 font-mono text-sm text-on-surface focus:outline-none focus:border-primary/40 transition-all leading-relaxed min-h-[220px] disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-white/[0.02] disabled:border-white/5"
                         />
                       </div>

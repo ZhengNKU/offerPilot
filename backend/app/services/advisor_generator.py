@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from app import models
 from app.config import settings
-from app.utils.llm import call_llm_stream, _strip_codeblock
+from app.utils.llm import call_llm_stream, _run_with_optional_tools, _strip_codeblock
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +45,31 @@ def _safe_json_parse(text: str) -> dict:
     )
 
 
-async def _call_llm_with_retry(payload: dict, max_retries: int = DEFAULT_MAX_RETRIES) -> dict:
+async def _call_llm_with_retry(
+    payload: dict,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    enable_network: bool = False,
+) -> dict:
     """对 LLM 调用 + JSON 解析整体重试，最多 ``max_retries`` 次。
 
-    网络/超时/5xx 已由 ``call_llm_stream`` 内部会话重试，这里补齐的是
-    「模型能响应但内容无法解析」这一类典型失败。每次失败都重新发请求，
+    网络/超时/5xx 已由 ``call_llm_stream`` / ``_run_with_optional_tools`` 内部会话重试，
+    这里补齐的是「模型能响应但内容无法解析」这一类典型失败。每次失败都重新发请求，
     给模型一次新机会（运气好时第二次就给干净 JSON 了）。
+
+    enable_network:
+      - True：走 ``_run_with_optional_tools``，挂载 web_search 等工具（AI 职业顾问联网生成）
+      - False：走 ``call_llm_stream``，纯 LLM（默认，向后兼容）
     """
     last_exc: Optional[BaseException] = None
     for attempt in range(1, max_retries + 1):
         try:
-            res_data = await asyncio.to_thread(call_llm_stream, payload, 180.0)
+            if enable_network:
+                # AI 职业顾问：允许 LLM 调用 web_search 检索行业最新招聘趋势 / 薪资参考等
+                res_data = await _run_with_optional_tools(
+                    payload, True, sync=False, timeout=180.0,
+                )
+            else:
+                res_data = await asyncio.to_thread(call_llm_stream, payload, 180.0)
             content = res_data["choices"][0]["message"]["content"]
             parsed = _safe_json_parse(content)
             if attempt > 1:
@@ -123,10 +137,13 @@ async def generate_general_advisor_insights(db: AsyncSession, user_id: int, targ
 3. 推荐行动 (recommended_actions): 具体的提升行动（例如：完成模拟面试、优化简历描述等）。
 4. 职业发展建议 (career_suggestions): 中长期的职业方向或能力规划。
 
+【联网工具（可选）】
+为了让近期面试趋势、推荐行动、职业发展建议更贴近当下行业招聘现状，可以调用 `web_search(query, count=5)` 工具检索目标岗位近期大厂面试考点偏好、行业薪资参考或最新招聘趋势。仅在本地训练语料不足时调用；联网失败时直接基于训练语料生成即可，不要因为工具失败而中断。
+
 【输出长度严格限制】
 每一个生成的建议条目字数必须严格限制在 10 到 18 个汉字以内。
 表述必须极度简明扼要，一行能展示完，严禁任何长篇大论，严禁包含任何括号、说明性后缀或多余解释。
-例如：“微服务高可用方案设计”、“补充核心项目定量指标”等。
+例如："微服务高可用方案设计"、"补充核心项目定量指标"等。
 
 你必须且只能返回严格符合以下结构的 JSON 字符串（不要包含任何 markdown 块或导言）：
 {{
@@ -147,9 +164,7 @@ async def generate_general_advisor_insights(db: AsyncSession, user_id: int, targ
     }
 
     try:
-        # _call_llm_with_retry：HTTP 层由 call_llm_stream 内部重试，
-        # 顶层再针对「返回内容无法解析」重试最多 3 次。
-        parsed_data = await _call_llm_with_retry(payload)
+        parsed_data = await _call_llm_with_retry(payload, enable_network=True)
         
         # 加上 flag 字段 is_customized = False，标明这是通用建议
         parsed_data["is_customized"] = False
@@ -266,11 +281,14 @@ async def generate_custom_advisor_insights(db: AsyncSession, user_id: int):
 【大模型决策逻辑与输出约束】
 1. 近期面试趋势 (new_trend):
    - 你需要根据候选人的最新表现，生成 1 条全新的、针对本次面试/简历分析的最新面试趋势。
-   - 例如：“系统设计出现频率上升 23%”、“高并发缓存一致性考察增加”等。
+   - 例如："系统设计出现频率上升 23%"、"高并发缓存一致性考察增加"等。
 2. 推荐行动 (recommended_actions):
    - 评估当前最新的表现和已有的推荐行动。
    - 如果现有的行动（{existing_recommended_actions}）仍然有效/适用，且没有发现候选人出现新的严重知识漏洞或急需改进的痛点，请在 `need_update` 字段中返回 false。
    - 只有当现有行动已经不合时宜、或候选人在最新面试中暴露了新的需要紧急攻克的短板时，才在 `need_update` 中返回 true，并在 `recommended_actions` 字段中给出全新拟定的 3 条行动建议。
+
+【联网工具（可选）】
+为了让近期面试趋势更贴近当下行业招聘现状，可以调用 `web_search(query, count=5)` 工具检索目标岗位近期大厂面试考点偏好或行业最新趋势。仅在本地上下文与训练语料不足时调用；联网失败时直接基于本地上下文作答即可，不要因为工具失败而中断。
 
 【字数长度严格限制】
 每一个生成的建议条目字数必须严格限制在 10 到 18 个汉字以内。
@@ -294,9 +312,8 @@ async def generate_custom_advisor_insights(db: AsyncSession, user_id: int):
     }
 
     try:
-        # 5. 调用大模型 + 鲁棒解析（含最多 3 次重试）
-        parsed_data = await _call_llm_with_retry(payload)
-        
+        parsed_data = await _call_llm_with_retry(payload, enable_network=True)
+
         # 6. 处理『近期面试趋势』：仅覆盖最新的一条记录（即 index 0 项），后 2 条保持原样
         new_trend = parsed_data.get("new_trend") or "面试考察工程落地细节明显"
         updated_trends = [new_trend] + existing_trends[1:]
@@ -407,10 +424,13 @@ async def generate_weekly_focus_areas(db: AsyncSession, user_id: int):
 建议只包含本周重点提升 (focus_areas) 这一个维度（严格输出 3 条，表述要专业、深入、切中候选人当前的实际能力短板与技术痛点，严禁长篇大论）：
 1. 本周重点提升 (focus_areas): 具体需要强化的技术痛点、系统设计漏洞或表达模式（参考候选人被扣分或扣分频次高的维度）。
 
+【联网工具（可选）】
+为了让本周重点提升更贴近候选人目标岗位当下大厂考察热点，可以调用 `web_search(query, count=5)` 工具检索目标岗位近期高频考点。仅在本地上下文与训练语料不足时调用；联网失败时直接基于本地上下文作答即可，不要因为工具失败而中断。
+
 【输出长度严格限制】
 每一个生成的建议条目字数必须严格限制在 10 到 18 个汉字以内。
 表述必须极度简明扼要，一行能展示完，严禁任何长篇大论，严禁包含任何括号、说明性后缀或多余解释。
-例如：“微服务高可用方案设计”、“补充核心项目定量指标”等。
+例如："微服务高可用方案设计"、"补充核心项目定量指标"等。
 
 你必须且只能返回严格符合以下结构的 JSON 字符串（不要包含任何 markdown 块或导言）：
 {{
@@ -428,7 +448,7 @@ async def generate_weekly_focus_areas(db: AsyncSession, user_id: int):
     }
 
     try:
-        parsed_data = await _call_llm_with_retry(payload)
+        parsed_data = await _call_llm_with_retry(payload, enable_network=True)
 
         new_focus_areas = parsed_data.get("focus_areas") or []
         if len(new_focus_areas) >= 3:

@@ -1016,17 +1016,49 @@ function InterviewTrainingPageContent() {
               </div>
             </div>
           </div>
-        ) : searchParams.get("liveId") && bootState !== "error" ? (
-          /* 当从 URL 或历史记录显式打开报告，但在异步加载完成之前，绝不闪现 Configure 表单和 Live 舞台 */
-          <div className="w-full flex-1 min-h-[60vh] flex flex-col items-center justify-center p-12 text-center gap-6 glass-panel rounded-3xl border-white/10">
-            <div className="relative w-16 h-16">
-              <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-              <div className="absolute inset-2 rounded-full border-4 border-tertiary/10 border-t-tertiary animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.1s" }} />
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-3xl font-black text-white animate-pulse tracking-wide">正在加载模拟面试复盘报告...</h3>
-              <p className="text-sm text-on-surface-variant/50 font-bold">正在提取会话记录与 DeepSeek 智能评估结果</p>
-            </div>
+        ) : (searchParams.get("liveId") && bootState !== "error") || isAnalyzing ? (
+          /* 当进入生成报告进度条态或从 URL/历史记录打开报告加载中，全屏渲染进度大屏，隐藏并锁定左侧 Configure 表单 */
+          <div className="w-full flex-1 min-h-[65vh] flex flex-col items-center justify-center p-12 text-center gap-8 glass-panel rounded-3xl border-white/10 animate-fade-in">
+            {isAnalyzing ? (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-6 max-w-xl w-full">
+                {/* Dual-ring spinner */}
+                <div className="relative w-20 h-20">
+                  <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                  <div className="absolute inset-2 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.1s" }} />
+                </div>
+
+                <div className="text-center space-y-3">
+                  <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">
+                    模拟面试已结束，正在生成复盘报告
+                  </h3>
+                  <p className="text-base text-white/70 font-semibold">
+                    基于你的全场表达与问答逻辑，DeepSeek 大模型正在深度评估能力维度...
+                  </p>
+                </div>
+
+                {/* Progress bar */}
+                <div className="w-full bg-white/5 rounded-full h-2 overflow-hidden border border-white/10 mt-2">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-primary to-[#5DECCB] transition-all duration-700 shadow-[0_0_12px_rgba(93,236,203,0.5)]"
+                    style={{ width: `${analysisProgress}%` }}
+                  />
+                </div>
+                <p className="text-[#5DECCB] text-3xl font-black font-mono tracking-wider drop-shadow-[0_0_10px_rgba(93,236,203,0.5)]">
+                  {analysisProgress}%
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="relative w-16 h-16">
+                  <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                  <div className="absolute inset-2 rounded-full border-4 border-tertiary/10 border-t-tertiary animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.1s" }} />
+                </div>
+                <div className="space-y-2">
+                  <h3 className="text-3xl font-black text-white animate-pulse tracking-wide">正在加载模拟面试复盘报告...</h3>
+                  <p className="text-sm text-on-surface-variant/50 font-bold">正在提取会话记录与 DeepSeek 智能评估结果</p>
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-12 gap-6 items-stretch w-full">
@@ -1257,36 +1289,7 @@ function InterviewTrainingPageContent() {
                   </div>
                 )}
 
-                {/* 分析中 */}
-                {isAnalyzing && (
-                  <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-6">
-                    {/* Dual-ring spinner */}
-                    <div className="relative w-16 h-16">
-                      <div className="absolute inset-0 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
-                      <div className="absolute inset-2 rounded-full border-4 border-[#5DECCB]/10 border-t-[#5DECCB] animate-spin" style={{ animationDirection: "reverse", animationDuration: "1.1s" }} />
-                    </div>
 
-                    <div className="text-center space-y-3">
-                      <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">
-                        正在生成 AI 面试报告
-                      </h3>
-                      <p className="text-base md:text-lg text-white/70 font-semibold">
-                        基于你的回答由 DeepSeek 生成深度分析...
-                      </p>
-                    </div>
-
-                    {/* Progress bar */}
-                    <div className="w-full max-w-sm bg-white/5 rounded-full h-1.5 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-primary to-[#5DECCB] transition-all duration-700"
-                        style={{ width: `${analysisProgress}%` }}
-                      />
-                    </div>
-                    <p className="text-[#5DECCB] text-2xl md:text-3xl font-black font-mono tracking-wider drop-shadow-[0_0_10px_rgba(93,236,203,0.5)] mt-2">
-                      {analysisProgress}%
-                    </p>
-                  </div>
-                )}
 
                 {/* 正在连接/加载中 */}
                 {bootState === "loading" && (

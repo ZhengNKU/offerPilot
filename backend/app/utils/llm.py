@@ -40,15 +40,13 @@ def _build_resilient_session() -> requests.Session:
 
 _RESILIENT_SESSION = _build_resilient_session()
 
-def call_llm_sync(payload: dict) -> dict:
+def call_llm_sync(payload: dict, timeout: float = 35.0) -> dict:
     url = f"{settings.DEEPSEEK_BASE_URL}/chat/completions"
     headers = {
         "Authorization": f"Bearer {settings.DEEPSEEK_API_KEY}",
         "Content-Type": "application/json"
     }
-    # 120s: long transcripts (e.g. 89 segments) can take well over 30s for
-    # reasoning models to finish; 30s caused "Read timed out" in sectionize.
-    response = _RESILIENT_SESSION.post(url, headers=headers, json=payload, timeout=120.0)
+    response = _RESILIENT_SESSION.post(url, headers=headers, json=payload, timeout=timeout)
     response.raise_for_status()
     return response.json()
 
@@ -108,7 +106,16 @@ def _repair_llm_json(text: str) -> str:
 
     # 匹配 "key": "value..." 模式，对 value 中的控制字符做转义
     def _fix_string_values(s: str) -> str:
-        """在 JSON 字符串值内转义未转义的控制字符（\\n \\r \\t）。"""
+        """在 JSON 字符串值内转义未转义的控制字符（\\n \\r \\t）；
+        字符串外（key/数组/对象分隔之间）的 raw 控制字符替换成空格。
+
+        为什么 string 外的也要处理：
+          - JSON 规范禁止 <0x20 控制字符出现在 token 之间，json.loads 一律拒绝。
+          - 若上游 LLM 输出里有未转义双引号（"foo"bar"），状态机会误翻转 in_string，
+            导致后续真正的 string 内部 raw control char 被当成「字符串外」而漏修。
+            把所有控制字符统一处理后，即使状态机错乱也能兜底。
+          - 替换成空格不影响 token 结构，仅替换空白区字符。
+        """
         result = []
         i = 0
         in_string = False
@@ -130,28 +137,33 @@ def _repair_llm_json(text: str) -> str:
                 result.append(ch)
                 i += 1
                 continue
-            if in_string:
-                # 在 JSON 字符串值内的裸控制字符需要转义
-                if ch == '\n':
-                    result.append('\\n')
-                elif ch == '\r':
-                    result.append('\\r')
-                elif ch == '\t':
-                    result.append('\\t')
-                elif ord(ch) < 0x20:
-                    result.append(f'\\u{ord(ch):04x}')
+            if ord(ch) < 0x20:
+                if in_string:
+                    # 在 JSON 字符串值内的裸控制字符需要转义
+                    if ch == '\n':
+                        result.append('\\n')
+                    elif ch == '\r':
+                        result.append('\\r')
+                    elif ch == '\t':
+                        result.append('\\t')
+                    else:
+                        result.append(f'\\u{ord(ch):04x}')
                 else:
-                    result.append(ch)
-            else:
-                result.append(ch)
+                    # 字符串之外（key/数组/对象分隔之间）的 raw 控制字符
+                    # JSON 规范禁止，统一替换成空格，不影响 token 结构
+                    result.append(' ')
+                i += 1
+                continue
+            result.append(ch)
             i += 1
         return ''.join(result)
 
     repaired = _fix_string_values(repaired)
 
     # ── 策略3: 迭代修复，每次用 json.loads 的错误位置修复一处 ──
-    # 循环最多 15 次，覆盖多数 LLM 输出中的多处缺失逗号 / 多余逗号 / 属性名缺引号等问题
-    MAX_FIX_ITERATIONS = 15
+    # 截断产生的多处结构错误（缺 `}`、缺 `]`、未闭合字符串）会消耗迭代次数，
+    # 15 次偏紧；提到 50 覆盖 question_generator 25K+ 字符输出的常见场景
+    MAX_FIX_ITERATIONS = 50
     for _ in range(MAX_FIX_ITERATIONS):
         try:
             json.loads(repaired)
@@ -235,7 +247,7 @@ async def call_llm_sync_with_tools(
     payload: dict,
     tools: list,
     ctx: Optional[dict] = None,
-    max_iters: int = 4,
+    max_iters: int = 2,
 ) -> dict:
     """同步 LLM 调用 + tool calling 循环。
 
@@ -262,8 +274,20 @@ async def call_llm_sync_with_tools(
 
     log = (ctx or {}).get("logger", logger) if isinstance(ctx, dict) else logger
     last_resp: Optional[dict] = None
+    ctx = ctx or {}
 
     for i in range(max_iters):
+        # 若上轮 tool 调用已超时降级（web_search 设置了 _web_search_disabled），
+        # 本轮不再让 LLM 自由决策，直接 tool_choice="none" 强制收尾，
+        # 避免多跑一轮又调一次联网（实测能让联网失败端到端从 80s+ 降到 30s 左右）
+        if ctx.get("_web_search_disabled"):
+            log.info(
+                f"[call_llm_sync_with_tools] iter={i} 工具已降级，强制 tool_choice=none 收尾"
+            )
+            cur_payload["messages"] = messages
+            cur_payload["tool_choice"] = "none"
+            return await asyncio.to_thread(call_llm_sync, cur_payload)
+
         cur_payload["messages"] = messages
         resp = await asyncio.to_thread(call_llm_sync, cur_payload)
         last_resp = resp
@@ -287,7 +311,7 @@ async def call_llm_sync_with_tools(
                 f"[call_llm_sync_with_tools] iter={i} call tool={name} "
                 f"args_keys={list(args.keys()) if isinstance(args, dict) else []}"
             )
-            result, _status = await dispatch_tool(name, args, ctx or {})
+            result, _status = await dispatch_tool(name, args, ctx)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc.get("id"),
@@ -415,7 +439,7 @@ async def call_llm_stream_with_tokens(
     payload: dict,
     tools: list,
     ctx: Optional[dict] = None,
-    max_iters: int = 4,
+    max_iters: int = 2,
     on_tool_event: Optional[Callable[[str, dict], Awaitable[None]]] = None,
     on_reasoning_event: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> AsyncIterator[str]:
@@ -441,6 +465,7 @@ async def call_llm_stream_with_tokens(
     from app.services.tool_registry import to_openai_tools, dispatch_tool
 
     log = (ctx or {}).get("logger", logger) if isinstance(ctx, dict) else logger
+    ctx = ctx or {}
 
     async def _emit(phase: str, info: dict):
         if on_tool_event is None:
@@ -462,6 +487,20 @@ async def call_llm_stream_with_tokens(
     messages: list = list(cur_payload.get("messages") or [])
 
     for i in range(max_iters):
+        # 若上轮 tool 调用已超时降级（web_search 设置了 _web_search_disabled），
+        # 本轮不再让 LLM 自由决策，直接 tool_choice="none" 强制收尾，
+        # 避免多跑一轮又调一次联网（实测能让联网失败端到端从 80s+ 降到 30s 左右）
+        if ctx.get("_web_search_disabled"):
+            log.info(
+                f"[call_llm_stream_with_tokens] iter={i} 工具已降级，强制 tool_choice=none 收尾"
+            )
+            stream_payload["messages"] = messages
+            stream_payload["tool_choice"] = "none"
+            async for piece in _stream_one_with_tools(stream_payload, log):
+                if piece["kind"] == "content":
+                    yield piece["piece"]
+            return
+
         stream_payload["messages"] = messages
         # 本轮累积
         content_parts: list[str] = []
@@ -581,7 +620,7 @@ async def _run_with_optional_tools(
     sync: bool = False,
     timeout: float = 300.0,
     ctx: Optional[dict] = None,
-    max_iters: int = 4,
+    max_iters: int = 2,
 ) -> dict:
     """通用 LLM 调用 wrapper：可选启用 tool calling（web_search 等）。
 
@@ -604,9 +643,12 @@ async def _run_with_optional_tools(
     from app.services.tool_registry import all_tools as _all_tools
 
     if not enable_network:
+        clean_payload = dict(payload)
+        clean_payload.pop("tools", None)
+        clean_payload.pop("tool_choice", None)
         if sync:
-            return await asyncio.to_thread(call_llm_sync, payload)
-        return await asyncio.to_thread(call_llm_stream, payload, timeout)
+            return await asyncio.to_thread(call_llm_sync, clean_payload)
+        return await asyncio.to_thread(call_llm_stream, clean_payload, timeout)
 
     if sync:
         return await call_llm_sync_with_tools(
@@ -642,7 +684,6 @@ async def analyze_interview_dialogue(
         "你是一个专业的 AI 面试教练。你需要根据候选人的面试对话内容进行深度评估。\n"
         "如果提供了候选人的职业画像（工作经验、岗位名称、目标公司、目标职级等），请结合该画像的期望要求进行评估。\n"
         "如果提供了目标岗位的岗位详情（JD / Job Description），请着重结合该岗位的技能、职责及期望，深入匹配并评估候选人的技术水平、项目契合度以及表达逻辑。\n"
-        "联网工具（可选）：当对话中提及具体公司名、岗位名、行业趋势或最新技术话题，且你需要参考真实行业信息来更准确地评估时，可以调用 `web_search(query, count=5)` 工具实时检索互联网公开信息（公司背景、岗位要求、行业资讯、面试经验、最新技术趋势、薪资参考等）。仅在对话上下文不足时使用；联网工具返回失败时直接基于已有对话继续评估即可，不要因为工具失败而中断。\n"
         "你必须以 JSON 格式返回评估结果，无需 any Markdown 标记或其它多余的前后导言，只返回纯 JSON 对象字符串。\n"
         "JSON 结构必须严格符合以下属性格式：\n"
         "\n"
@@ -845,8 +886,6 @@ async def extract_mentioned_projects(
         "  - 假设性的场景题回答（如「如果让我设计...」）\n"
         "  - 纯理论/八股文回答未涉及具体项目\n"
         "\n"
-        "联网工具（可选）：如果候选人提到的项目名你不确定是真实存在的产品/开源项目/业内项目，可以调用 `web_search(query, count=5)` 工具查证（避免把虚构项目当真实项目收录）；联网失败时直接基于对话文本判断即可。\n"
-        "\n"
         "每个识别到的项目输出：\n"
         "  - project_name: 使用对话中实际提到的名称，最多 30 字\n"
         "  - discussion_depth: 0-100 整数，评估讨论深度\n"
@@ -928,9 +967,6 @@ async def sectionize_transcript(
     the input segment timestamps. The function enforces this by snapping any
     out-of-range value to the nearest known segment boundary, and discards
     sections that don't overlap any segment.
-
-    enable_network: True 时允许 LLM 调用 web_search 了解候选人口中的具体公司/岗位背景，
-    以便更准确地给段位打 tag（仅在对话出现明确公司/岗位名词时使用；默认开启）。
     """
     if not segments:
         return []
@@ -956,8 +992,6 @@ async def sectionize_transcript(
         "1. 识别出面试中实际发生的话题块（如「自我介绍」「项目深挖」「技术追问」「算法题」「反问环节」等）\n"
         "2. 把整段对话分成 3-8 个语义段\n"
         "3. 为每个段给出 2-6 字中文标题\n"
-        "\n"
-        "联网工具（可选）：当对话中提及具体公司名、岗位名或行业术语，且你不确定它属于哪个话题类别（如「这家公司一面是不是常考系统设计」），可以调用 `web_search(query, count=5)` 工具查证；联网失败时直接基于对话判断即可。\n"
         "\n"
         "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言）：\n"
         "{\n"
@@ -1105,14 +1139,14 @@ def _snap_to_segments(t: float, segments: List[Dict[str, Any]]) -> float:
 
 async def generate_section_optimization_advice(
     dialogue_text: str,
-    enable_network: bool = False
 ) -> Dict[str, Any]:
     """
     Generate diagnostic conclusion, candidate original answer, and high-score answer recommendation.
 
-    enable_network: True 时允许 LLM 调用 web_search 查询该考点在大厂面试中的最新
-    高分回答思路（如「字节跳动 后端 P7 Redis 缓存架构 真实面经」），让高分话术更
-    贴合行业现状；工具失败时直接基于对话上下文作答即可。
+    本场景写死不走联网（enable_network=False）：
+      - 录音分析「生成优化建议」要求纯 LLM 基于对话上下文作答，不允许 web_search / 任何 tool 调用
+      - 之前签名暴露 enable_network 参数 + system prompt 提了 web_search，存在被未来误改的风险
+      - 移除参数后从代码层面堵死联网入口；system prompt 也明示「不使用联网工具」
     """
     system_prompt = (
         "你是一个顶尖的大厂架构师和 AI 面试教练。你需要对下面这段面试对话中候选人的回答进行深度诊断，并生成优化建议。\n"
@@ -1120,9 +1154,6 @@ async def generate_section_optimization_advice(
         "1. AI 诊断结论：指出候选人回答中的核心技术漏洞、不完美的设计选择、或者表达欠缺（比如对于提到的技术点指出其优缺点或潜在问题）。字数 80-150 字。\n"
         "2. 候选人原版回答：从对话中提取或提炼出候选人的主要回答内容，保持其口语化和原样。\n"
         "3. 大厂架构师版高分话术推荐：编写一个近乎完美、符合大厂架构师/高级开发期望的回答话术，突出技术深度、Trade-off 权衡、真实项目经验、以及正确的解决方案。字数 150-300 字，可以包含对核心概念的强调（不要使用 Markdown 标记；如需高亮关键词，请使用 <strong class='text-[#5DECCB] font-black'> 与 </strong>，注意 HTML 属性必须用单引号；可以合理使用 <br /><br /> 换行分段）。\n"
-        "\n"
-        "联网工具（可选）：为了让高分话术更贴近目标公司/岗位的真实考察侧重点，可以调用 `web_search(query, count=5)` 工具检索相关公司/岗位/技术点的最新面经、考点偏好或行业最佳实践。仅在对话上下文不足时调用；联网失败时直接基于对话作答即可，不要因此中断。\n"
-        "如果 web_search 返回的是降级文案（如「联网检索超过 Ns 仍未返回」「联网检索失败，已降级为不检索」），**不要再调用 web_search**，直接基于已知上下文作答。\n"
         "\n"
         "你必须返回严格符合以下结构的 JSON 对象（不要包含任何 Markdown 标记或其它前后导言，只返回纯 JSON 对象）：\n"
         "{\n"
@@ -1141,14 +1172,14 @@ async def generate_section_optimization_advice(
         "response_format": {"type": "json_object"}
     }
 
-    # 失败直接向上抛,不再返回 fallback 兜底 JSON
-    # sync=True 走 call_llm_sync_with_tools,同步阻塞,简单可靠
-    res_data = await _run_with_optional_tools(payload, enable_network, sync=True)
+    # enable_network 写死 False：纯大模型极速推理；
+    # sync=False 走流式消费，首包响应极快，设置 30.0s 硬限防死等卡顿
+    res_data = await _run_with_optional_tools(payload, False, sync=False, timeout=30.0)
     content = res_data["choices"][0]["message"]["content"]
     content_clean = _strip_codeblock(content)
     parsed_data = _safe_json_parse(content_clean, log_label="optimize")
-    if parsed_data is None:
-        raise RuntimeError("AI 优化建议返回结果无法解析")
+    if not isinstance(parsed_data, dict):
+        raise RuntimeError("AI 优化建议返回结果无法解析为字典对象")
     return parsed_data
 
 
@@ -1159,10 +1190,6 @@ async def generate_transcript_highlights(
     """
     Calls DeepSeek reasoning model LLM to analyze candidate's utterances, returning highlights
     with type ('strength', 'risk', 'tech') and 'tip' explanation.
-
-    enable_network: True 时允许 LLM 调用 web_search 验证候选人提到的「前沿技术」
-    是否属实/是否仍为主流（避免把过时技术误标为 strength）；工具失败时直接
-    基于对话判断即可。
     """
     if not segments:
         return []
@@ -1183,8 +1210,6 @@ async def generate_transcript_highlights(
         "1. strength (亮点)：阐述清晰、论据充分、体现大厂高并发架构思维或有数据量化背书的内容；\n"
         "2. risk (风险)：口癖、啰嗦、语病、逻辑硬伤、没有深度或明显的常识/技术方案错误；\n"
         "3. tech (核心词)：核心技术名词、架构方法论或业务指标词（如 Redis、SLA、双删、QPS 等）。\n"
-        "\n"
-        "联网工具（可选）：当候选人提到某个具体技术名词或方案，且你不确定它是否仍是当下主流/最佳实践时，可以调用 `web_search(query, count=5)` 工具查证。仅在判断存疑时调用；联网失败时直接基于对话判断即可。\n"
         "\n"
         "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言，只返回纯 JSON 对象）：\n"
         "{\n"
@@ -1401,11 +1426,6 @@ async def analyze_resume_text(
     传给 LLM 仅作为 "verbatim 参照表"，避免 LLM 把 "ByteDance" 改写成 "字节跳动"、
     改写公司名/时间等原文。LLM 仍可在结构上自由发挥，但所有公司名/岗位/时间/原文 bullet
     必须 verbatim 等于解析器给出的值。
-
-    enable_network: True 时允许 LLM 调用 web_search 查询候选人目标公司的最新
-    招聘 JD、技术栈要求、岗位画像或行业薪资参考，使 match_analysis 维度评分与
-    recommended_keywords 更贴合当下招聘趋势；工具失败时直接基于简历 + profile
-    判断即可，不要因为联网失败而中断。
     """
     from datetime import datetime
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -1413,7 +1433,6 @@ async def analyze_resume_text(
     system_prompt = (
         f"【系统时间上下文】当前北京时间是：{current_date}。在提取或计算候选人的工作年限（例如将 '2023.07 - 至今' 或其他时间段与当前时间对比）时，请严格以该时间作为当前的'至今/Present'基准进行逻辑计算，避免算错工作年限。\n"
         "你是一个专业的 AI 简历分析教练。你的任务是对候选人的简历进行深度雷区检测与优化建议。\n"
-        "联网工具（可选）：为了让 match_analysis、recommended_keywords、risks 更贴近招聘现状，可以调用 `web_search(query, count=5)` 工具实时检索目标公司最新 JD、技术栈要求、行业薪资参考或岗位画像。仅在简历上下文不足时调用；联网工具返回失败时直接基于简历和 profile 继续分析即可，不要因为工具失败而中断。\n"
         "你需要根据提取出的简历文本内容，结合候选人的求职期望画像（如果提供了），完成以下工作：\n"
         "1. 计算简历综合评分（0-100，当前表现）以及优化后预计提升的综合评分（0-100）。\n"
         "2. 计算大厂 ATS 机器可读性通过率百分比（0-100）。\n"
@@ -1591,16 +1610,12 @@ async def extract_project_experiences(
         parsed_structure: 服务端正则解析的结构化简历 {profile, work_experiences}
         existing_projects: 用户已有的项目记忆 [{"id": int, "project_name": str, "category": str}, ...]
             LLM 会对照此列表标注 is_duplicate 和 matched_existing_id
-        enable_network: True 时允许 LLM 调用 web_search 验证简历提到的「开源项目 /
-        业内产品 / 技术名词」是否真实存在，避免把虚构项目入库；联网失败时直接
-        基于简历原文提取即可。
 
     Returns:
         提取出的项目列表；LLM 调用失败时返回空列表 []
     """
     system_prompt = (
         "你是一个专业的 AI 简历解析与项目分析助手。你的任务是从候选人的简历原文中，提取出所有项目经历的结构化信息。\n"
-        "联网工具（可选）：当简历提到你不确定真实性的开源项目/业内产品/技术名词（如某个冷门开源库名），可以调用 `web_search(query, count=5)` 工具查证。仅在存疑时调用；联网失败时直接基于简历原文提取即可，不要因为工具失败而中断。\n"
         "\n"
         "## 核心要求\n"
         "1. **逐项目提取**：从简历中识别出每一个独立的项目经历，不要遗漏、不要合并不同项目\n"

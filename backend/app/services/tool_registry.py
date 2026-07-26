@@ -41,8 +41,26 @@ ToolHandler = Callable[[dict, ToolCtx], Awaitable[str]]
 
 # ──────────────────────────────────────────────────────────────────
 # Tool 调用硬超时（防止 LLM tool calling 循环被一次慢响应拖垮）
+# 默认值从 settings.WEB_SEARCH_TIMEOUT_S 取，让运维通过 env / config 真生效。
+# 保留常量名 DEFAULT_WEB_SEARCH_TIMEOUT_S 仅供向后兼容的引用方。
+# 真正取值在 _web_search_handler 内 lazy 求值（避免 module import 时 settings 还没加载）。
 # ──────────────────────────────────────────────────────────────────
-DEFAULT_WEB_SEARCH_TIMEOUT_S: float = 8.0
+def _resolve_web_search_timeout(ctx_value) -> float:
+    """ctx 显式传的 web_search_timeout 优先；否则 settings.WEB_SEARCH_TIMEOUT_S；否则 4.0。"""
+    if ctx_value is not None:
+        try:
+            return float(ctx_value)
+        except (TypeError, ValueError):
+            pass
+    try:
+        from app.config import settings
+        return float(getattr(settings, "WEB_SEARCH_TIMEOUT_S", 4.0))
+    except Exception:
+        return 4.0
+
+
+# 向后兼容：保留同名常量。值为 lazy 兜底（通常不会被用到，因为 handler 走 _resolve_web_search_timeout）。
+DEFAULT_WEB_SEARCH_TIMEOUT_S: float = 4.0
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -95,7 +113,7 @@ async def _web_search_handler(args: dict, ctx: ToolCtx) -> str:
     count = int(args.get("count") or 5)
     count = max(1, min(10, count))   # 上限保护
 
-    timeout_s = float(ctx.get("web_search_timeout") or DEFAULT_WEB_SEARCH_TIMEOUT_S)
+    timeout_s = _resolve_web_search_timeout(ctx.get("web_search_timeout"))
 
     # lazy import: mcp_client 是叶子模块，import 成本可忽略
     from app.services.mcp_client import search_web as _search_web_impl
@@ -164,8 +182,8 @@ async def _recall_user_history_handler(args: dict, ctx: ToolCtx) -> str:
     LLM 自主决定「用户提到具体历史小细节但 system prompt 未覆盖」时调用。
     """
     log = (ctx or {}).get("logger", logger)
-    db: AsyncSession = (ctx or {}).get("db")
-    user_id: int = (ctx or {}).get("user_id")
+    db: Optional[AsyncSession] = (ctx or {}).get("db") if ctx else None
+    user_id: Optional[int] = (ctx or {}).get("user_id") if ctx else None
     if db is None or user_id is None:
         return "（上下文不可用，无法执行历史分析召回）"
 
@@ -312,8 +330,8 @@ async def _query_match_rate_handler(args: dict, ctx: ToolCtx) -> str:
     LLM 根据用户问句中提到的「目标公司 / 目标岗位 / 目标职级」调本工具。
     """
     log = (ctx or {}).get("logger", logger)
-    db: AsyncSession = (ctx or {}).get("db")
-    user_id: int = (ctx or {}).get("user_id")
+    db: Optional[AsyncSession] = (ctx or {}).get("db") if ctx else None
+    user_id: Optional[int] = (ctx or {}).get("user_id") if ctx else None
     if db is None or user_id is None:
         return "（上下文不可用，无法计算匹配度）"
 

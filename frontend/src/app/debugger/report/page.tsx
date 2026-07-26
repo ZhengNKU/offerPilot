@@ -14,24 +14,24 @@ export default function CareerDashboard() {
   // STATE MANAGEMENT
   // =========================================================================
   const [profile, setProfile] = useState({
-    name: "张三",
-    status: "在职",
-    title: "高级后端工程师",
-    experience: "6 年经验",
-    city: "深圳",
-    joinDays: 128,
-    tags: ["后端开发", "分布式系统", "系统设计", "性能优化"],
-    company: "腾讯科技",
-    role: "高级后端工程师",
-    level: "T10-2"
+    name: "候选人",
+    status: "-",
+    title: "-",
+    experience: "-",
+    city: "-",
+    joinDays: 1,
+    tags: [],
+    company: "-",
+    role: "-",
+    level: "-"
   });
 
   const [careerGoal, setCareerGoal] = useState({
-    role: "架构师",
-    level: "P7",
-    salary: "50K - 70K",
-    city: "深圳",
-    matchRate: 72
+    role: "",
+    level: "",
+    salary: "",
+    city: "",
+    matchRate: 0
   });
 
   // 目标匹配度正在由后端 LLM 综合生成（通常 3-10s），期间圆环中央显示 spinner
@@ -88,9 +88,11 @@ export default function CareerDashboard() {
       }));
       setCareerGoal(prev => ({
         ...prev,
-        role: auth.user.targetRole || prev.role,
-        level: auth.user.targetGrade || prev.level,
-        salary: auth.user.targetSalary || prev.salary
+        role: auth.user.targetRole || "",
+        level: auth.user.targetGrade || "",
+        salary: auth.user.targetSalary || "",
+        city: auth.user.targetCity || "",
+        matchRate: auth.user.matchRate ?? 0
       }));
       setAccountSecurity(prev => ({
         ...prev,
@@ -450,19 +452,19 @@ export default function CareerDashboard() {
                   <div className="space-y-3.5 text-left">
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标岗位</span>
-                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.role}</span>
+                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.role || "—"}</span>
                     </div>
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标职级</span>
-                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.level}</span>
+                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.level || "—"}</span>
                     </div>
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标薪资</span>
-                      <span className="text-base font-black text-tertiary block mt-0.5 whitespace-nowrap">{careerGoal.salary}</span>
+                      <span className="text-base font-black text-tertiary block mt-0.5 whitespace-nowrap">{careerGoal.salary || "—"}</span>
                     </div>
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标城市</span>
-                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.city}</span>
+                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.city || "—"}</span>
                     </div>
                   </div>
 

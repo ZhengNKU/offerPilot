@@ -832,16 +832,21 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
     _set_progress(100, "completed")
     logger.info(f"[task={task_id}] Analysis complete for session {session_id}")
 
-    # 异步触发 AI 职业顾问定制建议建议更新
-    if session.user_id:
+    # 异步非阻塞派发：AI 职业顾问行动建议 + 200道题库生成器保留联网（enable_network=True），
+    # 但完全独立运行，绝对不占用主任务或阻塞【生成优化建议】与前端 API
+    if session.user_id is not None:
+        user_id_val: int = session.user_id
         from app.services.advisor_generator import trigger_custom_advisor_insights
-        asyncio.create_task(
-            trigger_custom_advisor_insights(session.user_id)
-        )
+        async def _safe_bg_advisor(target_uid: int):
+            try:
+                await trigger_custom_advisor_insights(target_uid)
+            except Exception as ex:
+                logger.warning(f"[audio] 异步 AI 职业顾问生成失败（不影响主流程）: {ex!r}")
+
+        asyncio.create_task(_safe_bg_advisor(user_id_val))
 
         # 异步匹配面试中的问题到知识库细化能力
         if llm_result:
-            # 从 question_deconstruction 提取真实的面试问题（不是弱点）
             questions = []
             for qd in (llm_result.get("question_deconstruction") or []):
                 if isinstance(qd, dict) and qd.get("title"):
@@ -851,9 +856,13 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
                     })
             if questions:
                 from app.services.knowledge_ability_service import trigger_knowledge_match
-                asyncio.create_task(
-                    trigger_knowledge_match(session.user_id, questions)
-                )
+                async def _safe_bg_knowledge(target_uid: int, q_list: list):
+                    try:
+                        await trigger_knowledge_match(target_uid, q_list)
+                    except Exception as ex:
+                        logger.warning(f"[audio] 异步知识库能力题库匹配失败（不影响主流程）: {ex!r}")
+
+                asyncio.create_task(_safe_bg_knowledge(user_id_val, questions))
 
 
 

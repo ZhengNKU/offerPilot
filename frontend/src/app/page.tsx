@@ -807,13 +807,50 @@ export default function Home() {
               <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-12 h-12 object-contain inline-block" />
               面试驾到
             </div>
-            <div className="w-full max-w-xs block">
+            <div className="w-full max-w-xs block space-y-1">
               <p className="text-on-surface-variant text-sm font-medium leading-relaxed">
                 AI Interview OS · 全流程面试分析引擎
               </p>
               <p className="text-on-surface-variant text-sm font-medium leading-relaxed">
                 面试驾到，Offer来到
               </p>
+            </div>
+
+            {/* 官方社媒账号 (小红书 & 抖音) - 嵌于红框位置 */}
+            <div className="pt-2">
+              <div className="flex items-center gap-4">
+                {/* 小红书卡片 */}
+                <div className="flex flex-col items-center p-3 rounded-2xl bg-white/[0.04] border border-white/10 hover:border-white/20 transition-all duration-300 group backdrop-blur-md">
+                  <div className="flex items-center gap-1.5 mb-2 select-none">
+                    <img src="/guide/redbook.svg" alt="小红书" className="w-8 h-8 object-contain" />
+                    <span className="text-xs font-bold text-white/90 group-hover:text-white transition-colors">官方小红书</span>
+                  </div>
+                  <div className="p-1.5 bg-white rounded-xl shadow-lg border border-white/20 overflow-hidden group-hover:scale-[1.03] transition-transform duration-300">
+                    <img 
+                      src={encodeURI("/logo/小红书.jpg")} 
+                      alt="官方小红书" 
+                      className="w-24 h-24 object-cover rounded-lg block" 
+                    />
+                  </div>
+                  <span className="text-[10px] text-white/40 font-medium mt-1.5 tracking-wider select-none">扫码关注</span>
+                </div>
+
+                {/* 抖音卡片 */}
+                <div className="flex flex-col items-center p-3 rounded-2xl bg-white/[0.04] border border-white/10 hover:border-white/20 transition-all duration-300 group backdrop-blur-md">
+                  <div className="flex items-center gap-1.5 mb-2 select-none">
+                    <img src="/guide/douyin.svg" alt="抖音" className="w-8 h-8 object-contain" />
+                    <span className="text-xs font-bold text-white/90 group-hover:text-white transition-colors">官方抖音</span>
+                  </div>
+                  <div className="p-1.5 bg-white rounded-xl shadow-lg border border-white/20 overflow-hidden group-hover:scale-[1.03] transition-transform duration-300">
+                    <img 
+                      src={encodeURI("/logo/抖音.jpg")} 
+                      alt="官方抖音" 
+                      className="w-24 h-24 object-cover rounded-lg block" 
+                    />
+                  </div>
+                  <span className="text-[10px] text-white/40 font-medium mt-1.5 tracking-wider select-none">扫码关注</span>
+                </div>
+              </div>
             </div>
           </div>
           

@@ -58,289 +58,7 @@ interface SegmentData {
   };
 }
 
-const SEGMENTS_DATA: SegmentData[] = [
-  {
-    id: 1,
-    label: "自我介绍",
-    timeRange: "00:00 - 02:15",
-    durationText: "02:15",
-    secondsStart: 0,
-    secondsEnd: 135,
-    tag: "良好",
-    tagColor: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
-    score: 85,
-    badgeText: "表现优秀",
-    badgeColor: "bg-[#5DECCB]/10 text-[#5DECCB]",
-    summary: "自我介绍框架清晰，表达流利。重点突出了6年高并发开发履历，有效树立起专业研发的第一印象。但时间控制稍紧，未能充分扣合本次应聘岗位的差异化痛点。",
-    advantages: ["核心高并发履历总结到位", "逻辑连贯，语气自信"],
-    shortcomings: ["缺少对目标岗位定制化痛点的对齐", "表达中稍微缺乏量化数据背书"],
-    reviewPoints: ["结构化叙事方法", "STAR核心数据提炼", "目标岗位JD匹配度设计"],
-    ipiTrendPoints: [78, 82, 85, 83, 85, 84, 88],
-    radarScores: { depth: 75, system: 70, expression: 85, solving: 78, implementation: 80 },
-    dialogue: [
-      {
-        sender: "interviewer",
-        name: "面试官",
-        time: "00:05",
-        seconds: 5,
-        text: "你好，欢迎参加技术面试，请先做一个简短的自我介绍吧。"
-      },
-      {
-        sender: "user",
-        name: "您",
-        time: "00:15",
-        seconds: 15,
-        text: "面试官您好，我叫张三，拥有6年后端高并发开发经验。曾在前公司作为核心成员设计了亿级DAU的数据分发和缓存架构，主导了秒杀一致性系统的落地...",
-        badgeText: "回答较好",
-        badgeClass: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
-        highlights: [
-          { text: "6年后端高并发开发经验", type: "strength", tip: "💡 核心闪光点：有效突出了技术深厚的履历积累，能在前10秒直接抓住面试官注意力。" },
-          { text: "亿级DAU的数据分发和缓存架构", type: "strength", tip: "💡 亮点：给出了非常出色的海量用户场景，证明具备大厂大规模系统的设计能力。" },
-          { text: "缓存架构", type: "tech", tip: "🔧 核心技术：代表熟悉 Redis/Memcached 等核心缓存体系的设计与性能调优。" }
-        ]
-      }
-    ]
-  },
-  {
-    id: 2,
-    label: "项目经验追问",
-    timeRange: "02:16 - 05:40",
-    durationText: "03:24",
-    secondsStart: 136,
-    secondsEnd: 340,
-    tag: "一般",
-    tagColor: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
-    score: 72,
-    badgeText: "中等表现",
-    badgeColor: "bg-[#AFA7FF]/10 text-[#AFA7FF]",
-    summary: "在陈述秒杀系统写缓冲和本地限流方案时逻辑成立，但在被追问并发堆积时如何保障多级缓存写屏障一致性及内存降级时，缺乏细分数值把控与方案权衡。",
-    advantages: ["限流与削峰方案描述基本无误", "主动阐明了系统重构的初衷"],
-    shortcomings: ["对多级缓存写屏障边界描述模糊", "堆积极限场景的兜底深度欠缺"],
-    reviewPoints: ["多级缓存写同步原理", "堆积状态容灾拦截", "内存兜底设计"],
-    ipiTrendPoints: [75, 78, 70, 72, 74, 80, 82],
-    radarScores: { depth: 78, system: 75, expression: 80, solving: 72, implementation: 76 },
-    dialogue: [
-      {
-        sender: "interviewer",
-        name: "面试官",
-        time: "02:20",
-        seconds: 140,
-        text: "你说到了重构秒杀系统，那在高并发流量突增的瞬间，你们是如何保障多级缓存和数据库的写屏障一致性的？"
-      },
-      {
-        sender: "user",
-        name: "您",
-        time: "02:45",
-        seconds: 165,
-        text: "我们当时主要是通过在写入时加入本地轻量队列，并将写事件单向异步广播到 Redis 来完成削峰，同时对数据库做批量写入限制。",
-        badgeText: "回答不够全面",
-        badgeClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
-        highlights: [
-          { text: "单向异步广播到 Redis", type: "risk", tip: "⚠️ 表达风险：单向异步广播在高并发下可能发生网络分区、乱序，导致缓存与DB数据永久不一致，需要补充数据一致性兜底方案。" },
-          { text: "Redis", type: "tech", tip: "🔧 核心技术：核心内存数据库，此处用于高速缓存及写缓冲。" }
-        ]
-      }
-    ]
-  },
-  {
-    id: 3,
-    label: "技术深挖: Redis",
-    timeRange: "05:41 - 09:18",
-    durationText: "03:37",
-    secondsStart: 341,
-    secondsEnd: 558,
-    tag: "风险",
-    tagColor: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
-    score: 68,
-    badgeText: "中等表现",
-    badgeColor: "bg-[#5DECCB]/10 text-[#5DECCB]",
-    summary: "在 Redis 相关问题上，对基本原理掌握较好，但在一致性方案和并发场景的处理上回答不够深入，缺乏具体实践经验 and 优化思考。建议加强对缓存一致性方案的理解，并准备更多实际项目中的难题方案。",
-    advantages: ["理解 Redis 基本原理", "能主动思考并发问题"],
-    shortcomings: ["一致性方案不够完整", "缺乏具体项目案例支撑"],
-    reviewPoints: ["缓存一致性方案", "并发场景处理", "热点问题优化"],
-    ipiTrendPoints: [78, 80, 76, 70, 62, 58, 68], // Drops to 58 around 06:22 and recovers slightly
-    radarScores: { depth: 72, system: 65, expression: 60, solving: 68, implementation: 58 },
-    dialogue: [
-      {
-        sender: "interviewer",
-        name: "面试官",
-        time: "05:41",
-        seconds: 341,
-        text: "为什么使用 Redis？"
-      },
-      {
-        sender: "user",
-        name: "您",
-        time: "05:52",
-        seconds: 352,
-        text: "因为 Redis 性能高，可以做缓存，提升接口响应速度。",
-        highlights: [
-          { text: "做缓存，提升接口响应速度", type: "strength", tip: "💡 亮点：简洁明了地归纳了 Redis 在缓存层加速接口响应的常见实用价值。" }
-        ]
-      },
-      {
-        sender: "interviewer",
-        name: "面试官",
-        time: "06:15",
-        seconds: 375,
-        text: "如果数据和数据库不一致怎么办？"
-      },
-      {
-        sender: "user",
-        name: "您",
-        time: "06:22",
-        seconds: 382,
-        text: "可以用双删策略，先删缓存，再更新数据库，最后再删一次缓存。",
-        badgeText: "回答不够全面",
-        badgeClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
-        highlights: [
-          { text: "双删策略", type: "risk", tip: "⚠️ 表达风险：双删是教科书式的非生产方案。高并发下仍有一致性漏洞。建议深入学习『Binlog异步订阅 + Canal』方案或『Redisson读写锁』。" }
-        ]
-      },
-      {
-        sender: "interviewer",
-        name: "面试官",
-        time: "06:40",
-        seconds: 400,
-        text: "双删策略有什么问题？"
-      },
-      {
-        sender: "user",
-        name: "您",
-        time: "06:45",
-        seconds: 405,
-        text: "可能会有并发问题，导致脏数据...",
-        badgeText: "回答较好",
-        badgeClass: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20"
-      },
-      {
-        sender: "interviewer",
-        name: "面试官",
-        time: "07:02",
-        seconds: 422,
-        text: "那你用过什么更好的方案吗？"
-      }
-    ]
-  },
-  {
-    id: 4,
-    label: "系统设计",
-    timeRange: "09:19 - 14:35",
-    durationText: "05:16",
-    secondsStart: 559,
-    secondsEnd: 875,
-    tag: "一般",
-    tagColor: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
-    score: 75,
-    badgeText: "中等表现",
-    badgeColor: "bg-[#AFA7FF]/10 text-[#AFA7FF]",
-    summary: "不停机数据平滑热迁移的方案描述大体得体，双写和增量追平方案清晰。但在多级一致性校验（Binlog位点对齐）及灰度切流步骤上陈述较窄，缺乏大厂复杂网络环境下的避坑反思。",
-    advantages: ["数据双写流程脉络完整", "架构分流层次分明"],
-    shortcomings: ["缺失Binlog数据校验细节", "灰度发布异常回滚机制单薄"],
-    reviewPoints: ["千万级平滑迁移", "Binlog位点对齐", "灰度流量切流机制"],
-    ipiTrendPoints: [68, 70, 72, 75, 76, 78, 80],
-    radarScores: { depth: 80, system: 82, expression: 78, solving: 80, implementation: 75 },
-    dialogue: [
-      {
-        sender: "interviewer",
-        name: "面试官",
-        time: "09:25",
-        seconds: 565,
-        text: "如果老库有一个千万级单表，不停机热迁移到新分库分表，你会如何安排以保证数据零丢失且平滑迁移？"
-      },
-      {
-        sender: "user",
-        name: "您",
-        time: "10:15",
-        seconds: 615,
-        text: "我们会用双写方案。首先启动新老库双写，然后全量校验，最后灰度读流量切新库。",
-        badgeText: "回答较好",
-        badgeClass: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20"
-      }
-    ]
-  },
-  {
-    id: 5,
-    label: "分布式事务",
-    timeRange: "14:36 - 20:02",
-    durationText: "05:26",
-    secondsStart: 876,
-    secondsEnd: 1202,
-    tag: "风险",
-    tagColor: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20",
-    score: 58,
-    badgeText: "表现预警",
-    badgeColor: "bg-[#FF7A95]/10 text-[#FF7A95]",
-    summary: "对 TCC 分布式事务三大异常（空回滚、幂等、悬挂）防范策略叙述混乱，无法清晰陈述分支事务控制表的拦截原理与状态机图谱，此环节暴露出分布式一致性工程理论短板较重。",
-    advantages: ["理解 TCC 二阶段状态拆解"],
-    shortcomings: ["完全模糊了空回滚与悬挂底层防线", "状态机异常流拦截叙事不严密"],
-    reviewPoints: ["TCC异常处理机制", "分支事务控制表", "状态机设计规约"],
-    ipiTrendPoints: [78, 75, 68, 60, 55, 58, 62],
-    radarScores: { depth: 68, system: 62, expression: 65, solving: 58, implementation: 60 },
-    dialogue: [
-      {
-        sender: "interviewer",
-        name: "面试官",
-        time: "14:40",
-        seconds: 880,
-        text: "在 TCC 分布式事务中，如果网络出现异常，Cancel 优先于 Try 到达或者 Try 失败了但触发了 Cancel，你怎么防范‘悬挂’和‘空回滚’？"
-      },
-      {
-        sender: "user",
-        name: "您",
-        time: "15:20",
-        seconds: 920,
-        text: "空回滚的话，就是检查 Try 是否执行过...悬挂的话可能要让 Cancel 等一下再执行。但具体怎么从底层拦截，我记不太清了。",
-        badgeText: "回答不够全面",
-        badgeClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
-      }
-    ]
-  },
-  {
-    id: 6,
-    label: "行为面试",
-    timeRange: "20:03 - 32:18",
-    durationText: "12:15",
-    secondsStart: 1203,
-    secondsEnd: 1938,
-    tag: "良好",
-    tagColor: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
-    score: 88,
-    badgeText: "表现优秀",
-    badgeColor: "bg-[#5DECCB]/10 text-[#5DECCB]",
-    summary: "行为测试展现出优秀的线上应急素养。精准基于 STAR 框架描述了大促死锁瞬间降级止血和团队敏捷协作，展示了中高级开发人员必不可少的抗压性与业务 Owner 精神。",
-    advantages: ["排障步骤清晰，有条不紊", "抗压性及团队协作能力极强"],
-    shortcomings: ["死锁底层索引竞争成因若能深化阐述会更有技术厚度"],
-    reviewPoints: ["STAR叙事范式", "大并发故障降级", "MySQL死锁深度分析"],
-    ipiTrendPoints: [65, 70, 78, 82, 85, 88, 90],
-    radarScores: { depth: 82, system: 80, expression: 88, solving: 85, implementation: 86 },
-    dialogue: [
-      {
-        sender: "interviewer",
-        name: "面试官",
-        time: "20:10",
-        seconds: 1210,
-        text: "作为业务骨干，你遇到过严重的线上高并发崩溃事故吗？你是怎么主导紧急抢修定位的？"
-      },
-      {
-        sender: "user",
-        name: "您",
-        time: "20:30",
-        seconds: 1230,
-        text: "遇到过。去年大促期间，由于上游数据库发生死锁。我作为总协调，第一步拉取 Dump 分析，第二步加本地限流降级止血，最后上线热修。在30分钟内挽回了数十万损失...",
-        badgeText: "回答较好",
-        badgeClass: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20"
-      }
-    ]
-  }
-];
 
-// 3 Critical general risk markers in Column 3 / Card 2
-const GENERAL_RISKS = [
-  { time: "08:15", label: "缓存一致性方案不完整", tag: "高风险", tagClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20", sec: 495 },
-  { time: "14:02", label: "分布式事务方案考虑不全面", tag: "高风险", tagClass: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20", sec: 842 },
-  { time: "18:33", label: "CAP 理论理解不够深入", tag: "中风险", tagClass: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20", sec: 1113 }
-];
 
 // Analysis step labels displayed during polling
 const ANALYSIS_STEPS = [
@@ -513,7 +231,7 @@ function buildDynamicSegments(
     highlights?: Array<{ text: string; type: "strength" | "risk" | "tech"; tip: string }>;
   }>
 ): SegmentData[] {
-  if (utterances.length === 0) return SEGMENTS_DATA; // fallback to mock if no transcript
+  if (utterances.length === 0) return [];
 
   const fmtSecs = (s: number) => {
     const m = Math.floor(Math.abs(s) / 60);
@@ -667,7 +385,7 @@ function renderHighlightText(
     parts.push(
       <span key={`hl-${idx}`} className={highlightClass}>
         {m.text}
-        <span className={`invisible group-hover:visible absolute top-full ${tooltipAlignClass} mt-1.5 w-64 p-3 bg-[#050B1A]/95 border border-white/10 text-white text-xs rounded-xl shadow-2xl z-55 text-left pointer-events-none transition-all duration-200 select-none backdrop-blur-md`}>
+        <span className={`invisible group-hover:visible absolute top-full ${tooltipAlignClass} mt-1.5 w-64 p-3 bg-[#050B1A]/95 border border-white/20 text-white text-xs rounded-xl shadow-[0_12px_30px_rgba(0,0,0,0.9)] z-50 text-left pointer-events-none transition-all duration-200 select-none backdrop-blur-xl opacity-0 group-hover:opacity-100`}>
           <span className="flex items-center gap-1.5 font-bold mb-1 select-none">
             <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${
               m.type === 'strength' ? 'bg-[#5DECCB]' : m.type === 'risk' ? 'bg-[#FF7A95]' : 'bg-[#00D4FF]'
@@ -678,7 +396,7 @@ function renderHighlightText(
               {m.type === 'strength' ? 'AI 亮点分析' : m.type === 'risk' ? 'AI 表达风险' : 'AI 技术解析'}
             </span>
           </span>
-          <span className="text-white/80 font-medium leading-relaxed block select-none">
+          <span className="text-white/90 font-medium leading-relaxed block select-none">
             {displayTip}
           </span>
         </span>
@@ -727,17 +445,18 @@ export default function InterviewVoiceAnalysisPage() {
   const fetchedSessionIdRef = useRef<string | null>(null);
   const isManualClickRef = useRef<boolean>(false);
 
-  // Live segments: starts as mock, replaced with real transcript once analysis completes
-  const [liveSegmentsData, setLiveSegmentsData] = useState(SEGMENTS_DATA);
+  // Live segments: starts empty, replaced with real transcript once analysis completes
+  const [liveSegmentsData, setLiveSegmentsData] = useState<SegmentData[]>([]);
   const [collapsedSections, setCollapsedSections] = useState<Record<number, boolean>>({});
+  const [hoveredBubbleKey, setHoveredBubbleKey] = useState<string | null>(null);
 
   // Onboarding / AI Segmenting Animation States
   const [isSegmenting, setIsSegmenting] = useState(false);
   const [segmentingStep, setSegmentingStep] = useState(0);
 
-  // Active Timeline Segment — reads from liveSegmentsData (not the const)
+  // Active Timeline Segment — reads from liveSegmentsData
   const [activeSegIdx, setActiveSegIdx] = useState(0);
-  const activeSeg = liveSegmentsData[activeSegIdx] ?? liveSegmentsData[0];
+  const activeSeg = liveSegmentsData[activeSegIdx] ?? liveSegmentsData[0] ?? null;
 
   // Dynamic IPI Line Chart points based on real segment scores
   const chartPoints = liveSegmentsData.map((seg, idx) => {
@@ -1193,6 +912,7 @@ export default function InterviewVoiceAnalysisPage() {
 
   // When switching segment via sidebar, seek audio to segment start
   useEffect(() => {
+    if (!activeSeg) return;
     const audio = audioRef.current;
     if (!audio) {
       setIsPlaying(false);
@@ -1243,6 +963,7 @@ export default function InterviewVoiceAnalysisPage() {
 
   // Jump playhead to exact second (cross-segment aware)
   const jumpPlayhead = (sec: number) => {
+    isManualClickRef.current = true;
     const targetSegIdx = liveSegmentsData.findIndex((s, idx) => {
       if (idx === liveSegmentsData.length - 1) {
         return sec >= s.secondsStart && sec <= s.secondsEnd;
@@ -1251,19 +972,19 @@ export default function InterviewVoiceAnalysisPage() {
     });
     if (targetSegIdx !== -1 && targetSegIdx !== activeSegIdx) {
       setActiveSegIdx(targetSegIdx);
-      // Audio seek happens in the activeSegIdx useEffect + manual set below
       setTimeout(() => {
         const audio = audioRef.current;
-        if (audio) { audio.currentTime = sec; audio.play().catch(() => {}); }
+        if (audio) { audio.currentTime = sec + 0.05; audio.play().catch(() => {}); }
         setPlaybackTime(sec);
         setIsPlaying(true);
       }, 50);
     } else {
       const audio = audioRef.current;
-      if (audio) { audio.currentTime = sec; audio.play().catch(() => {}); }
+      if (audio) { audio.currentTime = sec + 0.05; audio.play().catch(() => {}); }
       setPlaybackTime(sec);
       setIsPlaying(true);
     }
+    setTimeout(() => { isManualClickRef.current = false; }, 800);
   };
 
   // Update playback speed on real audio element
@@ -1690,7 +1411,7 @@ export default function InterviewVoiceAnalysisPage() {
       {/* ========================================================
           MAIN WORKSPACE DASHBOARD — only rendered when analysis is done
          ======================================================== */}
-      {pageStatus === "ready" && (
+      {pageStatus === "ready" && activeSeg && (
       <motion.div
         key="dashboard"
         initial={{ opacity: 0, y: 12 }}
@@ -1799,10 +1520,21 @@ export default function InterviewVoiceAnalysisPage() {
                           onClick={() => {
                             isManualClickRef.current = true;
                             setActiveSegIdx(idx);
+                            
+                            // 偏移 +0.1 秒，避开上一个片段 secondsEnd 边界与当前片段 secondsStart 重合误判
+                            const targetTime = seg.secondsStart + 0.1;
                             setPlaybackTime(seg.secondsStart);
-                            // Ensure the clicked section is expanded
+                            
+                            const audio = audioRef.current;
+                            if (audio) {
+                              audio.currentTime = targetTime;
+                            }
+
+                            // 确保当前选中的 section 是展开的
                             setCollapsedSections(prev => ({ ...prev, [seg.id]: false }));
-                            setTimeout(() => { isManualClickRef.current = false; }, 300);
+                            
+                            // 保持 800ms 的手动锁定，绝不给 timeupdate 误弹机会
+                            setTimeout(() => { isManualClickRef.current = false; }, 800);
                           }}
                           className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all duration-300 relative flex items-center justify-between gap-3 ${
                             isSelected
@@ -2068,11 +1800,16 @@ export default function InterviewVoiceAnalysisPage() {
                             {filteredDialogue.map((bubble, idx) => {
                               const isInterviewer = bubble.sender === "interviewer";
                               const isPlayed = playbackTime >= bubble.seconds;
+                              const bKey = `${seg.id}-${idx}`;
+                              const isHovered = hoveredBubbleKey === bKey;
 
                               return (
                                 <div 
                                   key={idx}
                                   onClick={() => jumpPlayhead(bubble.seconds)}
+                                  onMouseEnter={() => setHoveredBubbleKey(bKey)}
+                                  onMouseLeave={() => setHoveredBubbleKey(null)}
+                                  style={{ zIndex: isHovered ? 999 : 1, position: 'relative' }}
                                   className={`p-3.5 rounded-xl border transition-all duration-300 text-left cursor-pointer flex flex-col gap-1.5 ${
                                     isInterviewer 
                                       ? "bg-[#050B1A]/40 border-white/5 hover:border-white/10" 

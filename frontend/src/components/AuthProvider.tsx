@@ -1005,9 +1005,25 @@ function AuthModals() {
 export function UserMenu() {
   const auth = useAuth();
   const [isOpen, setIsOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+
+    if (isOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isOpen]);
 
   return (
-    <div className="relative">
+    <div className="relative" ref={menuRef}>
       <div
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-1.5 border-l border-white/10 pl-3.5 cursor-pointer select-none group"
@@ -1018,15 +1034,13 @@ export function UserMenu() {
         <span className="text-on-surface font-extrabold text-sm whitespace-nowrap hidden sm:block group-hover:text-white transition-colors">
           {auth.user.name}
         </span>
-        <span className="material-symbols-outlined text-xs text-white/30 group-hover:text-white transition-all transform group-hover:rotate-180">
+        <span className={`material-symbols-outlined text-xs transition-all transform ${isOpen ? "rotate-180 text-white" : "text-white/30 group-hover:text-white"}`}>
           keyboard_arrow_down
         </span>
       </div>
 
       {isOpen && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
-          <div className="absolute right-0 mt-2.5 w-56 bg-[#0e1626] border border-white/10 rounded-2xl p-3 shadow-2xl z-50 text-left space-y-1 animate-fade-in">
+        <div className="absolute right-0 mt-2.5 w-56 bg-[#0e1626] border border-white/10 rounded-2xl p-3 shadow-2xl z-50 text-left space-y-1 animate-fade-in">
             <div className="px-2.5 py-2 border-b border-white/5 mb-1.5 flex flex-col gap-1">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-black text-white truncate">{auth.user.name}</p>
@@ -1064,7 +1078,6 @@ export function UserMenu() {
               注销账号
             </button>
           </div>
-        </>
       )}
     </div>
   );

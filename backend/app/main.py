@@ -113,15 +113,21 @@ app = FastAPI(
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    auth_header = request.headers.get("Authorization", "None")
-    auth_prefix = auth_header[:15] if auth_header != "None" else "None"
-    
     start_time = time.time()
     response = await call_next(request)
     duration = time.time() - start_time
     
+    # 高频心跳/探活/保持登录路径列表：成功 200 时不打刷屏日志，只有 >=400 报错时告警
+    quiet_paths = {"/api/auth/me", "/health", "/api/live/quota"}
+    path = request.url.path
+    if path in quiet_paths and response.status_code < 400:
+        return response
+
+    auth_header = request.headers.get("Authorization", "None")
+    auth_prefix = auth_header[:15] if auth_header != "None" else "None"
+    
     logging.info(
-        f"Request: {request.method} {request.url.path} | "
+        f"Request: {request.method} {path} | "
         f"Auth: {auth_prefix}... | "
         f"Status: {response.status_code} | "
         f"Duration: {duration:.3f}s"

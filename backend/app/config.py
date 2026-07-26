@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # 同时覆盖文本 (TMS) 与图片 (IMS) 两种调用。IMS 走 ≤5MB base64 跨地域，
     # 生产环境从 4.0s 提到 8.0s 以兼容 ap-guangzhou 跨区冷连接。
     TMS_TIMEOUT_S: float = 8.0
+    # 单次 web_search 联网检索硬超时（asyncio.wait_for 包裹）。
+    # tool 调用降级到本地纯 LLM 后会立即结束工具循环，不再多跑 iter 浪费时间。
+    # 腾讯云 MCP 正常返回约需 1.5~4s，阈值需留足余量（原 4.0 卡在返回耗时上，导致大面积超时降级）。
+    WEB_SEARCH_TIMEOUT_S: float = 12.0
+    # 腾讯云 WebSearch MCP 服务端点
+    TENCENT_MCP_SEARCH_URL: str = "https://mcp-api.tencent-cloud.com/sse/c2453837744fd833"
     # 本地兜底词库开关；True=开启（默认）；False=跳过本地匹配（全靠 TMS）
     CONTENT_MODERATION_LOCAL_WORDS_ENABLED: bool = True
     # 审计写入策略：False=仅 Review/Block 写审计（默认，省空间）；True=连 Pass 也写
