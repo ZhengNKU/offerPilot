@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
 import { API_BASE } from "@/lib/api";
 
@@ -368,11 +369,11 @@ function renderHighlightText(
 
     let highlightClass = "";
     if (m.type === "strength") {
-      highlightClass = "text-[#5DECCB] bg-[#5DECCB]/10 border-b border-[#5DECCB]/40 px-1 py-0.5 rounded cursor-help font-extrabold relative group";
+      highlightClass = "voice-hl-strength text-emerald-700 bg-emerald-100 dark:text-[#5DECCB] dark:bg-[#5DECCB]/10 border-b border-emerald-300 dark:border-[#5DECCB]/40 px-1 py-0.5 rounded cursor-help font-black relative group";
     } else if (m.type === "risk") {
-      highlightClass = "text-[#FF7A95] bg-[#FF7A95]/8 border-b border-dashed border-[#FF7A95]/40 px-1 py-0.5 rounded cursor-help font-extrabold relative group";
+      highlightClass = "voice-hl-risk text-rose-700 bg-rose-100 dark:text-[#FF7A95] dark:bg-[#FF7A95]/15 border-b border-dashed border-rose-300 dark:border-[#FF7A95]/40 px-1 py-0.5 rounded cursor-help font-black relative group";
     } else if (m.type === "tech") {
-      highlightClass = "text-[#00D4FF] bg-[#00D4FF]/8 border-b border-[#00D4FF]/40 px-1 py-0.5 rounded cursor-help font-extrabold relative group";
+      highlightClass = "voice-hl-tech text-sky-700 bg-sky-100 dark:text-[#00D4FF] dark:bg-[#00D4FF]/10 border-b border-sky-300 dark:border-[#00D4FF]/40 px-1 py-0.5 rounded cursor-help font-black relative group";
     }
 
     const displayTip = (m.tip || "")
@@ -385,18 +386,18 @@ function renderHighlightText(
     parts.push(
       <span key={`hl-${idx}`} className={highlightClass}>
         {m.text}
-        <span className={`invisible group-hover:visible absolute top-full ${tooltipAlignClass} mt-1.5 w-64 p-3 bg-[#050B1A]/95 border border-white/20 text-white text-xs rounded-xl shadow-[0_12px_30px_rgba(0,0,0,0.9)] z-50 text-left pointer-events-none transition-all duration-200 select-none backdrop-blur-xl opacity-0 group-hover:opacity-100`}>
+        <span className={`voice-ai-tooltip invisible group-hover:visible absolute top-full ${tooltipAlignClass} mt-1.5 w-64 p-3.5 bg-white dark:bg-[#050B1A]/95 border border-slate-200 dark:border-white/20 text-slate-900 dark:text-white text-xs rounded-xl shadow-2xl z-50 text-left pointer-events-none transition-all duration-200 select-none backdrop-blur-xl opacity-0 group-hover:opacity-100`}>
           <span className="flex items-center gap-1.5 font-bold mb-1 select-none">
             <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${
-              m.type === 'strength' ? 'bg-[#5DECCB]' : m.type === 'risk' ? 'bg-[#FF7A95]' : 'bg-[#00D4FF]'
+              m.type === 'strength' ? 'bg-emerald-500 dark:bg-[#5DECCB]' : m.type === 'risk' ? 'bg-rose-500 dark:bg-[#FF7A95]' : 'bg-sky-400 dark:bg-[#00D4FF]'
             }`} />
             <span className={
-              m.type === 'strength' ? 'text-[#5DECCB]' : m.type === 'risk' ? 'text-[#FF7A95]' : 'text-[#00D4FF]'
+              m.type === 'strength' ? 'voice-ai-tooltip-title-strength text-emerald-600 dark:text-[#5DECCB]' : m.type === 'risk' ? 'voice-ai-tooltip-title-risk text-rose-600 dark:text-[#FF7A95]' : 'voice-ai-tooltip-title-tech text-sky-600 dark:text-[#00D4FF]'
             }>
               {m.type === 'strength' ? 'AI 亮点分析' : m.type === 'risk' ? 'AI 表达风险' : 'AI 技术解析'}
             </span>
           </span>
-          <span className="text-white/90 font-medium leading-relaxed block select-none">
+          <span className="voice-ai-tip-body text-slate-800 dark:text-white/90 font-semibold leading-relaxed block select-none">
             {displayTip}
           </span>
         </span>
@@ -487,8 +488,8 @@ export default function InterviewVoiceAnalysisPage() {
         segmentLabel: seg.label,
         tag: isRisk ? "高风险" : "中风险",
         tagClass: isRisk 
-          ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" 
-          : "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+          ? "text-rose-700 bg-rose-100 border-rose-200 dark:text-[#FF7A95] dark:bg-[#FF7A95]/10 dark:border-[#FF7A95]/20" 
+          : "text-amber-800 bg-amber-100 border-amber-200 dark:text-[#AFA7FF] dark:bg-[#AFA7FF]/10 dark:border-[#AFA7FF]/20",
         sec: seg.secondsStart,
         suggestions: seg.reviewPoints || []
       };
@@ -1281,7 +1282,7 @@ export default function InterviewVoiceAnalysisPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-x-hidden overflow-y-auto select-none pt-20">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#050B1A] voice-workbench-bg text-slate-900 dark:text-[#dae2fd] font-body-md flex flex-col relative overflow-x-hidden overflow-y-auto select-none pt-20">
 
       {/* Hidden real audio element — drives all playback */}
       <audio
@@ -1378,13 +1379,16 @@ export default function InterviewVoiceAnalysisPage() {
             </a>
           </div>
 
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push("/memory?tab=timeline")}
-              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-base">history</span>历史记录
-            </button>
+          <div className="flex items-center gap-3 md:gap-4">
+            {auth.isLoggedIn && (
+              <button
+                onClick={() => router.push("/memory?tab=timeline")}
+                className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-base">history</span>历史记录
+              </button>
+            )}
+            <ThemeToggle />
             {auth.isLoggedIn ? (
               <UserMenu />
             ) : (
@@ -1443,7 +1447,7 @@ export default function InterviewVoiceAnalysisPage() {
                 {/* 1.1 Interview Metadata Card */}
                 <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[290px] shrink-0">
                   <div className="flex justify-between items-center pb-2 border-b border-white/5">
-                    <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-base text-[#00D4FF]">assignment_ind</span>
                       面试信息
                     </h4>
@@ -1490,7 +1494,7 @@ export default function InterviewVoiceAnalysisPage() {
                 {/* 1.2 Interview Vertical Timeline Selector */}
                 <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[470px] shrink-0">
                   <div className="flex justify-between items-center pb-2 border-b border-white/5">
-                    <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-base text-[#00D4FF]">list_alt</span>
                       面试时间线
                     </h4>
@@ -1538,16 +1542,16 @@ export default function InterviewVoiceAnalysisPage() {
                           }}
                           className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all duration-300 relative flex items-center justify-between gap-3 ${
                             isSelected
-                              ? "bg-[#AFA7FF]/5 border-[#AFA7FF]/20 shadow-lg shadow-[#AFA7FF]/5"
-                              : "bg-[#050B1A]/40 border-white/5 hover:border-white/10 hover:bg-[#050B1A]/80"
+                              ? "voice-timeline-selected bg-indigo-600 border-indigo-700 dark:bg-[#AFA7FF]/5 dark:border-[#AFA7FF]/20 shadow-md text-white"
+                              : "voice-timeline-unselected bg-[#f0f4ff] border-[#dbeafe] hover:bg-[#e0e7ff] dark:bg-[#050B1A]/40 dark:border-white/5 dark:hover:border-white/10 dark:hover:bg-[#050B1A]/80 shadow-sm"
                           }`}
                         >
                           <div className="flex items-center gap-3">
                             {/* Connector line dot */}
-                            <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
+                            <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dotColor}`} />
                             <div className="space-y-0.5">
-                              <span className="text-xs text-white/40 font-mono block leading-none">{seg.timeRange}</span>
-                              <h5 className={`text-sm font-black truncate leading-tight ${isSelected ? "text-[#AFA7FF]" : "text-white"}`}>
+                              <span className="text-xs font-mono block leading-none opacity-80">{seg.timeRange}</span>
+                              <h5 className="text-sm font-black truncate leading-tight">
                                 {seg.label}
                               </h5>
                             </div>
@@ -1596,7 +1600,7 @@ export default function InterviewVoiceAnalysisPage() {
                   </div>
 
                   {/* Elegant Thin Waveform Player */}
-                  <div className="bg-slate-950/40 border border-white/5 rounded-2xl p-4 flex flex-col gap-2 relative">
+                  <div className="voice-player-box bg-[#f3f0ff] border border-[#e9d5ff] dark:bg-slate-950/40 dark:border-white/5 shadow-sm rounded-2xl p-4 flex flex-col gap-2 relative">
                     
                     <div className="flex items-center gap-4.5">
                       
@@ -1742,18 +1746,18 @@ export default function InterviewVoiceAnalysisPage() {
                         </div>
                       </div>
                       
-                      <div className="flex items-center bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 w-36 md:w-48">
+                      <div className="voice-search-box flex items-center bg-slate-100/90 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 rounded-xl px-2.5 py-1 w-36 md:w-48 shadow-xs">
                         <input
                           type="text"
                           value={searchQuery}
                           onChange={(e) => setSearchQuery(e.target.value)}
                           placeholder="搜索对话内容..."
-                          className="bg-transparent text-xs text-white placeholder-white/30 focus:outline-none w-full"
+                          className="bg-transparent border-0 text-xs text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-0 w-full"
                         />
                         {searchQuery && (
                           <span
                             onClick={() => setSearchQuery("")}
-                            className="material-symbols-outlined text-xs text-white/40 hover:text-white cursor-pointer ml-1"
+                            className="material-symbols-outlined text-xs text-slate-400 dark:text-white/40 hover:text-slate-700 dark:hover:text-white cursor-pointer ml-1"
                           >
                             close
                           </span>
@@ -1782,21 +1786,21 @@ export default function InterviewVoiceAnalysisPage() {
                       return (
                         <div key={seg.id} id={`section-block-${seg.id}`} className="space-y-3 scroll-mt-6">
                           {/* Segment Header */}
-                          <div className="flex justify-between items-center p-3 rounded-xl bg-white/5 border border-white/10 select-none">
+                          <div className="voice-segment-header flex justify-between items-center p-3 rounded-xl bg-[#f3f0ff] dark:bg-white/5 border border-[#e9d5ff] dark:border-white/10 shadow-xs select-none">
                             <div className="flex items-center gap-2 text-sm font-bold">
-                              <span className="text-[#AFA7FF] font-mono">#{segIdx + 1}</span>
-                              <span className="text-white font-black text-sm md:text-base">{seg.label}</span>
+                              <span className="text-indigo-600 dark:text-[#AFA7FF] font-mono">#{segIdx + 1}</span>
+                              <span className="voice-segment-label text-slate-900 dark:text-white font-black text-sm md:text-base">{seg.label}</span>
                               <span className={`px-2 py-0.5 rounded text-[10px] uppercase border font-semibold ${seg.tagColor}`}>
                                 {seg.tag}
                               </span>
                             </div>
-                            <div className="flex items-center gap-2 text-xs text-white/40 font-mono">
+                            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-white/40 font-mono">
                               <span>{seg.timeRange}</span>
                             </div>
                           </div>
 
                           {/* Dialogue bubbles */}
-                          <div className="space-y-3 pl-3 border-l border-white/5">
+                          <div className="space-y-3 pl-3 border-l border-slate-200 dark:border-white/5">
                             {filteredDialogue.map((bubble, idx) => {
                               const isInterviewer = bubble.sender === "interviewer";
                               const isPlayed = playbackTime >= bubble.seconds;
@@ -1810,16 +1814,16 @@ export default function InterviewVoiceAnalysisPage() {
                                   onMouseEnter={() => setHoveredBubbleKey(bKey)}
                                   onMouseLeave={() => setHoveredBubbleKey(null)}
                                   style={{ zIndex: isHovered ? 999 : 1, position: 'relative' }}
-                                  className={`p-3.5 rounded-xl border transition-all duration-300 text-left cursor-pointer flex flex-col gap-1.5 ${
-                                    isInterviewer 
-                                      ? "bg-[#050B1A]/40 border-white/5 hover:border-white/10" 
-                                      : "bg-gradient-to-r from-[#050B1A]/80 to-[#AFA7FF]/3 border-[#AFA7FF]/10 hover:border-[#AFA7FF]/20"
-                                  } ${isPlayed && !isInterviewer ? "border-[#00D4FF]/25 shadow-[0_0_12px_rgba(0,212,255,0.04)]" : ""}`}
+                                  className={`p-3.5 rounded-xl border transition-all duration-300 text-left cursor-pointer flex flex-col gap-1.5 dark:bg-[#050B1A]/40 dark:border-white/5 dark:hover:border-white/10 ${
+                                    isPlayed 
+                                      ? "voice-bubble-selected bg-indigo-600 border-indigo-700 text-white shadow-md dark:border-[#00D4FF]/25" 
+                                      : "voice-bubble-card bg-[#f3f0ff] border-[#e9d5ff] hover:border-purple-200 text-slate-900 shadow-sm"
+                                  }`}
                                 >
                                   <div className="flex justify-between items-center text-xs font-bold select-none">
-                                    <span className="text-white/60 flex items-center gap-1.5 text-xs">
-                                      <span className={`w-2.5 h-2.5 rounded-full ${isInterviewer ? "bg-[#FF7A95]" : "bg-[#00D4FF]"}`} />
-                                      {bubble.name} <span className="font-mono text-[10px] text-white/30">{bubble.time}</span>
+                                    <span className={`${isPlayed ? "text-white/90" : "text-slate-700"} dark:text-white/60 flex items-center gap-1.5 text-xs`}>
+                                      <span className={`w-2.5 h-2.5 rounded-full ${isInterviewer ? "bg-rose-500" : "bg-indigo-600 dark:bg-[#00D4FF]"}`} />
+                                      {bubble.name} <span className={`font-mono text-[10px] ${isPlayed ? "text-white/70" : "text-slate-400"} dark:text-white/30`}>{bubble.time}</span>
                                     </span>
                                     {bubble.badgeText && (
                                       <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border ${bubble.badgeClass}`}>
@@ -1827,7 +1831,7 @@ export default function InterviewVoiceAnalysisPage() {
                                       </span>
                                     )}
                                   </div>
-                                  <p className="text-[13px] md:text-sm leading-relaxed">
+                                  <p className={`text-[13px] md:text-sm leading-relaxed ${isPlayed ? "text-white" : "text-slate-900"} dark:text-[#dae2fd]`}>
                                     {renderHighlightText(bubble.text, bubble.highlights, isPlayed, isHighlightEnabled)}
                                   </p>
                                 </div>
@@ -1859,7 +1863,7 @@ export default function InterviewVoiceAnalysisPage() {
               <div className="col-span-12 lg:col-span-3.5 xl:col-span-3 flex flex-col gap-[18px]">
                 
                  {/* 3.1 IPI Performance Index widget with line chart */}
-                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[230px] shrink-0">
+                <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3 min-h-[220px] h-auto shrink-0 pb-4.5">
                   <div className="flex justify-between items-center pb-2 border-b border-white/5 select-none">
                     <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                       <span className="material-symbols-outlined text-sm text-[#00D4FF]">monitoring</span>
@@ -1869,10 +1873,10 @@ export default function InterviewVoiceAnalysisPage() {
 
                   <div className="flex items-center gap-3">
                     <div className="flex items-baseline leading-none">
-                      <span className="text-4xl font-black font-mono text-white tracking-tighter">
+                      <span className="voice-ipi-score-value text-4xl font-black font-mono text-slate-900 dark:text-white tracking-tighter">
                         {reportData ? reportData.ipi_score : activeSeg.score}
                       </span>
-                      <span className="text-sm text-white/30 font-bold ml-0.5">/100</span>
+                      <span className="voice-ipi-score-max text-sm text-slate-500 dark:text-white/30 font-bold ml-0.5">/100</span>
                     </div>
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-black uppercase text-[#5DECCB] bg-[#5DECCB]/10 border border-[#5DECCB]/25">
                       {reportData ? (reportData.ipi_score >= 80 ? "表现优秀" : reportData.ipi_score >= 65 ? "中等表现" : "表现预警") : activeSeg.badgeText}
@@ -1881,7 +1885,7 @@ export default function InterviewVoiceAnalysisPage() {
 
                   {/* Custom elegant line chart (Energy Curve Graph) */}
                   <div className="relative py-1 select-none">
-                    <svg className="w-full h-[80px] overflow-visible" viewBox="0 0 240 70">
+                    <svg className="w-full h-[65px] overflow-visible" viewBox="0 0 240 70">
                       <defs>
                         <linearGradient id="line-neon-grad" x1="0" y1="0" x2="1" y2="0">
                           <stop offset="0%" stopColor="#AFA7FF" />
@@ -1921,19 +1925,19 @@ export default function InterviewVoiceAnalysisPage() {
                       {/* Vertical line indicator at active segment */}
                       <line x1={activePt.x} y1="5" x2={activePt.x} y2="65" stroke="#FF7A95" strokeWidth="0.75" strokeDasharray="2 2" />
                       <circle cx={activePt.x} cy={activePt.y} r="3" fill="white" stroke="#FF7A95" strokeWidth="1.5" />
-                    </svg>
 
-                    {/* Dotted playhead marker readout label */}
-                    <div 
-                      style={{ left: `${(activePt.x / 240) * 100}%` }}
-                      className="absolute top-[28px] -translate-x-1/2 bg-[#FF7A95]/15 border border-[#FF7A95]/30 px-1.5 py-0.5 rounded font-mono text-[10px] text-[#FF7A95] font-black pointer-events-none"
-                    >
-                      {activeSeg?.timeRange?.split(" - ")[0] || "00:00"}
-                    </div>
+                      {/* Dotted playhead marker readout label inside SVG */}
+                      <g transform={`translate(${activePt.x}, ${activePt.y < 25 ? activePt.y + 16 : activePt.y - 14})`}>
+                        <rect x="-17" y="-8.5" width="34" height="15" rx="3.5" fill="#FF7A95" />
+                        <text x="0" y="0" textAnchor="middle" dominantBaseline="central" fill="white" fontSize="9" fontWeight="900" fontFamily="monospace">
+                          {activeSeg?.timeRange?.split(" - ")[0] || "00:00"}
+                        </text>
+                      </g>
+                    </svg>
                   </div>
 
-                  <p className="text-xs text-white/50 leading-relaxed font-semibold">
-                    整体趋势：表现{(reportData?.ipi_score || activeSeg?.score || 70) >= 80 ? "非常优秀" : (reportData?.ipi_score || activeSeg?.score || 70) >= 65 ? "比较稳健" : "波动较大"}。当前片段得分为 <span className="text-[#AFA7FF] font-extrabold">{activeSeg?.score || 70}分</span>
+                  <p className="text-xs text-slate-600 dark:text-white/50 leading-relaxed font-semibold mt-0.5">
+                    整体趋势：表现{(reportData?.ipi_score || activeSeg?.score || 70) >= 80 ? "非常优秀" : (reportData?.ipi_score || activeSeg?.score || 70) >= 65 ? "比较稳健" : "波动较大"}。当前片段得分为 <span className="text-indigo-600 dark:text-[#AFA7FF] font-extrabold">{activeSeg?.score || 70}分</span>
                   </p>
                 </div>
 
@@ -1953,13 +1957,13 @@ export default function InterviewVoiceAnalysisPage() {
                         <div 
                           key={idx}
                           onClick={() => jumpPlayhead(risk.sec)}
-                          className="p-2.5 rounded-xl bg-[#050B1A]/80 border border-white/5 hover:border-white/10 transition-all text-left flex justify-between items-center gap-2 cursor-pointer"
+                          className="voice-risk-card p-2.5 rounded-xl bg-[#f3f0ff] dark:bg-[#050B1A]/80 border border-[#e9d5ff] dark:border-white/5 hover:border-purple-300 dark:hover:border-white/10 shadow-sm transition-all text-left flex justify-between items-center gap-2 cursor-pointer"
                         >
                           <div className="flex items-center gap-2 truncate">
-                            <span className="px-2 py-0.5 rounded bg-white/5 text-[#00D4FF] font-mono font-bold text-xs select-none shrink-0">
+                            <span className="voice-risk-time-badge px-2 py-0.5 rounded bg-indigo-600 dark:bg-white/5 text-white dark:text-[#00D4FF] font-mono font-black text-xs select-none shrink-0 border border-indigo-700 dark:border-transparent shadow-xs">
                               {risk.time}
                             </span>
-                            <span className="text-xs md:text-sm text-white font-semibold truncate">{risk.label}</span>
+                            <span className="voice-risk-label text-xs md:text-sm text-slate-900 dark:text-white font-black truncate">{risk.label}</span>
                           </div>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase shrink-0 ${risk.tagClass}`}>
                             {risk.tag}
@@ -2024,6 +2028,7 @@ export default function InterviewVoiceAnalysisPage() {
                             stroke="white" 
                             strokeWidth="0.5" 
                             strokeOpacity={rIdx === 3 ? "0.08" : "0.03"} 
+                            className="voice-radar-line"
                           />
                         );
                       })}
@@ -2037,6 +2042,7 @@ export default function InterviewVoiceAnalysisPage() {
                             key={aIdx} 
                             x1="110" y1="110" x2={targetX} y2={targetY} 
                             stroke="white" strokeWidth="0.5" strokeOpacity="0.04" 
+                            className="voice-radar-line"
                           />
                         );
                       })}
@@ -2078,20 +2084,20 @@ export default function InterviewVoiceAnalysisPage() {
                       })()}
 
                       {/* External Labels with scores */}
-                      <text x="110" y="20" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="middle">
-                        技术深度 <tspan fill="#AFA7FF">{activeSeg.radarScores.depth}</tspan>
+                      <text className="voice-radar-text" x="110" y="20" fontSize="13" fontWeight="bold" textAnchor="middle">
+                        技术深度 <tspan fill="#4f46e5" className="dark:fill-[#AFA7FF]">{activeSeg.radarScores.depth}</tspan>
                       </text>
-                      <text x="195" y="92" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="start">
-                        系统思维 <tspan fill="#AFA7FF">{activeSeg.radarScores.system}</tspan>
+                      <text className="voice-radar-text" x="195" y="92" fontSize="13" fontWeight="bold" textAnchor="start">
+                        系统思维 <tspan fill="#4f46e5" className="dark:fill-[#AFA7FF]">{activeSeg.radarScores.system}</tspan>
                       </text>
-                      <text x="172" y="185" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="start">
-                        表达清晰度 <tspan fill="#AFA7FF">{activeSeg.radarScores.expression}</tspan>
+                      <text className="voice-radar-text" x="172" y="185" fontSize="13" fontWeight="bold" textAnchor="start">
+                        表达清晰度 <tspan fill="#4f46e5" className="dark:fill-[#AFA7FF]">{activeSeg.radarScores.expression}</tspan>
                       </text>
-                      <text x="48" y="185" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="end">
-                        问题解决 <tspan fill="#AFA7FF">{activeSeg.radarScores.solving}</tspan>
+                      <text className="voice-radar-text" x="48" y="185" fontSize="13" fontWeight="bold" textAnchor="end">
+                        问题解决 <tspan fill="#4f46e5" className="dark:fill-[#AFA7FF]">{activeSeg.radarScores.solving}</tspan>
                       </text>
-                      <text x="25" y="92" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="end">
-                        方案落地 <tspan fill="#AFA7FF">{activeSeg.radarScores.implementation}</tspan>
+                      <text className="voice-radar-text" x="25" y="92" fontSize="13" fontWeight="bold" textAnchor="end">
+                        方案落地 <tspan fill="#4f46e5" className="dark:fill-[#AFA7FF]">{activeSeg.radarScores.implementation}</tspan>
                       </text>
 
                     </svg>
@@ -2183,15 +2189,84 @@ export default function InterviewVoiceAnalysisPage() {
                     {activeSeg?.optimizationAdvice ? "已生成表达优化建议，可直接查看或重新生成" : "生成本片段的表达优化建议，提升回答质量"}
                   </p>
                 </div>
-                <button 
+                <button
                   onClick={() => handleOpenOptimizer()}
-                  className="w-full py-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white text-xs md:text-sm font-black rounded-lg transition-all cursor-pointer shadow-lg shadow-purple-500/10"
+                  className="voice-opt-trigger-btn w-full py-2.5 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white text-xs md:text-sm font-extrabold rounded-xl transition-all cursor-pointer shadow-md shadow-purple-500/20"
                 >
                   {activeSeg?.optimizationAdvice ? "查看优化建议" : "生成优化建议"}
                 </button>
               </div>
 
             </div>
+
+            {/* ========================================================
+                TARGETED IMPROVEMENT SUGGESTIONS CARD
+                点击任意一条建议 → 跳转 AI 职业顾问并自动发送关联本场面试的提问
+               ======================================================== */}
+            {reportData && reportData.suggestions && reportData.suggestions.length > 0 && (
+              <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4 w-full select-none mt-1 relative overflow-hidden">
+                {/* 背景光晕 */}
+                <div className="absolute -top-10 -right-10 w-40 h-40 bg-[#AFA7FF]/10 rounded-full blur-3xl pointer-events-none" />
+                <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-[#5DECCB]/10 rounded-full blur-3xl pointer-events-none" />
+
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-white/5 pb-3 relative z-10">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#AFA7FF]/20 to-[#5DECCB]/20 border border-white/10 flex items-center justify-center shrink-0">
+                      <span className="material-symbols-outlined text-xl text-[#AFA7FF]">auto_awesome</span>
+                    </div>
+                    <div>
+                      <h4 className="text-base font-black text-white flex items-center gap-2">
+                        针对性改进建议
+                        <span className="text-[10px] font-label-mono text-on-surface-variant/40 font-bold tracking-wider uppercase">Actionable Suggestions</span>
+                      </h4>
+                      <p className="text-xs text-on-surface-variant/55 font-semibold mt-0.5">
+                        点击任意一条建议，AI 职业顾问将基于本场面试表现与你的个人画像自动生成提升方案
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 rounded-full bg-[#AFA7FF]/10 border border-[#AFA7FF]/25 text-[#AFA7FF] text-[11px] font-black whitespace-nowrap shrink-0">
+                    {reportData.suggestions.length} 条建议
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 relative z-10">
+                  {reportData.suggestions.map((sug, idx) => {
+                    const colorPalette = [
+                      { border: "border-[#AFA7FF]/25 hover:border-[#AFA7FF]/50", icon: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/25", arrow: "text-[#AFA7FF] group-hover:translate-x-1" },
+                      { border: "border-[#5DECCB]/25 hover:border-[#5DECCB]/50", icon: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25", arrow: "text-[#5DECCB] group-hover:translate-x-1" },
+                      { border: "border-[#FFD66B]/25 hover:border-[#FFD66B]/50", icon: "text-[#FFD66B] bg-[#FFD66B]/10 border-[#FFD66B]/25", arrow: "text-[#FFD66B] group-hover:translate-x-1" },
+                      { border: "border-[#FF7A95]/25 hover:border-[#FF7A95]/50", icon: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25", arrow: "text-[#FF7A95] group-hover:translate-x-1" },
+                    ];
+                    const palette = colorPalette[idx % colorPalette.length];
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => handleConsultAdvisorForSuggestion(sug, idx)}
+                        className={`group p-4 rounded-2xl bg-white/[0.02] border ${palette.border} hover:bg-white/[0.04] active:scale-[0.985] transition-all flex flex-col gap-2.5 text-left cursor-pointer relative overflow-hidden`}
+                      >
+                        <div className="flex items-start gap-2.5">
+                          <div className={`w-7 h-7 rounded-lg ${palette.icon} border flex items-center justify-center shrink-0 mt-0.5`}>
+                            <span className="text-[11px] font-black font-label-mono">{String(idx + 1).padStart(2, "0")}</span>
+                          </div>
+                          <p className="text-[13px] font-bold text-white/85 leading-relaxed flex-1">
+                            {sug}
+                          </p>
+                        </div>
+                        <div className="flex items-center justify-between pt-2 border-t border-white/5">
+                          <span className="text-[10px] font-label-mono text-on-surface-variant/45 font-bold tracking-wider uppercase flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[12px]">support_agent</span>
+                            咨询 AI 顾问
+                          </span>
+                          <span className={`material-symbols-outlined text-base ${palette.arrow} transition-transform`}>
+                            arrow_forward
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
           </motion.div>
       )} {/* end pageStatus === "ready" */}
@@ -2238,24 +2313,24 @@ export default function InterviewVoiceAnalysisPage() {
                 </div>
               ) : (
                 <div className="space-y-4">
-                  <div className="p-3.5 rounded-2xl bg-[#FF7A95]/10 border border-[#FF7A95]/20 text-xs text-[#FF7A95] leading-relaxed font-bold">
-                    <span className="text-[10px] font-black uppercase tracking-wider block mb-1.5 select-none">AI 诊断结论</span>
+                  <div className="voice-opt-conclusion p-3.5 rounded-2xl bg-[#fff1f2] dark:bg-[#FF7A95]/10 border border-[#ffe4e6] dark:border-[#FF7A95]/20 text-xs text-[#be123c] dark:text-[#FF7A95] leading-relaxed font-bold">
+                    <span className="voice-opt-conclusion-title text-[10px] font-black uppercase tracking-wider block mb-1.5 select-none text-[#9f1239] dark:text-[#FF7A95]">AI 诊断结论</span>
                     {optAdvice?.conclusion || "暂无结论"}
                   </div>
 
-                  <div className="space-y-3.5 text-xs text-white/70 leading-relaxed font-bold max-h-[280px] overflow-y-auto pr-1">
+                  <div className="space-y-3.5 text-xs text-slate-700 dark:text-white/70 leading-relaxed font-bold max-h-[280px] overflow-y-auto pr-1">
                     <div className="space-y-1">
-                      <span className="text-white font-black text-sm block">💡 你的原版回答：</span>
-                      <p className="bg-white/[0.01] border border-white/5 p-3 rounded-xl text-white/50">{optAdvice?.original || "暂无"}</p>
+                      <span className="text-slate-900 dark:text-white font-black text-sm block">💡 你的原版回答：</span>
+                      <p className="bg-slate-100/90 dark:bg-white/[0.01] border border-slate-200 dark:border-white/5 p-3 rounded-xl text-slate-800 dark:text-white/50">{optAdvice?.original || "暂无"}</p>
                     </div>
 
                     <div className="space-y-1 mt-4">
-                      <span className="text-[#5DECCB] font-black text-sm block flex items-center gap-1.5 select-none">
-                        <span className="material-symbols-outlined text-base">verified</span>
-                        🎯 大厂架构师版高分话术推荐：
+                      <span className="voice-opt-arch-title text-emerald-600 dark:text-[#5DECCB] font-black text-sm block flex items-center gap-1.5 select-none">
+                        <span className="material-symbols-outlined text-base text-emerald-600 dark:text-[#5DECCB]">verified</span>
+                        🎯 大厂高分话术推荐：
                       </span>
                       <div 
-                        className="bg-slate-950/60 border border-[#5DECCB]/20 p-3.5 rounded-xl font-mono text-white whitespace-pre-wrap leading-relaxed text-xs"
+                        className="voice-opt-content bg-[#f3f0ff] dark:bg-slate-950/60 border border-[#e9d5ff] dark:border-[#5DECCB]/20 p-3.5 rounded-xl font-mono text-slate-900 dark:text-white whitespace-pre-wrap leading-relaxed text-xs shadow-xs"
                         dangerouslySetInnerHTML={{ __html: optAdvice?.optimized || "暂无" }}
                       />
                     </div>
@@ -2319,24 +2394,24 @@ export default function InterviewVoiceAnalysisPage() {
               <div className="flex-1 overflow-y-auto space-y-3.5 pr-1 py-1">
                 {dynamicRisks.length > 0 ? (
                   dynamicRisks.map((risk, idx) => (
-                    <div key={idx} className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex flex-col md:flex-row md:items-start justify-between gap-3.5 hover:border-white/10 transition-all">
+                    <div key={idx} className="voice-all-risks-card p-4 rounded-2xl bg-[#f3f0ff] dark:bg-white/[0.02] border border-[#e9d5ff] dark:border-white/5 flex flex-col md:flex-row md:items-start justify-between gap-3.5 hover:border-purple-300 dark:hover:border-white/10 transition-all shadow-xs">
                       <div className="space-y-2 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="px-2 py-0.5 rounded bg-white/5 text-[#00D4FF] font-mono font-bold text-xs">
+                          <span className="voice-risk-modal-time px-2 py-0.5 rounded bg-indigo-600 dark:bg-white/5 text-white dark:text-[#00D4FF] font-mono font-black text-xs border border-indigo-700 dark:border-transparent">
                             {risk.time}
                           </span>
-                          <span className="text-white font-extrabold text-xs">
+                          <span className="voice-risk-modal-seglabel text-slate-900 dark:text-white font-extrabold text-xs">
                             {risk.segmentLabel}
                           </span>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase border ${risk.tagClass}`}>
+                          <span className={`voice-risk-modal-tag px-2 py-0.5 rounded text-[10px] font-black uppercase border ${risk.tagClass}`}>
                             {risk.tag}
                           </span>
                         </div>
-                        <p className="text-sm font-semibold text-white/80 leading-relaxed">
+                        <p className="voice-risk-modal-title text-sm font-extrabold text-slate-900 dark:text-white/80 leading-relaxed">
                           {risk.label}
                         </p>
                         {risk.suggestions.length > 0 && (
-                          <div className="text-xs text-white/40 font-bold flex items-center gap-1">
+                          <div className="voice-risk-modal-sug text-xs text-slate-600 dark:text-white/40 font-bold flex items-center gap-1">
                             <span className="material-symbols-outlined text-xs">auto_stories</span>
                             建议重点复习：{risk.suggestions.join("、")}
                           </div>
@@ -2347,7 +2422,7 @@ export default function InterviewVoiceAnalysisPage() {
                           jumpPlayhead(risk.sec);
                           setShowRisksModal(false);
                         }}
-                        className="px-4.5 py-2 bg-[#AFA7FF] hover:bg-white text-[#050B1A] font-black text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0 align-self-end md:align-self-center"
+                        className="voice-risk-modal-btn px-4.5 py-2 bg-[#8b5cf6] hover:bg-[#7c3aed] dark:bg-[#AFA7FF] dark:hover:bg-white text-white dark:text-[#050B1A] font-black text-xs rounded-xl transition-all cursor-pointer flex items-center justify-center gap-1.5 shrink-0 align-self-end md:align-self-center shadow-sm"
                       >
                         <span className="material-symbols-outlined text-xs font-black">play_circle</span>
                         定位片段

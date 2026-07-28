@@ -8,6 +8,7 @@ import {
   getSession,
   deleteSession,
   stopSession,
+  getCounselorQuota,
   type MessageItem,
   type SessionListItem,
   type RecalledChunk,
@@ -126,6 +127,8 @@ export default function CounselorPanel(props: Props) {
   const [internalRemaining, setInternalRemaining] = useState<number | null>(null);
   const remaining = props.remaining !== undefined ? props.remaining : internalRemaining;
   const setRemaining = props.setRemaining || setInternalRemaining;
+  const [isFree, setIsFree] = useState(false);
+  const quotaFetchedRef = useRef(false);
 
   const stats = props.stats ?? null;
 
@@ -152,6 +155,19 @@ export default function CounselorPanel(props: Props) {
       loadSessions();
     }
   }, [loadSessions, props.sessions]);
+
+  // 挂载时查询剩余额度，让新用户也能看到"剩余 X 次"
+  useEffect(() => {
+    if (!auth.isLoggedIn || quotaFetchedRef.current) return;
+    quotaFetchedRef.current = true;
+    getCounselorQuota()
+      .then((q) => {
+        setRemaining(q.remaining);
+        setIsFree(q.is_free);
+      })
+      .catch(() => { /* 静默失败，不影响主流程 */ });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auth.isLoggedIn]);
 
   const loadSession = props.loadSession || useCallback(async (sid: number) => {
     try {
@@ -446,7 +462,7 @@ export default function CounselorPanel(props: Props) {
           <div className="flex items-center gap-4">
             {remaining !== null && (
               <span className="text-xs text-on-surface-variant font-label-mono font-bold">
-                今日剩余 {remaining} 次
+                {isFree ? `剩余 ${remaining} 次` : `今日剩余 ${remaining} 次`}
               </span>
             )}
             <button

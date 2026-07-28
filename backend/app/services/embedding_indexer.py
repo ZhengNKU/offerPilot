@@ -162,6 +162,150 @@ def chunk_interview_section(section) -> list[dict]:
     }]
 
 
+def chunk_live_interview_transcript(
+    transcript: list,
+    session_title: str,
+    ipi_score: Optional[int] = None,
+    offer_probability: Optional[int] = None,
+    target_role: Optional[str] = None,
+    interview_type: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    max_chars_per_chunk: int = 1800,
+) -> list[dict]:
+    """
+    把实时面试的逐字对话（InterviewLiveSession.transcript）切成多个 chunk。
+    用途：让 AI 职业顾问 RAG 召回时能直接定位到本场模拟面试的具体问答片段，
+    不再依赖"综合评价"等结构化字段。
+
+    transcript 数据形状（live_bridge._on_close 一次性写入）：
+      [
+        {
+          "start_time": float, "end_time": float,
+          "speaker": "Interviewer" | "Candidate",
+          "content": {"text": str, "speaker": "interviewer" | "candidate", ...}
+        },
+        ...
+      ]
+
+    切分策略：
+      - 先把每条 transcript 格式化成 "面试官：xxx\n候选人：yyy" 单行
+      - 按 max_chars_per_chunk (1800 字符 ≈ 600-700 tokens) 累加分组
+      - 每组保留首条对话的 speaker/序号作为定位上下文
+      - 加上 session_title + 评分 + 目标岗位等元数据前缀，便于 LLM 引用时溯源
+
+    切分粒度选择依据：
+      - 太粗（整场一场）→ RAG 召回会带过多无关内容
+      - 太细（每句 1 chunk）→ HNSW 召回 Top-6 会浪费在前言/寒暄上
+      - 1800 字符 ≈ 6-10 轮对话（一次问答来回 150-300 字），符合真实面试节奏
+    """
+    if not transcript or not isinstance(transcript, list):
+        return []
+
+    # 1. 格式化为带前缀的对话行
+    dialogue_lines: list[dict] = []  # [{idx, speaker, line}]
+    for idx, line in enumerate(transcript):
+        if not isinstance(line, dict):
+            continue
+        content = line.get("content") or {}
+        if not isinstance(content, dict):
+            text = ""
+        else:
+            text = (content.get("text") or "").strip()
+        if not text:
+            continue
+        # 优先用 line.speaker；fallback 到 content.speaker
+        speaker_raw = (line.get("speaker") or content.get("speaker") or "interviewer")
+        if speaker_raw in ("Candidate", "candidate", "user", "candidate_user"):
+            prefix = "候选人"
+        else:
+            prefix = "面试官"
+        # 控制单行长度，避免单条过长（截断保留 200 字 + 省略号）
+        if len(text) > 200:
+            text = text[:200] + "…"
+        dialogue_lines.append({
+            "idx": idx,
+            "speaker": prefix,
+            "line": f"{prefix}：{text}",
+        })
+
+    if not dialogue_lines:
+        return []
+
+    # 2. 累加分组
+    chunks: list[dict] = []
+    buf: list[dict] = []
+    buf_chars = 0
+    chunk_index = 0
+    base_meta = {
+        "ipi_score": ipi_score,
+        "offer_probability": offer_probability,
+        "target_role": target_role,
+        "interview_type": interview_type,
+        "difficulty": difficulty,
+        "session_title": session_title,
+        "transcript_total_turns": len(dialogue_lines),
+    }
+
+    def flush(reason: str):
+        nonlocal buf, buf_chars, chunk_index
+        if not buf:
+            return
+        first_idx = buf[0]["idx"]
+        last_idx = buf[-1]["idx"]
+        header_parts = [f"实时模拟面试逐字对话（{session_title}）"]
+        if target_role:
+            header_parts[0] += f" · 目标岗位 {target_role}"
+        if interview_type or difficulty:
+            tag_bits = []
+            if interview_type: tag_bits.append(f"类型 {interview_type}")
+            if difficulty: tag_bits.append(f"难度 {difficulty}")
+            if tag_bits:
+                header_parts[0] += " · " + " / ".join(tag_bits)
+        header_parts.append(
+            f"\n本片段包含第 {first_idx + 1}-{last_idx + 1} 轮对话（共 {len(dialogue_lines)} 轮）"
+        )
+        if ipi_score is not None:
+            header_parts.append(f"IPI 综合评分：{ipi_score}")
+        if offer_probability is not None:
+            header_parts.append(f"Offer 概率：{offer_probability}%")
+        header_parts.append("")  # 空行分隔
+        header = "\n".join(header_parts)
+        body = "\n".join(item["line"] for item in buf)
+        full_text = header + body
+        chunks.append({
+            "index": chunk_index,
+            "title": f"{session_title} · 对话片段 {chunk_index + 1}（{first_idx + 1}-{last_idx + 1} 轮）",
+            "content": truncate_to_token_limit(full_text),
+            "meta": {
+                **base_meta,
+                "turn_range": [first_idx + 1, last_idx + 1],
+                "turn_count": len(buf),
+                "split_reason": reason,
+            },
+        })
+        chunk_index += 1
+        buf = []
+        buf_chars = 0
+
+    for item in dialogue_lines:
+        # 单行已超上限：单独成块（避免极端长句撑爆）
+        if len(item["line"]) >= max_chars_per_chunk:
+            if buf:
+                flush("size_limit")
+            buf = [item]
+            buf_chars = len(item["line"])
+            flush("single_line_too_long")
+            continue
+        # 加入后会超上限：先 flush 旧块
+        if buf_chars + len(item["line"]) + 1 > max_chars_per_chunk and buf:
+            flush("size_limit")
+        buf.append(item)
+        buf_chars += len(item["line"]) + 1  # +1 for newline
+
+    flush("end_of_transcript")
+    return chunks
+
+
 def chunk_resume_analysis(result_json: dict, file_name: str) -> list[dict]:
     """把 resume_analyses.result_json 切成 3 段。"""
     chunks = []
@@ -430,9 +574,10 @@ async def _index_with_safety(payload: dict) -> None:
 # 3.5 P0 优化 O4：批量索引（一次性 batch 调 embed API + 并发 upsert）
 # ============================================================================
 
-async def _prepare_chunks_for_payload(payload: dict) -> Optional[tuple]:
+async def _prepare_chunks_for_payload(payload: dict) -> list[tuple]:
     """根据 payload 准备 chunks（不调 embed、不写 DB）。
-    返回 (user_id, source_type, source_id, chunks) 或 None（无数据时）。
+    返回 [(user_id, source_type, source_id, chunks), ...] 或 []（无数据时）。
+    部分 kind（如 live_interview）一个 payload 可能对应多个 source_type。
     """
     kind = payload.get("kind")
     try:
@@ -442,10 +587,10 @@ async def _prepare_chunks_for_payload(payload: dict) -> Optional[tuple]:
             async with async_session() as db:
                 sess = await db.get(models.InterviewSession, session_id)
                 if not sess or not sess.analysis_result:
-                    return None
+                    return []
                 title = " · ".join(x for x in [sess.company, sess.role, sess.round] if x) or f"面试{session_id}"
                 chunks = chunk_interview_summary(sess.analysis_result, title)
-            return (user_id, "interview_summary", session_id, chunks) if chunks else None
+            return [(user_id, "interview_summary", session_id, chunks)] if chunks else []
 
         if kind == "resume_analysis":
             user_id = payload["user_id"]
@@ -453,14 +598,14 @@ async def _prepare_chunks_for_payload(payload: dict) -> Optional[tuple]:
             async with async_session() as db:
                 ra = await db.get(models.ResumeAnalysis, resume_analysis_id)
                 if not ra or not ra.result_json:
-                    return None
+                    return []
                 file_name = "简历"
                 if ra.file_id:
                     f = await db.get(models.UploadedFile, ra.file_id)
                     if f:
                         file_name = f.filename
                 chunks = chunk_resume_analysis(ra.result_json, file_name)
-            return (user_id, "resume_analysis", resume_analysis_id, chunks) if chunks else None
+            return [(user_id, "resume_analysis", resume_analysis_id, chunks)] if chunks else []
 
         if kind == "project_memory":
             user_id = payload["user_id"]
@@ -468,17 +613,18 @@ async def _prepare_chunks_for_payload(payload: dict) -> Optional[tuple]:
             async with async_session() as db:
                 pm = await db.get(models.ProjectMemory, project_id)
                 if not pm or pm.user_id != user_id:
-                    return None
+                    return []
                 chunks = chunk_project_memory(pm)
-            return (user_id, "project_memory", project_id, chunks) if chunks else None
+            return [(user_id, "project_memory", project_id, chunks)] if chunks else []
 
         if kind == "live_interview":
             user_id = payload["user_id"]
             live_session_id = payload["live_session_id"]
+            results: list[tuple] = []
             async with async_session() as db:
                 live = await db.get(models.InterviewLiveSession, live_session_id)
                 if not live or not live.analysis_result:
-                    return None
+                    return []
                 title = f"{live.target_role or '面试'} · 实时面试{live_session_id}"
                 analysis = dict(live.analysis_result)
                 analysis.setdefault("ipi_score", live.ipi_score)
@@ -491,17 +637,36 @@ async def _prepare_chunks_for_payload(payload: dict) -> Optional[tuple]:
                     analysis["summary_suggestions"] = live.summary_suggestions
                 if live.executive_summary and not analysis.get("executive_summary"):
                     analysis["executive_summary"] = live.executive_summary
-                chunks = chunk_interview_summary(analysis, title)
-            return (user_id, "live_interview", live_session_id, chunks) if chunks else None
+                summary_chunks = chunk_interview_summary(analysis, title)
+                if summary_chunks:
+                    results.append((user_id, "live_interview", live_session_id, summary_chunks))
+
+                # ── 逐字对话（live_interview_transcript）──
+                transcript = live.transcript or []
+                if transcript:
+                    transcript_chunks = chunk_live_interview_transcript(
+                        transcript=transcript,
+                        session_title=title,
+                        ipi_score=live.ipi_score,
+                        offer_probability=live.offer_probability,
+                        target_role=live.target_role,
+                        interview_type=live.interview_type,
+                        difficulty=live.difficulty,
+                    )
+                    if transcript_chunks:
+                        results.append((
+                            user_id, "live_interview_transcript", live_session_id, transcript_chunks
+                        ))
+            return results
 
         # interview_section / interview_sections_bulk 走原路径（每个 section 是一个独立 source，
         # 且 chunks 内容差异大，不适合 batch；保留 schedule_index 单条路径）
         logger.warning(f"[indexer] batch path 不支持 kind={kind!r}，降级为单条 schedule_index")
         schedule_index(payload)
-        return None
+        return []
     except Exception:
         logger.error(f"[indexer] 准备 chunks 失败 kind={kind}: {traceback.format_exc()}")
-        return None
+        return []
 
 
 async def _upsert_chunks_with_vectors(
@@ -570,8 +735,10 @@ async def _index_batch_with_safety(payloads: list[dict]) -> None:
         prepared = await asyncio.gather(
             *[_prepare_chunks_for_payload(p) for p in payloads]
         )
-        # 过滤 None（无数据 / 降级走单条路径的）
-        valid = [item for item in prepared if item]
+        # 展平：每个结果是一个 [(user_id, source_type, source_id, chunks), ...] 列表或 []
+        valid: list[tuple[int, str, int, list[dict]]] = []
+        for items in prepared:
+            valid.extend(items)
         if not valid:
             logger.info("[indexer] batch: no valid chunks to index")
             return
@@ -698,24 +865,51 @@ async def _index_live_interview(payload: dict) -> None:
     live_session_id = payload["live_session_id"]
     async with async_session() as db:
         live = await db.get(models.InterviewLiveSession, live_session_id)
-        if not live or not live.analysis_result:
+        if not live:
+            return
+        # 至少有 analysis_result 或 transcript 之一才值得索引
+        if not live.analysis_result and not (live.transcript or []):
             return
         title = f"{live.target_role or '面试'} · 实时面试{live_session_id}"
-        # 组装一个与 interview_summary 结构类似的 dict
-        analysis = dict(live.analysis_result)
-        analysis.setdefault("ipi_score", live.ipi_score)
-        analysis.setdefault("offer_probability", live.offer_probability)
-        if live.summary_strengths and not analysis.get("summary_strengths"):
-            analysis["summary_strengths"] = live.summary_strengths
-        if live.summary_weaknesses and not analysis.get("summary_weaknesses"):
-            analysis["summary_weaknesses"] = live.summary_weaknesses
-        if live.summary_suggestions and not analysis.get("summary_suggestions"):
-            analysis["summary_suggestions"] = live.summary_suggestions
-        if live.executive_summary and not analysis.get("executive_summary"):
-            analysis["executive_summary"] = live.executive_summary
-        chunks = chunk_interview_summary(analysis, title)
-    if chunks:
-        await _upsert_chunks(user_id, "live_interview", live_session_id, chunks)
+
+        # ── A. 写"报告"类 chunks（综合评价/失分点/考点）────────────────
+        # 与 interview_summary 共享结构；保持原 live_interview source_type 不变
+        if live.analysis_result:
+            analysis = dict(live.analysis_result)
+            analysis.setdefault("ipi_score", live.ipi_score)
+            analysis.setdefault("offer_probability", live.offer_probability)
+            if live.summary_strengths and not analysis.get("summary_strengths"):
+                analysis["summary_strengths"] = live.summary_strengths
+            if live.summary_weaknesses and not analysis.get("summary_weaknesses"):
+                analysis["summary_weaknesses"] = live.summary_weaknesses
+            if live.summary_suggestions and not analysis.get("summary_suggestions"):
+                analysis["summary_suggestions"] = live.summary_suggestions
+            if live.executive_summary and not analysis.get("executive_summary"):
+                analysis["executive_summary"] = live.executive_summary
+            summary_chunks = chunk_interview_summary(analysis, title)
+        else:
+            summary_chunks = []
+        if summary_chunks:
+            await _upsert_chunks(user_id, "live_interview", live_session_id, summary_chunks)
+
+        # ── B. 写"逐字对话"类 chunks（新增，让顾问 RAG 能召回本场具体问答）──
+        # source_type 用独立的 "live_interview_transcript" 与 summary 区分，
+        # 避免 _upsert_chunks 的"先删后插"把 summary 也清空
+        transcript = live.transcript or []
+        if transcript:
+            transcript_chunks = chunk_live_interview_transcript(
+                transcript=transcript,
+                session_title=title,
+                ipi_score=live.ipi_score,
+                offer_probability=live.offer_probability,
+                target_role=live.target_role,
+                interview_type=live.interview_type,
+                difficulty=live.difficulty,
+            )
+            if transcript_chunks:
+                await _upsert_chunks(
+                    user_id, "live_interview_transcript", live_session_id, transcript_chunks
+                )
 
 
 # ============================================================================

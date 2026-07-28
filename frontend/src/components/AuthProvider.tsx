@@ -477,14 +477,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             initial={{ opacity: 0, y: -30, x: "-50%" }}
             animate={{ opacity: 1, y: 0, x: "-50%" }}
             exit={{ opacity: 0, y: -20, x: "-50%" }}
-            className="fixed top-10 left-1/2 z-[9999] px-6 py-3.5 bg-[#131b2e]/95 backdrop-blur-md border border-[#AFA7FF]/20 shadow-2xl rounded-2xl flex items-center gap-2.5 select-none"
+            className="global-app-toast fixed top-10 left-1/2 z-[9999] px-5 py-3 bg-emerald-50/95 dark:bg-[#131b2e]/95 backdrop-blur-md border border-emerald-200 dark:border-[#AFA7FF]/20 shadow-xl rounded-2xl flex items-center gap-2.5 select-none"
           >
             {toastMsg.kind === "error" ? (
-              <span className="material-symbols-outlined text-[#FF6B7A] text-base md:text-lg">error</span>
+              <span className="material-symbols-outlined text-rose-500 dark:text-[#FF6B7A] text-base md:text-lg">error</span>
             ) : (
-              <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg">check_circle</span>
+              <span className="material-symbols-outlined text-emerald-600 dark:text-[#5DECCB] text-base md:text-lg">check_circle</span>
             )}
-            <span className="text-sm md:text-base font-extrabold text-white">{toastMsg.msg}</span>
+            <span className="text-xs md:text-sm font-extrabold text-emerald-950 dark:text-white">{toastMsg.msg}</span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -924,15 +924,15 @@ function AuthModals() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className="bg-[#0e1626]/95 border border-white/10 rounded-3xl p-8 max-w-md w-full text-center relative z-10 space-y-6 shadow-2xl"
+            className="bg-white dark:bg-[#0e1626]/95 border border-slate-200 dark:border-white/10 rounded-3xl p-8 max-w-md w-full text-center relative z-10 space-y-6 shadow-2xl"
           >
-            <div className="w-16 h-16 rounded-full bg-[#FF7A95]/10 text-[#FF7A95] flex items-center justify-center mx-auto">
-              <span className="material-symbols-outlined !text-4xl">logout</span>
+            <div className="w-16 h-16 rounded-full bg-rose-100 dark:bg-[#FF7A95]/10 text-rose-600 dark:text-[#FF7A95] flex items-center justify-center mx-auto border border-rose-200 dark:border-rose-500/20 shadow-sm">
+              <span className="material-symbols-outlined !text-4xl text-rose-600 dark:text-rose-400 logout-modal-icon">logout</span>
             </div>
             
             <div className="space-y-2 text-center">
-              <h3 className="font-extrabold text-white text-xl md:text-2xl">退出登录</h3>
-              <p className="text-white/45 text-sm font-semibold leading-relaxed">
+              <h3 className="font-extrabold text-slate-900 dark:text-white text-xl md:text-2xl">退出登录</h3>
+              <p className="text-slate-600 dark:text-white/45 text-sm font-semibold leading-relaxed">
                 您确定要退出当前账号登录吗？退出后可随时重新登录。
               </p>
             </div>
@@ -940,13 +940,13 @@ function AuthModals() {
             <div className="flex gap-4 text-sm font-black md:text-base">
               <button
                 onClick={() => auth.setShowLogout(false)}
-                className="flex-1 py-3.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white transition-all cursor-pointer text-center"
+                className="flex-1 py-3.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-white transition-all cursor-pointer text-center font-black"
               >
                 取消
               </button>
               <button
                 onClick={() => auth.logout()}
-                className="flex-1 py-3.5 bg-[#FF7A95] text-[#050B1A] rounded-xl transition-all cursor-pointer text-center shadow-lg shadow-[#FF7A95]/10"
+                className="flex-1 py-3.5 bg-rose-500 hover:bg-rose-600 text-white rounded-xl transition-all cursor-pointer text-center shadow-lg shadow-rose-500/20 font-black"
               >
                 退出登录
               </button>
@@ -969,8 +969,8 @@ function AuthModals() {
             exit={{ opacity: 0, scale: 0.95 }}
             className="bg-[#0e1626]/95 border border-white/10 rounded-3xl p-8 max-w-md w-full text-center relative z-10 space-y-6 shadow-2xl"
           >
-            <div className="w-16 h-16 rounded-full bg-[#FF7A95]/10 text-[#FF7A95] flex items-center justify-center mx-auto">
-              <span className="material-symbols-outlined text-4xl">warning</span>
+            <div className="delete-warning-bubble w-20 h-20 rounded-full bg-rose-500/15 text-rose-500 flex items-center justify-center mx-auto border border-rose-500/20">
+              <span className="material-symbols-outlined !text-5xl text-rose-500 danger-warning-icon" style={{ color: "#f43f5e" }}>warning</span>
             </div>
             
             <div className="space-y-2 text-center">
@@ -1023,61 +1023,61 @@ export function UserMenu() {
   }, [isOpen]);
 
   return (
-    <div className="relative" ref={menuRef}>
+    <div className="relative topbar-user-menu" ref={menuRef}>
       <div
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 border-l border-white/10 pl-3.5 cursor-pointer select-none group"
+        className="flex items-center gap-1.5 border-l border-slate-200 dark:border-white/10 pl-3.5 cursor-pointer select-none group user-trigger-btn"
       >
-        <div className="w-8 h-8 rounded-full bg-slate-900 border border-white/10 overflow-hidden shrink-0 group-hover:border-[#AFA7FF]/40 transition-colors">
+        <div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-200 dark:border-white/10 overflow-hidden shrink-0 group-hover:border-indigo-500/40 dark:group-hover:border-[#AFA7FF]/40 transition-colors">
           <img src={auth.user.avatar || "/register.jpg"} alt={auth.user.name} className="w-full h-full object-cover" />
         </div>
-        <span className="text-on-surface font-extrabold text-sm whitespace-nowrap hidden sm:block group-hover:text-white transition-colors">
+        <span className="text-slate-900 dark:text-on-surface font-extrabold text-sm whitespace-nowrap hidden sm:block user-name-label transition-colors">
           {auth.user.name}
         </span>
-        <span className={`material-symbols-outlined text-xs transition-all transform ${isOpen ? "rotate-180 text-white" : "text-white/30 group-hover:text-white"}`}>
+        <span className={`material-symbols-outlined text-xs transition-all transform user-arrow-icon ${isOpen ? "rotate-180" : ""}`}>
           keyboard_arrow_down
         </span>
       </div>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2.5 w-56 bg-[#0e1626] border border-white/10 rounded-2xl p-3 shadow-2xl z-50 text-left space-y-1 animate-fade-in">
-            <div className="px-2.5 py-2 border-b border-white/5 mb-1.5 flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-black text-white truncate">{auth.user.name}</p>
-                {auth.user.status && (
-                  <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 text-xs font-extrabold border border-emerald-500/20 shrink-0">
-                    {auth.user.status}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-white/40 font-semibold truncate">{auth.user.role || "求职者"}</p>
-                <span className="px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-300 text-[11px] font-extrabold border border-purple-500/20 shrink-0">
-                  内测用户
+        <div className="absolute right-0 mt-2.5 w-56 bg-[#0e1626] border border-white/15 rounded-2xl p-3 shadow-2xl z-50 text-left space-y-1 animate-fade-in user-dropdown-card">
+          <div className="px-2.5 py-2 border-b border-white/10 mb-1.5 flex flex-col gap-1">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-sm font-black text-white truncate user-name-text" style={{ color: "#ffffff" }}>{auth.user.name}</p>
+              {auth.user.status && (
+                <span className="px-2.5 py-1 rounded-full text-xs font-black shrink-0 user-badge-emerald bg-[#ecfdf5] dark:bg-emerald-500/20 text-[#047857] dark:text-emerald-400 border border-[#a7f3d0] dark:border-emerald-500/30">
+                  {auth.user.status}
                 </span>
-              </div>
+              )}
             </div>
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                auth.setShowLogout(true);
-              }}
-              className="w-full px-2.5 py-2.5 text-sm font-bold text-white/70 hover:text-white hover:bg-white/5 rounded-xl transition-all flex items-center gap-2 cursor-pointer text-left"
-            >
-              <span className="material-symbols-outlined text-lg text-[#FF7A95]">logout</span>
-              退出登录
-            </button>
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                auth.setShowDelete(true);
-              }}
-              className="w-full px-2.5 py-2.5 text-sm font-bold text-[#FF7A95]/80 hover:text-[#FF7A95] hover:bg-[#FF7A95]/5 rounded-xl transition-all flex items-center gap-2 cursor-pointer text-left"
-            >
-              <span className="material-symbols-outlined text-lg text-[#FF7A95]">delete_forever</span>
-              注销账号
-            </button>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-bold truncate user-role-text" style={{ color: "rgba(255, 255, 255, 0.75)" }}>{auth.user.role || "求职者"}</p>
+              <span className="px-2 py-0.5 rounded-full text-[11px] font-black shrink-0 user-badge-purple bg-[#f3e8ff] dark:bg-purple-500/20 text-[#6b21a8] dark:text-purple-300 border border-[#e9d5ff] dark:border-purple-500/30">
+                内测用户
+              </span>
+            </div>
           </div>
+          <button
+            onClick={() => {
+              setIsOpen(false);
+              auth.setShowLogout(true);
+            }}
+            className="w-full px-2.5 py-2.5 text-sm font-bold text-white hover:bg-white/10 rounded-xl transition-all flex items-center gap-2 cursor-pointer text-left group/btn user-menu-item"
+          >
+            <span className="material-symbols-outlined text-lg user-logout-icon" style={{ color: "#f43f5e" }}>logout</span>
+            <span className="user-menu-item-text" style={{ color: "#ffffff" }}>退出登录</span>
+          </button>
+          <button
+            onClick={() => {
+              setIsOpen(false);
+              auth.setShowDelete(true);
+            }}
+            className="w-full px-2.5 py-2.5 text-sm font-bold text-white hover:bg-white/10 rounded-xl transition-all flex items-center gap-2 cursor-pointer text-left user-menu-item"
+          >
+            <span className="material-symbols-outlined text-lg user-delete-icon" style={{ color: "#f43f5e" }}>delete_forever</span>
+            <span className="user-menu-item-text" style={{ color: "#ffffff" }}>注销账号</span>
+          </button>
+        </div>
       )}
     </div>
   );

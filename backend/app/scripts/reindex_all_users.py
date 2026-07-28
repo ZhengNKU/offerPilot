@@ -25,6 +25,7 @@ from app.services.embedding_indexer import (
     chunk_interview_section,
     chunk_resume_analysis,
     chunk_project_memory,
+    chunk_live_interview_transcript,
     _upsert_chunks,
 )
 
@@ -159,6 +160,23 @@ async def reindex_user(user_id: int, source_types: list[str], dry_run: bool) -> 
                 chunks = chunk_interview_summary(analysis, title)
                 n = await _upsert_chunks(user_id, "live_interview", live.id, chunks)
                 stats["live_interview"] += n
+
+                # ── 逐字对话索引（live_interview_transcript） ──
+                if live.transcript:
+                    transcript_chunks = chunk_live_interview_transcript(
+                        transcript=live.transcript,
+                        session_title=title,
+                        ipi_score=live.ipi_score,
+                        offer_probability=live.offer_probability,
+                        target_role=live.target_role,
+                        interview_type=live.interview_type,
+                        difficulty=live.difficulty,
+                    )
+                    if transcript_chunks:
+                        m = await _upsert_chunks(
+                            user_id, "live_interview_transcript", live.id, transcript_chunks
+                        )
+                        stats["live_interview"] += m
             except Exception as e:
                 log.error(f"  live_interview id={live.id} failed: {e!r}")
                 stats["errors"] += 1

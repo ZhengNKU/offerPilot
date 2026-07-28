@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { API_BASE } from "@/lib/api";
@@ -642,13 +643,16 @@ export default function CareerDashboard() {
             </a>
           </div>
 
-          <div className="flex items-center gap-4">
-            <button
-              onClick={handleHistoryRedirect}
-              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-base">history</span>历史记录
-            </button>
+          <div className="flex items-center gap-3 md:gap-4">
+            {auth.isLoggedIn && (
+              <button
+                onClick={handleHistoryRedirect}
+                className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-base">history</span>历史记录
+              </button>
+            )}
+            <ThemeToggle />
             {auth.isLoggedIn ? (
               <UserMenu />
 ) : (
@@ -827,12 +831,12 @@ export default function CareerDashboard() {
                 <div className="grid grid-cols-2 gap-4 flex-1 items-center">
                   <div className="space-y-3.5 text-left">
                     <div>
-                      <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标岗位</span>
-                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.role || "—"}</span>
+                      <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标公司</span>
+                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.company || "—"}</span>
                     </div>
                     <div>
-                      <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标职级</span>
-                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.level || "—"}</span>
+                      <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标岗位</span>
+                      <span className="text-base font-black text-white block mt-0.5 whitespace-nowrap">{careerGoal.role || "—"}</span>
                     </div>
                     <div>
                       <span className="text-[11px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">目标薪资</span>
@@ -1042,31 +1046,27 @@ export default function CareerDashboard() {
                                 {formatRelativeTime(item.created_at || "")}
                               </span>
                               <span className="text-white/10 font-normal">|</span>
-                              <span className={`text-xs font-extrabold uppercase ${
-                                item.type === "resume" ? "text-secondary/70" :
-                                item.type === "live" ? "text-tertiary/70" :
-                                item.type === "text" ? "text-purple-400/70" :
-                                "text-primary/70"
+                              <span className={`text-xs font-black uppercase ${
+                                item.type === "live" ? "type-emerald text-emerald-600 dark:text-emerald-400" :
+                                item.type === "resume" ? "type-rose text-rose-600 dark:text-rose-400" :
+                                item.type === "text" ? "type-purple text-purple-600 dark:text-purple-400" :
+                                "type-indigo text-indigo-600 dark:text-indigo-400"
                               }`}>
                                 {typeLabel[item.type] || item.type}
                               </span>
                             </div>
-                            <p className="text-sm font-black text-white truncate leading-snug mt-0.5">
+                            <p className="text-sm font-black text-slate-900 dark:text-white truncate leading-snug mt-0.5">
                               {item.company} · {item.role}
                             </p>
                           </div>
 
                           <div className="shrink-0 flex items-center">
                             {hasScore ? (
-                              <span className={`font-black font-label-mono text-xs md:text-sm px-2 py-0.5 rounded-lg whitespace-nowrap ${
-                                scoreRating === "good" ? "bg-tertiary/10 text-tertiary border border-tertiary/20" :
-                                scoreRating === "risk" ? "bg-secondary/15 text-secondary border border-secondary/20" :
-                                "bg-white/5 text-on-surface-variant/60"
-                              }`}>
+                              <span className="font-black font-label-mono text-xs md:text-sm px-2.5 py-1 rounded-lg whitespace-nowrap bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/20 shadow-sm">
                                 评分 {item.score}
                               </span>
                             ) : (
-                              <span className="text-on-surface-variant/30 font-semibold font-label-mono text-xs px-2 whitespace-nowrap">—</span>
+                              <span className="text-slate-400 dark:text-white/30 font-semibold font-label-mono text-xs px-2 whitespace-nowrap">—</span>
                             )}
                           </div>
                         </div>
@@ -1150,19 +1150,19 @@ export default function CareerDashboard() {
               {/* Security info items block */}
               <div className="flex flex-col sm:flex-row gap-3.5 flex-1 w-full max-w-2xl">
                 
-                <div className="flex items-center gap-3.5 px-4.5 py-3.5 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-0">
-                  <span className="material-symbols-outlined text-primary text-xl opacity-60 shrink-0">mail</span>
+                <div className="security-card flex items-center gap-3.5 px-4.5 py-3.5 rounded-2xl bg-indigo-50/50 dark:bg-white/[0.02] border border-indigo-100 dark:border-white/5 flex-1 min-w-0 shadow-sm">
+                  <span className="material-symbols-outlined security-icon text-indigo-600 dark:text-primary text-xl font-bold shrink-0">mail</span>
                   <div className="text-left min-w-0 flex-1">
-                    <span className="text-xs md:text-sm text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">邮箱</span>
-                    <span className="text-sm font-black text-white block mt-0.5 truncate">{accountSecurity.email}</span>
+                    <span className="text-xs md:text-sm security-label text-slate-600 dark:text-white/60 font-label-mono uppercase tracking-widest font-black block">邮箱</span>
+                    <span className="text-sm font-black security-value text-slate-900 dark:text-white block mt-0.5 truncate">{accountSecurity.email}</span>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3.5 px-4.5 py-3.5 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-0">
-                  <span className="material-symbols-outlined text-primary text-xl opacity-60 shrink-0">phone_iphone</span>
+                <div className="security-card flex items-center gap-3.5 px-4.5 py-3.5 rounded-2xl bg-indigo-50/50 dark:bg-white/[0.02] border border-indigo-100 dark:border-white/5 flex-1 min-w-0 shadow-sm">
+                  <span className="material-symbols-outlined security-icon text-indigo-600 dark:text-primary text-xl font-bold shrink-0">phone_iphone</span>
                   <div className="text-left min-w-0 flex-1">
-                    <span className="text-xs md:text-sm text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">手机号</span>
-                    <span className="text-sm font-black text-white block mt-0.5 truncate">{accountSecurity.phone}</span>
+                    <span className="text-xs md:text-sm security-label text-slate-600 dark:text-white/60 font-label-mono uppercase tracking-widest font-black block">手机号</span>
+                    <span className="text-sm font-black security-value text-slate-900 dark:text-white block mt-0.5 truncate">{accountSecurity.phone}</span>
                   </div>
                 </div>
 
@@ -1172,7 +1172,7 @@ export default function CareerDashboard() {
               <div className="flex flex-wrap items-center gap-3.5 shrink-0 justify-between lg:justify-end text-sm font-black">
                 <button
                   onClick={handleOpenSecurityModal}
-                  className="px-5 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl border border-white/10 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
+                  className="security-edit-btn px-5 py-3 rounded-xl transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer shadow-sm"
                 >
                   <span className="material-symbols-outlined text-base">edit</span>
                   修改
@@ -1180,7 +1180,7 @@ export default function CareerDashboard() {
                 
                 <button
                   onClick={() => auth.setShowLogout(true)}
-                  className="px-5 py-3 bg-secondary/10 hover:bg-secondary/20 text-secondary rounded-xl border border-secondary/25 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer"
+                  className="px-5 py-3 bg-rose-50 hover:bg-rose-600 text-rose-600 hover:text-white dark:bg-secondary/10 dark:hover:bg-secondary/20 dark:text-secondary rounded-xl border border-rose-200 dark:border-secondary/25 transition-all flex items-center gap-1.5 hover:scale-[1.01] active:scale-98 cursor-pointer shadow-sm"
                 >
                   <span className="material-symbols-outlined text-base">logout</span>
                   退出登录
@@ -1263,35 +1263,35 @@ export default function CareerDashboard() {
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">求职状态</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">求职状态</label>
                     <select
                       value={profileForm.status}
                       onChange={(e) => setProfileForm({ ...profileForm, status: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white appearance-none hero-select"
+                      className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold appearance-none hero-select"
                     >
-                      <option className="bg-[#0e1626]" value="在职">在职</option>
-                      <option className="bg-[#0e1626]" value="离职">离职</option>
-                      <option className="bg-[#0e1626]" value="在校生">在校生</option>
-                      <option className="bg-[#0e1626]" value="应届生">应届生</option>
+                      <option className="bg-white dark:bg-[#0e1626] text-slate-900 dark:text-white" value="在职">在职</option>
+                      <option className="bg-white dark:bg-[#0e1626] text-slate-900 dark:text-white" value="离职">离职</option>
+                      <option className="bg-white dark:bg-[#0e1626] text-slate-900 dark:text-white" value="在校生">在校生</option>
+                      <option className="bg-white dark:bg-[#0e1626] text-slate-900 dark:text-white" value="应届生">应届生</option>
                     </select>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">性别</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">性别</label>
                     <select
                       value={profileForm.gender || "male"}
                       onChange={(e) => setProfileForm({ ...profileForm, gender: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white appearance-none hero-select"
+                      className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold appearance-none hero-select"
                     >
-                      <option className="bg-[#0e1626]" value="male">男</option>
-                      <option className="bg-[#0e1626]" value="female">女</option>
-                      <option className="bg-[#0e1626]" value="other">不方便透露</option>
+                      <option className="bg-white dark:bg-[#0e1626] text-slate-900 dark:text-white" value="male">男</option>
+                      <option className="bg-white dark:bg-[#0e1626] text-slate-900 dark:text-white" value="female">女</option>
+                      <option className="bg-white dark:bg-[#0e1626] text-slate-900 dark:text-white" value="other">不方便透露</option>
                     </select>
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">年龄</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">年龄</label>
                     <input
                       type="number"
                       required
@@ -1300,44 +1300,44 @@ export default function CareerDashboard() {
                       placeholder="26"
                       value={profileForm.age || ""}
                       onChange={(e) => setProfileForm({ ...profileForm, age: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white placeholder-white/20"
+                      className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">当前公司 (选填)</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">当前公司 (选填)</label>
                     <input
                       type="text"
                       value={profileForm.company}
                       onChange={(e) => setProfileForm({ ...profileForm, company: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                      className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">当前岗位 (选填)</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">当前岗位 (选填)</label>
                     <input
                       type="text"
                       value={profileForm.role}
                       onChange={(e) => setProfileForm({ ...profileForm, role: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                      className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">当前职级 (选填)</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">当前职级 (选填)</label>
                     <input
                       type="text"
                       value={profileForm.level}
                       onChange={(e) => setProfileForm({ ...profileForm, level: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                      className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">当前月薪范围</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">当前月薪范围</label>
                     <div className="flex items-center gap-2">
                       <div className="relative flex-1">
                         <input
@@ -1345,40 +1345,40 @@ export default function CareerDashboard() {
                           inputMode="numeric"
                           value={profileForm.salaryMin || ""}
                           onChange={(e) => setProfileForm({ ...profileForm, salaryMin: parseInt(e.target.value) || 0 })}
-                          className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                          className="w-full px-3 py-2.5 pr-9 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold"
                         />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-white/40 text-xs font-bold pointer-events-none">K</span>
                       </div>
-                      <span className="text-white/30 font-bold text-sm shrink-0">-</span>
+                      <span className="text-slate-400 dark:text-white/30 font-bold text-sm shrink-0">-</span>
                       <div className="relative flex-1">
                         <input
                           type="text"
                           inputMode="numeric"
                           value={profileForm.salaryMax || ""}
                           onChange={(e) => setProfileForm({ ...profileForm, salaryMax: parseInt(e.target.value) || 0 })}
-                          className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                          className="w-full px-3 py-2.5 pr-9 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold"
                         />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-white/40 text-xs font-bold pointer-events-none">K</span>
                       </div>
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">工作年限</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">工作年限</label>
                     <div className="flex gap-2">
                       <select
                         value={profileForm.experienceYears}
                         onChange={(e) => setProfileForm({ ...profileForm, experienceYears: e.target.value })}
-                        className="flex-1 px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-primary/40 text-sm appearance-none hero-select"
+                        className="flex-1 px-3 py-2.5 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl text-slate-900 dark:text-white font-bold focus:outline-none focus:border-indigo-600 text-sm appearance-none hero-select"
                       >
                         {["在校", "应届", "1年", "2年", "3年", "4年", "5年", "6年", "7年", "8年", "9年", "10年以上"].map((y) => (
-                          <option key={y} className="bg-[#0e1626] text-white">{y}</option>
+                          <option key={y} className="bg-white dark:bg-[#0e1626] text-slate-900 dark:text-white">{y}</option>
                         ))}
                       </select>
                       <select
                         value={profileForm.experienceMonths}
                         onChange={(e) => setProfileForm({ ...profileForm, experienceMonths: e.target.value })}
-                        className="flex-1 px-3 py-2.5 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:border-primary/40 text-sm appearance-none hero-select"
+                        className="flex-1 px-3 py-2.5 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl text-slate-900 dark:text-white font-bold focus:outline-none focus:border-indigo-600 text-sm appearance-none hero-select"
                       >
                         {["0个月", "1个月", "2个月", "3个月", "4个月", "5个月", "6个月", "7个月", "8个月", "9个月", "10个月", "11个月"].map((m) => (
                           <option key={m} className="bg-[#0e1626] text-white">{m}</option>
@@ -1390,44 +1390,44 @@ export default function CareerDashboard() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">学校名称 (选填)</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">学校名称 (选填)</label>
                     <input
                       type="text"
                       value={profileForm.school || ""}
                       onChange={(e) => setProfileForm({ ...profileForm, school: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                      className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">学历 (选填)</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">学历 (选填)</label>
                     <select
                       value={profileForm.degree || "本科"}
                       onChange={(e) => setProfileForm({ ...profileForm, degree: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white appearance-none hero-select"
+                      className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold appearance-none hero-select"
                     >
                       {["专科", "本科", "硕士", "博士", "其他"].map((d) => (
-                        <option key={d} className="bg-[#0e1626]" value={d}>{d}</option>
+                        <option key={d} className="bg-[#0e1626] text-white" value={d}>{d}</option>
                       ))}
                     </select>
                   </div>
                 </div>
 
-                <div className="pt-6 border-t border-white/5 flex gap-4 justify-end text-sm font-black">
+                <div className="pt-6 border-t border-slate-100 dark:border-white/5 flex gap-4 justify-end text-sm font-black">
                   <button
                     type="button"
                     onClick={() => setShowEditProfileModal(false)}
-                    className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all text-white cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 transition-all text-slate-800 dark:text-white font-black cursor-pointer"
                   >
                     取消
                   </button>
                   <button
                     type="submit"
                     disabled={isSavingProfile}
-                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[100px]"
+                    className="px-6 py-3 rounded-xl bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-primary dark:text-white font-black border border-indigo-200 dark:border-primary/30 shadow-md transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[100px]"
                   >
                     {isSavingProfile ? (
                       <>
-                        <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                        <div className="w-4 h-4 border-2 border-indigo-700 border-t-transparent rounded-full animate-spin shrink-0" />
                         <span>保存中...</span>
                       </>
                     ) : (
@@ -1494,11 +1494,11 @@ export default function CareerDashboard() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold flex items-center gap-0.5 h-5">
+                    <label className="text-slate-700 dark:text-white/60 font-bold flex items-center gap-1.5 h-5">
                       目标城市
                       <span className="relative group cursor-help leading-none">
-                        <span className="block rounded-full bg-white/30 w-[11px] h-[11px] flex items-center justify-center text-[7px] font-bold text-surface select-none">i</span>
-                        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 bg-[#1a2236] border border-white/10 rounded-lg text-[11px] text-white/70 whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none font-normal">
+                        <span className="goal-tip-icon block rounded-full w-[13px] h-[13px] flex items-center justify-center text-[9px] font-black select-none">i</span>
+                        <span className="goal-tip-box absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-30">
                           最多3个，用顿号隔开
                         </span>
                       </span>
@@ -1509,24 +1509,24 @@ export default function CareerDashboard() {
                       placeholder="例如：上海、深圳、杭州"
                       value={goalForm.city}
                       onChange={(e) => setGoalForm({ ...goalForm, city: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                      className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/30"
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold flex items-center h-5">目标公司 (选填)</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold flex items-center h-5">目标公司 (选填)</label>
                     <input
                       type="text"
                       placeholder="例如：腾讯科技"
                       value={goalForm.company || ""}
                       onChange={(e) => setGoalForm({ ...goalForm, company: e.target.value })}
-                      className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm"
+                      className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/30"
                     />
                   </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-on-surface-variant/60 font-bold block">期望薪资范围</label>
+                    <label className="text-slate-700 dark:text-white/60 font-bold block">期望薪资范围</label>
                     <div className="flex items-center gap-2">
                       <div className="relative flex-1">
                         <input
@@ -1534,41 +1534,41 @@ export default function CareerDashboard() {
                           inputMode="numeric"
                           value={goalForm.salaryMin || ""}
                           onChange={(e) => setGoalForm({ ...goalForm, salaryMin: parseInt(e.target.value) || 0 })}
-                          className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                          className="w-full px-3 py-2.5 pr-9 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold"
                         />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-white/40 text-xs font-bold pointer-events-none">K</span>
                       </div>
-                      <span className="text-white/30 font-bold text-sm shrink-0">-</span>
+                      <span className="text-slate-400 dark:text-white/30 font-bold text-sm shrink-0">-</span>
                       <div className="relative flex-1">
                         <input
                           type="text"
                           inputMode="numeric"
                           value={goalForm.salaryMax || ""}
                           onChange={(e) => setGoalForm({ ...goalForm, salaryMax: parseInt(e.target.value) || 0 })}
-                          className="w-full px-3 py-2.5 pr-9 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary/40 text-sm text-white"
+                          className="w-full px-3 py-2.5 pr-9 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold"
                         />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40 text-xs font-bold pointer-events-none">K</span>
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-white/40 text-xs font-bold pointer-events-none">K</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                <div className="pt-6 border-t border-white/5 flex gap-4 justify-end text-sm font-black">
+                <div className="pt-6 border-t border-slate-100 dark:border-white/5 flex gap-4 justify-end text-sm font-black">
                   <button
                     type="button"
                     onClick={() => setShowEditGoalModal(false)}
-                    className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all text-white cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 transition-all text-slate-800 dark:text-white font-black cursor-pointer"
                   >
                     取消
                   </button>
                   <button
                     type="submit"
                     disabled={isSavingGoal}
-                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[100px]"
+                    className="px-6 py-3 rounded-xl bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-primary dark:text-white font-black border border-indigo-200 dark:border-primary/30 shadow-md transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[100px]"
                   >
                     {isSavingGoal ? (
                       <>
-                        <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                        <div className="w-4 h-4 border-2 border-indigo-700 border-t-transparent rounded-full animate-spin shrink-0" />
                         <span>保存中...</span>
                       </>
                     ) : (
@@ -1598,34 +1598,34 @@ export default function CareerDashboard() {
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               className="bg-surface-container-high border border-white/10 rounded-3xl p-8 max-w-md w-full text-left relative z-10 space-y-6 shadow-2xl"
             >
-              <div className="flex justify-between items-center pb-3.5 border-b border-white/5">
-                <h3 className="font-extrabold text-white text-base flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary">security</span>
+              <div className="flex justify-between items-center pb-3.5 border-b border-slate-100 dark:border-white/5">
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-base flex items-center gap-2">
+                  <span className="material-symbols-outlined text-indigo-600 dark:text-primary">security</span>
                   修改账号与安全设置
                 </h3>
                 <button
                   onClick={handleCloseSecurityModal}
-                  className="text-on-surface-variant hover:text-white transition-colors cursor-pointer flex items-center justify-center w-7 h-7 rounded-lg hover:bg-white/5"
+                  className="text-slate-500 dark:text-on-surface-variant hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer flex items-center justify-center w-7 h-7 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5"
                 >
                   <span className="material-symbols-outlined text-base">close</span>
                 </button>
               </div>
 
-              <form onSubmit={handleSaveSecurity} className="space-y-4 text-sm font-semibold text-white">
+              <form onSubmit={handleSaveSecurity} className="space-y-4 text-sm font-semibold text-slate-900 dark:text-white">
 
                 <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">邮箱地址 <span className="text-[#FF7A95]">*</span></label>
+                  <label className="text-slate-700 dark:text-white/60 font-bold block">邮箱地址 <span className="text-[#FF7A95]">*</span></label>
                   <input
                     type="email"
                     required
                     value={securityForm.email}
                     onChange={(e) => setSecurityForm({ ...securityForm, email: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-[#AFA7FF]/40 text-sm text-white placeholder-white/20"
+                    className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20"
                   />
                 </div>
 
                 <div className="space-y-1.5 animate-fade-in">
-                  <label className="text-on-surface-variant/60 font-bold block">验证码 <span className="text-[#FF7A95]">*</span></label>
+                  <label className="text-slate-700 dark:text-white/60 font-bold block">验证码 <span className="text-[#FF7A95]">*</span></label>
                   <div className="flex gap-2">
                     <input
                       type="text"
@@ -1634,13 +1634,13 @@ export default function CareerDashboard() {
                       placeholder="输入 6 位验证码"
                       value={emailCode}
                       onChange={(e) => setEmailCode(e.target.value)}
-                      className="flex-1 py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold"
+                      className="flex-1 py-3 px-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-600 text-sm"
                     />
                     <button
                       type="button"
                       disabled={emailCountdown > 0}
                       onClick={handleGetSecurityEmailCode}
-                      className="px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer"
+                      className="px-4 py-3 rounded-xl border border-indigo-200 dark:border-[#AFA7FF]/20 text-indigo-600 dark:text-[#AFA7FF] font-black text-sm bg-indigo-50 hover:bg-indigo-100 dark:bg-transparent dark:hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer shadow-sm verify-code-btn"
                     >
                       {emailCountdown > 0 ? `${emailCountdown}s` : "获取验证码"}
                     </button>
@@ -1648,32 +1648,32 @@ export default function CareerDashboard() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className="text-on-surface-variant/60 font-bold block">修改密码 (选填)</label>
+                  <label className="text-slate-700 dark:text-white/60 font-bold block">修改密码 (选填)</label>
                   <input
                     type="password"
                     placeholder="请输入新密码，不修改请留空"
                     value={securityForm.password || ""}
                     onChange={(e) => setSecurityForm({ ...securityForm, password: e.target.value })}
-                    className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-[#AFA7FF]/40 text-sm text-white placeholder-white/20"
+                    className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20"
                   />
                 </div>
 
-                <div className="pt-6 border-t border-white/5 flex gap-4 justify-end text-sm font-black">
+                <div className="pt-6 border-t border-slate-100 dark:border-white/5 flex gap-4 justify-end text-sm font-black">
                   <button
                     type="button"
                     onClick={handleCloseSecurityModal}
-                    className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 active:scale-95 transition-all text-white cursor-pointer"
+                    className="px-6 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 transition-all text-slate-800 dark:text-white font-black cursor-pointer"
                   >
                     取消
                   </button>
                   <button
                     type="submit"
                     disabled={isSavingSecurity}
-                    className="px-6 py-3 rounded-xl bg-primary text-on-primary font-black shadow-lg shadow-primary/20 hover:scale-[1.01] active:scale-98 transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[100px]"
+                    className="px-6 py-3 rounded-xl bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-primary dark:text-white font-black border border-indigo-200 dark:border-primary/30 shadow-md transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[100px]"
                   >
                     {isSavingSecurity ? (
                       <>
-                        <div className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin shrink-0" />
+                        <div className="w-4 h-4 border-2 border-indigo-700 border-t-transparent rounded-full animate-spin shrink-0" />
                         <span>保存中...</span>
                       </>
                     ) : (

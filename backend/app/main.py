@@ -196,6 +196,8 @@ async def startup_event():
     asyncio.create_task(_seed_project_tags())
     # 启动管理员账号初始化
     asyncio.create_task(_seed_admin_account())
+    # 启动精选推荐数据种子（面试指南页固定预置数据，幂等）
+    asyncio.create_task(_seed_featured_guides())
     # 启动内容审核后台巡检
     from app.utils.content_moderation import run_periodic_rescan
     asyncio.create_task(run_periodic_rescan())
@@ -349,3 +351,67 @@ if __name__ == "__main__":
         reload=True,
         reload_includes=["*.env", "*.py"],  # 监听 .env 等非 Python 文件的变更
     )
+
+
+# ============================================================================
+# 精选推荐种子数据 (幂等：使用 ON CONFLICT (id) DO UPDATE 多次启动不会重复插入)
+# ============================================================================
+# 用法：要新增/修改预置数据，直接在 PRESET_FEATURED_GUIDES 列表中追加/编辑条目即可。
+# id 唯一键；多次启动执行同一 SQL 不会报错也不会产生重复行。
+PRESET_FEATURED_GUIDES_SQL: list[str] = [
+    # id=1: 面试驾到官方账号首推
+    """
+    INSERT INTO featured_guides (
+        id, title, cover_img, platform, platform_badge_bg,
+        duration, url, author, author_avatar, author_verified,
+        fans_count, category, reads, likes, favorites, created_at
+    ) VALUES (
+        1,
+        '我们想打造一个陪你成长的 AI 职业伙伴 🚀',
+        '/guide/context/1.jpg',
+        '小红书',
+        'bg-[#FF2442]/20 text-[#FF2442] border-[#FF2442]/30',
+        '图文笔记',
+        'https://www.xiaohongshu.com/explore/6a67251d000000001d02342c?xsec_token=ABjNQQTIIKOpQ3qBhwjet_W0eG_ItjLbApVi6GHprq5Xs=&xsec_source=pc_user',
+        '面试驾到',
+        '',
+        TRUE,
+        '0',
+        '推荐',
+        0, 0, 0,
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        title            = EXCLUDED.title,
+        cover_img        = EXCLUDED.cover_img,
+        platform         = EXCLUDED.platform,
+        platform_badge_bg= EXCLUDED.platform_badge_bg,
+        duration         = EXCLUDED.duration,
+        url              = EXCLUDED.url,
+        author           = EXCLUDED.author,
+        author_avatar    = EXCLUDED.author_avatar,
+        author_verified  = EXCLUDED.author_verified,
+        fans_count       = EXCLUDED.fans_count,
+        category         = EXCLUDED.category
+    -- reads/likes/favorites 保留数据库里用户行为产生的真实计数，不被种子覆盖
+    """,
+    # 后续追加：复制上面模板改 id=2, title, url, cover_img 即可
+]
+
+
+async def _seed_featured_guides():
+    """启动期通过原生 SQL 幂等写入精选推荐预置数据。
+
+    使用 INSERT ... ON CONFLICT (id) DO UPDATE：
+      - 首次启动：插入新行；
+      - 再次启动：若 id 已存在则按 EXCLUDED 内容刷新（除 reads/likes/favorites 外），
+        即使重复执行也不会报错或产生重复行。
+    """
+    try:
+        from sqlalchemy import text as _text
+        async with engine.begin() as conn:
+            for sql in PRESET_FEATURED_GUIDES_SQL:
+                await conn.execute(_text(sql))
+        logging.info("[seed] 精选推荐预置数据已写入 (共 %d 条)", len(PRESET_FEATURED_GUIDES_SQL))
+    except Exception as _e:
+        logging.error("[seed] 精选推荐预置数据写入失败: %s", _e)

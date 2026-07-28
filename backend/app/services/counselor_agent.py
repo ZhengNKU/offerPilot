@@ -554,7 +554,7 @@ async def stream_chat(
             "model": COUNSELOR_MODEL,
             "messages": messages,
             "temperature": 0.7,
-            "max_tokens": 1500,
+            "max_tokens": 8192,
         }
 
         # 工具调用上下文：handler 通过 ctx 拿 db session 和 user_id

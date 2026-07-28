@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 
 INTERVIEW_TYPE_VALUES = ("tech_8gu", "tech_project", "tech_scenario", "non_tech", "hr_comprehensive")
 DIFFICULTY_VALUES = ("Lv1", "Lv2", "Lv3", "Lv4")
+# 标准时长档（前端 UI 与 POST /api/live/sessions 主流程仍走这三个值）。
+# build_system_prompt 已放开接受任意 duration_min（effective 折算值），这里仅用于提示。
 DURATION_VALUES = (10, 15, 20)
 
 # 时长档 → 题目数区间（前端不参与计算，后端是唯一权威）
@@ -45,6 +47,49 @@ LIVE_DURATION_PRESETS: dict[int, dict[str, int]] = {
     20: {"min_questions": 7, "max_questions": 9},
 }
 FOLLOWUP_MIN, FOLLOWUP_MAX = 1, 3
+
+
+def _resolve_duration_preset(duration_min: int) -> dict[str, int]:
+    """
+    把任意 duration_min 解析成 {min_questions, max_questions}。
+
+    标准档（10/15/20）直接查 LIVE_DURATION_PRESETS；
+    非标准档（如 effective_duration_min=6，因用户当月配额不足被折算）按相邻标准档
+    做线性插值/外推，题目数随之压缩到能塞进给定时间内。
+    """
+    if duration_min in LIVE_DURATION_PRESETS:
+        return LIVE_DURATION_PRESETS[duration_min]
+
+    sorted_presets = sorted(LIVE_DURATION_PRESETS.items())  # [(10, ...), (15, ...), (20, ...)]
+    lo_d, lo_p = sorted_presets[0]
+    hi_d, hi_p = sorted_presets[-1]
+
+    # 低于最小标准档 → 按比例外推（6min 走这条）
+    if duration_min < lo_d:
+        ratio = duration_min / lo_d
+        return {
+            "min_questions": max(1, round(lo_p["min_questions"] * ratio)),
+            "max_questions": max(2, round(lo_p["max_questions"] * ratio)),
+        }
+    # 高于最大标准档 → 按比例外推
+    if duration_min > hi_d:
+        ratio = duration_min / hi_d
+        return {
+            "min_questions": max(1, round(hi_p["min_questions"] * ratio)),
+            "max_questions": max(2, round(hi_p["max_questions"] * ratio)),
+        }
+    # 落在相邻标准档之间 → 线性插值
+    for i in range(len(sorted_presets) - 1):
+        a_d, a_p = sorted_presets[i]
+        b_d, b_p = sorted_presets[i + 1]
+        if a_d <= duration_min <= b_d:
+            t = (duration_min - a_d) / (b_d - a_d)
+            return {
+                "min_questions": round(a_p["min_questions"] + t * (b_p["min_questions"] - a_p["min_questions"])),
+                "max_questions": round(a_p["max_questions"] + t * (b_p["max_questions"] - a_p["max_questions"])),
+            }
+    # 兜底（理论上到不了）
+    return LIVE_DURATION_PRESETS[10]
 
 
 # ---------- 5 套面试类型提示词骨架（§7.4） ----------
@@ -208,7 +253,7 @@ PROMPT_TEMPLATE = """你是 {company_style} 的 {interviewer_persona_cn}，正�
 {target_role}（{job_level}）。
 
 【本次面试结构】硬性约束
-- 总时长：约 {duration_min} 分钟。
+- 总时长：本场约 {duration_min} 分钟（已按候选人本月剩余配额动态折算，请严格在此时间内完成，超时不再开新题）。
 - 问题数量：控制在 {min_questions}~{max_questions} 题之间。
 - 追问轮数：每道题最多追问 {followup_rounds} 轮后必须切下一题。
 - 预计节奏：开场破冰 1 题 → 主干 {min_minus_two}~{max_minus_two} 题 → 反向问答 1 题。
@@ -265,17 +310,18 @@ def build_system_prompt(
     - LIVE_DURATION_PRESETS 推导的题目数区间
     - candidate_context（候选人背景摘要，从简历/项目记忆/历史面试分析压缩，~500 字）
     """
-    if duration_min not in LIVE_DURATION_PRESETS:
-        raise ValueError(f"duration_min 必须是 {DURATION_VALUES} 之一，得到 {duration_min}")
-
+    # 接受任意 duration_min：标准档（10/15/20）走 LIVE_DURATION_PRESETS；
+    # effective 折算值（如配额不足时 6 分钟）走 _resolve_duration_preset 插值/外推。
     if interview_type not in INTERVIEW_TYPE_PROMPTS:
         raise ValueError(f"interview_type 必须是 {INTERVIEW_TYPE_VALUES} 之一")
     if difficulty not in DIFFICULTY_CONFIG:
         raise ValueError(f"difficulty 必须是 {DIFFICULTY_VALUES} 之一")
+    if duration_min <= 0:
+        raise ValueError(f"duration_min 必须 > 0，得到 {duration_min}")
 
     profile = get_profile(interview_type, difficulty)
     diff_cfg = DIFFICULTY_CONFIG[difficulty]
-    preset = LIVE_DURATION_PRESETS[duration_min]
+    preset = _resolve_duration_preset(duration_min)
     min_q = preset["min_questions"]
     max_q = preset["max_questions"]
 

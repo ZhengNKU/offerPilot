@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import GrowthCurveChart, { type GrowthPoint } from "@/components/GrowthCurveChart";
 import CounselorPanel from "@/components/counselor/CounselorPanel";
@@ -572,6 +573,36 @@ export default function CareerMemoryDashboard() {
       const tab = params.get("tab");
       if (tab) {
         setActiveTab(tab);
+      }
+
+      if (tab === "advisor") {
+        try {
+          const raw =
+            sessionStorage.getItem("interviewVar_advisor_autosend") ||
+            localStorage.getItem("interviewVar_advisor_autosend");
+          if (raw) {
+            const payload = JSON.parse(raw);
+            const isFresh = typeof payload?.ts === "number"
+              && Date.now() - payload.ts < 60_000;
+            if (isFresh && typeof payload.prompt === "string" && payload.prompt.trim().length > 0) {
+              // 触发前先清空，避免 askAdvisor 内部 setState 触发的 re-render 重复消费
+              sessionStorage.removeItem("interviewVar_advisor_autosend");
+              localStorage.removeItem("interviewVar_advisor_autosend");
+              // 等下一个 microtask 再调用，确保 askAdvisor 内部 setState 顺序稳定
+              setTimeout(() => askAdvisor(payload.prompt), 0);
+            } else {
+              // 过期 payload：清理掉
+              sessionStorage.removeItem("interviewVar_advisor_autosend");
+              localStorage.removeItem("interviewVar_advisor_autosend");
+            }
+          }
+        } catch (e) {
+          // JSON 解析失败等异常静默处理，不影响正常进入
+          try {
+            sessionStorage.removeItem("interviewVar_advisor_autosend");
+            localStorage.removeItem("interviewVar_advisor_autosend");
+          } catch {}
+        }
       }
     }
   }, []);
@@ -1484,7 +1515,8 @@ export default function CareerMemoryDashboard() {
             </a>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 md:gap-4">
+            <ThemeToggle />
             {auth.isLoggedIn ? (
               <UserMenu />
             ) : (
@@ -1595,7 +1627,7 @@ export default function CareerMemoryDashboard() {
                             setSelectedCounselorIds([]);
                           }
                         }}
-                        className="w-3 h-3 rounded border-white/10 bg-white/5 text-primary focus:ring-primary focus:ring-offset-0 focus:ring-1 cursor-pointer transition-all accent-primary"
+                        className="checkbox-white w-3.5 h-3.5 rounded text-indigo-600 focus:ring-indigo-500 focus:ring-offset-0 focus:ring-1 cursor-pointer transition-all"
                       />
                       全选
                     </label>
@@ -1896,32 +1928,32 @@ export default function CareerMemoryDashboard() {
                                 case "audio":
                                   return {
                                     label: "录音分析",
-                                    dotColor: "bg-primary",
-                                    textColor: "text-primary/70",
+                                    dotColor: "bg-indigo-600 dark:bg-indigo-400",
+                                    textColor: "type-indigo text-indigo-600 dark:text-indigo-400 font-extrabold",
                                   };
                                 case "text":
                                   return {
                                     label: "记录分析",
-                                    dotColor: "bg-purple-400",
-                                    textColor: "text-purple-400/70",
+                                    dotColor: "bg-purple-600 dark:bg-purple-400",
+                                    textColor: "type-purple text-purple-600 dark:text-purple-400 font-extrabold",
                                   };
                                 case "resume":
                                   return {
                                     label: "简历优化",
-                                    dotColor: "bg-secondary",
-                                    textColor: "text-secondary/70",
+                                    dotColor: "bg-rose-500 dark:bg-rose-400",
+                                    textColor: "type-rose text-rose-600 dark:text-rose-400 font-extrabold",
                                   };
                                 case "live":
                                   return {
                                     label: "模拟面试",
-                                    dotColor: "bg-tertiary",
-                                    textColor: "text-tertiary/70",
+                                    dotColor: "bg-emerald-500 dark:bg-emerald-400",
+                                    textColor: "type-emerald text-emerald-600 dark:text-emerald-400 font-extrabold",
                                   };
                                 default:
                                   return {
                                     label: "录音分析",
-                                    dotColor: "bg-primary",
-                                    textColor: "text-primary/70",
+                                    dotColor: "bg-indigo-600 dark:bg-indigo-400",
+                                    textColor: "type-indigo text-indigo-600 dark:text-indigo-400 font-extrabold",
                                   };
                               }
                             };
@@ -1935,28 +1967,32 @@ export default function CareerMemoryDashboard() {
                               const bracketText = item.type === "resume" ? item.round : (item.raw_created_at ? item.raw_created_at.split('T')[0] : (item.date.includes(' ') ? item.date.split(' ')[0] : item.date));
 
                               return (
-                                <div key={index} className="relative flex justify-between items-center group py-0.5">
-                                  <div className={`absolute -left-[19px] top-1.5 w-2 h-2 rounded-full ring-4 ring-[#11131a] z-10 ${typeInfo.dotColor}`} />
+                                <div key={index} className="relative flex justify-between items-start text-sm font-semibold py-1 group">
+                                  <div className={`absolute -left-5 top-1.5 w-2 h-2 rounded-full ${typeInfo.dotColor} z-10`} />
                                   
-                                  <div className="space-y-1 text-left">
-                                    <div className="flex items-center gap-1.5 text-xs font-semibold text-on-surface-variant/40">
-                                      <span>{displayTime}</span>
-                                      <span>|</span>
+                                  <div className="space-y-0.5 text-left min-w-0 pr-2">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-xs text-slate-500 dark:text-white/40 font-bold font-label-mono" style={{ color: "#64748b" }}>
+                                        {displayTime}
+                                      </span>
+                                      <span className="text-slate-300 dark:text-white/20 font-normal">|</span>
                                       <span className={typeInfo.textColor}>{typeInfo.label}</span>
                                     </div>
-                                    <p className="text-xs md:text-sm text-white/90 font-medium">
+                                    <p className="text-xs md:text-sm text-slate-900 dark:text-white/90 font-black truncate leading-snug mt-0.5">
                                       {companyText} · {roleText}
                                     </p>
                                   </div>
 
-                                  <div className={`px-2.5 py-1 rounded-full text-xs border font-label-mono shrink-0 ${
-                                    item.score > 0 && item.score < 60
-                                      ? "bg-[#fb7185]/10 text-[#fb7185] border-[#fb7185]/20 font-bold"
-                                      : item.score >= 60
-                                        ? "bg-white/5 text-[#94a3b8] border-white/5 font-semibold"
-                                        : "bg-white/5 text-on-surface-variant/40 border-white/5"
-                                  }`}>
-                                    评分 <span className="ml-0.5">{item.score > 0 ? item.score : "待评估"}</span>
+                                  <div className="shrink-0 flex items-center">
+                                    {item.score > 0 ? (
+                                      <span className="font-black font-label-mono text-xs md:text-sm px-2.5 py-1 rounded-lg whitespace-nowrap bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-500/20 shadow-sm">
+                                        评分 {item.score}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs font-black font-label-mono px-2.5 py-1 rounded-lg whitespace-nowrap bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-white/40 border border-slate-200 dark:border-white/10">
+                                        待评估
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               );
@@ -2473,7 +2509,7 @@ export default function CareerMemoryDashboard() {
                         </div>
 
                         {/* Recommendations summary */}
-                        <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-1 mt-2">
+                        <div className="p-3.5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-1 mt-7 pt-2">
                           <span className="text-xs text-on-surface-variant/40 font-extrabold block">提升建议</span>
                           <p className="text-xs text-on-surface-variant/70 leading-relaxed font-semibold">
                             {offerSuggestion ? (
@@ -2565,7 +2601,7 @@ export default function CareerMemoryDashboard() {
                                 type="checkbox"
                                 checked={allSelected}
                                 onChange={handleToggleSelectAll}
-                                className="w-4 h-4 rounded border-white/10 bg-white/5 text-primary focus:ring-primary focus:ring-offset-0 focus:ring-1 cursor-pointer transition-all accent-primary"
+                                className="checkbox-white w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 focus:ring-offset-0 focus:ring-1 cursor-pointer transition-all"
                               />
                               全选
                             </label>
@@ -2620,7 +2656,7 @@ export default function CareerMemoryDashboard() {
                                       type="checkbox"
                                       checked={selectedIds.includes(item.id)}
                                       onChange={() => handleToggleSelect(item.id)}
-                                      className="w-4 h-4 rounded border-white/10 bg-white/5 text-primary focus:ring-primary focus:ring-offset-0 focus:ring-1 cursor-pointer transition-all accent-primary"
+                                      className="checkbox-white w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 focus:ring-offset-0 focus:ring-1 cursor-pointer transition-all"
                                     />
                                   </div>
 
@@ -2794,7 +2830,7 @@ export default function CareerMemoryDashboard() {
                     </div>
                   ) : projects.length === 0 ? (
                     <div className="py-16 text-center w-full">
-                      <span className="material-symbols-outlined text-5xl text-on-surface-variant/25 mb-3 block">folder_off</span>
+                      <span className="material-symbols-outlined !text-4xl text-on-surface-variant/25 mb-3 block">folder_off</span>
                       <p className="text-lg font-black text-on-surface-variant/40">暂无项目记忆</p>
                       <p className="text-sm text-on-surface-variant/30 font-semibold mt-1">上传简历进行分析后，AI 将自动提取项目经历</p>
                       <button
@@ -3613,7 +3649,7 @@ export default function CareerMemoryDashboard() {
                       {/* Left list pane: questions list */}
                       <div className="col-span-12 md:col-span-5 flex flex-col gap-3 h-full overflow-hidden">
                         <div className="flex items-center gap-1.5 text-base font-bold text-on-surface-variant/50 uppercase tracking-widest shrink-0">
-                          <span className="material-symbols-outlined text-base text-amber-400">star</span>
+                          <span className="material-symbols-outlined text-base text-amber-400 knowledge-icon-amber" style={{ color: "#fbbf24" }}>star</span>
                           面试高频问题 Top10
                         </div>
                         <div className="flex-1 overflow-y-auto pr-2 space-y-2 scrollbar-thin scrollbar-thumb-white/10">
@@ -3632,7 +3668,7 @@ export default function CareerMemoryDashboard() {
                               >
                                 <div className="flex items-start gap-3 min-w-0 flex-1">
                                   <span className="font-mono text-xs font-bold text-primary shrink-0 mt-0.5">{numStr}</span>
-                                  <span className="text-xs md:text-sm font-bold truncate pr-2 text-left">{q.title}</span>
+                                  <span className="text-xs md:text-sm font-black truncate pr-2 text-left text-slate-900 dark:text-white knowledge-q-title">{q.title}</span>
                                 </div>
                               </div>
                             );
@@ -3644,7 +3680,7 @@ export default function CareerMemoryDashboard() {
                       <div className="col-span-12 md:col-span-7 flex flex-col gap-3 h-full overflow-hidden">
                         <div className="flex items-center justify-between shrink-0">
                           <div className="flex items-center gap-1.5 text-base font-bold text-on-surface-variant/50 uppercase tracking-widest">
-                            <span className="material-symbols-outlined text-base text-violet-400">psychology</span>
+                            <span className="material-symbols-outlined text-base text-violet-400 knowledge-icon-violet" style={{ color: "#c084fc" }}>psychology</span>
                             AI 推荐回答
                           </div>
                         </div>
@@ -3654,7 +3690,7 @@ export default function CareerMemoryDashboard() {
                           {/* Core Answer Strategy */}
                           <div className="p-4.5 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">
                             <h4 className="text-xs md:text-sm font-black text-white flex items-center gap-1.5">
-                              <span className="material-symbols-outlined text-sm text-amber-400">lightbulb</span>
+                              <span className="material-symbols-outlined text-sm text-amber-400 knowledge-icon-amber" style={{ color: "#fbbf24" }}>lightbulb</span>
                               核心回答思路
                             </h4>
                             <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
@@ -3665,27 +3701,27 @@ export default function CareerMemoryDashboard() {
                           {/* Reference Answer - STAR structure */}
                           <div className="p-4.5 rounded-2xl bg-white/[0.01] border border-white/5 space-y-4">
                             <h4 className="text-xs md:text-sm font-black text-white flex items-center gap-1.5 border-b border-white/5 pb-2">
-                              <span className="material-symbols-outlined text-sm text-cyan-400">layers</span>
+                              <span className="material-symbols-outlined text-sm text-cyan-400 knowledge-icon-cyan" style={{ color: "#22d3ee" }}>layers</span>
                               参考回答（STAR 结构）
                             </h4>
                             
                             <div className="space-y-3.5">
                               <div className="space-y-1">
-                                <span className="text-primary font-bold text-[10px] md:text-xs uppercase tracking-wide block">S Situation（场景）</span>
+                                <span className="font-bold text-[10px] md:text-xs uppercase tracking-wide block star-label-st" style={{ color: "#818cf8" }}>S Situation（场景）</span>
                                 <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
                                   {activeQuestion.aiAnswer.s}
                                 </p>
                               </div>
                               
                               <div className="space-y-1">
-                                <span className="text-primary font-bold text-[10px] md:text-xs uppercase tracking-wide block">T Task（任务）</span>
+                                <span className="font-bold text-[10px] md:text-xs uppercase tracking-wide block star-label-st" style={{ color: "#818cf8" }}>T Task（任务）</span>
                                 <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
                                   {activeQuestion.aiAnswer.t}
                                 </p>
                               </div>
                               
                               <div className="space-y-1">
-                                <span className="text-primary font-bold text-[10px] md:text-xs uppercase tracking-wide block">A Action（行动）</span>
+                                <span className="font-bold text-[10px] md:text-xs uppercase tracking-wide block star-label-st" style={{ color: "#818cf8" }}>A Action（行动）</span>
                                 <ul className="list-disc list-inside text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed space-y-1">
                                   {activeQuestion.aiAnswer.a.map((action, aidx) => (
                                     <li key={aidx}>{action}</li>
@@ -3694,7 +3730,7 @@ export default function CareerMemoryDashboard() {
                               </div>
                               
                               <div className="space-y-1">
-                                <span className="text-tertiary font-bold text-[10px] md:text-xs uppercase tracking-wide block">R Result（结果）</span>
+                                <span className="font-bold text-[10px] md:text-xs uppercase tracking-wide block star-label-r" style={{ color: "#34d399" }}>R Result（结果）</span>
                                 <p className="text-xs md:text-sm text-on-surface-variant/80 font-semibold leading-relaxed">
                                   {activeQuestion.aiAnswer.r}
                                 </p>
@@ -3706,7 +3742,7 @@ export default function CareerMemoryDashboard() {
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="p-4 rounded-2xl bg-primary/5 border border-primary/10 space-y-2">
                               <h5 className="text-xs md:text-sm font-bold text-white flex items-center gap-1">
-                                <span className="material-symbols-outlined text-xs text-primary">bookmark</span>
+                                <span className="material-symbols-outlined text-xs text-primary knowledge-icon-indigo" style={{ color: "#6366f1" }}>bookmark</span>
                                 关键点总结
                               </h5>
                               <ul className="list-disc list-inside text-xs text-on-surface-variant/80 font-semibold space-y-1.5">
@@ -3718,7 +3754,7 @@ export default function CareerMemoryDashboard() {
                             
                             <div className="p-4 rounded-2xl bg-tertiary/5 border border-tertiary/10 space-y-2">
                               <h5 className="text-xs md:text-sm font-bold text-white flex items-center gap-1">
-                                <span className="material-symbols-outlined text-xs text-tertiary">contact_support</span>
+                                <span className="material-symbols-outlined text-xs text-tertiary knowledge-icon-rose" style={{ color: "#f43f5e" }}>contact_support</span>
                                 可能的追问
                               </h5>
                               <ul className="list-disc list-inside text-xs text-on-surface-variant/80 font-semibold space-y-1.5">
@@ -3769,8 +3805,8 @@ export default function CareerMemoryDashboard() {
             </div>
 
             <div className="space-y-2">
-              <div className="w-16 h-16 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2">
-                <span className="material-symbols-outlined" style={{ fontSize: "40px" }}>warning</span>
+              <div className="w-16 h-16 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2 border border-rose-500/20">
+                <span className="material-symbols-outlined text-rose-500 danger-warning-icon" style={{ fontSize: "40px", color: "#f43f5e" }}>warning</span>
               </div>
               <h3 className="font-extrabold text-white text-2xl">确认要删除吗？</h3>
               <p className="text-on-surface-variant text-sm leading-relaxed max-w-xs mx-auto font-semibold">

@@ -61,13 +61,2235 @@
   --font-label-mono: "Geist", monospace;
 }
 
+/* 明暗主题映射 - 默认深色 dark */
+:root,
+html.dark {
+  --app-bg: #0b1326;
+  --app-text: #dae2fd;
+  color-scheme: dark;
+}
+
+html.light {
+  --app-bg: #f4f6fb;
+  --app-text: #0f172a;
+  color-scheme: light;
+}
+
 body {
-  background-color: #0b1326;
-  color: #dae2fd;
+  background-color: var(--app-bg);
+  color: var(--app-text);
   font-family: "Inter", sans-serif;
   overflow-x: hidden;
   margin: 0;
   padding: 0;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* 深色模式下选中复选框保持白色底，避免浏览器原生灰色渲染 */
+.checkbox-white {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.checkbox-white:checked {
+  background-color: #ffffff;
+  border-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='m3 8 3 3 7-7' fill='none' stroke='%234f46e5' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 85%;
+}
+
+html.light .checkbox-white {
+  background-color: #ffffff;
+  border-color: #cbd5e1;
+}
+
+/* ========================================================
+   Slogan 逐字光辉扫过动画 (Shimmer Sweep Slogan Effect)
+   ======================================================== */
+@keyframes shimmer-sweep {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer-text-glow {
+  background: linear-gradient(
+    110deg,
+    #312e81 0%,
+    #4338ca 20%,
+    #6366f1 35%,
+    #38bdf8 48%,
+    #ffffff 50%,
+    #38bdf8 52%,
+    #6366f1 65%,
+    #4338ca 80%,
+    #312e81 100%
+  );
+  background-size: 200% auto;
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: shimmer-sweep 4s linear infinite;
+  display: inline-block;
+}
+
+html.dark .shimmer-text-glow {
+  background: linear-gradient(
+    110deg,
+    #818cf8 0%,
+    #c0c1ff 20%,
+    #e0e7ff 35%,
+    #ffffff 50%,
+    #ffffff 52%,
+    #e0e7ff 65%,
+    #c0c1ff 80%,
+    #818cf8 100%
+  );
+  background-size: 200% auto;
+  color: transparent;
+  -webkit-background-clip: text;
+  background-clip: text;
+  animation: shimmer-sweep 4s linear infinite;
+  display: inline-block;
+}
+
+/* 浅色模式全量文本与主题变量重置 (Fixing All Invisible White Text in Light Mode) */
+html.light {
+  --color-on-surface: #0f172a !important;
+  --color-on-surface-variant: #475569 !important;
+  --color-surface-variant: #f1f5f9 !important;
+  --color-background: #f4f6fb !important;
+  --color-surface: #ffffff !important;
+}
+
+html.light,
+html.light body,
+html.light main,
+html.light section,
+html.light footer,
+html.light .min-h-screen,
+html.light .bg-background {
+  background-color: #f4f6fb !important;
+  color: #0f172a;
+}
+
+/* 导航栏浅色透亮 */
+html.light nav {
+  background-color: rgba(255, 255, 255, 0.92) !important;
+  border-bottom-color: rgba(0, 0, 0, 0.12) !important;
+}
+
+/* 浅色模式 Hero 视频与 Banner 渐变蒙层 - 只应用在 Hero 区域，不污染通用卡片 */
+html.light section.relative div[class*="from-[#0b1326]"] {
+  background: linear-gradient(to bottom, rgba(15, 23, 42, 0.4), rgba(15, 23, 42, 0.15), rgba(244, 246, 251, 0.7)) !important;
+}
+
+/* 浅色模式下所有标题强制设为深邃黑 */
+html.light h1,
+html.light h2,
+html.light h3,
+html.light h4,
+html.light h5,
+html.light h6 {
+  color: #0f172a !important;
+}
+
+/* 最近活动分析类型颜色最高优先级保全 - 保持与点颜色 100% 一致 */
+html.light .type-emerald { color: #059669 !important; font-weight: 900 !important; }
+html.light .type-indigo { color: #4f46e5 !important; font-weight: 900 !important; }
+html.light .type-purple { color: #9333ea !important; font-weight: 900 !important; }
+html.light .type-rose,
+html.light .text-rose-600,
+html.light p.text-rose-600,
+html.light .text-red-500,
+html.light p.text-red-500 { color: #e11d48 !important; font-weight: 900 !important; }
+
+/* 求职目标 Tooltip 提示框白底黑字 & 图标深淡紫背景 */
+html.light .goal-tip-box {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12) !important;
+}
+
+html.light .goal-tip-icon {
+  background-color: #e0e7ff !important;
+  color: #4338ca !important;
+  border: 1px solid #c7d2fe !important;
+}
+
+/* 浅色模式通用高对比文本分类 (Fix Light Mode Text & Label Contrast) */
+html.light p,
+html.light label {
+  color: #0f172a;
+}
+
+/* 正文 & 关键内容全量设为扎实高对比纯黑 */
+html.light .text-white,
+html.light .text-white\/95,
+html.light .text-white\/90,
+html.light .text-white\/85,
+html.light .text-white\/80 {
+  color: #0f172a !important;
+}
+
+/* 靓紫文字与按钮最高优先级保全 */
+html.light .text-indigo-600 {
+  color: #4f46e5 !important;
+}
+
+/* Label 标签 & 次要说明文本全量提升为高清晰度 Slate 深黑蓝灰 */
+html.light .text-white\/75,
+html.light .text-white\/70,
+html.light .text-white\/65,
+html.light .text-white\/60,
+html.light .text-white\/55,
+html.light .text-white\/50,
+html.light .text-white\/45,
+html.light .text-white\/40,
+html.light .text-white\/35,
+html.light .text-white\/30,
+html.light .text-white\/25,
+html.light .text-white\/20,
+html.light .text-white\/15,
+html.light .text-white\/10,
+html.light .text-on-surface-variant,
+html.light .text-on-surface-variant\/40,
+html.light .text-on-surface-variant\/50,
+html.light .text-on-surface-variant\/60,
+html.light .text-on-surface-variant\/70,
+html.light .text-on-surface-variant\/80 {
+  color: #334155 !important;
+  font-weight: 700 !important;
+}
+
+html.light .material-symbols-outlined.text-white\/30,
+html.light .material-symbols-outlined.text-white\/40,
+html.light .material-symbols-outlined.text-white\/50,
+html.light .material-symbols-outlined.text-white\/60 {
+  color: #64748b !important;
+}
+
+/* 退出登录、删除评论图标与删除确认 Modal 顶部的 Icon 强力指定为高亮亮红色 */
+.danger-warning-icon,
+.logout-modal-icon,
+.delete-comment-icon,
+html.light .logout-modal-icon,
+html.light .delete-comment-icon,
+html.dark .logout-modal-icon,
+html.dark .danger-warning-icon,
+html.dark .delete-comment-icon,
+div[class*="fixed"][class*="z-50"] .danger-warning-icon,
+div[class*="fixed"][class*="z-50"] span.danger-warning-icon {
+  color: #f43f5e !important;
+}
+
+/* 浅色模式下注销账号确认弹窗的警告图标 → 纯红（与深色模式的玫红区分）。
+   必须带上 div[class*="fixed"][class*="z-50"] 选择器，否则 specificity (0,1,1) 比
+   同文件里那条 div[class*="fixed"][class*="z-50"] .danger-warning-icon (0,2,1) 低，
+   !important 都会被那条玫红规则压过去。
+   再用 :not(:has(> div.resume-structure-modal)) span.danger-warning-icon 把 specificity 顶到
+   (0,5,3) 以上，强行盖掉兜底"全 modal 内 span 变 #334155"的规则。 */
+html.light div[class*="fixed"][class*="z-50"] .danger-warning-icon,
+html.light div[class*="fixed"][class*="z-50"] span.danger-warning-icon,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span.danger-warning-icon {
+  color: #dc2626 !important;
+}
+
+/* 浅色模式下退出登录确认弹窗的 logout 图标 → 纯红（与深色模式玫红区分） */
+html.light div[class*="fixed"][class*="z-50"] .logout-modal-icon {
+  color: #dc2626 !important;
+}
+
+/* 上面规则的选择器 (0,4,2) 比下面那条 html.light div[class*="fixed"][class*="z-50"]:not(:has(...)) span (0,5,3) 低，
+   !important 也压不过 → 必须再补一条同模式的高 specific 规则，强制把警告/退出图标锁定为红色，
+   覆盖全站"全 modal 内的 span 都变灰"的兜底规则。 */
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span.logout-modal-icon,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span.danger-warning-icon,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span.delete-comment-icon,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span.user-logout-icon,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span.user-delete-icon {
+  color: #dc2626 !important;
+}
+
+/* 浅色模式下注销账号确认弹窗的警告图标容器底色/边框也同步改纯红（与图标统一） */
+html.light div[class*="fixed"][class*="z-50"] .delete-warning-bubble {
+  background-color: rgba(220, 38, 38, 0.12) !important;
+  border-color: rgba(220, 38, 38, 0.25) !important;
+}
+
+/* 浅色模式 - 底部 Banner “开始模拟面试” 按钮与标题保全高亮纯白 */
+html.light .guide-start-btn,
+html.light button.guide-start-btn {
+  color: #ffffff !important;
+  background-image: linear-gradient(to right, #a855f7, #4f46e5) !important;
+}
+
+html.light h3.banner-title,
+html.light h1.banner-title,
+html.light .banner-title {
+  color: #ffffff !important;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8) !important;
+}
+
+/* 体验反馈 & 面试指南海报 Banner 晶莹纯白字保全 (高权重碾压 html.light h1) */
+html.light h1.banner-title,
+html.light .banner-title {
+  color: #ffffff !important;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8) !important;
+}
+
+html.light p.banner-desc,
+html.light .banner-desc {
+  color: rgba(255, 255, 255, 0.95) !important;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8) !important;
+}
+
+/* 职业驾驶舱及全站 Modal 弹窗 Header 标志 Icon 在浅色模式下保全绚丽品牌紫 */
+html.light div[class*="fixed"][class*="z-50"] h3 .material-symbols-outlined,
+html.light div[class*="fixed"][class*="z-50"] h2 .material-symbols-outlined,
+html.light div[class*="fixed"][class*="z-50"] h4 .material-symbols-outlined,
+html.light div[class*="fixed"][class*="z-50"] header .material-symbols-outlined {
+  color: #4f46e5 !important;
+}
+
+/* 面试指南及全站搜索框 Icon 在浅色模式下保全高对比度深灰色 */
+html.light .guide-search-icon,
+html.light div[class*="relative"] span[class*="search"] {
+  color: #475569 !important;
+}
+
+html.light .guide-empty-heart {
+  color: #f43f5e !important;
+}
+
+html.light .guide-bullet-text,
+html.light .guide-bullet-text span {
+  color: #0f172a !important;
+  font-weight: 800 !important;
+}
+
+/* 精选推荐卡片底部栏 - 浅色模式淡紫色背景 */
+
+/* 精选推荐卡片底部栏 - 浅色模式淡紫色背景 */
+html.light .guide-card-footer {
+  background-color: #f5f3ff !important;
+  border-top: 1px solid #e0e7ff !important;
+  color: #3730a3 !important;
+}
+
+html.light .guide-card-footer span,
+html.light .guide-card-footer div,
+html.light .guide-card-footer .material-symbols-outlined {
+  color: #3730a3 !important;
+}
+
+/* 黄金公式高亮盒 - 浅色模式深靓紫字 */
+html.light .formula-box,
+html.light div[class*="bg-purple-500\/10"],
+html.light div[class*="bg-purple-500\/20"],
+html.light div[class*="bg-indigo-500\/10"],
+html.light div[class*="bg-primary-container\/10"] {
+  background-color: #f3e8ff !important;
+  border: 1px solid #e9d5ff !important;
+  color: #5b21b6 !important;
+}
+
+html.light .formula-box p,
+html.light .formula-box span,
+html.light div[class*="bg-purple-500\/10"] p,
+html.light div[class*="bg-purple-500\/10"] span,
+html.light div[class*="bg-primary-container\/10"] p,
+html.light div[class*="bg-primary-container\/10"] span {
+  color: #5b21b6 !important;
+  font-weight: 800 !important;
+}
+
+/* 指南卡片核心点 / 执行要点高亮盒 - 完美隔绝浅色与深色模式 */
+html.light .guide-detail-formula-box {
+  background-color: #f5f3ff !important;
+  border: 1px solid #e0e7ff !important;
+  color: #1e1b4b !important;
+}
+html.light .guide-detail-formula-box span,
+html.light .guide-detail-formula-box p {
+  color: #1e1b4b !important;
+}
+
+html.dark .guide-detail-formula-box {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+html.dark .guide-detail-formula-box span,
+html.dark .guide-detail-formula-box p {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+
+/* 浅色模式 - 卡片顶部 Badge 标签 & Icon 饱满高对比度保全 */
+html.light span[class*="text-purple-300"],
+html.light div[class*="text-purple-300"] {
+  color: #6b21a8 !important;
+  background-color: #f3e8ff !important;
+  border-color: #d8b4fe !important;
+}
+
+html.light span[class*="text-emerald-300"],
+html.light span[class*="text-emerald-400"],
+html.light div[class*="text-emerald-300"],
+html.light div[class*="text-emerald-400"] {
+  color: #047857 !important;
+  background-color: #d1fae5 !important;
+  border-color: #6ee7b7 !important;
+}
+
+html.light span[class*="text-blue-300"],
+html.light div[class*="text-blue-300"] {
+  color: #1d4ed8 !important;
+  background-color: #dbeafe !important;
+  border-color: #93c5fd !important;
+}
+
+html.light span[class*="text-amber-300"],
+html.light div[class*="text-amber-300"] {
+  color: #b45309 !important;
+  background-color: #fef3c7 !important;
+  border-color: #fde68a !important;
+}
+
+html.light span[class*="text-rose-300"],
+html.light div[class*="text-rose-300"] {
+  color: #be123c !important;
+  background-color: #ffe4e6 !important;
+  border-color: #fecdd3 !important;
+}
+
+/* 浅色模式 - 【查看完整指导细节】按钮高亮淡紫背景与沉紫粗字 */
+html.light .guide-detail-btn,
+html.light button.guide-detail-btn {
+  background-color: #e0e7ff !important;
+  border: 1px solid #c7d2fe !important;
+  color: #3730a3 !important;
+  font-weight: 800 !important;
+}
+
+html.light .guide-detail-btn:hover {
+  background-color: #4f46e5 !important;
+  border-color: #4338ca !important;
+  color: #ffffff !important;
+}
+
+html.light .guide-detail-btn span,
+html.light .guide-detail-btn .material-symbols-outlined {
+  color: #3730a3 !important;
+}
+
+html.light .guide-detail-btn:hover span,
+html.light .guide-detail-btn:hover .material-symbols-outlined {
+  color: #ffffff !important;
+}
+
+/* 浅色模式 - 【← 返回全部概览】按钮文字 100% 硬朗高级灰色 */
+html.light .guide-back-btn,
+html.light button.guide-back-btn,
+html.light a.guide-back-btn {
+  color: #64748b !important;
+}
+
+html.light .guide-back-btn:hover,
+html.light button.guide-back-btn:hover,
+html.light a.guide-back-btn:hover {
+  color: #4f46e5 !important;
+}
+
+/* 浅色模式 - 指南卡片【核心点 / 执行要点】盒：纯净淡灰底、绝对黑色字体、无蓝色背景 */
+html.light .guide-detail-formula-box {
+  background-color: #f8fafc !important;
+  background: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+html.light .guide-detail-formula-box span,
+html.light .guide-detail-formula-box p,
+html.light .guide-formula-title {
+  color: #0f172a !important;
+  background-color: transparent !important;
+  background: transparent !important;
+  font-weight: 800 !important;
+}
+
+html.dark .guide-detail-formula-box {
+  background-color: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+html.dark .guide-detail-formula-box span,
+html.dark .guide-detail-formula-box p,
+html.dark .guide-formula-title {
+  color: rgba(255, 255, 255, 0.9) !important;
+  background: transparent !important;
+}
+
+/* 详细指导 Modal 弹窗图标超级最高优先级颜色强化 (绝对碾压全局黑灰色) */
+html.light .modal-purple-title .material-symbols-outlined,
+html.light .modal-purple-icon,
+html.light span.modal-purple-icon,
+html.light div[class*="fixed"][class*="z-50"] .modal-purple-icon {
+  color: #7c3aed !important;
+}
+
+html.light .modal-amber-icon,
+html.light span.modal-amber-icon,
+html.light .modal-amber-icon.material-symbols-outlined,
+html.light div[class*="fixed"][class*="z-50"] .modal-amber-icon {
+  color: #d97706 !important;
+}
+
+html.light .modal-emerald-title .material-symbols-outlined,
+html.light .modal-emerald-icon,
+html.light span.modal-emerald-icon,
+html.light div[class*="fixed"][class*="z-50"] .modal-emerald-icon {
+  color: #059669 !important;
+}
+
+html.light .modal-rose-title .material-symbols-outlined,
+html.light .modal-rose-icon,
+html.light span.modal-rose-icon,
+html.light div[class*="fixed"][class*="z-50"] .modal-rose-icon {
+  color: #e11d48 !important;
+}
+
+/* 首页底部 CTA 海报背景图片高清通透增强 (彻底解决深浅色暗淡看不清问题) */
+.home-cta-bg {
+  background-image: linear-gradient(to bottom, rgba(15, 23, 42, 0.3) 0%, rgba(15, 23, 42, 0.8) 100%), url('/home-start.jpg') !important;
+  opacity: 0.85 !important;
+  background-size: cover !important;
+  background-position: center !important;
+}
+
+html.light .home-cta-bg {
+  background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.2) 0%, rgba(248, 250, 252, 0.65) 100%), url('/home-start.jpg') !important;
+  opacity: 0.9 !important;
+}
+html.light .modal-box-purple {
+  background-color: #f3e8ff !important;
+  border: 1px solid #e9d5ff !important;
+  color: #1e1b4b !important;
+}
+
+html.light .modal-box-slate {
+  background-color: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+html.light .modal-box-emerald {
+  background-color: #ecfdf5 !important;
+  border: 1px solid #a7f3d0 !important;
+  color: #064e3b !important;
+}
+
+html.light .modal-box-rose {
+  background-color: #fff1f2 !important;
+  border: 1px solid #fecdd3 !important;
+  color: #881337 !important;
+}
+
+/* 修改账号与安全弹窗【获取验证码】按钮 - 浅色模式强力高亮靓紫字 */
+html.light .verify-code-btn,
+html.light div[class*="fixed"][class*="z-50"] button.verify-code-btn {
+  background-color: #f5f3ff !important;
+  color: #4f46e5 !important;
+  border: 1.5px solid #c7d2fe !important;
+  font-weight: 900 !important;
+}
+
+html.light .verify-code-btn:hover,
+html.light div[class*="fixed"][class*="z-50"] button.verify-code-btn:hover {
+  background-color: #e0e7ff !important;
+  color: #3730a3 !important;
+}
+
+/* 反馈类型 Badge 浅色模式专属保全 - 保留原本红紫绿彩色 */
+html.light .badge-bug {
+  background-color: #ffe4e6 !important;
+  color: #e11d48 !important;
+  border: 1px solid #fecdd3 !important;
+}
+
+html.light .badge-feature {
+  background-color: #e0e7ff !important;
+  color: #4338ca !important;
+  border: 1px solid #c7d2fe !important;
+}
+
+html.light .badge-ux {
+  background-color: #d1fae5 !important;
+  color: #047857 !important;
+  border: 1px solid #a7f3d0 !important;
+}
+
+html.light .badge-other {
+  background-color: #f1f5f9 !important;
+  color: #334155 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+/* 体验反馈弹窗底部评论发布条 - 浅色模式强力采用优雅淡紫色背景 */
+html.light .feedback-comment-bar {
+  background-color: #f5f3ff !important;
+  border-top: 1.5px solid #e0e7ff !important;
+  color: #0f172a !important;
+}
+
+html.light .feedback-comment-input {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1.5px solid #c7d2fe !important;
+  font-weight: 700 !important;
+}
+
+html.light .feedback-comment-input::placeholder {
+  color: #64748b !important;
+}
+
+html.light .feedback-comment-btn {
+  background-color: #e0e7ff !important;
+  color: #3730a3 !important;
+  border: 1.5px solid #a5b4fc !important;
+  font-weight: 900 !important;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.15) !important;
+}
+
+html.light .feedback-comment-btn:hover {
+  background-color: #c7d2fe !important;
+  color: #312e81 !important;
+}
+
+/* 浅色模式 - 面试训练场【面试进度】进度条槽轨 visible 高对比度 */
+html.light .training-progress-track {
+  background-color: #cbd5e1 !important;
+  border: 1px solid #94a3b8 !important;
+}
+
+html.light .training-progress-bar {
+  background-image: linear-gradient(to right, #4f46e5, #e11d48) !important;
+}
+
+/* 浅色模式 - 面试训练场【快捷操作】按钮、图标与字体 100% 亮化 visible */
+html.light .training-action-btn {
+  background-color: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+}
+
+/* 浅色模式 - 面试训练场【快捷操作】禁用状态 100% 置灰与禁止手势 */
+html.light .training-action-btn:disabled,
+html.light button.training-action-btn:disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  color: #94a3b8 !important;
+}
+
+html.light .training-action-btn:disabled span {
+  color: #94a3b8 !important;
+}
+
+html.light .training-action-btn:hover {
+  background-color: #e0e7ff !important;
+  border-color: #6366f1 !important;
+  color: #4338ca !important;
+}
+
+html.light .training-action-btn span {
+  color: #0f172a !important;
+}
+
+html.light .training-action-btn:hover span {
+  color: #4338ca !important;
+}
+
+html.light .training-action-btn.active-pause {
+  background-color: #ffe4e6 !important;
+  border-color: #f43f5e !important;
+  color: #e11d48 !important;
+}
+html.light .training-action-btn.active-pause span {
+  color: #e11d48 !important;
+}
+
+html.light .training-action-btn.active-skip {
+  background-color: #e0e7ff !important;
+  border-color: #6366f1 !important;
+  color: #4338ca !important;
+}
+html.light .training-action-btn.active-skip span {
+  color: #4338ca !important;
+}
+
+html.light .training-action-btn.active-hint {
+  background-color: #dcfce7 !important;
+  border-color: #22c55e !important;
+  color: #15803d !important;
+}
+html.light .training-action-btn.active-hint span {
+  color: #15803d !important;
+}
+
+html.light .training-action-btn.active-feedback {
+  background-color: #fef3c7 !important;
+  border-color: #f59e0b !important;
+  color: #b45309 !important;
+}
+html.light .training-action-btn.active-feedback span {
+  color: #b45309 !important;
+}
+
+/* 顶栏用户下拉菜单浅色模式下箭头保全为 Slate 500 灰色 */
+html.light .topbar-user-menu .user-arrow-icon {
+  color: #64748b !important;
+}
+
+html.light .topbar-user-menu .user-trigger-btn:hover .user-arrow-icon {
+  color: #4f46e5 !important;
+}
+
+/* 浅色模式 - 顶栏用户名 Hover 保全 */
+html.light .topbar-user-menu .user-name-label {
+  color: #0f172a !important;
+}
+html.light .topbar-user-menu .user-trigger-btn:hover .user-name-label {
+  color: #4f46e5 !important;
+}
+
+/* 浅色模式 - 下拉卡片在职与内测用户标签字体全量设为黑色 */
+html.light .user-badge-emerald,
+html.light span.user-badge-emerald {
+  background-color: #a7f3d0 !important;
+  color: #000000 !important;
+  font-weight: 900 !important;
+  border: none !important;
+}
+
+html.light .user-badge-purple,
+html.light span.user-badge-purple {
+  background-color: #e9d5ff !important;
+  color: #000000 !important;
+  font-weight: 900 !important;
+  border: none !important;
+}
+
+/* 浅色与深色模式 - 退出登录 & 注销账号 Icon 统一保持鲜艳红，文字统一保持纯白 */
+.user-logout-icon,
+.user-delete-icon,
+span.user-logout-icon,
+span.user-delete-icon {
+  color: #f43f5e !important;
+}
+
+html.light .user-menu-item-text,
+html.dark .user-menu-item-text {
+  color: #ffffff !important;
+}
+
+/* 浅色模式 Modal 内框盒背景色调全量轻盈高亮保全 */
+/* 全站 Modal 提交按钮 (保存资料/保存更新/确认修改) 在浅色模式下全量统一为浅紫色 */
+html.light div[class*="fixed"][class*="z-50"] button[type="submit"] {
+  background-color: #e0e7ff !important;
+  color: #3730a3 !important;
+  border: 1.5px solid #a5b4fc !important;
+  font-weight: 900 !important;
+  box-shadow: 0 2px 8px rgba(79, 70, 229, 0.12) !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] button[type="submit"]:hover {
+  background-color: #c7d2fe !important;
+  color: #312e81 !important;
+}
+
+/* 深色模式下（html.dark）全量保全原汁原味的酷炫强紫按钮与 Tip 框 */
+html.dark div[class*="fixed"][class*="z-50"] button[type="submit"] {
+  background-color: #4f46e5 !important;
+  color: #ffffff !important;
+  border: none !important;
+  box-shadow: 0 10px 25px rgba(79, 70, 229, 0.3) !important;
+}
+
+html.dark div[class*="fixed"][class*="z-50"] button[type="submit"]:hover {
+  background-color: #6366f1 !important;
+  color: #ffffff !important;
+}
+
+html.dark .goal-tip-box {
+  background-color: #1a2236 !important;
+  color: rgba(255, 255, 255, 0.8) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5) !important;
+}
+
+html.dark .goal-tip-icon {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  color: #ffffff !important;
+  border: none !important;
+}
+
+/* 全站 Input 输入框与 Textarea 在浅色模式下全量统一为纯白底、深黑字与精致边框 */
+html.light input,
+html.light textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1.5px solid #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #64748b !important;
+  opacity: 1 !important;
+}
+
+/* 全站卡片 & 面板在浅色模式下全量重置为晶莹纯白 */
+html.light .glass-panel,
+html.light div[class*="bg-surface-container"],
+html.light div[class*="glass-panel"] {
+  background-color: #ffffff !important;
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03) !important;
+}
+
+/* 保留与还原海报 Banner 的背景图 */
+html.light div[style*="backgroundImage"] {
+  opacity: 0.9 !important;
+}
+
+html.light div[style*="backgroundImage"] + div[class*="from-[#0b1326]"] {
+  background: linear-gradient(to right, rgba(15, 23, 42, 0.8), rgba(15, 23, 42, 0.45), transparent) !important;
+}
+
+/* 全站 Modal 弹窗与二次确认框在浅色模式下全量适配为精致纯白与纯黑字 (Modal / Dialog Popup Light Theme Fix) */
+html.light div[class*="fixed"][class*="z-50"] div[class*="rounded-3xl"],
+html.light div[class*="fixed"][class*="z-50"] div[class*="rounded-2xl"],
+html.light div[class*="fixed"][class*="z-50"] div[class*="shadow-2xl"] {
+  background-color: #ffffff !important;
+  border: 1px solid rgba(0, 0, 0, 0.12) !important;
+  color: #0f172a !important;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15) !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] h3,
+html.light div[class*="fixed"][class*="z-50"] h2,
+html.light div[class*="fixed"][class*="z-50"] h4,
+html.light div[class*="fixed"][class*="z-50"] label {
+  color: #0f172a !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) p,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span {
+  color: #334155 !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] button[class*="bg-white/5"],
+html.light div[class*="fixed"][class*="z-50"] button[class*="bg-white/10"] {
+  background-color: #f1f5f9 !important;
+  color: #1e293b !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+/* 浅色模式下，所有下拉框 Select 及 Option 选项框全量统一为纯白底黑字 */
+html.light select {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border: 1.5px solid #cbd5e1 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+}
+
+html.light select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+/* 顶部 User Menu 下拉卡片全模式统一适配 */
+.user-dropdown-card .user-name-text,
+html.light .user-dropdown-card .user-name-text,
+html.dark .user-dropdown-card .user-name-text {
+  color: #ffffff !important;
+}
+
+.user-dropdown-card .user-role-text,
+html.light .user-dropdown-card .user-role-text,
+html.dark .user-dropdown-card .user-role-text {
+  color: rgba(255, 255, 255, 0.75) !important;
+}
+
+/* 在职 Badge (与个人主页卡片 1:1 统一：浅绿底 + 深绿字) */
+html.light .user-badge-emerald,
+html.light span.user-badge-emerald {
+  background-color: #ecfdf5 !important;
+  color: #047857 !important;
+  border: 1px solid #a7f3d0 !important;
+  font-weight: 900 !important;
+}
+
+/* 内测用户 Badge (与个人主页卡片 1:1 统一：浅紫底 + 深紫字) */
+html.light .user-badge-purple,
+html.light span.user-badge-purple {
+  background-color: #f3e8ff !important;
+  color: #6b21a8 !important;
+  border: 1px solid #e9d5ff !important;
+  font-weight: 900 !important;
+}
+
+/* 退出登录 & 注销账号 Icon (高亮红) 与 文字 (纯白) */
+.user-logout-icon,
+.user-delete-icon,
+span.user-logout-icon,
+span.user-delete-icon {
+  color: #f43f5e !important;
+}
+
+.user-menu-item-text,
+html.light .user-menu-item-text,
+html.dark .user-menu-item-text {
+  color: #ffffff !important;
+}
+
+/* 知识库详情 Modal 图标色彩最高优先级强锁定 (超越 fixed z-50 span 规则) */
+html.light div[class*="fixed"][class*="z-50"] span.knowledge-icon-amber,
+html.dark div[class*="fixed"][class*="z-50"] span.knowledge-icon-amber,
+span.knowledge-icon-amber,
+.knowledge-icon-amber {
+  color: #fbbf24 !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] span.knowledge-icon-violet,
+html.dark div[class*="fixed"][class*="z-50"] span.knowledge-icon-violet,
+span.knowledge-icon-violet,
+.knowledge-icon-violet {
+  color: #c084fc !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] span.knowledge-icon-cyan,
+html.dark div[class*="fixed"][class*="z-50"] span.knowledge-icon-cyan,
+span.knowledge-icon-cyan,
+.knowledge-icon-cyan {
+  color: #22d3ee !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] span.knowledge-icon-indigo,
+html.dark div[class*="fixed"][class*="z-50"] span.knowledge-icon-indigo,
+span.knowledge-icon-indigo,
+.knowledge-icon-indigo {
+  color: #6366f1 !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] span.knowledge-icon-rose,
+html.dark div[class*="fixed"][class*="z-50"] span.knowledge-icon-rose,
+span.knowledge-icon-rose,
+.knowledge-icon-rose {
+  color: #f43f5e !important;
+}
+
+/* 知识库 Modal 左侧问题目录题目：浅色模式硬朗纯黑字，深色模式亮洁纯白字 */
+html.light div[class*="fixed"][class*="z-50"] span.knowledge-q-title,
+html.light div.knowledge-q-title,
+html.light span.knowledge-q-title,
+html.light .knowledge-q-title {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.dark div[class*="fixed"][class*="z-50"] span.knowledge-q-title,
+html.dark div.knowledge-q-title,
+html.dark span.knowledge-q-title,
+html.dark .knowledge-q-title {
+  color: #ffffff !important;
+  font-weight: 900 !important;
+}
+
+/* 浅色与深色模式下全站所有删除确认 Modal 警告图标强受控呈亮纯红/玫瑰红 */
+html.light div[class*="fixed"][class*="z-50"] .danger-warning-icon,
+html.dark div[class*="fixed"][class*="z-50"] .danger-warning-icon,
+html.light div[class*="fixed"][class*="z-50"] span.danger-warning-icon,
+html.dark div[class*="fixed"][class*="z-50"] span.danger-warning-icon,
+.danger-warning-icon,
+html.light .danger-warning-icon {
+  color: #f43f5e !important;
+}
+
+/* 知识库弹窗 STAR 结构 S T A (紫) 与 R (绿) 模式专属亮彩显色 */
+html.light div[class*="fixed"][class*="z-50"] span.star-label-st,
+html.light .star-label-st,
+span.star-label-st,
+.star-label-st {
+  color: #4f46e5 !important;
+  font-weight: 900 !important;
+}
+
+html.dark div[class*="fixed"][class*="z-50"] span.star-label-st,
+html.dark .star-label-st {
+  color: #818cf8 !important;
+  font-weight: 900 !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] span.star-label-r,
+html.light .star-label-r,
+span.star-label-r,
+.star-label-r {
+  color: #059669 !important;
+  font-weight: 900 !important;
+}
+
+html.dark div[class*="fixed"][class*="z-50"] span.star-label-r,
+html.dark .star-label-r {
+  color: #34d399 !important;
+  font-weight: 900 !important;
+}
+
+/* 浅色模式 - 面试录音分析报告 (Voice Workbench) 页面与卡片全量纯白/优雅灰透亮适配 */
+html.light .voice-workbench-bg,
+html.light div.voice-workbench-bg {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html.light .voice-glass-card,
+html.light div.voice-glass-card {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04) !important;
+}
+
+
+
+/* 雷达图维度文字与刻度线浅色/深色双模适配 */
+html.light .voice-radar-text,
+html.light svg text.voice-radar-text {
+  fill: #334155 !important;
+  fill-opacity: 0.95 !important;
+}
+
+html.dark .voice-radar-text,
+html.dark svg text.voice-radar-text {
+  fill: #ffffff !important;
+  fill-opacity: 0.7 !important;
+}
+
+html.light .voice-radar-line {
+  stroke: #cbd5e1 !important;
+  stroke-opacity: 0.8 !important;
+}
+
+/* 面试时间线 (问题目录) 卡片 - 浅色模式专属美学定调 */
+html.light .voice-timeline-selected,
+html.light div.voice-timeline-selected {
+  background-color: #4f46e5 !important;
+  border-color: #4338ca !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25) !important;
+}
+
+html.light .voice-timeline-selected h5,
+html.light .voice-timeline-selected span.font-mono,
+html.light .voice-timeline-selected span,
+html.light div.voice-timeline-selected h5,
+html.light div.voice-timeline-selected span {
+  color: #ffffff !important;
+}
+
+html.light .voice-timeline-unselected,
+html.light div.voice-timeline-unselected {
+  background-color: #f0f4ff !important;
+  border: 1px solid #dbeafe !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02) !important;
+}
+
+html.light .voice-timeline-unselected:hover {
+  background-color: #e0e7ff !important;
+  border-color: #c7d2fe !important;
+}
+
+html.light .voice-timeline-unselected h5 {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-timeline-unselected span.font-mono {
+  color: #475569 !important;
+  font-weight: 700 !important;
+}
+
+/* 对话记录气泡与音频播放盒 - 浅色模式全量统一淡紫色底 */
+html.light .voice-player-box,
+html.light div.voice-player-box,
+html.light .voice-bubble-card,
+html.light div.voice-bubble-card,
+html.light .voice-bubble-interviewer,
+html.light .voice-bubble-interviewee {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.03) !important;
+}
+
+html.light .voice-player-box p,
+html.light .voice-player-box span,
+html.light .voice-bubble-card p,
+html.light .voice-bubble-card span,
+html.light .voice-bubble-interviewer p,
+html.light .voice-bubble-interviewer span,
+html.light .voice-bubble-interviewee p,
+html.light .voice-bubble-interviewee span {
+  color: #0f172a !important;
+}
+
+/* 选中的对话记录气泡 - 皇家深紫底 + 纯白字 */
+html.light .voice-bubble-selected,
+html.light div.voice-bubble-selected {
+  background-color: #4f46e5 !important;
+  border-color: #4338ca !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25) !important;
+}
+
+html.light .voice-bubble-selected p,
+html.light .voice-bubble-selected span,
+html.light .voice-bubble-selected span.font-mono {
+  color: #ffffff !important;
+}
+
+/* 对话记录 Segment Header 在浅色模式下标题文字设为绝对纯黑 */
+html.light .voice-segment-header,
+html.light div.voice-segment-header {
+  background-color: #f3f0ff !important;
+  border-color: #e9d5ff !important;
+}
+
+html.light .voice-segment-header span,
+html.light div.voice-segment-header span,
+html.light .voice-segment-label {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-segment-header span.font-mono,
+html.light .voice-segment-header span.text-indigo-600 {
+  color: #4f46e5 !important;
+}
+
+/* 关键风险点卡片 - 浅色模式全量淡紫底 + 深紫时间 Badge */
+html.light .voice-risk-card,
+html.light div.voice-risk-card {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.03) !important;
+}
+
+html.light .voice-risk-card:hover {
+  background-color: #ede9fe !important;
+  border-color: #ddd6fe !important;
+}
+
+html.light .voice-risk-card span,
+html.light .voice-risk-label {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-risk-time-badge,
+html.light span.voice-risk-time-badge {
+  background-color: #4f46e5 !important;
+  color: #ffffff !important;
+  border-color: #4338ca !important;
+  font-weight: 900 !important;
+}
+
+/* 搜索框 - 浅色模式极简气泡与输入清空 */
+html.light .voice-search-box input,
+html.light div.voice-search-box input {
+  border: none !important;
+  background: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+  color: #0f172a !important;
+}
+
+/* AI 高亮标注在浅色模式下的多彩纯正色彩与文字 (Fix AI Highlight text colors) */
+html.light .voice-hl-strength,
+html.light span.voice-hl-strength {
+  background-color: #d1fae5 !important;
+  color: #047857 !important;
+  border-bottom: 2px solid #10b981 !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-hl-risk,
+html.light span.voice-hl-risk {
+  background-color: #ffe4e6 !important;
+  color: #be123c !important;
+  border-bottom: 2px dashed #f43f5e !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-hl-tech,
+html.light span.voice-hl-tech {
+  background-color: #e0e7ff !important;
+  color: #0284c7 !important;
+  border-bottom: 2px solid #0284c7 !important;
+  font-weight: 900 !important;
+}
+
+/* AI 高亮 Tooltip 悬浮卡片在浅色模式下呈现高对比白底黑字 */
+html.light .voice-ai-tooltip,
+html.light div.voice-ai-tooltip,
+html.light span.voice-ai-tooltip {
+  background-color: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15) !important;
+  color: #0f172a !important;
+}
+
+html.light .voice-ai-tooltip p,
+html.light .voice-ai-tooltip span.voice-ai-tip-body {
+  color: #0f172a !important;
+  font-weight: 600 !important;
+}
+
+/* AI Tooltip 标题颜色与左侧指示灯圆圈颜色 100% 保持一致 */
+html.light .voice-ai-tooltip-title-strength,
+html.light span.voice-ai-tooltip-title-strength {
+  color: #059669 !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-ai-tooltip-title-risk,
+html.light span.voice-ai-tooltip-title-risk {
+  color: #e11d48 !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-ai-tooltip-title-tech,
+html.light span.voice-ai-tooltip-title-tech {
+  color: #0284c7 !important;
+  font-weight: 900 !important;
+}
+
+/* 生成优化建议弹窗在浅色模式下的专属高特化样式 (只影响 html.light 浅色模式) */
+
+/* 1. AI 诊断结论：淡红背景 (#fff1f2)、粉红边框 (#ffe4e6)、红色文字 (#be123c) */
+html.light div[class*="fixed"][class*="z-50"] div.voice-opt-conclusion,
+html.light div.voice-opt-conclusion {
+  background-color: #fff1f2 !important;
+  border: 1px solid #ffe4e6 !important;
+  color: #be123c !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] div.voice-opt-conclusion span,
+html.light div[class*="fixed"][class*="z-50"] div.voice-opt-conclusion p,
+html.light div.voice-opt-conclusion span,
+html.light div.voice-opt-conclusion p {
+  color: #be123c !important;
+  font-weight: 700 !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] div.voice-opt-conclusion span.voice-opt-conclusion-title,
+html.light div.voice-opt-conclusion span.voice-opt-conclusion-title {
+  color: #9f1239 !important;
+  font-weight: 900 !important;
+}
+
+/* 2. 大厂架构师版高分话术推荐图标与标题：翡翠绿 (#059669) */
+html.light div[class*="fixed"][class*="z-50"] .voice-opt-arch-title,
+html.light div[class*="fixed"][class*="z-50"] span.voice-opt-arch-title,
+html.light .voice-opt-arch-title {
+  color: #059669 !important;
+  font-weight: 900 !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] .voice-opt-arch-title span,
+html.light div[class*="fixed"][class*="z-50"] .voice-opt-arch-title span.material-symbols-outlined,
+html.light .voice-opt-arch-title span.material-symbols-outlined {
+  color: #059669 !important;
+}
+
+/* 3. 大厂架构师版话术内容在浅色模式下淡紫色背景 (#f3f0ff) + 漆黑体字 (#0f172a) */
+html.light div[class*="fixed"][class*="z-50"] div.voice-opt-content,
+html.light div.voice-opt-content {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+  color: #0f172a !important;
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.03) !important;
+}
+
+/* 恢复大厂架构师高分话术内的关键字鲜艳高亮 (Fix missing highlight text colors) */
+html.light div.voice-opt-content span[class*="text-emerald"],
+html.light div.voice-opt-content span[class*="text-[#5DECCB]"],
+html.light div.voice-opt-content font[color*="emerald"],
+html.light div.voice-opt-content .text-emerald-600,
+html.light div.voice-opt-content .text-emerald-500,
+html.light div.voice-opt-content .text-emerald-400 {
+  color: #059669 !important;
+  font-weight: 900 !important;
+}
+
+html.light div.voice-opt-content span[class*="text-indigo"],
+html.light div.voice-opt-content span[class*="text-cyan"],
+html.light div.voice-opt-content *[class*="00D4FF"],
+html.light div.voice-opt-content .text-indigo-600 {
+  color: #0284c7 !important;
+  font-weight: 900 !important;
+}
+
+html.light div.voice-opt-content span.font-bold,
+html.light div.voice-opt-content strong,
+html.light div.voice-opt-content b {
+  color: #4f46e5 !important;
+  font-weight: 900 !important;
+}
+
+/* 表达升级 / 下一步操作在浅色模式下的按钮适配 (暂无优化建议时，按钮置灰且文字呈优雅灰色 #64748b) */
+html.light #upgrade-expression button:disabled,
+html.light #upgrade-expression button[disabled],
+html.light #upgrade-expression .cursor-not-allowed {
+  background-color: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #64748b !important;
+  box-shadow: none !important;
+}
+
+html.light #upgrade-expression button:disabled span,
+html.light #upgrade-expression button[disabled] span,
+html.light #upgrade-expression .cursor-not-allowed span {
+  color: #64748b !important;
+}
+
+/* 4. 关键风险点汇总弹窗在浅色模式下的高级淡紫风与亮彩元素 */
+html.light div[class*="fixed"][class*="z-50"] div.voice-all-risks-card,
+html.light div.voice-all-risks-card {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.03) !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] div.voice-all-risks-card:hover,
+html.light div.voice-all-risks-card:hover {
+  background-color: #ede9fe !important;
+  border-color: #c084fc !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] span.voice-risk-modal-time,
+html.light span.voice-risk-modal-time {
+  background-color: #4f46e5 !important;
+  color: #ffffff !important;
+  border: 1px solid #4338ca !important;
+  font-weight: 900 !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] span.voice-risk-modal-seglabel,
+html.light span.voice-risk-modal-seglabel,
+html.light div[class*="fixed"][class*="z-50"] p.voice-risk-modal-title,
+html.light p.voice-risk-modal-title {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] button.voice-risk-modal-btn,
+html.light button.voice-risk-modal-btn {
+  background-color: #8b5cf6 !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.25) !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"] button.voice-risk-modal-btn:hover,
+html.light button.voice-risk-modal-btn:hover {
+  background-color: #7c3aed !important;
+}
+
+/* 5. 提交反馈 Modal 按钮在浅色模式下采用淡紫色背景 (#f3f0ff) + 浓郁紫字 (#6d28d9) */
+html.light .voice-feedback-submit-btn,
+html.light button.voice-feedback-submit-btn,
+html.light div[class*="fixed"][class*="z-50"] button.voice-feedback-submit-btn {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+  color: #6d28d9 !important;
+  font-weight: 900 !important;
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.08) !important;
+}
+
+html.light .voice-feedback-submit-btn:hover,
+html.light button.voice-feedback-submit-btn:hover {
+  background-color: #ede9fe !important;
+  border-color: #c084fc !important;
+  color: #5b21b6 !important;
+}
+
+/* 6. 提示信息栏在浅色模式下采用淡绿色背景 (#ecfdf5) + 翡翠绿边框 (#a7f3d0) + 深绿字 (#047857) */
+html.light .voice-training-hint-banner,
+html.light div.voice-training-hint-banner {
+  background-color: #ecfdf5 !important;
+  border: 1px solid #a7f3d0 !important;
+  color: #047857 !important;
+}
+
+html.light .voice-training-hint-banner span,
+html.light div.voice-training-hint-banner span {
+  color: #047857 !important;
+  font-weight: 700 !important;
+}
+
+html.light .voice-training-hint-banner span.material-symbols-outlined {
+  color: #059669 !important;
+}
+
+/* 7. 全局 Toast 提示在浅色模式下清新淡绿配漆黑/深绿字 */
+html.light .global-app-toast,
+html.light div.global-app-toast {
+  background-color: #ecfdf5 !important;
+  border: 1px solid #a7f3d0 !important;
+  color: #047857 !important;
+  box-shadow: 0 10px 30px rgba(16, 185, 129, 0.15) !important;
+}
+
+html.light .global-app-toast span,
+html.light div.global-app-toast span {
+  color: #047857 !important;
+  font-weight: 900 !important;
+}
+
+/* 8. AI 模拟面试卡片、Overlay 标签、候选人画面在浅色模式下的亮彩与淡紫底 */
+html.light .voice-interviewer-card {
+  background-color: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+}
+
+html.light .voice-interviewer-tag,
+html.light span.voice-interviewer-tag,
+html.light .voice-candidate-tag,
+html.light span.voice-candidate-tag {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+}
+
+html.light .voice-interviewer-overlay,
+html.light div.voice-interviewer-overlay {
+  background-color: rgba(255, 255, 255, 0.95) !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #0f172a !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08) !important;
+}
+
+html.light .voice-interviewer-overlay p {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-candidate-card,
+html.light div.voice-candidate-card {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+}
+
+html.light .voice-candidate-inner,
+html.light div.voice-candidate-inner {
+  background: linear-gradient(180deg, #f3f0ff 0%, #e9d5ff 100%) !important;
+}
+
+html.light .voice-candidate-icon-box {
+  background-color: rgba(255, 255, 255, 0.8) !important;
+  border-color: #ddd6fe !important;
+}
+
+html.light .voice-candidate-icon-box span,
+html.light .voice-candidate-text {
+  color: #6b21a8 !important;
+  font-weight: 900 !important;
+}
+
+/* 9. 训练场倒计时 Overlay 在浅色模式下呈现高档纯白背景 (#ffffff) 与高亮靛紫数字 */
+html.light .voice-training-countdown-overlay,
+html.light div.voice-training-countdown-overlay {
+  background-color: rgba(255, 255, 255, 0.98) !important;
+  color: #0f172a !important;
+}
+
+html.light .voice-training-countdown-num,
+html.light span.voice-training-countdown-num {
+  color: #4f46e5 !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-training-countdown-text,
+html.light span.voice-training-countdown-text {
+  color: #475569 !important;
+  font-weight: 900 !important;
+}
+
+/* 10. 关键风险点汇总弹窗内“建议重点复习”字体在浅色模式下调为深灰色 (#475569) */
+html.light div[class*="fixed"][class*="z-50"] div.voice-risk-modal-sug,
+html.light div.voice-risk-modal-sug,
+html.light div[class*="fixed"][class*="z-50"] div.voice-risk-modal-sug span,
+html.light div.voice-risk-modal-sug span {
+  color: #475569 !important;
+  font-weight: 700 !important;
+}
+
+/* 11. "生成优化建议" 按钮在浅色模式下采用炫彩亮紫背景 + 纯白高对比文字 (#ffffff) */
+html.light .voice-opt-trigger-btn,
+html.light button.voice-opt-trigger-btn {
+  background-color: #8b5cf6 !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.25) !important;
+}
+
+html.light .voice-opt-trigger-btn:hover,
+html.light button.voice-opt-trigger-btn:hover {
+  background-color: #7c3aed !important;
+  color: #ffffff !important;
+}
+
+/* 12. 模拟面试分析报告对话复盘在浅色模式下全量统一为白底黑字 */
+html.light .voice-report-dialogue-bubble,
+html.light div.voice-report-dialogue-bubble,
+html.light .voice-report-dialogue-interviewer,
+html.light .voice-report-dialogue-candidate {
+  background-color: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  color: #0f172a !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02) !important;
+}
+
+html.light .voice-report-dialogue-bubble:hover {
+  background-color: #f8fafc !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light .voice-report-speaker-label,
+html.light span.voice-report-speaker-label {
+  color: #64748b !important;
+  font-weight: 800 !important;
+}
+
+html.light .voice-report-dialogue-text,
+html.light p.voice-report-dialogue-text {
+  color: #0f172a !important;
+  font-weight: 800 !important;
+}
+
+html.light .voice-report-avatar-candidate {
+  background-color: #ecfdf5 !important;
+  color: #047857 !important;
+  border: 1px solid #a7f3d0 !important;
+}
+
+html.light .voice-report-avatar-interviewer {
+  background-color: #e0e7ff !important;
+  color: #4338ca !important;
+  border: 1px solid #c7d2fe !important;
+}
+
+/* 13. 面试记录分析报告页在浅色模式下与面试录音分析报告样式保持 100% 完全一致 */
+html.light .record-question-unselected,
+html.light div.record-question-unselected {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+}
+
+html.light .record-question-unselected:hover,
+html.light div.record-question-unselected:hover {
+  background-color: #ede9fe !important;
+  border-color: #c084fc !important;
+}
+
+html.light .record-question-selected,
+html.light div.record-question-selected {
+  background-color: #4f46e5 !important;
+  border: 1px solid #4338ca !important;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25) !important;
+}
+
+html.light .record-question-selected h5.record-question-title,
+html.light .record-question-selected span,
+html.light .record-question-selected div {
+  color: #ffffff !important;
+  font-weight: 900 !important;
+}
+
+html.light .record-question-unselected h5.record-question-title {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.light .record-search-box,
+html.light div.record-search-box {
+  background-color: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  border-radius: 0.75rem !important;
+  box-shadow: none !important;
+}
+
+html.light .record-search-box input,
+html.light div.record-search-box input {
+  border: none !important;
+  background: transparent !important;
+  outline: none !important;
+  box-shadow: none !important;
+  color: #0f172a !important;
+}
+
+html.light .record-search-box input::placeholder {
+  color: #94a3b8 !important;
+}
+
+html.light .record-section-header,
+html.light div.record-section-header {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+}
+
+html.light .record-section-title {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+/* 对话详细记录卡片 (与 Image 3 Voice Workbench 保持 100% 一致：面试官为皇家深紫底纯白字，候选人为优雅淡紫底深黑字) */
+html.light .record-dialogue-interviewer,
+html.light div.record-dialogue-interviewer {
+  background-color: #4f46e5 !important;
+  border: 1px solid #4338ca !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.25) !important;
+}
+
+html.light .record-dialogue-interviewer p,
+html.light .record-dialogue-interviewer span,
+html.light .record-dialogue-interviewer span.font-mono {
+  color: #ffffff !important;
+}
+
+html.light .record-dialogue-interviewee,
+html.light div.record-dialogue-interviewee {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.03) !important;
+  color: #0f172a !important;
+}
+
+html.light .record-dialogue-interviewee p,
+html.light .record-dialogue-interviewee span {
+  color: #0f172a !important;
+}
+
+html.light .record-dialogue-interviewee span.text-slate-400,
+html.light .record-dialogue-interviewee span.font-mono {
+  color: #64748b !important;
+}
+
+html.light .record-risk-card,
+html.light div.record-risk-card {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+}
+
+html.light .record-risk-title,
+html.light .record-risk-title span {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+/* AI 提分战略建议卡片在浅色模式下采用淡紫色 (#f3f0ff) */
+html.light .record-strategy-card,
+html.light div.record-strategy-card {
+  background-color: #f3f0ff !important;
+  border: 1px solid #e9d5ff !important;
+  color: #0f172a !important;
+  box-shadow: 0 2px 8px rgba(147, 51, 234, 0.03) !important;
+}
+
+html.light .record-strategy-card p,
+html.light .record-strategy-card span {
+  color: #0f172a !important;
+}
+
+html.light .record-strategy-card .record-strategy-title,
+html.light span.record-strategy-title {
+  color: #4f46e5 !important;
+  font-weight: 900 !important;
+}
+
+html.light .record-risk-desc {
+  color: #475569 !important;
+  font-weight: 700 !important;
+}
+
+html.light .record-risk-rank {
+  background-color: #e2e8f0 !important;
+  color: #334155 !important;
+}
+
+/* 简历分析页面浅色模式全量适配：所有分析报告卡片与 AI 重构 Banner 统一为优雅淡紫色 (#f3f0ff) */
+html.light .resume-structure-item {
+  background-color: #f3f0ff !important;
+  border-color: #e9d5ff !important;
+}
+
+html.light .resume-structure-title,
+html.light span.resume-structure-title {
+  color: #0f172a !important;
+  font-weight: 800 !important;
+}
+
+html.light .resume-info-val,
+html.light span.resume-info-val {
+  color: #0f172a !important;
+  font-weight: 800 !important;
+}
+
+html.light .resume-score-num,
+html.light span.resume-score-num,
+html.light .resume-ats-val,
+html.light span.resume-ats-val,
+html.light .resume-pie-val,
+html.light span.resume-pie-val,
+html.light .resume-pie-num,
+html.light span.resume-pie-num,
+html.light .resume-pie-label,
+html.light span.resume-pie-label,
+html.light .resume-offer-val,
+html.light span.resume-offer-val {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.light .resume-score-sub,
+html.light span.resume-score-sub,
+html.light .resume-ats-sub,
+html.light span.resume-ats-sub,
+html.light .resume-pie-sub,
+html.light span.resume-pie-sub,
+html.light .resume-offer-sub,
+html.light span.resume-offer-sub {
+  color: #64748b !important;
+  font-weight: 700 !important;
+}
+
+html.light .resume-toggle-pill {
+  background-color: #f1f5f9 !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light .resume-sub-card,
+html.light div.resume-sub-card,
+html.light .resume-rebuild-banner,
+html.light div.resume-rebuild-banner {
+  background-color: #f3f0ff !important;
+  border-color: #e9d5ff !important;
+  color: #0f172a !important;
+  box-shadow: 0 2px 10px rgba(147, 51, 234, 0.04) !important;
+}
+
+/* 关键修复：在 :not() 中加入 [class*="resume-"]，
+   这样所有带自定义 .resume-* 类的元素都不会被强制为 #0f172a，
+   它们各自的 CSS 规则可以生效 */
+html.light .resume-sub-card p,
+html.light .resume-sub-card span:not([class*="text-emerald"]):not([class*="text-rose"]):not([class*="text-amber"]):not([class*="text-indigo"]):not([class*="text-sky"]):not([class*="resume-"]),
+html.light .resume-sub-card h3,
+html.light .resume-sub-card h4,
+html.light .resume-sub-card h5,
+html.light .resume-rebuild-banner p,
+html.light .resume-rebuild-banner span:not([class*="text-emerald"]):not([class*="text-rose"]):not([class*="text-amber"]):not([class*="text-indigo"]):not([class*="text-sky"]):not([class*="resume-"]),
+html.light .resume-rebuild-banner h4 {
+  color: #0f172a !important;
+}
+
+/* 简历分析页面 - 工作台背景与容器层 (light mode) */
+html.light .resume-workbench-bg,
+html.light div.resume-workbench-bg {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* 简历分析页面 - 简历信息侧栏标签 */
+html.light .resume-info-label {
+  color: #475569 !important;
+  font-weight: 700 !important;
+}
+
+/* 简历分析页面 - 简历信息数值 (头像区) */
+html.light .resume-info-row-label {
+  color: #475569 !important;
+  font-weight: 700 !important;
+}
+
+/* 简历分析页面 - 简历预览切换器 (Original / AI Optimized) */
+html.light .resume-toggle-pill {
+  background-color: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+html.light .resume-toggle-pill button {
+  color: #475569 !important;
+}
+
+html.light .resume-toggle-pill button.text-indigo-600,
+html.light .resume-toggle-pill button.text-emerald-600 {
+  background-color: #ffffff !important;
+  border-color: #c7d2fe !important;
+}
+
+/* 简历分析页面 - 工作经历项目条目 (Original 模式非风险卡片 - 浅色模式改为白色背景) */
+html.light div[class*="bg-indigo-50/40"],
+html.light div[class*="bg-emerald-50/50"] {
+  color: #0f172a !important;
+}
+
+/* 简历分析页面 - Tab 6 (ATS) 展开后分隔线 */
+html.light .resume-ats-expand-divider {
+  border-color: rgba(0, 0, 0, 0.08) !important;
+  color: #475569 !important;
+}
+
+/* 简历分析页面 - 全局导航栏 hover 圆角按钮 (历史记录) */
+html.light button[class*="bg-white/5"][class*="text-on-surface"] {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light button[class*="bg-white/5"][class*="text-on-surface"]:hover {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+/* 简历分析页面 - AI 简历重构引擎 Banner 右上下载按钮 loading 状态的 spinner */
+html.light .border-2.border-white\/40 {
+  border-color: rgba(15, 23, 42, 0.4) !important;
+}
+
+/* 简历分析页面 - 简历信息属性列表中的分割线 */
+html.light .resume-info-divider {
+  background-color: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* 简历分析页面 - 风险分布卡片右侧标签 hover 状态 */
+html.light .resume-pie-num {
+  color: #0f172a !important;
+}
+
+/* 简历分析页面 - 优化后概率 (右侧绿色) */
+html.light span.text-emerald-700.dark\:text-\[\#5DECCB\]\/55,
+html.light div span.text-emerald-700 {
+  color: #047857 !important;
+}
+
+html.light span.text-emerald-700.dark\:text-\[\#5DECCB\]\/85 {
+  color: #047857 !important;
+  font-weight: 900 !important;
+}
+
+/* 简历分析页面 - 简历预览 Original 模式下风险条目的子说明文字 */
+html.light div span.text-slate-500.dark\:text-white\/40 {
+  color: #475569 !important;
+}
+
+/* 简历分析页面 - 工作经历公司名 / 岗位 / 时间 (深色/浅色 都能正常显示) */
+html.light .text-slate-900.dark\:text-white,
+html.light .text-slate-800.dark\:text-white {
+  color: #0f172a !important;
+}
+
+/* =========================================================================
+   简历分析页面 - 浅色模式可见性修复 (Light Mode Visibility Fix)
+   解决用户反馈：箭头图标、ATS 文本、Tab 按钮在浅色模式下看起来发白/不可见
+   ========================================================================= */
+
+/* 1. Offer 概率预测卡片中间的箭头 - 强制使用 slate-500 灰色 */
+html.light .resume-arrow-icon,
+html.light span.resume-arrow-icon {
+  color: #64748b !important;
+}
+
+/* 2. ATS 兼容性检测卡片右侧文字（关键词覆盖 / 结构规范 / PDF 兼容 / 机器可读）- 强制使用 slate-600 灰色 */
+html.light .resume-ats-check-label,
+html.light span.resume-ats-check-label {
+  color: #475569 !important;
+  font-weight: 800 !important;
+}
+
+/* 3. 简历深度分析 Tab 按钮 - 未选中灰色，选中紫色 */
+
+/* 未选中：灰色 */
+html.light .resume-tab-inactive,
+html.light button.resume-tab-inactive {
+  color: #64748b !important;
+}
+html.light .resume-tab-inactive:hover,
+html.light button.resume-tab-inactive:hover {
+  color: #334155 !important;
+  background-color: #f1f5f9 !important;
+}
+
+/* 选中：紫色 */
+html.light .resume-tab-active,
+html.light button.resume-tab-active {
+  background-color: #f5f3ff !important;
+  color: #6d28d9 !important;
+  border-color: #ddd6fe !important;
+}
+
+/* 5. 简历预览 Original 模式 - 每条 bullet 卡片下方的 AI 解释说明文字 */
+html.light .resume-bullet-explain,
+html.light div.resume-bullet-explain,
+html.light .resume-bullet-explain span,
+html.light div.resume-bullet-explain span {
+  color: #475569 !important;
+  font-weight: 700 !important;
+}
+
+/* 6. 风险分析 Tab - 序号圆形图标 (灰色背景 + 灰色数字) */
+/* 选择器特异性 (0,3,2) 与全局规则持平，靠位置胜出 */
+html.light .resume-sub-card .resume-risk-num,
+html.light .resume-sub-card span.resume-risk-num {
+  background-color: #e2e8f0 !important;
+  color: #475569 !important;
+  border-color: transparent !important;
+}
+
+/* 7. 风险分析 Tab - AI 解释说明文字 (灰色) */
+html.light .resume-sub-card .resume-risk-desc,
+html.light .resume-sub-card p.resume-risk-desc {
+  color: #475569 !important;
+  font-weight: 700 !important;
+}
+
+/* 8. 岗位匹配分析 Tab - "画像符合度估值" 百分比 + Match 文字 (浅色与深色模式统一为薄荷绿 #5DECCB) */
+html.light .resume-sub-card .resume-match-score,
+html.light .resume-sub-card h3.resume-match-score {
+  color: #5DECCB !important;
+  font-weight: 900 !important;
+}
+
+/* 9. 岗位匹配分析 Tab - 每条卡片中的小百分比 (灰色) */
+html.light .resume-sub-card .resume-match-percent,
+html.light .resume-sub-card span.resume-match-percent {
+  color: #94a3b8 !important;
+  font-weight: 800 !important;
+}
+
+/* 10. AI 优化建议 Tab - 每条卡片的小标题 (紫色) */
+html.light .resume-sub-card .resume-suggestion-title,
+html.light .resume-sub-card h5.resume-suggestion-title {
+  color: #6d28d9 !important;  /* violet-700 紫色 */
+  font-weight: 900 !important;
+}
+
+/* 11. 关键词分析 Tab - "高频" 标签 (紫色 - 与暗色模式 #AFA7FF 同色调，但保证浅色背景可读) */
+html.light .resume-sub-card .resume-keyword-highlight,
+html.light .resume-sub-card span.resume-keyword-highlight {
+  background-color: #f5f3ff !important;  /* violet-50 极浅紫背景 */
+  color: #8b5cf6 !important;              /* violet-500 中紫文字（不黑） */
+  border-color: #c4b5fd !important;        /* violet-300 紫色边框 */
+  font-weight: 900 !important;
+}
+
+/* 12. 关键词分析 Tab - "推荐补齐的行业热点词" 标签 (灰色) */
+/* 该元素不在 .resume-sub-card 内，普通选择器即可 */
+html.light .resume-keyword-recommend,
+html.light span.resume-keyword-recommend {
+  color: #64748b !important;  /* slate-500 灰色 */
+  font-weight: 700 !important;
+}
+
+/* 13. ATS 检测 Tab - 折叠状态下的 "— 分数说明" 浅色文字 (灰色) */
+/* 提高优先级：增加 .resume-sub-card 祖先选择器，避免被 .resume-sub-card span:not(...) 规则覆盖 */
+html.light .resume-sub-card .resume-ats-score-line,
+html.light .resume-sub-card span.resume-ats-score-line {
+  color: #94a3b8 !important;  /* slate-400 灰色 */
+  font-weight: 500 !important;
+}
+
+/* 14. ATS 检测 Tab - 展开箭头图标 (浅色模式灰色) */
+/* 提高优先级：增加 .resume-sub-card 祖先选择器 */
+html.light .resume-sub-card .resume-ats-expand-icon,
+html.light .resume-sub-card span.resume-ats-expand-icon {
+  color: #94a3b8 !important;
+}
+
+/* 15. 简历完整结构分析弹窗 - 左侧七个卡片 */
+html.light .resume-structure-nav-item,
+html.light div.resume-structure-nav-item {
+  /* 未选中默认已是淡紫色 (violet-50)，选中态为蓝色 (blue-50) */
+}
+html.light .resume-structure-nav-item:not(.is-active),
+html.light div.resume-structure-nav-item:not(.is-active) {
+  background-color: #f5f3ff !important;  /* violet-50 淡紫色 */
+  border-color: #ddd6fe !important;        /* violet-200 淡紫边框 */
+}
+html.light .resume-structure-nav-item.is-active,
+html.light div.resume-structure-nav-item.is-active {
+  background-color: #eff6ff !important;  /* blue-50 浅蓝色 */
+  border-color: #93c5fd !important;        /* blue-300 蓝色边框 */
+}
+
+/* 16. 简历完整结构分析弹窗 - 深度诊断分析卡片背景 (淡紫色) */
+html.light .resume-diagnosis-card,
+html.light div.resume-diagnosis-card {
+  background-color: #f5f3ff !important;  /* violet-50 淡紫色 */
+  border-color: #ddd6fe !important;        /* violet-200 淡紫边框 */
+}
+
+/* 17. 简历完整结构分析弹窗 - 针对性优化建议列表文字 (浅深两色模式统一为灰色) */
+html.light .resume-suggestions-list,
+html.light ul.resume-suggestions-list,
+html.light .resume-suggestions-list li {
+  color: #475569 !important;  /* slate-600 灰色 */
+}
+
+html.dark .resume-suggestions-list,
+html.dark ul.resume-suggestions-list,
+html.dark .resume-suggestions-list li {
+  color: #94a3b8 !important;  /* slate-400 浅灰 */
+}
+
+/* 简历完整结构分析弹窗 - 浅色模式下图标颜色与深色模式保持一致
+   覆盖全局 div[class*="fixed"][class*="z-50"] h3/h4 强制 #4f46e5 的规则 */
+html.light div[class*="fixed"][class*="z-50"] div.resume-structure-modal h3 .material-symbols-outlined {
+  color: #AFA7FF !important;
+}
+html.light div[class*="fixed"][class*="z-50"] div.resume-structure-modal h4 .material-symbols-outlined {
+  color: #00D4FF !important;
+}
+
+/* 简历完整结构分析弹窗 - 左侧 nav 卡片文字颜色（补偿排除全站 span 灰化规则后的颜色丢失） */
+html.light .resume-structure-nav-item > div:first-child > span:nth-child(2) {
+  color: #334155 !important;
+}
+html.light .resume-structure-nav-item.is-active > div:first-child > span:nth-child(2) {
+  color: #050B1A !important;
+}
+
+/* 注册页面第一步 - 浅色模式下三张卡片背景强制为纯白（覆盖 backdrop-blur 与半透明叠加） */
+html.light .register-step1-left-card {
+  background-color: #ffffff !important;
+  background-image: none !important;
+}
+html.light .register-step1-right-card {
+  background-color: #ffffff !important;
+  background-image: none !important;
+}
+
+/* 注册页面第一步右侧"为什么要填写这些信息？"卡片 - 列表文字强制深色 */
+html.light .register-step1-right-card .register-why-item,
+html.light .register-step1-right-card .register-why-item > span:not(.material-symbols-outlined) {
+  color: #334155 !important;
+}
+
+html.light .text-slate-500.dark\:text-white\/45,
+html.light .text-slate-500.dark\:text-white\/50,
+html.light .text-slate-500.dark\:text-white\/55 {
+  color: #64748b !important;
+  font-weight: 700 !important;
+}
+
+html.light .text-slate-400.dark\:text-white\/30 {
+  color: #94a3b8 !important;
+}
+
+/* 注册页面 Step 2 - 头像建议卡片（浅色模式白底深色字） */
+html.light .register-avatar-tip {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+}
+html.light .register-avatar-tip .material-symbols-outlined {
+  color: #4f46e5 !important;
+}
+
+/* 注册页面 Step 2 - 求职状态按钮组（浅色模式白底） */
+html.light .register-job-status {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+}
+
+/* 简历分析页面 - 优化预览/AST 检测 内展开内容颜色 */
+html.light .text-on-surface-variant\/80 {
+  color: #475569 !important;
+}
+
+/* 简历分析页面 - 结构地图侧栏 (section.scrollbar) */
+html.light div.text-white\/60 {
+  color: #475569 !important;
+}
+
+html.light div.text-white\/45 {
+  color: #475569 !important;
+}
+
+/* 简历分析页面 - ATS 圆圈 stroke 浅色模式更醒目 */
+html.light circle.dark\:stroke-white\/5 {
+  stroke: rgba(0, 0, 0, 0.08) !important;
+}
+
+/* 14. 离开确认弹窗在浅色模式下样式与删除二次确认 Modal 全量保持一致 */
+html.light .voice-leave-confirm-btn,
+html.light button.voice-leave-confirm-btn,
+html.light div[class*="fixed"][class*="z-50"] button.voice-leave-confirm-btn {
+  background-color: #f43f5e !important;
+  color: #ffffff !important;
+  font-weight: 900 !important;
+  box-shadow: 0 4px 12px rgba(244, 63, 94, 0.25) !important;
+}
+
+html.light .voice-leave-confirm-btn:hover,
+html.light button.voice-leave-confirm-btn:hover {
+  background-color: #e11d48 !important;
+}
+
+html.light .voice-leave-cancel-btn,
+html.light button.voice-leave-cancel-btn {
+  background-color: #f1f5f9 !important;
+  border: 1px solid #cbd5e1 !important;
+  color: #334155 !important;
+  font-weight: 800 !important;
+}
+
+html.light .voice-leave-cancel-btn:hover,
+html.light button.voice-leave-cancel-btn:hover {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+/* 15. 浅色模式下，面试录音分析报告右上角“面试表现指数”卡片中的总分/100字体呈精致灰色 */
+html.light .voice-ipi-score-value,
+html.light span.voice-ipi-score-value {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-ipi-score-max,
+html.light span.voice-ipi-score-max {
+  color: #64748b !important;
+  font-weight: 700 !important;
+}
+
+/* 16. 浅色模式下，面试官视角卡片下面的列表 Icon 改为精致中灰色 (#94a3b8) */
+html.light .record-perspective-item,
+html.light div.record-perspective-item {
+  background-color: #f8fafc !important;
+  border: 1px solid #e2e8f0 !important;
+}
+
+html.light .record-perspective-label {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.light .record-perspective-val {
+  color: #64748b !important;
+  font-weight: 700 !important;
+}
+
+html.light .record-perspective-icon,
+html.light .record-perspective-arrow,
+html.light span.record-perspective-icon,
+html.light span.record-perspective-arrow {
+  color: #94a3b8 !important;
+}
+html.light .voice-ai-tooltip-title-strength,
+html.light span.voice-ai-tooltip-title-strength {
+  color: #059669 !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-ai-tooltip-title-risk,
+html.light span.voice-ai-tooltip-title-risk {
+  color: #e11d48 !important;
+  font-weight: 900 !important;
+}
+
+html.light .voice-ai-tooltip-title-tech,
+html.light span.voice-ai-tooltip-title-tech {
+  color: #0284c7 !important;
+  font-weight: 900 !important;
+}
+
+html.dark .voice-radar-line {
+  stroke: #ffffff !important;
+  stroke-opacity: 0.08 !important;
+}
+
+/* 恢复浅色模式下的多彩 Accent 阶梯 */
+html.light .text-primary,
+html.light .text-primary-container,
+html.light .text-\[\#c0c1ff\],
+html.light .text-\[\#8083ff\],
+html.light .text-\[\#AFA7FF\] {
+  color: #4f46e5 !important;
+}
+
+/* 账号与安全卡片与修改按钮在浅色模式下的绝对强力渲染 */
+html.light .security-card {
+  background-color: #eef2ff !important;
+  border: 1px solid #c7d2fe !important;
+}
+
+html.light .security-icon {
+  color: #4f46e5 !important;
+  opacity: 1 !important;
+}
+
+html.light .security-label {
+  color: #475569 !important;
+  font-weight: 800 !important;
+}
+
+html.light .security-value {
+  color: #0f172a !important;
+  font-weight: 900 !important;
+}
+
+html.light .security-edit-btn {
+  background-color: #e0e7ff !important;
+  color: #3730a3 !important;
+  border: 1.5px solid #a5b4fc !important;
+  font-weight: 900 !important;
+  box-shadow: 0 1px 4px rgba(79, 70, 229, 0.15) !important;
+}
+
+html.light .security-edit-btn:hover {
+  background-color: #4338ca !important;
+  color: #ffffff !important;
+}
+
+html.light .bg-primary {
+  background-color: #4f46e5 !important;
+  color: #ffffff !important;
+}
+
+html.light .text-secondary {
+  color: #e11d48 !important;
+}
+
+html.light .text-tertiary {
+  color: #059669 !important;
+}
+
+html.light .border-white\/5,
+html.light .border-white\/10,
+html.light .border-white\/15,
+html.light .border-white\/20 {
+  border-color: rgba(0, 0, 0, 0.12) !important;
 }
 
 /* Fallback utilities to resolve container-max and custom spacing compiler bugs */
@@ -307,3 +2529,22 @@ body {
   -moz-appearance: none !important;
 }
 .hero-select::-ms-expand { display: none; }
+
+/* =========================================================================
+   .force-dark — 强制子树在 html.light 下也保持深色模式外观
+   用于让某些 tab（如简历分析报告的 AI 优化建议 / 关键词分析）
+   无论浅色/深色主题都渲染一致。
+   选择器与 html.light 规则同优先级，文件位置靠后 → 同优先级下顺序取胜。
+   ========================================================================= */
+.force-dark .text-white { color: #ffffff !important; }
+.force-dark .text-white\/30 { color: rgba(255, 255, 255, 0.3) !important; }
+.force-dark .text-white\/40 { color: rgba(255, 255, 255, 0.4) !important; }
+.force-dark .text-white\/50 { color: rgba(255, 255, 255, 0.5) !important; }
+.force-dark .text-white\/60 { color: rgba(255, 255, 255, 0.6) !important; }
+.force-dark .text-white\/70 { color: rgba(255, 255, 255, 0.7) !important; }
+.force-dark .text-white\/80 { color: rgba(255, 255, 255, 0.8) !important; }
+.force-dark .text-white\/90 { color: rgba(255, 255, 255, 0.9) !important; }
+.force-dark .border-white\/5 { border-color: rgba(255, 255, 255, 0.05) !important; }
+.force-dark .border-white\/10 { border-color: rgba(255, 255, 255, 0.1) !important; }
+.force-dark .border-white\/15 { border-color: rgba(255, 255, 255, 0.15) !important; }
+.force-dark .border-white\/20 { border-color: rgba(255, 255, 255, 0.2) !important; }

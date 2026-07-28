@@ -1,271 +1,227 @@
-import logging
-import json
+from __future__ import annotations
+
 import asyncio
-import itertools
-import httpx
-from urllib.parse import urljoin
+import json
+import logging
+import threading
+from datetime import timedelta
 from typing import Optional
+
+import httpx
+from mcp import ClientSession
+from mcp.client.streamable_http import streamable_http_client
+from mcp.types import CallToolResult, TextContent
+
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# SSE 长连接：read=None，否则长连接会被 read 超时（原来的 6s）周期性掐断。
-_SSE_TIMEOUT = httpx.Timeout(connect=3.5, read=None, write=4.0, pool=3.5)
-# POST 交互：正常握手/检索请求，给 15s read 上限。
-_POST_TIMEOUT = httpx.Timeout(connect=3.5, read=15.0, write=4.0, pool=3.5)
 
+# ──────────────────────────────────────────────────────────────────────
+# 常驻 MCP 会话（按 URL + API Key 单例）
+# ──────────────────────────────────────────────────────────────────────
+class _McpSession:
+    """单条常驻 streamableHttp + 单个 ClientSession 的复用容器。
 
-class _McpSseSession:
-    """进程内复用的腾讯云 WebSearch MCP over SSE 会话。
-
-    关键设计（同时解决"取消拆连接阻塞"与"每次重新握手"两个问题）：
-      - 一条 SSE GET 长连接 + 一个 POST client 常驻复用，只在断线时重建；
-      - 每次检索用唯一自增 id，响应按 id 路由到各自的调用方，支持并发共享；
-      - 单次 call_search 被外层 wait_for 取消时，只丢弃自己的等待（pop 掉 id），
-        绝不 aclose 共享连接 —— 因此取消能在一个事件循环 tick 内干净返回，
-        不会再出现 threshold=4s 却 elapsed 28~58s 的拆连接阻塞。
+    关键设计：
+      - `_run()` 在一个常驻任务里 await streamable_http_client(...) 上下文管理器，
+        里面再 await ClientSession(...) 上下文管理器；SDK 内部自行驱动 HTTP 请求，
+        只要任务不退出，会话就一直存活。
+      - 首次 _ensure() 建连 + list_tools() 发现可用工具；之后 search_web() 直接复用。
+      - 任何时候探测到会话挂了，下次 _ensure 会重建。
     """
 
-    def __init__(self, sse_url: str):
-        self.sse_url = sse_url
+    # session.call_tool() 默认 read_timeout_seconds=60s 偏长；这里收紧到 11s，
+    # 给外层 WEB_SEARCH_TIMEOUT_S=12s 留 1s 余量。
+    _CALL_READ_TIMEOUT_S = 11.0
+
+    # _ready.wait() 上限（initialize + list_tools 收尾）
+    _READY_TIMEOUT_S = 15.0
+
+    def __init__(self, url: str, api_key: str):
+        self.url = url
+        self.api_key = api_key
         self._lock = asyncio.Lock()
-        self._sse_client: Optional[httpx.AsyncClient] = None
-        self._post_client: Optional[httpx.AsyncClient] = None
-        self._post_url: Optional[str] = None
-        self._responses: dict[int, dict] = {}
-        self._pending: set[int] = set()          # 仍在等待响应的 id，防止晚到响应泄漏
-        self._listener: Optional[asyncio.Task] = None
-        self._initialized = False
-        self._ids = itertools.count(2)            # id=1 保留给 initialize
+        self._ready = asyncio.Event()
+        self._session: Optional[ClientSession] = None
+        self._runner: Optional[asyncio.Task] = None
+        # 工具名缓存：首次连接时通过 list_tools() 发现
+        self._search_tool_name: Optional[str] = None
 
-    def _healthy(self) -> bool:
-        return (
-            self._initialized
-            and self._post_url is not None
-            and self._post_client is not None
-            and self._listener is not None
-            and not self._listener.done()
-        )
+    @property
+    def ready(self) -> bool:
+        return self._ready.is_set() and self._session is not None
 
-    async def _listen(self):
-        """常驻 SSE 监听：解析 endpoint / message 事件，按 id 落到 _responses。"""
+    async def _run(self):
+        """常驻任务：保持 streamableHttp + ClientSession 一直活着；任一异常即退出。"""
         try:
-            async with self._sse_client.stream(
-                "GET", self.sse_url, headers={"Accept": "text/event-stream"}
-            ) as resp:
-                if resp.status_code != 200:
-                    logger.error(f"[mcp] SSE GET 响应非 200: {resp.status_code}")
-                    return
-                current_event = None
-                async for line in resp.aiter_lines():
-                    if not line:
-                        continue
-                    if line.startswith("event:"):
-                        current_event = line[6:].strip()
-                    elif line.startswith("data:"):
-                        data_str = line[5:].strip()
-                        if current_event == "endpoint":
-                            self._post_url = urljoin(self.sse_url, data_str)
-                        elif current_event == "message":
-                            try:
-                                msg = json.loads(data_str)
-                                rid = msg.get("id")
-                                if rid is not None and rid in self._pending:
-                                    self._responses[rid] = msg
-                            except Exception:
-                                pass
+            async with httpx.AsyncClient(
+                headers={"Authorization": f"Bearer {self.api_key}"},
+                timeout=httpx.Timeout(30.0, connect=10.0),
+            ) as http_client:
+                async with streamable_http_client(
+                    self.url,
+                    http_client=http_client,
+                    terminate_on_close=True,
+                ) as (read_stream, write_stream, get_sid):
+                    async with ClientSession(read_stream, write_stream) as session:
+                        await session.initialize()
+
+                        # 发现可用工具
+                        tools_result = await session.list_tools()
+                        tool_names = [t.name for t in tools_result.tools]
+                        logger.info(f"[mcp] 已连接阿里百炼 MCP，可用工具: {tool_names}")
+                        # 优先找 WebSearch/web_search，否则取第一个
+                        self._search_tool_name = (
+                            next((n for n in tool_names if "web" in n.lower() or "search" in n.lower()), None)
+                            or (tool_names[0] if tool_names else None)
+                        )
+                        if not self._search_tool_name:
+                            logger.warning("[mcp] 阿里百炼 MCP 未发现任何工具")
+
+                        self._session = session
+                        self._ready.set()
+                        logger.info("[mcp] WebSearch MCP 会话已建立（streamableHttp）")
+                        # 阻塞直到被取消
+                        await asyncio.Future()
         except asyncio.CancelledError:
             raise
         except Exception as ex:
-            logger.debug(f"[mcp] SSE listener 结束: {ex!r}")
+            logger.warning(f"[mcp] 会话异常退出: {ex!r}")
         finally:
-            # 连接断了：标记未初始化，下次 call 触发重连
-            self._initialized = False
-
-    async def _connect_locked(self):
-        """在 _lock 保护下建立连接并完成 MCP 握手。"""
-        await self._teardown()
-        self._sse_client = httpx.AsyncClient(timeout=_SSE_TIMEOUT)
-        self._post_client = httpx.AsyncClient(timeout=_POST_TIMEOUT)
-        self._responses = {}
-        self._pending = set()
-        self._post_url = None
-        self._listener = asyncio.create_task(self._listen())
-
-        # 1. 等 endpoint（最长 4.5s）
-        for _ in range(45):
-            if self._post_url:
-                break
-            if self._listener.done():
-                raise RuntimeError("SSE listener 提前结束，未拿到 endpoint")
-            await asyncio.sleep(0.1)
-        if not self._post_url:
-            raise RuntimeError("未获得 MCP SSE endpoint（超时）")
-
-        # 2. initialize 握手（id=1）
-        self._pending.add(1)
-        try:
-            await self._post_client.post(self._post_url, json={
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {},
-                    "clientInfo": {"name": "OfferPilotMCPClient", "version": "1.0.0"},
-                },
-            })
-            for _ in range(25):
-                if 1 in self._responses:
-                    break
-                await asyncio.sleep(0.1)
-            # 3. notifications/initialized
-            await self._post_client.post(
-                self._post_url, json={"jsonrpc": "2.0", "method": "notifications/initialized"}
-            )
-        finally:
-            self._pending.discard(1)
-            self._responses.pop(1, None)
-
-        self._initialized = True
-        logger.info("[mcp] WebSearch MCP 会话已建立（复用）")
+            self._ready.clear()
+            self._session = None
 
     async def _ensure(self):
-        if self._healthy():
+        """惰性建连：首次调用 / 上次连接挂了再调用时重建。"""
+        if self.ready and self._runner is not None and not self._runner.done():
             return
         async with self._lock:
-            if self._healthy():
+            if self.ready and self._runner is not None and not self._runner.done():
                 return
-            await self._connect_locked()
-
-    async def call_search(self, query: str, count: int) -> str:
-        await self._ensure()
-        rid = next(self._ids)
-        self._pending.add(rid)
-        try:
-            await self._post_client.post(self._post_url, json={
-                "jsonrpc": "2.0",
-                "id": rid,
-                "method": "tools/call",
-                "params": {"name": "wsa-SearchPro", "arguments": {"Query": query}},
-            })
-            # 轮询自己的 id；外层 wait_for 会更早取消（取消时下方 finally 只 pop id，不拆连接）
-            for _ in range(300):
-                if rid in self._responses:
-                    break
-                await asyncio.sleep(0.1)
-
-            res_obj = self._responses.get(rid)
-            if not res_obj:
-                logger.warning("[mcp] tools/call 未在规定时间内返回")
-                return ""
-            if "error" in res_obj:
-                err_msg = res_obj["error"].get("message", "")
-                logger.warning(f"[mcp] MCP 返回错误: {err_msg}")
-                return f"（腾讯云联网检索提示: {err_msg}）"
-            content_items = res_obj.get("result", {}).get("content", [])
-            if not content_items:
-                return "（未找到相关互联网搜索结果）"
-            raw_text = content_items[0].get("text", "")
-            return _format_tencent_search_json(raw_text, count)
-        finally:
-            self._pending.discard(rid)
-            self._responses.pop(rid, None)
-
-    async def _teardown(self):
-        """有界地拆掉当前连接（仅进程退出或重连时调用，不在单次取消路径里跑）。"""
-        if self._listener is not None and not self._listener.done():
-            self._listener.cancel()
+            await self._cancel_runner()
+            self._runner = asyncio.get_running_loop().create_task(
+                self._run(), name="aliyun-mcp-session"
+            )
             try:
-                await asyncio.wait_for(asyncio.shield(self._listener), timeout=1.0)
-            except Exception:
-                pass
-        for client in (self._post_client, self._sse_client):
-            if client is not None:
+                await asyncio.wait_for(self._ready.wait(), timeout=self._READY_TIMEOUT_S)
+            except asyncio.TimeoutError:
+                await self._cancel_runner()
+                raise RuntimeError(
+                    f"MCP 会话建立超时（{self._READY_TIMEOUT_S:.0f}s 内未完成 initialize）"
+                )
+
+    async def _cancel_runner(self):
+        runner = self._runner
+        self._runner = None
+        if runner is None or runner.done():
+            return
+        runner.cancel()
+        try:
+            await runner
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    async def call_tool_text(
+        self, name: str, arguments: dict, *, timeout_s: Optional[float] = None
+    ) -> str:
+        """走官方 session.call_tool() 调一次工具，返回拼接后的文本。"""
+        await self._ensure()
+        assert self._session is not None
+        rt_s = timeout_s if timeout_s is not None else self._CALL_READ_TIMEOUT_S
+        result: CallToolResult = await self._session.call_tool(
+            name=name,
+            arguments=arguments,
+            read_timeout_seconds=timedelta(seconds=rt_s),
+        )
+        if getattr(result, "isError", False):
+            raise RuntimeError(f"MCP tools/call 返回 isError=True: {result.content!r}")
+        chunks: list[str] = []
+        for item in result.content or []:
+            if isinstance(item, TextContent):
+                chunks.append(item.text or "")
+            else:
                 try:
-                    await asyncio.wait_for(client.aclose(), timeout=1.0)
+                    chunks.append(json.dumps(item.model_dump(by_alias=True, exclude_none=True), ensure_ascii=False))
                 except Exception:
-                    pass
-        self._listener = None
-        self._sse_client = None
-        self._post_client = None
-        self._post_url = None
-        self._initialized = False
+                    chunks.append(str(item))
+        return "\n".join(chunks)
+
+    async def close(self):
+        await self._cancel_runner()
 
 
-# 进程内单例（按 URL 绑定；绑定创建时所在的事件循环，uvicorn 单循环下安全）
-_session: Optional[_McpSseSession] = None
+# ──────────────────────────────────────────────────────────────────────
+# 模块级单例 + 公共 API
+# ──────────────────────────────────────────────────────────────────────
+_session: Optional[_McpSession] = None
+_session_lock = threading.Lock()
+
+
+def _get_session() -> _McpSession:
+    """惰性创建 / 复用 _McpSession 单例（线程安全）。"""
+    global _session
+    with _session_lock:
+        if _session is None:
+            url = (
+                getattr(settings, "ALIYUN_MCP_SEARCH_URL", "")
+                or "https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp"
+            )
+            api_key = settings.DASHSCOPE_API_KEY or ""
+            if not api_key:
+                logger.error("[mcp] DASHSCOPE_API_KEY 未配置，联网搜索不可用")
+            _session = _McpSession(url, api_key)
+        return _session
 
 
 async def search_web(query: str, count: int = 5) -> str:
-    """调用联网搜索工具。通过标准 MCP Protocol (over SSE) 与腾讯云 WebSearch MCP 通信。
+    """调用阿里百炼 WebSearch MCP 工具联网检索。
 
-    内部复用一条常驻 MCP 会话（避免每次重新握手）。被外层 wait_for 取消时，
-    仅放弃本次等待，不会拆共享连接 —— 取消可在阈值内干净返回。
+    走官方 MCP 协议：常驻 streamableHttp + ClientSession，
+    单次 search_web 只是 call_tool 一次。
+    外层 asyncio.wait_for 取消时，SDK 内部只会丢掉本次等待，不会拆共享会话。
     """
-    global _session
+    api_key = settings.DASHSCOPE_API_KEY or ""
+    if not api_key:
+        return "（未配置阿里百炼 DASHSCOPE_API_KEY，已降级为纯大模型推理）"
 
-    tc_url = getattr(settings, "TENCENT_MCP_SEARCH_URL", "") or "https://mcp-api.tencent-cloud.com/sse/c2453837744fd833"
-    if not tc_url:
-        return "（未配置腾讯云 WebSearch MCP 端点，已降级为纯大模型推理）"
-
-    if _session is None or _session.sse_url != tc_url:
-        _session = _McpSseSession(tc_url)
-
+    sess = _get_session()
     try:
-        res = await _session.call_search(query, count)
-        if res:
-            return res
+        # 等连接建立完成，工具名已缓存
+        tool_name = sess._search_tool_name
+        if not tool_name:
+            # 先触发建连
+            await sess._ensure()
+            tool_name = sess._search_tool_name
+        if not tool_name:
+            return "（阿里百炼 MCP 未发现可用搜索工具，已降级为纯大模型推理）"
+
+        raw_text = await sess.call_tool_text(
+            name=tool_name,
+            arguments={"query": query, "count": count},
+        )
     except asyncio.CancelledError:
-        # 让外层 wait_for 干净取消（不吞异常、不拆连接）
         raise
-    except Exception as e:
-        logger.warning(f"[mcp] WebSearch MCP 调用异常，降级为纯大模型推理: {e!r}")
-        # 出错多半意味着连接坏了，重置以便下次重连
+    except Exception as ex:
+        logger.warning(f"[mcp] 阿里百炼 MCP 调用异常，降级为纯大模型推理: {ex!r}")
         try:
-            await _session._teardown()
+            await sess.close()
         except Exception:
             pass
+        return "（阿里百炼联网检索不可用，已降级为纯大模型推理）"
 
-    return "（腾讯云联网检索不可用，已降级为纯大模型推理）"
+    if not raw_text or not raw_text.strip():
+        return "（未找到相关互联网搜索结果）"
+    return raw_text
 
 
 async def close_web_search_session():
-    """进程关闭时可调用，主动拆掉常驻 MCP 会话（可选，进程退出本身也会释放）。"""
+    """进程关闭时可调用，主动拆掉常驻 MCP 会话。"""
     global _session
-    if _session is not None:
+    sess = _session
+    _session = None
+    if sess is not None:
         try:
-            await _session._teardown()
+            await sess.close()
         except Exception:
             pass
-        _session = None
-
-
-def _format_tencent_search_json(raw_text: str, count: int = 5) -> str:
-    """将腾讯云 WebSearch 返回的原始 JSON/文本转换为优雅的 Markdown 链接与摘要列表"""
-    if not raw_text:
-        return "（未找到相关互联网搜索结果）"
-
-    try:
-        data = json.loads(raw_text)
-        # 腾讯云原生结构: {"Response": {"Pages": ["{\"title\":..., \"url\":..., \"passage\":...}"]}}
-        pages_raw = data.get("Response", {}).get("Pages", [])
-        if pages_raw:
-            formatted_lines = []
-            for i, page_str in enumerate(pages_raw[:count], 1):
-                try:
-                    p = json.loads(page_str) if isinstance(page_str, str) else page_str
-                    title = (p.get("title") or "网页搜索结果").strip()
-                    page_url = p.get("url") or ""
-                    snippet = (p.get("passage") or p.get("snippet") or "").strip()
-                    site = p.get("site") or ""
-                    site_str = f" (来源: {site})" if site else ""
-                    formatted_lines.append(f"{i}. [{title}]({page_url}){site_str}\n   摘要: {snippet}")
-                except Exception:
-                    continue
-            if formatted_lines:
-                return "\n\n".join(formatted_lines)
-    except Exception:
-        pass
-
-    return raw_text[:2000]

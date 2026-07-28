@@ -5,6 +5,7 @@ import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
 import { API_BASE } from "@/lib/api";
 import { getQuotaStatus } from "@/lib/quotaClient";
@@ -298,16 +299,16 @@ export default function InterviewRecordAnalysisPage() {
 
   // Default transcript matching preview image
   const DEFAULT_TRANSCRIPT = 
-    `面试官 (00:00)：请先做个自我介绍吧。\n` +
-    `我 (00:02)：好的，我叫张三，3年后端开发经验，主要做分布式系统 and 中间件相关的开发...\n` +
-    `面试官 (02:16)：介绍一下你负责的项目吧，重点讲讲你的角色和技术难点。\n` +
-    `我 (02:32)：我主要负责推荐系统的后端开发，使用了 Redis、MySQL、Kafka 等技术栈...\n` +
-    `面试官 (06:42)：为什么使用 Redis ？\n` +
-    `我 (06:45)：因为 Redis 性能高，可以做缓存，提升接口响应速度。\n` +
-    `面试官 (06:50)：那为什么不用本地缓存呢？\n` +
-    `我 (06:53)：本地缓存会有数据不一致的问题，而且不好维护...\n` +
-    `面试官 (06:58)：那如果缓存和数据库的数据不一致怎么办？\n` +
-    `我 (07:02)：我们用的是定时双删策略，保证最终一致性。`;
+    `面试官：请先做个自我介绍吧。\n` +
+    `我：好的，我叫张三，3年后端开发经验，主要做分布式系统 and 中间件相关的开发...\n` +
+    `面试官：介绍一下你负责的项目吧，重点讲讲你的角色和技术难点。\n` +
+    `我：我主要负责推荐系统的后端开发，使用了 Redis、MySQL、Kafka 等技术栈...\n` +
+    `面试官：为什么使用 Redis ？\n` +
+    `我：因为 Redis 性能高，可以做缓存，提升接口响应速度。\n` +
+    `面试官：那为什么不用本地缓存呢？\n` +
+    `我：本地缓存会有数据不一致的问题，而且不好维护...\n` +
+    `面试官：那如果缓存和数据库的数据不一致怎么办？\n` +
+    `我：我们用的是定时双删策略，保证最终一致性。`;
 
   // Pre-load default or local storage text
   useEffect(() => {
@@ -837,13 +838,14 @@ export default function InterviewRecordAnalysisPage() {
             </a>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => router.push("/memory?tab=timeline")}
               className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <span className="material-symbols-outlined text-base">history</span>历史记录
             </button>
+            <ThemeToggle />
             {auth.isLoggedIn ? (
               <UserMenu />
             ) : (
@@ -887,7 +889,7 @@ export default function InterviewRecordAnalysisPage() {
                 {taskStep || "面试驾到 AI 正在分析中..."}
               </h3>
               <p className="text-base md:text-lg text-white/70 font-semibold">
-                文本诊断 + DeepSeek 智能评估，分析完成后自动进入报告
+                文本诊断 + 大模型智能评估，分析完成后自动进入报告
               </p>
             </div>
 
@@ -931,7 +933,7 @@ export default function InterviewRecordAnalysisPage() {
               <div className="py-24 flex flex-col items-center justify-center gap-4 text-center select-none w-full">
                 <div className="w-16 h-16 rounded-full border-4 border-dashed border-[#00D4FF] flex items-center justify-center relative animate-[spin:6s_linear_infinite]" style={{ animation: "spin 6s linear infinite" }} />
                 <div className="space-y-1 mt-2">
-                  <p className="text-sm font-black text-white animate-pulse">正在载入字节跳动真实面试模板数据...</p>
+                  <p className="text-base font-black text-white animate-pulse">正在载入字节跳动真实面试模板数据...</p>
                   <p className="text-xs text-white/40 font-bold font-mono">LOADING_REAL_BYTEDANCE_INTERVIEW_TEMPLATE</p>
                 </div>
               </div>
@@ -1074,7 +1076,7 @@ export default function InterviewRecordAnalysisPage() {
               {/* 1.2 Interview Info card */}
               <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[290px] shrink-0">
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
-                  <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-base text-[#00D4FF]">assignment_ind</span>
                     面试信息
                   </h4>
@@ -1127,7 +1129,7 @@ export default function InterviewRecordAnalysisPage() {
               {/* 1.3 Question Catalog */}
               <div className="glass-panel p-4.5 rounded-2xl border-white/5 flex flex-col gap-3.5 h-[470px] shrink-0">
                 <div className="flex justify-between items-center pb-2 border-b border-white/5">
-                  <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
                     <span className="material-symbols-outlined text-base text-[#00D4FF]">list_alt</span>
                     问题目录
                   </h4>
@@ -1154,17 +1156,17 @@ export default function InterviewRecordAnalysisPage() {
                       <div 
                         key={q.id}
                         onClick={() => scrollToSection(q.id)}
-                        className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all duration-300 relative flex items-center justify-between gap-3 ${
+                        className={`record-question-card p-3.5 rounded-xl border text-left cursor-pointer transition-all duration-300 relative flex items-center justify-between gap-3 ${
                           isSelected
-                            ? "bg-[#AFA7FF]/5 border-[#AFA7FF]/20 shadow-lg shadow-[#AFA7FF]/5"
-                            : "bg-[#050B1A]/40 border-white/5 hover:border-white/10 hover:bg-[#050B1A]/80"
+                            ? "record-question-selected bg-[#AFA7FF]/5 border-[#AFA7FF]/20 shadow-lg shadow-[#AFA7FF]/5"
+                            : "record-question-unselected bg-[#050B1A]/40 border-white/5 hover:border-white/10 hover:bg-[#050B1A]/80"
                         }`}
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           {/* Connector line dot */}
                           <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor}`} />
                           <div className="min-w-0">
-                            <h5 className={`text-sm font-black truncate leading-tight ${isSelected ? "text-[#AFA7FF]" : "text-white"}`}>
+                            <h5 className={`record-question-title text-sm font-black truncate leading-tight ${isSelected ? "text-[#AFA7FF]" : "text-white"}`}>
                               Q{idx + 1} {q.title}
                             </h5>
                           </div>
@@ -1212,18 +1214,18 @@ export default function InterviewRecordAnalysisPage() {
                   </div>
 
                   {activeTab === "dialogue" && (
-                    <div className="flex items-center bg-white/5 border border-white/10 rounded-lg px-2.5 py-1 w-36 md:w-44 mb-2.5">
+                    <div className="record-search-box flex items-center bg-slate-100/90 dark:bg-white/5 border border-slate-200/80 dark:border-white/10 rounded-xl px-2.5 py-1 w-36 md:w-48 shadow-xs">
                       <input
                         type="text"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        placeholder="搜索对话..."
-                        className="bg-transparent text-[11px] text-white placeholder-white/30 focus:outline-none w-full"
+                        placeholder="搜索对话内容..."
+                        className="bg-transparent border-0 text-xs text-slate-800 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/30 focus:outline-none focus:ring-0 w-full"
                       />
                       {searchQuery && (
                         <span
                            onClick={() => setSearchQuery("")}
-                           className="material-symbols-outlined text-[11px] text-white/40 hover:text-white cursor-pointer ml-1 select-none"
+                           className="material-symbols-outlined text-xs text-slate-400 dark:text-white/40 hover:text-slate-700 dark:hover:text-white cursor-pointer ml-1 select-none"
                         >
                           close
                         </span>
@@ -1255,11 +1257,11 @@ export default function InterviewRecordAnalysisPage() {
                                   [sec.id]: !prev[sec.id]
                                 }));
                               }}
-                              className="flex justify-between items-center p-3.5 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all cursor-pointer select-none"
+                              className="record-section-header flex justify-between items-center p-3 rounded-xl bg-[#f3f0ff] dark:bg-white/5 border border-[#e9d5ff] dark:border-white/10 shadow-xs hover:bg-white/10 transition-all cursor-pointer select-none"
                             >
                               <div className="flex items-center gap-2.5 text-sm font-bold text-left">
-                                <span className="text-[#AFA7FF] font-mono">#{secIdx + 1}</span>
-                                <span className="text-white font-black">{sec.title}</span>
+                                <span className="text-indigo-600 dark:text-[#AFA7FF] font-mono">#{secIdx + 1}</span>
+                                <span className="record-section-title text-slate-900 dark:text-white font-black">{sec.title}</span>
                                 <span className={`px-2 py-0.5 rounded text-[10px] uppercase border font-semibold ${sec.tagColor || "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20"}`}>
                                   {sec.tag}
                                 </span>
@@ -1268,7 +1270,7 @@ export default function InterviewRecordAnalysisPage() {
 
                             {/* Section content (dialogue bubbles) */}
                             {!isCollapsed && (
-                              <div className="space-y-3.5 pl-3.5 border-l border-white/5">
+                              <div className="space-y-3.5 pl-3.5 border-l border-slate-200 dark:border-white/5">
                                 {filteredDialogue.map((bubble: any, idx: number) => {
                                   const isInterviewer = bubble.sender === "interviewer";
                                   const popoverKey = `${sec.id}-${idx}`;
@@ -1278,15 +1280,15 @@ export default function InterviewRecordAnalysisPage() {
                                       key={idx}
                                       className={`p-3.5 rounded-xl border transition-all duration-300 text-left flex flex-col gap-1.5 relative ${
                                         isInterviewer 
-                                          ? "bg-[#050B1A]/40 border-white/5 hover:border-white/10" 
-                                          : `bg-gradient-to-r from-[#050B1A]/80 to-[#AFA7FF]/3 border-[#AFA7FF]/10 hover:border-[#AFA7FF]/20 ${
+                                          ? "record-dialogue-interviewer voice-bubble-interviewer bg-indigo-600 border-indigo-700 text-white shadow-md" 
+                                          : `record-dialogue-interviewee voice-bubble-interviewee bg-[#f3f0ff] border-[#e9d5ff] hover:border-purple-200 text-slate-900 shadow-xs dark:bg-[#050B1A]/40 dark:border-white/5 ${
                                               bubble.hasWarning ? "border-[#FF7A95]/30 bg-[#1e132e]/30 shadow-[0_0_12px_rgba(255,122,149,0.04)]" : ""
                                             }`
                                       }`}
                                     >
                                       <div className="flex justify-between items-center text-xs font-bold select-none">
-                                        <span className="text-white/60 flex items-center gap-1.5 text-xs">
-                                          <span className={`w-2.5 h-2.5 rounded-full ${isInterviewer ? "bg-[#FF7A95]" : "bg-[#00D4FF]"}`} />
+                                        <span className={`${isInterviewer ? "text-white/90" : "text-slate-700"} dark:text-white/60 flex items-center gap-1.5 text-xs`}>
+                                          <span className={`w-2.5 h-2.5 rounded-full ${isInterviewer ? "bg-rose-500" : "bg-indigo-600 dark:bg-[#00D4FF]"}`} />
                                           {bubble.name}
                                         </span>
                                         
@@ -1354,7 +1356,7 @@ export default function InterviewRecordAnalysisPage() {
                                         </div>
                                       </div>
                                       
-                                      <p className="text-[13px] md:text-sm leading-relaxed text-white font-semibold">
+                                      <p className={`text-[13px] md:text-sm leading-relaxed ${isInterviewer ? "text-white" : "text-slate-900"} dark:text-[#dae2fd]`}>
                                         {renderHighlightedText(bubble.text)}
                                       </p>
                                     </div>
@@ -1470,23 +1472,23 @@ export default function InterviewRecordAnalysisPage() {
                   ) : activeTab === "followup" ? (
                     /* Tab 3: 追问路径 */
                     <div className="space-y-4 py-2">
-                      <div className="relative pl-6 space-y-5">
-                        <div className="absolute left-2 top-2.5 bottom-2.5 w-0.5 bg-[#AFA7FF]/20" />
+                      <div className="relative pl-10 space-y-5">
+                        <div className="absolute left-4 top-2.5 bottom-2.5 w-0.5 bg-indigo-200 dark:bg-[#AFA7FF]/20" />
                         
                         {reportData?.analysis_result?.followup_paths && reportData.analysis_result.followup_paths.length > 0 ? (
                           reportData.analysis_result.followup_paths.map((item: any, idx: number) => {
                             const isRisk = item.tag === "风险";
                             const isGood = item.tag === "良好";
                             const dotBg = isRisk ? "bg-[#FF7A95]" : isGood ? "bg-[#5DECCB]" : "bg-[#AFA7FF]";
-                            const titleColor = isRisk ? "text-[#FF7A95]" : isGood ? "text-[#5DECCB]" : "text-white/60";
+                            const titleColor = isRisk ? "text-rose-600 dark:text-[#FF7A95] type-rose" : isGood ? "text-emerald-600 dark:text-[#5DECCB] type-emerald" : "text-slate-800 dark:text-white/80";
                             return (
                               <div key={idx} className="relative">
-                                <span className={`absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] ${dotBg} z-10 ${isRisk ? "animate-pulse" : ""}`} />
+                                <span className={`absolute -left-[1.75rem] top-1.5 w-3.5 h-3.5 rounded-full border-0 ${dotBg} z-20 ${isRisk ? "animate-pulse" : ""}`} />
                                 <div className="text-left text-sm md:text-base space-y-1 font-semibold">
                                   <p className={`text-xs md:text-sm font-bold ${titleColor}`}>
                                     {item.title} · {item.tag || "一般"}
                                   </p>
-                                  <p className="text-xs md:text-sm text-white/80 leading-relaxed font-normal">
+                                  <p className="text-xs md:text-sm text-slate-600 dark:text-white/80 leading-relaxed font-normal">
                                     {item.desc}
                                   </p>
                                 </div>
@@ -1498,16 +1500,16 @@ export default function InterviewRecordAnalysisPage() {
                             const isRisk = sec.tag === "风险";
                             const isGood = sec.tag === "良好";
                             const dotBg = isRisk ? "bg-[#FF7A95]" : isGood ? "bg-[#5DECCB]" : "bg-[#AFA7FF]";
-                            const titleColor = isRisk ? "text-[#FF7A95]" : isGood ? "text-[#5DECCB]" : "text-white/60";
-                            
+                            const titleColor = isRisk ? "text-rose-600 dark:text-[#FF7A95] type-rose" : isGood ? "text-emerald-600 dark:text-[#5DECCB] type-emerald" : "text-slate-800 dark:text-white/80";
+
                             return (
                               <div key={sec.id || idx} className="relative">
-                                <span className={`absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] ${dotBg} z-10 ${isRisk ? "animate-pulse" : ""}`} />
+                                <span className={`absolute -left-[1.75rem] top-1.5 w-3.5 h-3.5 rounded-full border-0 ${dotBg} z-20 ${isRisk ? "animate-pulse" : ""}`} />
                                 <div className="text-left text-sm md:text-base space-y-1 font-semibold">
                                   <p className={`text-xs md:text-sm font-bold ${titleColor}`}>
                                     Q{idx + 1} {sec.title} · {sec.tag || "一般"}
                                   </p>
-                                  <p className="text-xs md:text-sm text-white/80 leading-relaxed font-normal">
+                                  <p className="text-xs md:text-sm text-slate-600 dark:text-white/80 leading-relaxed font-normal">
                                     {isRisk 
                                       ? `识别出回答薄弱环节：${sec.shortcomings?.[0] || sec.summary || "回答暴露了一定盲区或表达细节不完善。"}`
                                       : isGood 
@@ -1522,26 +1524,26 @@ export default function InterviewRecordAnalysisPage() {
                         ) : (
                           <>
                             <div className="relative">
-                              <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-[#5DECCB] z-10" />
+                              <span className="absolute -left-[1.75rem] top-1.5 w-3.5 h-3.5 rounded-full border-0 bg-[#5DECCB] z-20" />
                               <div className="text-left text-base space-y-1 font-semibold">
-                                <p className="text-base text-white/40">Q1 自我介绍 · 引导切入</p>
-                                <p className="text-base text-white font-normal">抛出“做过分布式系统与中间件开发”，成功引导面试官进入中间件板块。</p>
+                                <p className="text-xs md:text-sm text-slate-500 dark:text-white/40 font-bold">Q1 自我介绍 · 引导切入</p>
+                                <p className="text-xs md:text-sm text-slate-700 dark:text-white font-normal">抛出“做过分布式系统与中间件开发”，成功引导面试官进入中间件板块。</p>
                               </div>
                             </div>
 
                             <div className="relative">
-                              <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-[#AFA7FF] z-10 animate-pulse" />
+                              <span className="absolute -left-[1.75rem] top-1.5 w-3.5 h-3.5 rounded-full border-0 bg-[#AFA7FF] z-20 animate-pulse" />
                               <div className="text-left text-base space-y-1 font-semibold">
-                                <p className="text-base text-[#AFA7FF]">Q3 Redis 选型 · 主动深挖</p>
-                                <p className="text-base text-white/80 font-normal">核心漏洞点：“因为 Redis 性能高，可以做缓存” ➔ 引出高负载高并发背景的细节追问。</p>
+                                <p className="text-xs md:text-sm text-indigo-600 dark:text-[#AFA7FF] font-bold">Q3 Redis 选型 · 主动深挖</p>
+                                <p className="text-xs md:text-sm text-slate-700 dark:text-white/80 font-normal">核心漏洞点：“因为 Redis 性能高，可以做缓存” ➔ 引出高负载高并发背景的细节追问。</p>
                               </div>
                             </div>
 
                             <div className="relative">
-                              <span className="absolute -left-6.5 top-1.5 w-3.5 h-3.5 rounded-full border-2 border-[#050B1A] bg-white/5 z-10" />
+                              <span className="absolute -left-[1.75rem] top-1.5 w-3.5 h-3.5 rounded-full border-0 bg-white/5 z-20" />
                               <div className="text-left text-base space-y-1 font-semibold">
-                                <p className="text-base text-white/30">Q5 双写一致性 · 重试质感</p>
-                                <p className="text-base text-white/40 font-normal">最终瓶颈：“定时双删”的答法暴露了高并发和真实复杂场景落地架构经验欠缺的破绽。</p>
+                                <p className="text-xs md:text-sm text-slate-500 dark:text-white/30 font-bold">Q5 双写一致性 · 重试质感</p>
+                                <p className="text-xs md:text-sm text-slate-600 dark:text-white/40 font-normal">最终瓶颈：“定时双删”的答法暴露了高并发和真实复杂场景落地架构经验欠缺的破绽。</p>
                               </div>
                             </div>
                           </>
@@ -1581,12 +1583,14 @@ export default function InterviewRecordAnalysisPage() {
                           </div>
                         </div>
                       </div>
-                      <div className="p-3.5 rounded-xl bg-[#0b1326] border border-white/5 font-semibold text-xs md:text-sm leading-relaxed text-left space-y-1">
-                        <span className="text-xs md:text-sm font-black text-[#AFA7FF] uppercase tracking-wider block mb-1">AI 提分战略建议</span>
-                        {reportData?.summary?.suggestions && reportData.summary.suggestions.length > 0 
-                          ? reportData.summary.suggestions.join(" ")
-                          : reportData?.summary?.executive_summary || "求职者表达有一定条理（逻辑自洽），但对于大型系统设计的方案Trade-off对比和量化数据支持稍显薄弱。建议参考AI优化话术进行重点模块的重构和背书改进。"
-                        }
+                      <div className="record-strategy-card p-3.5 rounded-xl bg-[#f3f0ff] dark:bg-[#0b1326] border border-[#e9d5ff] dark:border-white/5 font-semibold text-xs md:text-sm leading-relaxed text-left space-y-1 text-slate-800 dark:text-inherit">
+                        <span className="record-strategy-title text-xs md:text-sm font-black text-indigo-600 dark:text-[#AFA7FF] uppercase tracking-wider block mb-1">AI 提分战略建议</span>
+                        <p className="text-xs md:text-sm text-slate-700 dark:text-white/80 leading-relaxed">
+                          {reportData?.summary?.suggestions && reportData.summary.suggestions.length > 0
+                            ? reportData.summary.suggestions.join(" ")
+                            : reportData?.summary?.executive_summary || "求职者表达有一定条理（逻辑自洽），但对于大型系统设计的方案Trade-off对比和量化数据支持稍显薄弱。建议参考AI优化话术进行重点模块的重构和背书改进。"
+                          }
+                        </p>
                       </div>
                     </div>
                   )}
@@ -1653,17 +1657,17 @@ export default function InterviewRecordAnalysisPage() {
                           ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black"
                           : "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
                         return (
-                          <div key={idx} className="p-2 rounded-xl bg-[#050B1A]/80 border border-white/5 space-y-1.5 text-left text-xs md:text-sm">
+                          <div key={idx} className="record-risk-card p-2 rounded-xl bg-[#050B1A]/80 border border-white/5 space-y-1.5 text-left text-xs md:text-sm">
                             <div className="flex justify-between items-center">
-                              <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
-                                <span className="w-4 h-4 rounded-full bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-white/55">{rank}</span>
+                              <span className="record-risk-title font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
+                                <span className="record-risk-rank w-4 h-4 rounded-full bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-white/55">{rank}</span>
                                 <span className="truncate">{label}</span>
                               </span>
                               <span className={`px-1.5 py-0.2 rounded border shrink-0 ${tagClass}`}>
                                 {tag}
                               </span>
                             </div>
-                            <p className="text-xs text-white/45 leading-snug font-bold">
+                            <p className="record-risk-desc text-xs text-white/45 leading-snug font-bold">
                               {desc}
                             </p>
                           </div>
@@ -1758,15 +1762,15 @@ export default function InterviewRecordAnalysisPage() {
                             }
                           }}
                           onMouseLeave={() => setHoveredPerspective(null)}
-                          className="flex justify-between items-center py-1.5 px-2 rounded bg-white/[0.01] border border-white/5 hover:border-white/10 hover:text-white cursor-pointer transition-all relative group"
+                          className="record-perspective-item flex justify-between items-center py-1.5 px-2 rounded bg-white/[0.01] border border-white/5 hover:border-white/10 hover:text-white cursor-pointer transition-all relative group"
                         >
                           <span className="flex items-center gap-1 text-xs md:text-sm shrink-0 mr-4">
-                            <span className="material-symbols-outlined text-xs text-white/30 shrink-0">folder_open</span>
-                            <span className="font-extrabold text-white">{p.label}</span>
+                            <span className="record-perspective-icon material-symbols-outlined text-xs text-white/30 shrink-0">folder_open</span>
+                            <span className="record-perspective-label font-extrabold text-white">{p.label}</span>
                           </span>
-                          <span className="text-white/40 font-semibold flex items-center gap-0.5 text-xs md:text-sm truncate flex-1 justify-end min-w-0">
+                          <span className="record-perspective-val text-white/40 font-semibold flex items-center gap-0.5 text-xs md:text-sm truncate flex-1 justify-end min-w-0">
                             <span className="truncate">{p.val}</span>
-                            <span className="material-symbols-outlined text-xs shrink-0">chevron_right</span>
+                            <span className="record-perspective-arrow material-symbols-outlined text-xs shrink-0">chevron_right</span>
                           </span>
                         </div>
                       ));
@@ -1878,6 +1882,7 @@ export default function InterviewRecordAnalysisPage() {
                             stroke="white" 
                             strokeWidth="0.5" 
                             strokeOpacity={rIdx === 3 ? "0.08" : "0.03"} 
+                            className="voice-radar-line"
                           />
                         );
                       })}
@@ -1891,6 +1896,7 @@ export default function InterviewRecordAnalysisPage() {
                             key={aIdx} 
                             x1="110" y1="110" x2={targetX} y2={targetY} 
                             stroke="white" strokeWidth="0.5" strokeOpacity="0.04" 
+                            className="voice-radar-line"
                           />
                         );
                       })}
@@ -1931,20 +1937,20 @@ export default function InterviewRecordAnalysisPage() {
                       })()}
 
                       {/* Dimension Labels */}
-                      <text x="110" y="20" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="middle">
-                        逻辑自洽 <tspan fill="#AFA7FF">{scoreLogic}</tspan>
+                      <text x="110" y="20" className="voice-radar-text font-bold" fontSize="13" textAnchor="middle">
+                        逻辑自洽 <tspan fill="#4f46e5" className="dark:fill-[#AFA7FF]" fontWeight="900">{scoreLogic}</tspan>
                       </text>
-                      <text x="195" y="92" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="start">
-                        技术广度 <tspan fill="#AFA7FF">{scoreSystem}</tspan>
+                      <text x="195" y="92" className="voice-radar-text font-bold" fontSize="13" textAnchor="start">
+                        技术广度 <tspan fill="#4f46e5" className="dark:fill-[#AFA7FF]" fontWeight="900">{scoreSystem}</tspan>
                       </text>
-                      <text x="172" y="185" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="start">
-                        数据指标 <tspan fill="#AFA7FF">{scoreExpression}</tspan>
+                      <text x="172" y="185" className="voice-radar-text font-bold" fontSize="13" textAnchor="start">
+                        数据指标 <tspan fill="#4f46e5" className="dark:fill-[#AFA7FF]" fontWeight="900">{scoreExpression}</tspan>
                       </text>
-                      <text x="48" y="185" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="end">
-                        业务理解 <tspan fill="#AFA7FF">{scoreOwnership}</tspan>
+                      <text x="48" y="185" className="voice-radar-text font-bold" fontSize="13" textAnchor="end">
+                        业务理解 <tspan fill="#4f46e5" className="dark:fill-[#AFA7FF]" fontWeight="900">{scoreOwnership}</tspan>
                       </text>
-                      <text x="25" y="92" fill="white" fillOpacity="0.5" fontSize="15" fontWeight="bold" textAnchor="end">
-                        细节深度 <tspan fill="#AFA7FF">{scoreProject}</tspan>
+                      <text x="25" y="92" className="voice-radar-text font-bold" fontSize="13" textAnchor="end">
+                        细节深度 <tspan fill="#4f46e5" className="dark:fill-[#AFA7FF]" fontWeight="900">{scoreProject}</tspan>
                       </text>
                     </svg>
                   </div>
@@ -2123,20 +2129,20 @@ export default function InterviewRecordAnalysisPage() {
                       const desc = lose.desc;
                       const tag = lose.tag || (idx === 0 ? "高风险" : "中风险");
                       const tagClass = tag === "高风险"
-                        ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black"
-                        : "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
+                        ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-sm font-black"
+                        : "text-amber-500 bg-amber-400/10 border-amber-400/20 text-sm font-black";
                       return (
-                        <div key={idx} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-2 text-left">
+                        <div key={idx} className="record-risk-card p-3 rounded-xl bg-[#f3f0ff] dark:bg-[#050B1A]/80 border border-[#e9d5ff] dark:border-white/5 space-y-2 text-left">
                           <div className="flex justify-between items-center">
-                            <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
-                              <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-white/55">{rank}</span>
+                            <span className="record-risk-title font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
+                              <span className="record-risk-rank w-5 h-5 rounded-full bg-slate-200 dark:bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-slate-700 dark:text-white/55">{rank}</span>
                               <span className="truncate">{label}</span>
                             </span>
                             <span className={`px-1.5 py-0.2 rounded border shrink-0 ${tagClass}`}>
                               {tag}
                             </span>
                           </div>
-                          <p className="text-xs text-white/50 leading-relaxed font-semibold">
+                          <p className="record-risk-desc text-xs text-slate-600 dark:text-white/50 leading-relaxed font-semibold">
                             {desc}
                           </p>
                         </div>
@@ -2152,19 +2158,19 @@ export default function InterviewRecordAnalysisPage() {
                       const tag = idx === 0 ? "高风险" : "中风险";
                       const tagClass = idx === 0 
                         ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black" 
-                        : "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
+                        : "text-amber-500 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
                       return (
-                        <div key={idx} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-2 text-left">
+                        <div key={idx} className="record-risk-card p-3 rounded-xl bg-[#f3f0ff] dark:bg-[#050B1A]/80 border border-[#e9d5ff] dark:border-white/5 space-y-2 text-left">
                           <div className="flex justify-between items-center">
-                            <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
-                              <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-white/55">{idx + 1}</span>
+                            <span className="record-risk-title font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
+                              <span className="record-risk-rank w-5 h-5 rounded-full bg-slate-200 dark:bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-slate-700 dark:text-white/55">{idx + 1}</span>
                               <span className="truncate">{label}</span>
                             </span>
                             <span className={`px-1.5 py-0.2 rounded border shrink-0 ${tagClass}`}>
                               {tag}
                             </span>
                           </div>
-                          <p className="text-xs text-white/50 leading-relaxed font-semibold">
+                          <p className="record-risk-desc text-xs text-slate-600 dark:text-white/50 leading-relaxed font-semibold">
                             {desc}
                           </p>
                         </div>
@@ -2178,19 +2184,19 @@ export default function InterviewRecordAnalysisPage() {
                   ].map((lose, idx) => {
                     const tagClass = lose.tag === "高风险"
                       ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black"
-                      : "text-amber-400 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
+                      : "text-amber-500 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
                     return (
-                      <div key={idx} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 space-y-2 text-left">
+                      <div key={idx} className="record-risk-card p-3 rounded-xl bg-[#f3f0ff] dark:bg-[#050B1A]/80 border border-[#e9d5ff] dark:border-white/5 space-y-2 text-left">
                         <div className="flex justify-between items-center">
-                          <span className="font-extrabold text-white flex items-center gap-1.5 text-xs md:text-sm">
-                            <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center font-mono text-xs font-black text-white/55">{lose.rank}</span>
+                          <span className="record-risk-title font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs md:text-sm">
+                            <span className="record-risk-rank w-5 h-5 rounded-full bg-slate-200 dark:bg-white/5 flex items-center justify-center font-mono text-xs font-black text-slate-700 dark:text-white/55">{lose.rank}</span>
                             {lose.label}
                           </span>
                           <span className={`px-1.5 py-0.2 rounded border shrink-0 ${tagClass}`}>
                             {lose.tag}
                           </span>
                         </div>
-                        <p className="text-xs text-white/50 leading-relaxed font-semibold">
+                        <p className="record-risk-desc text-xs text-slate-600 dark:text-white/50 leading-relaxed font-semibold">
                           {lose.desc}
                         </p>
                       </div>

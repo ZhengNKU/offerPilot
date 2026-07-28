@@ -9,37 +9,6 @@ from app.database import get_db
 
 router = APIRouter(prefix="/api/guide", tags=["Interview Guide"])
 
-
-async def check_and_seed_featured_guides(db: AsyncSession):
-    """确保数据库中仅保留 1 条真实预置数据 (初始阅读量、点赞量、收藏量均为 0)。"""
-    res = await db.execute(select(models.FeaturedGuide))
-    items = res.scalars().all()
-
-    # 如果数据库不恰好为 1 条或者标题不符，进行重置
-    if len(items) != 1 or items[0].title != "在仙林参加了一场AI产品的分享会":
-        await db.execute(delete(models.FeaturedGuide))
-        await db.commit()
-
-        real_item = models.FeaturedGuide(
-            id=1,
-            title="在仙林参加了一场AI产品的分享会",
-            cover_img="/guide/test.jpg",
-            platform="小红书",
-            platform_badge_bg="bg-[#FF2442]/20 text-[#FF2442] border-[#FF2442]/30",
-            duration="图文笔记",
-            url="https://www.xiaohongshu.com/user/profile/6799a1aa000000000e010b91/6a2f6eed0000000006021c5c?xsec_token=ABzPxAe_7shsbeXRUnRFatFieduaK2Nxat4Ijb1sTp3E8=&xsec_source=pc_user",
-            author="",
-            author_avatar="",
-            author_verified=False,
-            category="推荐",
-            reads=0,
-            likes=0,
-            favorites=0,
-        )
-        db.add(real_item)
-        await db.commit()
-
-
 @router.get("/featured", response_model=schemas.FeaturedGuidePageOut)
 async def get_featured_guides(
     page: int = Query(1, ge=1, description="当前页码"),
@@ -48,8 +17,8 @@ async def get_featured_guides(
     sort_by: Optional[str] = Query("latest", description="排序规则: latest, likes, favs, reads"),
     db: AsyncSession = Depends(get_db)
 ):
-    """获取精选推荐列表 (仅包含 1 条真实预置数据)"""
-    await check_and_seed_featured_guides(db)
+    """获取精选推荐列表"""
+    # 预置数据已由 main.py 在启动时写入；这里直接查询即可
 
     stmt = select(models.FeaturedGuide)
 

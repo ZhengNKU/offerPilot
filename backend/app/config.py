@@ -53,10 +53,10 @@ class Settings(BaseSettings):
     TMS_TIMEOUT_S: float = 8.0
     # 单次 web_search 联网检索硬超时（asyncio.wait_for 包裹）。
     # tool 调用降级到本地纯 LLM 后会立即结束工具循环，不再多跑 iter 浪费时间。
-    # 腾讯云 MCP 正常返回约需 1.5~4s，阈值需留足余量（原 4.0 卡在返回耗时上，导致大面积超时降级）。
+    # 阿里百炼 MCP 正常返回约需 1.5~4s，阈值需留足余量（原 4.0 卡在返回耗时上，导致大面积超时降级）。
     WEB_SEARCH_TIMEOUT_S: float = 12.0
-    # 腾讯云 WebSearch MCP 服务端点
-    TENCENT_MCP_SEARCH_URL: str = "https://mcp-api.tencent-cloud.com/sse/c2453837744fd833"
+    # 阿里百炼 WebSearch MCP 服务端点（streamableHttp 协议）
+    ALIYUN_MCP_SEARCH_URL: str = "https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp"
     # 本地兜底词库开关；True=开启（默认）；False=跳过本地匹配（全靠 TMS）
     CONTENT_MODERATION_LOCAL_WORDS_ENABLED: bool = True
     # 审计写入策略：False=仅 Review/Block 写审计（默认，省空间）；True=连 Pass 也写
@@ -128,6 +128,16 @@ class Settings(BaseSettings):
     LIVE_MAX_DURATION_MIN: int = 30
     LIVE_HEARTBEAT_INTERVAL_S: int = 15
     LIVE_WS_TOKEN_EXPIRE_MIN: int = 60
+
+    # ── 实时面试并发限流 + 排队（Redis ZSET 槽位管理）────────────────
+    # 背景：单进程单 worker + 容器限 1 CPU，约 10 场并发即满载。
+    # 设计：鉴权后、建桥前用 Redis 原子占槽，满则排队，队满快速拒绝。
+    # 关键不变式：所有"建桥前退出"分支都不产生 duration_sec，因此永不扣时长额度。
+    LIVE_MAX_CONCURRENT: int = 6          # 活跃并发硬上限（CAP）；灰度期可临时调大=不限流
+    LIVE_QUEUE_MAX: int = 20              # 队列长度上限；超出直接 close 4429
+    LIVE_SLOT_TTL: int = 30              # 槽位心跳 TTL（秒），须 > 2×watchdog 周期(5s)，崩溃后自动回收
+    LIVE_QUEUE_MAX_WAIT: int = 180       # 单连接最长排队秒数；超出 close 4408
+    LIVE_QUEUE_POLL_INTERVAL: float = 2.0  # 排队轮询/位置刷新间隔（秒）
 
     # 文件保留策略，单位：天。
     # 内测档 test 60 天；免费档 30 天。PRO/MAX 暂未上线。

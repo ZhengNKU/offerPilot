@@ -82,12 +82,14 @@ class LiveSessionBridge:
         db: AsyncSession,
         volc: Optional["object"] = None,  # PR3 类型 VolcRealtimeBridge, PR2 为 None
         asr_bridge: Optional["object"] = None,  # PR-N 流式短语音识别 VolcStreamingAsrBridge
+        slots: Optional["object"] = None,  # 并发槽位管理器 SlotManager（心跳续期 + 结束释放）
     ):
         self.ws = ws
         self.row = row
         self.db = db
         self.volc = volc
         self.asr_bridge = asr_bridge
+        self.slots = slots
         self._closed = False
         # 候选人累积 transcript（PR2 echo 模式也写，给 PR4 归档备用）
         self._transcript: list[dict] = []
@@ -211,6 +213,12 @@ class LiveSessionBridge:
         while not self._closed:
             await asyncio.sleep(5)
             import time
+            # 续期并发槽位 TTL（防止会话被 SlotManager 当作僵尸回收）
+            if self.slots is not None:
+                try:
+                    await self.slots.heartbeat(self.row.id)
+                except Exception as e:
+                    logger.debug(f"[bridge] 槽位心跳失败(忽略): {e}")
             # PR4: 监听 status='ending' 信号（end 端点设置）→ 主动关闭
             try:
                 await self.db.refresh(self.row)
@@ -794,6 +802,13 @@ class LiveSessionBridge:
                 await self.volc.close()
             except Exception:
                 pass
+
+        # 释放并发槽位（幂等；ws_live 最外层 finally 还会再兜底释放一次）
+        if self.slots is not None:
+            try:
+                await self.slots.release(self.row.id)
+            except Exception as e:
+                logger.warning(f"[bridge] 释放槽位失败: {e}")
 
     # ---------- 流式文本攒齐逻辑 ----------
 

@@ -478,7 +478,8 @@ COUNSELOR_SOURCE_TYPES = (
     "interview_section",     # transcript_sections 单个语义段
     "resume_analysis",       # resume_analyses.result_json 切分后的简历分析
     "project_memory",        # project_memories 单个项目
-    "live_interview",        # interview_live_sessions.analysis_result 实时面试报告
+    "live_interview",        # interview_live_sessions.analysis_result 实时面试报告（综合评价/失分点/考点等）
+    "live_interview_transcript",  # interview_live_sessions.transcript 实时面试逐字对话（按段切分）
 )
 
 

@@ -77,24 +77,60 @@ class SessionDetail(BaseModel):
 # ============================================================================
 # 速率限制
 # ============================================================================
+# 额度策略：
+#   - free（membership 为空）：终身累计 30 次，不限时间，Redis key 无日期后缀
+#   - test：按天重置 30 次/天，Redis key 带日期后缀，25h 过期
 
-DAILY_LIMIT = {
-    None: 1,     # 免费：1 次/天（≈30次/月）
+COUNSELOR_LIMIT = {
+    None: 30,     # 免费：终身累计 30 次
     "test": 30,   # 内测：30 次/天；注册起 30 天后过期降级为免费
 }
 
 
-async def _check_rate_limit(redis_client: aioredis.Redis, user_id: int, membership: Optional[str]) -> int:
-    """返回用户今日剩余可用次数；-1 表示超限。"""
+def _resolve_effective_membership(user: models.User) -> Optional[str]:
+    """返回实际生效的 membership（test 超 30 天试用期 → 降级为 None=free）。"""
+    eff = user.membership
+    if not eff:
+        return None  # 免费用户
+    eff_lower = eff.lower()
+    if eff_lower == "test":
+        from app.services.quota import _is_trial_expired
+        if _is_trial_expired(user):
+            return None  # 过期降级为免费
+    return eff_lower
+
+
+def _is_free_membership(membership: Optional[str]) -> bool:
+    """是否为免费用户（终身累计类型）。"""
+    return membership is None
+
+
+def _counselor_key(user_id: int, membership: Optional[str]) -> str:
+    """返回 Redis key：free 用户用终身 key，其他按天 key。"""
+    if _is_free_membership(membership):
+        return f"counselor:total:{user_id}"
     today = datetime.now().strftime("%Y%m%d")
-    key = f"counselor:daily:{user_id}:{today}"
+    return f"counselor:daily:{user_id}:{today}"
+
+
+async def _get_remaining_no_incr(redis_client: aioredis.Redis, user_id: int, membership: Optional[str]) -> int:
+    """只读查询剩余次数（不计数、不 +1）。"""
+    key = _counselor_key(user_id, membership)
     used = int(await redis_client.get(key) or 0)
-    limit = DAILY_LIMIT.get(membership, DAILY_LIMIT[None])
+    limit = COUNSELOR_LIMIT.get(membership, COUNSELOR_LIMIT[None])
+    return max(0, limit - used)
+
+
+async def _check_rate_limit(redis_client: aioredis.Redis, user_id: int, membership: Optional[str]) -> int:
+    """消耗一次额度，返回剩余次数；-1 表示超限。"""
+    key = _counselor_key(user_id, membership)
+    used = int(await redis_client.get(key) or 0)
+    limit = COUNSELOR_LIMIT.get(membership, COUNSELOR_LIMIT[None])
     if used >= limit:
         return -1
-    # 原子 +1，并设置 25h 过期（保证跨天计数稳定）
     new_val = await redis_client.incr(key)
-    if new_val == 1:
+    # 非终身用户（按天）：首次写入时设 25h 过期
+    if new_val == 1 and not _is_free_membership(membership):
         await redis_client.expire(key, 25 * 3600)
     return max(0, limit - int(new_val))
 
@@ -153,6 +189,25 @@ async def get_counselor_stats(
 
 
 # ============================================================================
+# GET /quota - 查询剩余额度（只读，不计数）
+# ============================================================================
+
+@router.get("/quota")
+async def get_counselor_quota(
+    redis_client: aioredis.Redis = Depends(get_redis),
+    current_user: models.User = Depends(get_current_user),
+):
+    """查询今日剩余咨询次数（只读，不消耗额度）。"""
+    eff_membership = _resolve_effective_membership(current_user)
+    remaining = await _get_remaining_no_incr(redis_client, current_user.id, eff_membership)
+    return {
+        "remaining": remaining,
+        "limit": COUNSELOR_LIMIT.get(eff_membership, COUNSELOR_LIMIT[None]),
+        "is_free": _is_free_membership(eff_membership),
+    }
+
+
+# ============================================================================
 # POST /chat - SSE 流式对话
 # ============================================================================
 
@@ -172,17 +227,17 @@ async def chat(
       - error   → {"message": "..."}
     """
     # 1. 速率限制
-    # 内测用户超 30 天试用期 → 按免费算
-    eff_membership = current_user.membership
-    if eff_membership and eff_membership.lower() == "test":
-        from app.services.quota import _is_trial_expired
-        if _is_trial_expired(current_user):
-            eff_membership = None
+    eff_membership = _resolve_effective_membership(current_user)
     remaining = await _check_rate_limit(redis_client, current_user.id, eff_membership)
     if remaining < 0:
+        limit = COUNSELOR_LIMIT.get(eff_membership, COUNSELOR_LIMIT[None])
+        if _is_free_membership(eff_membership):
+            detail = f"AI 职业顾问免费咨询次数已用完（共 {limit} 次）"
+        else:
+            detail = f"今日咨询次数已用完（{limit} 次/天），请明天再来或升级会员"
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"今日咨询次数已用完（{DAILY_LIMIT.get(eff_membership, 20)} 次/天），明天再来或升级会员",
+            detail=detail,
         )
 
     # 2. 获取/创建 session

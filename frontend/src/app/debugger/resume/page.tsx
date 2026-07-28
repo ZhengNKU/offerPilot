@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { API_BASE } from "@/lib/api";
 
 function ResumeAnalysisPageContent() {
@@ -680,7 +681,7 @@ function ResumeAnalysisPageContent() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050B1A] text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden pt-20">
+    <div className="min-h-screen bg-slate-50 dark:bg-[#050B1A] text-slate-900 dark:text-[#dae2fd] font-body-md flex flex-col relative overflow-hidden pt-20 resume-workbench-bg">
       {/* ========================================================
           HYDRATING OVERLAY — blocks the report UI until
           analysisResult is populated (matches the loading overlay
@@ -697,7 +698,7 @@ function ResumeAnalysisPageContent() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
-            className="fixed inset-0 z-[60] bg-[#050B1A]/95 backdrop-blur-xl flex flex-col justify-center items-center gap-6 px-8"
+            className="fixed inset-0 z-[60] bg-white/95 dark:bg-[#050B1A]/95 backdrop-blur-xl flex flex-col justify-center items-center gap-6 px-8"
           >
             {/* Dual-ring spinner — same vibe as voice/record overlays */}
             <div className="relative w-16 h-16">
@@ -706,10 +707,10 @@ function ResumeAnalysisPageContent() {
             </div>
 
             <div className="text-center space-y-3">
-              <h3 className="font-black text-white text-2xl md:text-3xl animate-pulse tracking-wide">
+              <h3 className="font-black text-slate-900 dark:text-white text-2xl md:text-3xl animate-pulse tracking-wide">
                 正在加载简历诊断报告...
               </h3>
-              <p className="text-base md:text-lg text-white/70 font-semibold">
+              <p className="text-base md:text-lg text-slate-600 dark:text-white/70 font-semibold">
                 即将呈现 8 维度结构化诊断与岗位匹配分析
               </p>
             </div>
@@ -718,9 +719,9 @@ function ResumeAnalysisPageContent() {
       </AnimatePresence>
 
       {/* Background visual grid elements */}
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />
-      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-[#AFA7FF]/5 rounded-full blur-[160px] pointer-events-none z-0" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-[#5DECCB]/3 rounded-full blur-[160px] pointer-events-none z-0" />
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#0f172a08_1px,transparent_1px),linear-gradient(to_bottom,#0f172a08_1px,transparent_1px)] dark:bg-[linear-gradient(to_right,#ffffff02_1px,transparent_1px),linear-gradient(to_bottom,#ffffff02_1px,transparent_1px)] bg-[size:40px_40px] pointer-events-none z-0" />
+      <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-[#AFA7FF]/10 dark:bg-[#AFA7FF]/5 rounded-full blur-[160px] pointer-events-none z-0" />
+      <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-[#5DECCB]/10 dark:bg-[#5DECCB]/3 rounded-full blur-[160px] pointer-events-none z-0" />
 
       {/* ========================================================
           GLOBAL NAVBAR
@@ -759,13 +760,14 @@ function ResumeAnalysisPageContent() {
             </a>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => router.push("/memory?tab=timeline")}
               className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <span className="material-symbols-outlined text-base">history</span>历史记录
             </button>
+            <ThemeToggle />
             {auth.isLoggedIn ? (
               <UserMenu />
             ) : (
@@ -807,9 +809,9 @@ function ResumeAnalysisPageContent() {
             
             {/* Sidebar Profile Card */}
             <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 text-left lg:min-h-[402px] shrink-0">
-              <div className="flex justify-between items-center pb-2.5 border-b border-white/5">
-                <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-base text-[#00D4FF]">assignment_ind</span>
+              <div className="flex justify-between items-center pb-2.5 border-b border-slate-200 dark:border-white/5">
+                <h4 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-base text-sky-600 dark:text-[#00D4FF]">assignment_ind</span>
                   简历信息
                 </h4>
               </div>
@@ -839,51 +841,51 @@ function ResumeAnalysisPageContent() {
                       </div>
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-1.5">
-                          <span className="text-base font-black text-white">{displayName}</span>
+                          <span className="text-base font-black text-slate-900 dark:text-white">{displayName}</span>
                           <span className="px-1.5 py-0.2 rounded bg-[#5DECCB]/10 text-[#5DECCB] border border-[#5DECCB]/25 text-xs font-black uppercase">
                             {profile.status && profile.status.trim() ? profile.status : (auth.user.status || "-")}
                           </span>
                         </div>
                         {displayRole && displayRole !== "-" && (
-                          <p className="text-xs text-white/50 font-bold">{displayRole}</p>
+                          <p className="text-xs text-slate-500 dark:text-white/50 font-bold">{displayRole}</p>
                         )}
                       </div>
                     </div>
 
                     {/* Attributes list */}
-                    <div className="space-y-2.5 text-xs font-bold text-white/60">
+                    <div className="space-y-2.5 text-xs font-bold text-slate-500 dark:text-white/60">
                       <div className="flex justify-between items-start gap-3">
-                        <span className="shrink-0">工作年限</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.years && profile.years.trim() ? profile.years : (auth.user.years || "-")}</span>
+                        <span className="resume-info-label shrink-0">工作年限</span>
+                        <span className="resume-info-val text-slate-800 dark:text-white font-extrabold text-right break-words max-w-[70%]">{profile.years && profile.years.trim() ? profile.years : (auth.user.years || "-")}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
-                        <span className="shrink-0">当前公司</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{displayCompany && displayCompany.trim() ? displayCompany : "-"}</span>
+                        <span className="resume-info-label shrink-0">当前公司</span>
+                        <span className="resume-info-val text-slate-800 dark:text-white font-extrabold text-right break-words max-w-[70%]">{displayCompany && displayCompany.trim() ? displayCompany : "-"}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
-                        <span className="shrink-0">当前岗位</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{displayRole && displayRole.trim() ? displayRole : "-"}</span>
+                        <span className="resume-info-label shrink-0">当前岗位</span>
+                        <span className="resume-info-val text-slate-800 dark:text-white font-extrabold text-right break-words max-w-[70%]">{displayRole && displayRole.trim() ? displayRole : "-"}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
-                        <span className="shrink-0">当前薪资</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.salary && profile.salary.trim() ? profile.salary : "-"}</span>
+                        <span className="resume-info-label shrink-0">当前薪资</span>
+                        <span className="resume-info-val text-slate-800 dark:text-white font-extrabold text-right break-words max-w-[70%]">{profile.salary && profile.salary.trim() ? profile.salary : "-"}</span>
                       </div>
-                      <div className="h-px bg-white/5 my-1" />
+                      <div className="h-px bg-slate-200 dark:bg-white/5 my-1" />
                       <div className="flex justify-between items-start gap-3">
-                        <span className="shrink-0">目标公司</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetCompany && profile.targetCompany.trim() ? profile.targetCompany : "-"}</span>
-                      </div>
-                      <div className="flex justify-between items-start gap-3">
-                        <span className="shrink-0">目标岗位</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetRole && profile.targetRole.trim() ? profile.targetRole : "-"}</span>
+                        <span className="resume-info-label shrink-0">目标公司</span>
+                        <span className="resume-info-val text-slate-800 dark:text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetCompany && profile.targetCompany.trim() ? profile.targetCompany : "-"}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
-                        <span className="shrink-0">目标职级</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetGrade && profile.targetGrade.trim() ? profile.targetGrade : "-"}</span>
+                        <span className="resume-info-label shrink-0">目标岗位</span>
+                        <span className="resume-info-val text-slate-800 dark:text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetRole && profile.targetRole.trim() ? profile.targetRole : "-"}</span>
                       </div>
                       <div className="flex justify-between items-start gap-3">
-                        <span className="shrink-0">目标薪资</span>
-                        <span className="text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetSalary && profile.targetSalary.trim() ? profile.targetSalary : "-"}</span>
+                        <span className="resume-info-label shrink-0">目标职级</span>
+                        <span className="resume-info-val text-slate-800 dark:text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetGrade && profile.targetGrade.trim() ? profile.targetGrade : "-"}</span>
+                      </div>
+                      <div className="flex justify-between items-start gap-3">
+                        <span className="resume-info-label shrink-0">目标薪资</span>
+                        <span className="resume-info-val text-slate-800 dark:text-white font-extrabold text-right break-words max-w-[70%]">{profile.targetSalary && profile.targetSalary.trim() ? profile.targetSalary : "-"}</span>
                       </div>
                     </div>
                   </>
@@ -893,9 +895,9 @@ function ResumeAnalysisPageContent() {
 
             {/* Sidebar Structure Status Card */}
             <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-4 text-left flex-1 lg:h-0 lg:min-h-0 overflow-hidden">
-              <div className="flex justify-between items-center pb-2.5 border-b border-white/5">
-                <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-base text-[#00D4FF]">map</span>
+              <div className="flex justify-between items-center pb-2.5 border-b border-slate-200 dark:border-white/5">
+                <h4 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-base text-sky-600 dark:text-[#00D4FF]">map</span>
                   简历结构地图
                 </h4>
               </div>
@@ -912,10 +914,10 @@ function ResumeAnalysisPageContent() {
                 ].map((item, idx) => (
                   <div
                     key={idx}
-                    className="p-3 rounded-xl border border-white/5 bg-[#050B1A]/40 flex justify-between items-center text-xs font-bold"
+                    className="resume-structure-item p-3 rounded-xl border border-[#e9d5ff] dark:border-white/5 bg-[#f3f0ff] dark:bg-[#050B1A]/40 flex justify-between items-center text-xs font-bold"
                   >
-                    <span className="text-[13px] text-white/90">{item.name}</span>
-                    <span className={`px-2 py-0.2 rounded text-sm font-black uppercase border shrink-0 ${item.color}`}>
+                    <span className="resume-structure-title text-sm text-slate-800 dark:text-white/90 font-extrabold">{item.name}</span>
+                    <span className={`px-2 py-0.2 rounded text-xs font-black uppercase border shrink-0 ${item.color}`}>
                       {item.status}
                     </span>
                   </div>
@@ -924,7 +926,7 @@ function ResumeAnalysisPageContent() {
 
               <button
                 onClick={() => setShowStructureModal(true)}
-                className="w-full pt-3.5 border-t border-white/5 text-sm text-[#AFA7FF] font-black hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
+                className="w-full pt-3.5 border-t border-slate-200 dark:border-white/5 text-sm text-indigo-600 dark:text-[#AFA7FF] font-black hover:text-indigo-800 dark:hover:text-white transition-colors cursor-pointer flex items-center justify-center gap-1"
               >
                 查看完整结构分析 <span className="material-symbols-outlined text-xs">arrow_forward</span>
               </button>
@@ -940,10 +942,10 @@ function ResumeAnalysisPageContent() {
             {/* Center Header Details */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 select-none text-left">
               <div>
-                <h2 className="text-lg font-black text-white flex items-center gap-2">
+                <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
                   简历深度分析
                 </h2>
-                <p className="text-[11px] text-white/30 font-bold mt-1">
+                <p className="text-[11px] text-slate-500 dark:text-white/30 font-bold mt-1">
                   根据目标求职画像精确定位简历漏洞与风险点，输出AI专家建议
                 </p>
               </div>
@@ -1014,15 +1016,15 @@ function ResumeAnalysisPageContent() {
               return (
                 <div className="grid grid-cols-4 gap-3.5 select-none shrink-0">
                   {dynamicMetrics.map((m, i) => (
-                    <div key={i} className="glass-panel p-4 rounded-xl border-white/5 flex items-center gap-3 w-full">
-                      <div className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                    <div key={i} className="glass-panel p-4 rounded-xl border-slate-200 dark:border-white/5 flex items-center gap-3 w-full">
+                      <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 flex items-center justify-center shrink-0">
                         <span className={`material-symbols-outlined text-base ${m.color}`}>
                           {m.icon}
                         </span>
                       </div>
                       <div className="text-left min-w-0 flex-1">
-                        <span className="text-xs text-white/40 font-bold block">{m.title}</span>
-                        <span className="text-sm md:text-base font-black text-white block mt-0.5 leading-none font-mono">
+                        <span className="text-xs text-slate-500 dark:text-white/40 font-bold block">{m.title}</span>
+                        <span className="text-sm md:text-base font-black text-slate-900 dark:text-white block mt-0.5 leading-none font-mono">
                           {m.val}
                         </span>
                       </div>
@@ -1036,7 +1038,7 @@ function ResumeAnalysisPageContent() {
             <div className="glass-panel rounded-2xl border-white/5 p-4 flex flex-col gap-4 flex-1 lg:h-0 lg:min-h-0 min-h-[600px] overflow-hidden">
               
               {/* Tab Header Row */}
-              <div className="flex border-b border-white/5 pb-2.5 overflow-x-auto gap-2 shrink-0 select-none no-scrollbar">
+              <div className="flex border-b border-slate-200 dark:border-white/5 pb-2.5 overflow-x-auto gap-2 shrink-0 select-none no-scrollbar">
                 {[
                   { id: "preview", label: "简历预览" },
                   { id: "risk", label: "风险分析" },
@@ -1050,8 +1052,8 @@ function ResumeAnalysisPageContent() {
                     onClick={() => setActiveTab(tab.id as any)}
                     className={`px-3 py-1.5 rounded-lg text-[13px] md:text-sm font-black whitespace-nowrap cursor-pointer transition-all ${
                       activeTab === tab.id
-                        ? "bg-[#AFA7FF]/15 text-[#AFA7FF] border border-[#AFA7FF]/20"
-                        : "text-white/40 hover:text-white/70 hover:bg-white/5 border border-transparent"
+                        ? "resume-tab-active bg-violet-50 dark:bg-[#AFA7FF]/15 text-violet-700 dark:text-[#AFA7FF] border border-violet-200 dark:border-[#AFA7FF]/20"
+                        : "resume-tab-inactive text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5 border border-transparent"
                     }`}
                   >
                     {tab.label}
@@ -1066,20 +1068,20 @@ function ResumeAnalysisPageContent() {
                       TAB 1: RESUME PREVIEW (HIGH-FIDELITY EXPERIENCE BLOCKS)
                      ======================================================== */
                   <div className="space-y-6 pt-1">
-                    <div className="flex justify-between items-center pb-2 border-b border-white/5">
-                      <h4 className="text-sm font-black text-white flex items-center gap-1.5">
-                        <span className="material-symbols-outlined text-base text-[#00D4FF]">business_center</span>
+                    <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-white/5">
+                      <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                        <span className="material-symbols-outlined text-base text-sky-600 dark:text-[#00D4FF]">business_center</span>
                         工作/实习经历
                       </h4>
 
                       {/* Original vs Optimized Switcher */}
-                      <div className="flex rounded-lg bg-slate-950 p-1 border border-white/5 select-none font-bold text-[10px] md:text-xs">
+                      <div className="resume-toggle-pill flex rounded-lg bg-[#f1f5f9] dark:bg-slate-950 p-1 border border-[#cbd5e1] dark:border-white/5 select-none font-bold text-[10px] md:text-xs">
                         <button
                           onClick={() => setViewMode("original")}
                           className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
                             viewMode === "original"
-                              ? "bg-[#AFA7FF]/15 text-[#AFA7FF] border border-[#AFA7FF]/15"
-                              : "text-white/40 hover:text-white/70"
+                              ? "bg-white dark:bg-[#AFA7FF]/15 text-indigo-600 dark:text-[#AFA7FF] border border-[#cbd5e1] dark:border-[#AFA7FF]/15 shadow-sm font-black"
+                              : "text-slate-600 dark:text-white/40 hover:text-slate-900 dark:hover:text-white/70"
                           }`}
                         >
                           原始简历
@@ -1088,8 +1090,8 @@ function ResumeAnalysisPageContent() {
                           onClick={() => setViewMode("optimized")}
                           className={`px-3 py-1 rounded-md transition-all cursor-pointer ${
                             viewMode === "optimized"
-                              ? "bg-[#5DECCB]/15 text-[#5DECCB] border border-[#5DECCB]/15"
-                              : "text-white/40 hover:text-white/70"
+                              ? "bg-white dark:bg-[#5DECCB]/15 text-emerald-600 dark:text-[#5DECCB] border border-[#cbd5e1] dark:border-[#5DECCB]/15 shadow-sm font-black"
+                              : "text-slate-600 dark:text-white/40 hover:text-slate-900 dark:hover:text-white/70"
                           }`}
                         >
                           AI 优化预览
@@ -1102,10 +1104,10 @@ function ResumeAnalysisPageContent() {
                         <div key={expIdx} className="space-y-3.5 text-left">
                           <div className="flex justify-between items-center text-xs font-bold font-mono">
                             <div className="flex items-center gap-3">
-                              <span className="text-sm font-black text-white">{exp.company}</span>
-                              <span className="text-white/45">{exp.role}</span>
+                              <span className="text-sm font-black text-slate-900 dark:text-white">{exp.company}</span>
+                              <span className="text-slate-500 dark:text-white/45">{exp.role}</span>
                             </div>
-                            <span className="text-white/30">{exp.period}</span>
+                            <span className="text-slate-400 dark:text-white/30">{exp.period}</span>
                           </div>
 
                           <div className="space-y-2.5">
@@ -1115,8 +1117,8 @@ function ResumeAnalysisPageContent() {
                               const badgeLabel = isOriginal ? bullet.originalTag : bullet.optimizedTag;
                               const badgeStyle = (isOriginal ? bullet.originalTagClass : bullet.optimizedTagClass) || 
                                 (badgeLabel === "风险" 
-                                  ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20" 
-                                  : "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20");
+                                  ? "text-rose-700 bg-rose-50 border-rose-200 dark:text-[#FF7A95] dark:bg-[#FF7A95]/10 dark:border-[#FF7A95]/20" 
+                                  : "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-[#5DECCB] dark:bg-[#5DECCB]/10 dark:border-[#5DECCB]/20");
                               const isRisk = isOriginal && bullet.originalTag === "风险";
 
                               return (
@@ -1125,13 +1127,13 @@ function ResumeAnalysisPageContent() {
                                   className={`p-3.5 rounded-xl border text-xs md:text-sm flex flex-col gap-2 relative transition-all duration-300 ${
                                     isOriginal
                                       ? isRisk
-                                        ? "bg-red-950/[0.04] border-red-500/10 hover:border-red-500/20"
-                                        : "bg-emerald-950/[0.04] border-emerald-500/10 hover:border-emerald-500/20"
-                                      : "bg-emerald-950/[0.08] border-emerald-500/15 hover:border-emerald-500/30"
+                                        ? "bg-rose-50/50 dark:bg-red-950/[0.04] border-rose-200 dark:border-red-500/10 hover:border-rose-300 dark:hover:border-red-500/20"
+                                        : "bg-indigo-50/40 dark:bg-emerald-950/[0.04] border-indigo-100 dark:border-emerald-500/10 hover:border-indigo-200 dark:hover:border-emerald-500/20"
+                                      : "bg-emerald-50/50 dark:bg-emerald-950/[0.08] border-emerald-200 dark:border-emerald-500/15 hover:border-emerald-300 dark:hover:border-emerald-500/30"
                                   }`}
                                 >
                                   <div className="flex justify-between items-start gap-4">
-                                    <p className="text-[13px] md:text-sm leading-relaxed text-white font-semibold flex-1">
+                                    <p className="text-[13px] md:text-sm leading-relaxed text-slate-800 dark:text-white font-semibold flex-1">
                                       {textContent}
                                     </p>
                                     <span className={`px-2.5 py-0.5 rounded text-xs font-black uppercase border shrink-0 ${badgeStyle}`}>
@@ -1141,8 +1143,8 @@ function ResumeAnalysisPageContent() {
 
                                   {/* Explanation notes (only in original mode) */}
                                   {isOriginal && (
-                                    <div className="flex items-center gap-1.5 text-[11px] text-white/40 font-bold border-t border-white/5 pt-2 mt-1">
-                                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRisk ? "bg-amber-400" : "bg-[#5DECCB]"}`} />
+                                    <div className="resume-bullet-explain flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-bold border-t border-slate-200 dark:border-white/5 pt-2 mt-1">
+                                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRisk ? "bg-amber-500" : "bg-emerald-500"}`} />
                                       <span>{bullet.originalDesc}</span>
                                     </div>
                                   )}
@@ -1161,30 +1163,30 @@ function ResumeAnalysisPageContent() {
                       TAB 2: RISK ANALYSIS
                      ======================================================== */
                   <div className="space-y-4 pt-1 text-left">
-                    <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
-                      <span className="material-symbols-outlined text-base text-[#FF7A95]">warning</span>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5 pb-2 border-b border-slate-200 dark:border-white/5">
+                      <span className="material-symbols-outlined text-base text-rose-500 dark:text-[#FF7A95]">warning</span>
                       简历风险漏洞诊断报告
                     </h4>
                     <div className="space-y-3">
                       {risksList.map((item: any, idx: number) => {
                         const priority = item.severity || item.priority || "中风险";
                         const color = priority === "高风险"
-                          ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+                          ? "text-rose-700 bg-rose-50 border-rose-200 dark:text-[#FF7A95] dark:bg-[#FF7A95]/10 dark:border-[#FF7A95]/20"
                           : priority === "中风险"
-                            ? "text-amber-400 bg-amber-400/10 border-amber-400/20"
-                            : "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20";
+                            ? "text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-400/10 dark:border-amber-400/20"
+                            : "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-[#5DECCB] dark:bg-[#5DECCB]/10 dark:border-[#5DECCB]/20";
                         return (
-                          <div key={idx} className="p-3.5 rounded-xl border border-white/5 bg-[#050B1A]/80 space-y-1.5 text-sm md:text-sm">
+                          <div key={idx} className="resume-sub-card p-3.5 rounded-xl border border-[#e9d5ff] dark:border-white/5 bg-[#f3f0ff] dark:bg-[#050B1A]/80 space-y-1.5 text-sm md:text-sm">
                             <div className="flex justify-between items-center">
-                              <span className="font-extrabold text-white flex items-center gap-2">
-                                <span className="w-5 h-5 rounded-full bg-white/5 flex items-center justify-center font-mono text-[10px] font-black text-white/55">{idx + 1}</span>
+                              <span className="font-extrabold text-slate-800 dark:text-white flex items-center gap-2">
+                                <span className="resume-risk-num w-5 h-5 rounded-full bg-slate-200 dark:bg-white/5 flex items-center justify-center font-mono text-[10px] font-black text-slate-700 dark:text-slate-300">{idx + 1}</span>
                                 {item.title}
                               </span>
                               <span className={`px-2.5 py-0.5 rounded border text-xs font-black shrink-0 ${color}`}>
                                 {priority}
                               </span>
                             </div>
-                            <p className="text-xs text-white/45 leading-relaxed font-bold pl-7">
+                            <p className="resume-risk-desc text-xs text-slate-600 dark:text-slate-400 leading-relaxed font-bold pl-7">
                               {item.desc}
                             </p>
                           </div>
@@ -1199,17 +1201,17 @@ function ResumeAnalysisPageContent() {
                       TAB 3: JOB MATCH ANALYSIS
                      ======================================================== */
                   <div className="space-y-4 pt-1 text-left">
-                    <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
-                      <span className="material-symbols-outlined text-base text-[#5DECCB]">donut_large</span>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5 pb-2 border-b border-slate-200 dark:border-white/5">
+                      <span className="material-symbols-outlined text-base text-emerald-600 dark:text-[#5DECCB]">donut_large</span>
                       岗位画像深度匹配分析 (目标岗位: {profile.targetCompany} {profile.targetRole})
                     </h4>
                     <div className="space-y-4">
-                      <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 flex items-center gap-5 justify-between">
+                      <div className="resume-sub-card p-4 rounded-xl bg-[#f8fafc] dark:bg-white/[0.01] border border-[#e2e8f0] dark:border-white/5 flex items-center gap-5 justify-between">
                         <div className="space-y-1">
-                          <span className="text-xs text-white/45 font-bold">画像符合度估值</span>
-                          <h3 className="text-2xl font-black text-[#5DECCB] font-mono">{analysisResult?.match_analysis?.match_score ?? 83}% Match</h3>
+                          <span className="text-xs text-slate-500 dark:text-white/45 font-bold">画像符合度估值</span>
+                          <h3 className="resume-match-score text-2xl font-black dark:text-[#5DECCB] font-mono">{analysisResult?.match_analysis?.match_score ?? 83}% Match</h3>
                         </div>
-                        <p className="text-xs text-white/60 leading-relaxed font-bold flex-1 max-w-sm">
+                        <p className="text-xs text-slate-600 dark:text-white/60 leading-relaxed font-bold flex-1 max-w-sm">
                           {analysisResult?.match_analysis?.match_desc ?? "您的技术背景与阿里/腾讯等主流大厂的【高并发微服务后端专家】JD极其吻合。重点缺失项主要集中在“业务闭环指标”和“管理/带人经验”描述。"}
                         </p>
                       </div>
@@ -1221,17 +1223,17 @@ function ResumeAnalysisPageContent() {
                           { item: "分布式一致性方案 (TCC/Saga/2PC)", status: "基础具备", percent: "75%" },
                           { item: "全链路线上大促压测与高可用设计", status: "描述较弱", percent: "45%" }
                         ]).map((m: any, idx: number) => {
-                          let tagStyle = "text-amber-400 bg-amber-400/10 border-amber-400/25";
+                          let tagStyle = "text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-400/10 dark:border-amber-400/25";
                           if (m.status === "完美覆盖" || m.status === "覆盖") {
-                            tagStyle = "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25";
+                            tagStyle = "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-[#5DECCB] dark:bg-[#5DECCB]/10 dark:border-[#5DECCB]/25";
                           } else if (m.status === "描述较弱" || m.status === "缺失") {
-                            tagStyle = "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25";
+                            tagStyle = "text-rose-700 bg-rose-50 border-rose-200 dark:text-[#FF7A95] dark:bg-[#FF7A95]/10 dark:border-[#FF7A95]/25";
                           }
                           return (
-                            <div key={idx} className="p-3 rounded-xl border border-white/5 bg-[#050B1A]/40 flex justify-between items-center text-xs md:text-sm font-bold">
-                              <span className="text-white/80">{m.item}</span>
+                            <div key={idx} className="resume-sub-card p-3 rounded-xl border border-[#e2e8f0] dark:border-white/5 bg-[#f8fafc] dark:bg-[#050B1A]/40 flex justify-between items-center text-xs md:text-sm font-bold">
+                              <span className="text-slate-800 dark:text-white/80 font-extrabold">{m.item}</span>
                               <div className="flex items-center gap-3">
-                                <span className="font-mono text-white/55 font-black">{m.percent}</span>
+                                <span className="resume-match-percent font-mono text-slate-500 dark:text-slate-400 font-black">{m.percent}</span>
                                 <span className={`px-2.5 py-0.5 rounded border text-xs font-black uppercase ${tagStyle}`}>
                                   {m.status}
                                 </span>
@@ -1247,21 +1249,22 @@ function ResumeAnalysisPageContent() {
                 {activeTab === "optimization" && (
                   /* ========================================================
                       TAB 4: AI SUGGESTIONS
+                      适配浅色模式：与其它 Tab 风格保持一致
                      ======================================================== */
                   <div className="space-y-4 pt-1 text-left">
-                    <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
-                      <span className="material-symbols-outlined text-base text-[#AFA7FF]">lightbulb</span>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5 pb-2 border-b border-slate-200 dark:border-white/5">
+                      <span className="material-symbols-outlined text-base text-indigo-600 dark:text-[#AFA7FF]">lightbulb</span>
                       AI 简历深度优化建议书
                     </h4>
-                    <div className="space-y-3.5 text-xs md:text-sm text-white/70 font-semibold leading-relaxed">
+                    <div className="space-y-3.5 text-xs md:text-sm text-slate-600 dark:text-white/70 font-semibold leading-relaxed">
                       {(analysisResult?.optimization_suggestions || [
                         { title: "建议 1：重塑“动作词”，剔除事务型字眼", desc: "在简历中，避免将自己的工作描绘为“被动执行”。将所有的“负责开发”、“配合维护”替换为“主导设计”、“构建”、“重塑”、“突破”等主动掌控性动词。" },
                         { title: "建议 2：STAR 法则全盘套用，补齐 Result (成果)", desc: "每一个项目经历必须遵循：背景与挑战(Situation) → 目标(Task) → 采取的架构行动(Action) → 业务/技术产出成果(Result)。特别是必须把性能提高比例、节省机器成本、解决事故次数等量化。" },
                         { title: "建议 3：精修技术栈，提升高级段位感", desc: "不要笼统写“精通 Java/Go”，应当写“深入研究 Spring/JVM 垃圾回收调优逻辑，阅读 Kafka 源码；掌握 Redis 缓存穿透与大 Key 多级缓冲治理架构”。" }
                       ]).map((item: any, idx: number) => (
-                        <div key={idx} className="p-4 rounded-xl bg-white/[0.01] border border-white/5 space-y-2">
-                          <h5 className="font-black text-[#AFA7FF] text-sm">{item.title}</h5>
-                          <p className="text-white/50 font-bold leading-normal">{item.desc}</p>
+                        <div key={idx} className="resume-sub-card p-4 rounded-xl bg-white dark:bg-[#0b1326] border border-slate-200 dark:border-white/5 space-y-2">
+                          <h5 className="resume-suggestion-title font-black dark:text-[#AFA7FF] text-sm">{item.title}</h5>
+                          <p className="text-slate-600 dark:text-white/50 font-bold leading-normal">{item.desc}</p>
                         </div>
                       ))}
                     </div>
@@ -1271,18 +1274,19 @@ function ResumeAnalysisPageContent() {
                 {activeTab === "keywords" && (
                   /* ========================================================
                       TAB 5: KEYWORDS ANALYSIS
+                      适配浅色模式：与其它 Tab 风格保持一致
                      ======================================================== */
                   <div className="space-y-4 pt-1 text-left">
-                    <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
-                      <span className="material-symbols-outlined text-base text-[#00D4FF]">tag</span>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5 pb-2 border-b border-slate-200 dark:border-white/5">
+                      <span className="material-symbols-outlined text-base text-sky-600 dark:text-[#00D4FF]">tag</span>
                       简历关键词覆盖率分析
                     </h4>
                     <div className="space-y-3.5">
-                      <div className="p-4 rounded-xl bg-white/[0.01] border border-white/5 text-xs text-white/50 font-bold leading-relaxed space-y-2">
+                      <div className="resume-sub-card p-4 rounded-xl bg-white dark:bg-[#0b1326] border border-slate-200 dark:border-white/5 text-xs text-slate-600 dark:text-white/50 font-bold leading-relaxed space-y-2">
                         <p>大厂AI筛简历系统（ATS）会根据JD权重匹配核心词频。当前简历关键词权重最高的为：</p>
                         <div className="flex flex-wrap gap-2 pt-1.5">
                           {(analysisResult?.keywords_analysis?.current_keywords || ["Redis", "Kafka", "分布式系统", "高并发", "后端开发", "架构设计", "接口优化"]).map((word: string, idx: number) => (
-                            <span key={idx} className="px-2.5 py-1 rounded-md bg-[#AFA7FF]/10 text-[#AFA7FF] border border-[#AFA7FF]/20 text-xs font-black">
+                            <span key={idx} className="resume-keyword-highlight px-2.5 py-1 rounded-md dark:bg-[#AFA7FF]/10 dark:text-[#AFA7FF] dark:border-[#AFA7FF]/20 text-xs font-black">
                               {word} (高频)
                             </span>
                           ))}
@@ -1290,10 +1294,10 @@ function ResumeAnalysisPageContent() {
                       </div>
 
                       <div className="space-y-2.5">
-                        <h5 className="text-xs font-black text-white">推荐补齐的行业热点词：</h5>
+                        <h5 className="text-xs font-black text-slate-900 dark:text-white">推荐补齐的行业热点词：</h5>
                         <div className="flex flex-wrap gap-2">
                           {(analysisResult?.keywords_analysis?.recommended_keywords || ["Service Mesh", "高可用容灾", "限流熔断", "多机房多活", "性能调优", "微服务编排"]).map((word: string, idx: number) => (
-                            <span key={idx} className="px-2.5 py-1 rounded-md bg-white/5 text-white/50 border border-white/10 text-xs font-bold">
+                            <span key={idx} className="resume-keyword-recommend px-2.5 py-1 rounded-md bg-slate-100 border border-slate-200 dark:bg-white/5 dark:text-slate-400 dark:border-white/10 text-xs font-bold">
                               {word}
                             </span>
                           ))}
@@ -1308,8 +1312,8 @@ function ResumeAnalysisPageContent() {
                       TAB 6: ATS COMPATIBILITY
                      ======================================================== */
                   <div className="space-y-4 pt-1 text-left">
-                    <h4 className="text-sm font-black text-white flex items-center gap-1.5 pb-2 border-b border-white/5">
-                      <span className="material-symbols-outlined text-base text-[#00D4FF]">checklist</span>
+                    <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5 pb-2 border-b border-slate-200 dark:border-white/5">
+                      <span className="material-symbols-outlined text-base text-sky-600 dark:text-[#00D4FF]">checklist</span>
                       大厂 ATS 机器人可读性诊断
                     </h4>
                     <div className="space-y-3">
@@ -1320,23 +1324,23 @@ function ResumeAnalysisPageContent() {
                         { name: "非标准分隔符识别", status: "警告", score: "图表/虚线可能截断" }
                       ]).map((item: any, idx: number) => {
                         const isExpanded = !!expandedAts[idx];
-                        let color = "text-amber-400 border-amber-400/20 bg-amber-400/10";
+                        let color = "text-amber-700 bg-amber-50 border-amber-200 dark:text-amber-400 dark:border-amber-400/20 dark:bg-amber-400/10";
                         if (item.status === "通过") {
-                          color = "text-[#5DECCB] border-[#5DECCB]/20 bg-[#5DECCB]/10";
+                          color = "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-[#5DECCB] dark:border-[#5DECCB]/20 dark:bg-[#5DECCB]/10";
                         } else if (item.status === "警告" || item.status === "不通过") {
-                          color = "text-[#FF7A95] border-[#FF7A95]/20 bg-[#FF7A95]/10";
+                          color = "text-rose-700 bg-rose-50 border-rose-200 dark:text-[#FF7A95] dark:border-[#FF7A95]/20 dark:bg-[#FF7A95]/10";
                         }
                         return (
                           <div
                             key={idx}
                             onClick={() => setExpandedAts(prev => ({ ...prev, [idx]: !prev[idx] }))}
-                            className="p-4 rounded-xl border border-white/5 bg-[#050B1A]/40 flex flex-col transition-all hover:bg-[#050B1A]/60 cursor-pointer select-none group"
+                            className="resume-sub-card p-4 rounded-xl border border-[#e2e8f0] dark:border-white/5 bg-[#f8fafc] dark:bg-[#050B1A]/40 flex flex-col transition-all cursor-pointer select-none group"
                           >
                             <div className="flex justify-between items-center text-xs md:text-sm font-bold gap-4 w-full">
                               <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                                <span className="text-white/80 shrink-0">{item.name}</span>
+                                <span className="text-slate-800 dark:text-white/80 shrink-0 font-extrabold">{item.name}</span>
                                 {!isExpanded && item.score && (
-                                  <span className="text-xs text-white/35 font-normal truncate hidden sm:block">
+                                  <span className="resume-ats-score-line text-xs font-normal truncate hidden sm:block">
                                     — {item.score}
                                   </span>
                                 )}
@@ -1345,7 +1349,7 @@ function ResumeAnalysisPageContent() {
                                 <span className={`px-2.5 py-0.5 rounded border text-xs font-black uppercase ${color}`}>
                                   {item.status}
                                 </span>
-                                <span className={`material-symbols-outlined text-white/30 group-hover:text-white transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}>
+                                <span className={`resume-ats-expand-icon material-symbols-outlined dark:text-white/30 group-hover:text-white transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}>
                                   expand_more
                                 </span>
                               </div>
@@ -1385,14 +1389,14 @@ function ResumeAnalysisPageContent() {
             {/* 3.1 Resume Hiring Score */}
             <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-2.5 select-none lg:flex-1 lg:min-h-0 shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
-                <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-sm text-[#00D4FF]">verified</span>
+                <h4 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-sky-600 dark:text-[#00D4FF]">verified</span>
                   简历综合评分
                 </h4>
                 <button
                   type="button"
                   onClick={() => setShowScoreMetricsModal(true)}
-                  className="material-symbols-outlined text-sm text-white/30 hover:text-[#00D4FF] transition-colors cursor-pointer bg-transparent border-none p-0 outline-none flex items-center justify-center z-20"
+                  className="material-symbols-outlined text-sm text-slate-400 dark:text-white/30 hover:text-indigo-600 dark:hover:text-[#00D4FF] transition-colors cursor-pointer bg-transparent border-none p-0 outline-none flex items-center justify-center z-20"
                   title="点击查看计算指标"
                 >
                   info
@@ -1402,7 +1406,7 @@ function ResumeAnalysisPageContent() {
               <div className="flex flex-col items-center justify-center relative">
                 <div className="relative w-32 h-32 flex items-center justify-center">
                   <svg className="w-full h-full -rotate-90">
-                    <circle cx="64" cy="64" r="50" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="7" />
+                    <circle cx="64" cy="64" r="50" fill="transparent" stroke="rgba(0,0,0,0.05)" strokeWidth="7" className="dark:stroke-white/5" />
                     <circle
                       cx="64" cy="64" r="50"
                       fill="transparent"
@@ -1420,12 +1424,12 @@ function ResumeAnalysisPageContent() {
                     </defs>
                   </svg>
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center leading-none">
-                    <span className="text-3xl font-black text-white font-mono">{analysisResult?.score ?? 84}</span>
-                    <span className="text-xs text-white/30 font-bold block mt-0.5">/100 { (analysisResult?.score ?? 84) >= 85 ? "优秀" : (analysisResult?.score ?? 84) >= 70 ? "良好" : "一般" }</span>
+                    <span className="resume-score-num text-3xl font-black text-slate-900 dark:text-white font-mono">{analysisResult?.score ?? 84}</span>
+                    <span className="resume-score-sub text-xs text-slate-500 dark:text-white/30 font-bold block mt-0.5">/100 { (analysisResult?.score ?? 84) >= 85 ? "优秀" : (analysisResult?.score ?? 84) >= 70 ? "良好" : "一般" }</span>
                   </div>
                 </div>
                 <div className="space-y-0.5 mt-0.5 text-center">
-                  <p className="text-sm text-white/45 font-bold">超过 <span className="text-[#00D4FF] font-black text-base">{Math.min(99, Math.round((analysisResult?.score ?? 84) * 0.9))}%</span> 同岗位候选人</p>
+                  <p className="text-sm text-slate-600 dark:text-white/45 font-bold">超过 <span className="text-sky-600 dark:text-[#00D4FF] font-black text-base">{Math.min(99, Math.round((analysisResult?.score ?? 84) * 0.9))}%</span> 同岗位候选人</p>
                 </div>
               </div>
             </div>
@@ -1433,44 +1437,44 @@ function ResumeAnalysisPageContent() {
             {/* 3.2 Offer Probability */}
             <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-2.5 select-none lg:flex-1 lg:min-h-0 shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
-                <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-sm text-[#AFA7FF]">trending_up</span>
+                <h4 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-indigo-600 dark:text-[#AFA7FF]">trending_up</span>
                   Offer 概率预测
                 </h4>
               </div>
 
               <div className="flex items-center justify-between gap-3 py-2 px-1">
                 {/* Current */}
-                <div className="flex flex-col items-center justify-center flex-1 py-3.5 rounded-xl bg-white/[0.01] border border-white/5 relative">
+                <div className="resume-sub-card flex flex-col items-center justify-center flex-1 py-3.5 rounded-xl bg-[#f8fafc] dark:bg-white/[0.01] border border-[#e2e8f0] dark:border-white/5 relative">
                   <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
                     <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 96 96">
-                      <circle cx="48" cy="48" r="40" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="4.5" />
+                      <circle cx="48" cy="48" r="40" fill="transparent" stroke="rgba(0,0,0,0.05)" strokeWidth="4.5" className="dark:stroke-white/5" />
                       <circle cx="48" cy="48" r="40" fill="transparent" stroke="#AFA7FF" strokeWidth="4.5" strokeDasharray={2 * Math.PI * 40} strokeDashoffset={2 * Math.PI * 40 * (1 - (analysisResult ? Math.min(99, Math.round(analysisResult.score * 0.85)) : 72) / 100)} strokeLinecap="round" />
                     </svg>
                     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center leading-none">
-                      <span className="text-xl font-black text-white font-mono block">{analysisResult ? Math.min(99, Math.round(analysisResult.score * 0.85)) : 72}%</span>
-                      <span className="text-[10px] text-white/35 font-bold mt-0.5">当前简历</span>
+                      <span className="resume-offer-val text-xl font-black text-slate-800 dark:text-white font-mono block">{analysisResult ? Math.min(99, Math.round(analysisResult.score * 0.85)) : 72}%</span>
+                      <span className="resume-offer-sub text-[10px] text-slate-500 dark:text-white/35 font-bold mt-0.5">当前简历</span>
                     </div>
                   </div>
-                  <span className="text-[11px] text-white/50 font-bold mt-2.5">获得面试概率</span>
+                  <span className="text-sm text-slate-600 dark:text-white/50 font-bold mt-2.5">获得面试概率</span>
                 </div>
 
                 {/* Arrow */}
-                <span className="material-symbols-outlined text-white/20 select-none">arrow_forward</span>
+                <span className="material-symbols-outlined resume-arrow-icon text-slate-500 dark:text-slate-400 select-none">arrow_forward</span>
 
                 {/* Optimized */}
-                <div className="flex flex-col items-center justify-center flex-1 py-3.5 rounded-xl bg-white/[0.01] border border-white/5 relative">
+                <div className="resume-sub-card flex flex-col items-center justify-center flex-1 py-3.5 rounded-xl bg-[#f8fafc] dark:bg-white/[0.01] border border-[#e2e8f0] dark:border-white/5 relative">
                   <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
                     <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 96 96">
-                      <circle cx="48" cy="48" r="40" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="4.5" />
+                      <circle cx="48" cy="48" r="40" fill="transparent" stroke="rgba(0,0,0,0.05)" strokeWidth="4.5" className="dark:stroke-white/5" />
                       <circle cx="48" cy="48" r="40" fill="transparent" stroke="#5DECCB" strokeWidth="4.5" strokeDasharray={2 * Math.PI * 40} strokeDashoffset={2 * Math.PI * 40 * (1 - (analysisResult ? Math.min(99, Math.round(analysisResult.optimized_score * 0.95)) : 89) / 100)} strokeLinecap="round" />
                     </svg>
                     <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center leading-none">
-                      <span className="text-xl font-black text-[#5DECCB] font-mono block">{analysisResult ? Math.min(99, Math.round(analysisResult.optimized_score * 0.95)) : 89}%</span>
-                      <span className="text-[10px] text-[#5DECCB]/55 font-bold mt-0.5">优化后</span>
+                      <span className="text-xl font-black text-emerald-600 dark:text-[#5DECCB] font-mono block">{analysisResult ? Math.min(99, Math.round(analysisResult.optimized_score * 0.95)) : 89}%</span>
+                      <span className="text-[10px] text-emerald-700 dark:text-[#5DECCB]/55 font-bold mt-0.5">优化后</span>
                     </div>
                   </div>
-                  <span className="text-[11px] text-[#5DECCB]/85 font-bold mt-2.5">预计提升概率</span>
+                  <span className="text-sm text-emerald-700 dark:text-[#5DECCB]/85 font-bold mt-2.5">预计提升概率</span>
                 </div>
               </div>
             </div>
@@ -1478,14 +1482,14 @@ function ResumeAnalysisPageContent() {
             {/* 3.3 ATS Checks checklist */}
             <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-2.5 select-none lg:flex-1 lg:min-h-0 shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
-                <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-sm text-[#00D4FF]">analytics</span>
+                <h4 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-sky-600 dark:text-[#00D4FF]">analytics</span>
                   ATS 兼容性检测
                 </h4>
                 <div className="relative group/tooltip flex items-center">
-                  <span className="material-symbols-outlined text-sm text-white/30 cursor-pointer hover:text-white/60 transition-colors">info</span>
-                  <div className="absolute right-0 bottom-full mb-2 w-52 hidden group-hover/tooltip:block bg-[#0e1626] border border-white/10 p-3 rounded-xl text-sm leading-relaxed text-white/70 shadow-2xl z-50 pointer-events-none">
-                    <span className="font-extrabold text-[#00D4FF] block mb-1">ATS（申请人追踪系统）</span>
+                  <span className="material-symbols-outlined text-sm text-slate-400 dark:text-white/30 cursor-pointer hover:text-slate-700 dark:hover:text-white/60 transition-colors">info</span>
+                  <div className="absolute right-0 bottom-full mb-2 w-52 hidden group-hover/tooltip:block bg-white dark:bg-[#0e1626] border border-slate-200 dark:border-white/10 p-3 rounded-xl text-sm leading-relaxed text-slate-700 dark:text-white/70 shadow-2xl z-50 pointer-events-none">
+                    <span className="font-extrabold text-sky-600 dark:text-[#00D4FF] block mb-1">ATS（申请人追踪系统）</span>
                     大厂用于自动筛选简历的系统。检测您的简历关键词覆盖率、排版规范度以及是否易被机器解析。
                   </div>
                 </div>
@@ -1495,7 +1499,7 @@ function ResumeAnalysisPageContent() {
                 {/* ATS Circle Gauge */}
                 <div className="relative w-24 h-24 flex items-center justify-center shrink-0">
                   <svg className="absolute inset-0 w-full h-full -rotate-90" viewBox="0 0 96 96">
-                    <circle cx="48" cy="48" r="40" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="5" />
+                    <circle cx="48" cy="48" r="40" fill="transparent" stroke="rgba(0,0,0,0.05)" strokeWidth="5" className="dark:stroke-white/5" />
                     <circle
                       cx="48"
                       cy="48"
@@ -1509,27 +1513,27 @@ function ResumeAnalysisPageContent() {
                     />
                   </svg>
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center leading-none">
-                    <span className="text-xl font-black text-white font-mono">{analysisResult?.ats_pass_rate ?? 92}%</span>
-                    <span className="text-sm text-white/40 font-bold mt-0.5">通过率</span>
+                    <span className="resume-ats-val text-xl font-black text-slate-800 dark:text-white font-mono">{analysisResult?.ats_pass_rate ?? 92}%</span>
+                    <span className="resume-ats-sub text-sm text-slate-500 dark:text-white/40 font-bold mt-0.5">通过率</span>
                   </div>
                 </div>
 
-                <div className="space-y-2.5 text-left text-sm font-bold text-white/85 flex-1 pl-3">
+                <div className="space-y-2.5 text-left text-sm font-bold text-slate-700 dark:text-white/85 flex-1 pl-3">
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-base text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
-                    <span>关键词覆盖</span>
+                    <span className="material-symbols-outlined text-base text-emerald-600 dark:text-[#5DECCB] font-bold" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span className="resume-ats-check-label text-slate-600 dark:text-slate-300 font-extrabold">关键词覆盖</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-base text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
-                    <span>结构规范</span>
+                    <span className="material-symbols-outlined text-base text-emerald-600 dark:text-[#5DECCB] font-bold" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span className="resume-ats-check-label text-slate-600 dark:text-slate-300 font-extrabold">结构规范</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-base text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
-                    <span>PDF 兼容</span>
+                    <span className="material-symbols-outlined text-base text-emerald-600 dark:text-[#5DECCB] font-bold" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span className="resume-ats-check-label text-slate-600 dark:text-slate-300 font-extrabold">PDF 兼容</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="material-symbols-outlined text-base text-[#5DECCB]" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
-                    <span>机器可读</span>
+                    <span className="material-symbols-outlined text-base text-emerald-600 dark:text-[#5DECCB] font-bold" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
+                    <span className="resume-ats-check-label text-slate-600 dark:text-slate-300 font-extrabold">机器可读</span>
                   </div>
                 </div>
               </div>
@@ -1538,8 +1542,8 @@ function ResumeAnalysisPageContent() {
             {/* 3.4 Risk Distribution donut */}
             <div className="glass-panel p-5 rounded-2xl border-white/5 flex flex-col gap-2.5 select-none lg:flex-1 lg:min-h-0 shrink-0">
               <div className="flex justify-between items-center pb-2 border-b border-white/5">
-                <h4 className="text-base font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-sm text-[#FF7A95]">pie_chart</span>
+                <h4 className="text-base font-black text-slate-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-rose-500 dark:text-[#FF7A95]">pie_chart</span>
                   风险分布
                 </h4>
               </div>
@@ -1562,32 +1566,32 @@ function ResumeAnalysisPageContent() {
                     </defs>
                   </svg>
                   <div className="absolute inset-0 z-10 flex flex-col items-center justify-center text-center leading-none">
-                    <span className="text-3xl font-black text-white font-mono">{totalRisksCount}</span>
-                    <span className="text-xs text-white/45 font-bold block mt-1">总项数</span>
+                    <span className="resume-pie-val text-3xl font-black text-slate-900 dark:text-white font-mono">{totalRisksCount}</span>
+                    <span className="resume-pie-sub text-xs text-slate-500 dark:text-white/45 font-bold block mt-1">总项数</span>
                   </div>
                 </div>
 
-                <div className="space-y-3 text-left text-sm md:text-base font-black text-white/85 flex-1 pl-4">
+                <div className="space-y-3 text-left text-sm md:text-base font-black text-slate-800 dark:text-white/85 flex-1 pl-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#FF7A95] shrink-0" />
-                      <span>高风险</span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500 dark:bg-[#FF7A95] shrink-0" />
+                      <span className="resume-pie-label text-slate-800 dark:text-white/85 font-extrabold">高风险</span>
                     </div>
-                    <span className="font-mono text-white/90 font-black text-base md:text-lg">{highRisksCount}</span>
+                    <span className="resume-pie-num font-mono text-slate-900 dark:text-white/90 font-black text-base md:text-lg">{highRisksCount}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
-                      <span>中风险</span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500 dark:bg-amber-400 shrink-0" />
+                      <span className="resume-pie-label text-slate-800 dark:text-white/85 font-extrabold">中风险</span>
                     </div>
-                    <span className="font-mono text-white/90 font-black text-base md:text-lg">{medRisksCount}</span>
+                    <span className="resume-pie-num font-mono text-slate-900 dark:text-white/90 font-black text-base md:text-lg">{medRisksCount}</span>
                   </div>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#5DECCB] shrink-0" />
-                      <span>低风险</span>
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 dark:bg-[#5DECCB] shrink-0" />
+                      <span className="resume-pie-label text-slate-800 dark:text-white/85 font-extrabold">低风险</span>
                     </div>
-                    <span className="font-mono text-white/90 font-black text-base md:text-lg">{lowRisksCount}</span>
+                    <span className="resume-pie-num font-mono text-slate-900 dark:text-white/90 font-black text-base md:text-lg">{lowRisksCount}</span>
                   </div>
                 </div>
               </div>
@@ -1598,41 +1602,41 @@ function ResumeAnalysisPageContent() {
           {/* ========================================================
               3. BOTTOM ROW: AI RESUME REBUILD ENGINE (Full-width 12 cols)
              ======================================================== */}
-          <div className="col-span-12 relative overflow-hidden rounded-3xl border border-white/10 bg-[#060e20]/60 backdrop-blur-xl p-6 md:py-8 md:px-10 flex flex-col md:flex-row justify-between items-center gap-6 shadow-2xl group min-h-[120px] select-none mt-10">
-            
+          <div className="resume-rebuild-banner col-span-12 relative overflow-hidden rounded-3xl border border-[#e9d5ff] dark:border-white/10 bg-[#f3f0ff] dark:bg-[#060e20]/60 backdrop-blur-xl p-6 md:py-8 md:px-10 flex flex-col md:flex-row justify-between items-center gap-6 shadow-2xl group min-h-[120px] select-none mt-10">
+
             {/* Background Glow Layer */}
-            <div className="absolute inset-0 bg-gradient-to-r from-[#AFA7FF]/5 via-[#5DECCB]/3 to-transparent pointer-events-none" />
+            <div className="absolute inset-0 bg-gradient-to-r from-[#AFA7FF]/10 via-[#5DECCB]/8 to-transparent pointer-events-none" />
 
             <div className="relative z-10 text-left flex items-center gap-6">
               {/* Spinning Logo Graphic */}
-              <div className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center relative shrink-0">
-                <span className="material-symbols-outlined text-3xl text-[#AFA7FF] animate-pulse">settings_suggest</span>
+              <div className="w-12 h-12 rounded-xl bg-indigo-50 dark:bg-white/5 border border-indigo-100 dark:border-white/10 flex items-center justify-center relative shrink-0">
+                <span className="material-symbols-outlined text-3xl text-indigo-600 dark:text-[#AFA7FF] animate-pulse">settings_suggest</span>
               </div>
 
               <div className="space-y-1.5 max-w-xl text-left">
-                <h4 className="text-base font-black text-white flex items-center gap-2">
+                <h4 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
                   AI 简历重构引擎
                 </h4>
-                <p className="text-sm text-white/50 leading-relaxed font-bold">
+                <p className="text-sm text-slate-600 dark:text-white/50 leading-relaxed font-bold">
                   AI 已完成简历重构，全面优化表达与结构，提升面试与 ATS 通过率。
                 </p>
 
                 {/* Enhancement statistics tags */}
-                <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] md:text-sm font-black font-mono text-[#5DECCB] pt-1">
+                <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[10px] md:text-sm font-black font-mono text-emerald-700 dark:text-[#5DECCB] pt-1">
                   <span className="flex items-center gap-1.5">
-                    面试通过率 <span className="bg-[#5DECCB]/15 border border-[#5DECCB]/25 px-1 rounded">+17%</span> 预计提升
+                    面试通过率 <span className="bg-emerald-100 dark:bg-[#5DECCB]/15 border border-emerald-200 dark:border-[#5DECCB]/25 px-1 rounded">+17%</span> 预计提升
                   </span>
-                  <span className="text-white/10 font-normal">|</span>
+                  <span className="text-slate-300 dark:text-white/10 font-normal">|</span>
                   <span className="flex items-center gap-1.5">
-                    ATS 通过率 <span className="bg-[#5DECCB]/15 border border-[#5DECCB]/25 px-1 rounded">+12%</span> 预计提升
+                    ATS 通过率 <span className="bg-emerald-100 dark:bg-[#5DECCB]/15 border border-emerald-200 dark:border-[#5DECCB]/25 px-1 rounded">+12%</span> 预计提升
                   </span>
-                  <span className="text-white/10 font-normal">|</span>
+                  <span className="text-slate-300 dark:text-white/10 font-normal">|</span>
                   <span className="flex items-center gap-1.5">
-                    关键词覆盖 <span className="bg-[#5DECCB]/15 border border-[#5DECCB]/25 px-1 rounded">+34%</span> 预计提升
+                    关键词覆盖 <span className="bg-emerald-100 dark:bg-[#5DECCB]/15 border border-emerald-200 dark:border-[#5DECCB]/25 px-1 rounded">+34%</span> 预计提升
                   </span>
-                  <span className="text-white/10 font-normal">|</span>
+                  <span className="text-slate-300 dark:text-white/10 font-normal">|</span>
                   <span className="flex items-center gap-1.5">
-                    表达专业度 <span className="bg-[#5DECCB]/15 border border-[#5DECCB]/25 px-1 rounded">+28%</span> 预计提升
+                    表达专业度 <span className="bg-emerald-100 dark:bg-[#5DECCB]/15 border border-emerald-200 dark:border-[#5DECCB]/25 px-1 rounded">+28%</span> 预计提升
                   </span>
                 </div>
               </div>
@@ -1645,7 +1649,7 @@ function ResumeAnalysisPageContent() {
                 disabled={downloadState === "loading"}
                 className={`flex-1 md:flex-none px-6 py-3 rounded-xl transition-all shadow-md whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer ${
                   downloadState === "loading"
-                    ? "bg-white/10 text-white/60 cursor-not-allowed shadow-none"
+                    ? "bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-white/60 cursor-not-allowed shadow-none"
                     : downloadState === "success"
                       ? "bg-[#5DECCB] text-[#050B1A] shadow-[#5DECCB]/30"
                       : downloadState === "error"
@@ -1688,21 +1692,21 @@ function ResumeAnalysisPageContent() {
       {/* ========================================================
           GLOBAL FOOTER
          ======================================================== */}
-      <footer className="bg-[#060e20] border-t border-white/5 w-full block mt-8">
+      <footer className="bg-white dark:bg-[#060e20] border-t border-slate-200 dark:border-white/5 w-full block mt-8">
         <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left select-none">
           <div className="flex items-center gap-4">
-            <span className="text-xs text-white/30 font-label-mono font-bold tracking-widest">
+            <span className="text-xs text-slate-500 dark:text-white/30 font-label-mono font-bold tracking-widest">
               © 2026 面试驾到. All rights reserved.
             </span>
           </div>
-          <div className="flex gap-8 text-xs text-white/30 font-label-mono font-bold tracking-widest animate-pulse">
-            <a onClick={() => router.push("/")} className="hover:text-primary transition-colors cursor-pointer">
+          <div className="flex gap-8 text-xs text-slate-500 dark:text-white/30 font-label-mono font-bold tracking-widest animate-pulse">
+            <a onClick={() => router.push("/")} className="hover:text-indigo-600 dark:hover:text-primary transition-colors cursor-pointer">
               返回主页
             </a>
-            <a className="hover:text-primary transition-colors cursor-default" href="#">
+            <a className="hover:text-indigo-600 dark:hover:text-primary transition-colors cursor-default" href="#">
               隐私政策
             </a>
-            <a className="hover:text-primary transition-colors cursor-default" href="#">
+            <a className="hover:text-indigo-600 dark:hover:text-primary transition-colors cursor-default" href="#">
               服务条款
             </a>
           </div>
@@ -1717,25 +1721,25 @@ function ResumeAnalysisPageContent() {
           {/* Overlay blur shadow */}
           <div
             onClick={() => setShowEditProfileModal(false)}
-            className="absolute inset-0 bg-[#050B1A]/80 backdrop-blur-md transition-opacity duration-300"
+            className="absolute inset-0 bg-black/40 dark:bg-[#050B1A]/80 backdrop-blur-md transition-opacity duration-300"
           />
 
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-[#171f33] border border-white/10 rounded-3xl p-8 max-w-lg w-full text-left relative z-10 space-y-6 shadow-2xl"
+            className="bg-white dark:bg-[#171f33] border border-slate-200 dark:border-white/10 rounded-3xl p-8 max-w-lg w-full text-left relative z-10 space-y-6 shadow-2xl"
           >
-            <div className="flex justify-between items-center pb-3 border-b border-white/5">
-              <h3 className="font-extrabold text-white text-lg">编辑简历分析信息</h3>
+            <div className="flex justify-between items-center pb-3 border-b border-slate-200 dark:border-white/5">
+              <h3 className="font-extrabold text-slate-900 dark:text-white text-lg">编辑简历分析信息</h3>
               <button
                 onClick={() => setShowEditProfileModal(false)}
-                className="text-white/30 hover:text-white transition-colors cursor-pointer"
+                className="text-slate-400 dark:text-white/30 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
               >
                 <span className="material-symbols-outlined text-lg">close</span>
               </button>
             </div>
 
-            <form onSubmit={handleEditProfile} className="space-y-4 text-xs font-semibold text-white/60">
+            <form onSubmit={handleEditProfile} className="space-y-4 text-xs font-semibold text-slate-600 dark:text-white/60">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block mb-1.5">用户名 *</label>
@@ -1744,7 +1748,7 @@ function ResumeAnalysisPageContent() {
                     required
                     value={profile.name}
                     onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                    className="w-full py-2.5 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-400 dark:focus:border-[#AFA7FF]/40"
                   />
                 </div>
                 <div>
@@ -1754,7 +1758,7 @@ function ResumeAnalysisPageContent() {
                     required
                     value={profile.status}
                     onChange={(e) => setProfile({ ...profile, status: e.target.value })}
-                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                    className="w-full py-2.5 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-400 dark:focus:border-[#AFA7FF]/40"
                   />
                 </div>
               </div>
@@ -1765,7 +1769,7 @@ function ResumeAnalysisPageContent() {
                   type="text"
                   value={profile.company}
                   onChange={(e) => setProfile({ ...profile, company: e.target.value })}
-                  className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                  className="w-full py-2.5 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-400 dark:focus:border-[#AFA7FF]/40"
                 />
               </div>
 
@@ -1776,7 +1780,7 @@ function ResumeAnalysisPageContent() {
                     type="text"
                     value={profile.role}
                     onChange={(e) => setProfile({ ...profile, role: e.target.value })}
-                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                    className="w-full py-2.5 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-400 dark:focus:border-[#AFA7FF]/40"
                   />
                 </div>
                 <div>
@@ -1785,12 +1789,12 @@ function ResumeAnalysisPageContent() {
                     type="text"
                     value={profile.salary}
                     onChange={(e) => setProfile({ ...profile, salary: e.target.value })}
-                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                    className="w-full py-2.5 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-400 dark:focus:border-[#AFA7FF]/40"
                   />
                 </div>
               </div>
 
-              <div className="h-px bg-white/5 my-1" />
+              <div className="h-px bg-slate-200 dark:bg-white/5 my-1" />
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1800,7 +1804,7 @@ function ResumeAnalysisPageContent() {
                     required
                     value={profile.targetCompany}
                     onChange={(e) => setProfile({ ...profile, targetCompany: e.target.value })}
-                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                    className="w-full py-2.5 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-400 dark:focus:border-[#AFA7FF]/40"
                   />
                 </div>
                 <div>
@@ -1810,7 +1814,7 @@ function ResumeAnalysisPageContent() {
                     required
                     value={profile.targetRole}
                     onChange={(e) => setProfile({ ...profile, targetRole: e.target.value })}
-                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                    className="w-full py-2.5 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-400 dark:focus:border-[#AFA7FF]/40"
                   />
                 </div>
               </div>
@@ -1822,7 +1826,7 @@ function ResumeAnalysisPageContent() {
                     type="text"
                     value={profile.targetGrade}
                     onChange={(e) => setProfile({ ...profile, targetGrade: e.target.value })}
-                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                    className="w-full py-2.5 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-400 dark:focus:border-[#AFA7FF]/40"
                   />
                 </div>
                 <div>
@@ -1831,7 +1835,7 @@ function ResumeAnalysisPageContent() {
                     type="text"
                     value={profile.targetSalary}
                     onChange={(e) => setProfile({ ...profile, targetSalary: e.target.value })}
-                    className="w-full py-2.5 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40"
+                    className="w-full py-2.5 px-3 bg-white dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-400 dark:focus:border-[#AFA7FF]/40"
                   />
                 </div>
               </div>
@@ -1840,13 +1844,13 @@ function ResumeAnalysisPageContent() {
                 <button
                   type="button"
                   onClick={() => setShowEditProfileModal(false)}
-                  className="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold cursor-pointer text-center"
+                  className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 text-slate-700 dark:text-white font-bold cursor-pointer text-center"
                 >
                   取消
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-3 bg-[#AFA7FF] text-[#050B1A] rounded-xl font-black cursor-pointer text-center"
+                  className="flex-1 py-3 bg-indigo-600 dark:bg-[#AFA7FF] text-white dark:text-[#050B1A] rounded-xl font-black cursor-pointer text-center"
                 >
                   保存修改
                 </button>
@@ -1864,31 +1868,31 @@ function ResumeAnalysisPageContent() {
           {/* Overlay blur shadow */}
           <div
             onClick={() => setShowScoreMetricsModal(false)}
-            className="absolute inset-0 bg-[#050B1A]/85 backdrop-blur-md transition-opacity duration-300 cursor-pointer"
+            className="absolute inset-0 bg-black/40 dark:bg-[#050B1A]/85 backdrop-blur-md transition-opacity duration-300 cursor-pointer"
           />
 
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-[#171f33]/95 backdrop-blur-xl border border-white/10 rounded-3xl p-6 max-w-md w-full text-left relative z-10 space-y-5 shadow-2xl"
+            className="bg-white dark:bg-[#171f33]/95 backdrop-blur-xl border border-slate-200 dark:border-white/10 rounded-3xl p-6 max-w-md w-full text-left relative z-10 space-y-5 shadow-2xl"
           >
-            <div className="flex justify-between items-center pb-3 border-b border-white/5">
-              <h3 className="font-extrabold text-white text-[16px] flex items-center gap-2">
-                <span className="material-symbols-outlined text-[#00D4FF] text-base">verified</span>
+            <div className="flex justify-between items-center pb-3 border-b border-slate-200 dark:border-white/5">
+              <h3 className="font-extrabold text-slate-900 dark:text-white text-[16px] flex items-center gap-2">
+                <span className="material-symbols-outlined text-sky-600 dark:text-[#00D4FF] text-base">verified</span>
                 综合评分计算指标
               </h3>
               <button
                 type="button"
                 onClick={() => setShowScoreMetricsModal(false)}
-                className="text-white/30 hover:text-white transition-colors cursor-pointer"
+                className="text-slate-400 dark:text-white/30 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer"
               >
                 <span className="material-symbols-outlined text-lg">close</span>
               </button>
             </div>
 
             <div className="space-y-4">
-              <p className="text-sm text-white/50 leading-relaxed font-bold">
-                简历综合评分由 面试驾到 AI 根据您的目标求职画像（<span className="text-white">{profile.targetCompany} · {profile.targetRole}</span>）进行多维度智能分析评估得出：
+              <p className="text-sm text-slate-600 dark:text-white/50 leading-relaxed font-bold">
+                简历综合评分由 面试驾到 AI 根据您的目标求职画像（<span className="text-slate-900 dark:text-white">{profile.targetCompany} · {profile.targetRole}</span>）进行多维度智能分析评估得出：
               </p>
 
               <div className="space-y-3">
@@ -1921,20 +1925,20 @@ function ResumeAnalysisPageContent() {
                       }))
                     : [
                         // 历史数据兼容：无 score_breakdown 时不再用假数据，显示"--"
-                        { key: "keyword_match", name: "关键词匹配度 (权重 30%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-white/10" },
-                        { key: "experience_value", name: "工作经历含金量 (权重 30%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-white/10" },
-                        { key: "quantification", name: "成果量化程度 (权重 20%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-white/10" },
-                        { key: "resume_completeness", name: "简历完整度 (权重 10%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-white/10" },
-                        { key: "expression_quality", name: "表达专业度 (权重 10%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-white/10" },
+                        { key: "keyword_match", name: "关键词匹配度 (权重 30%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-slate-200 dark:bg-white/10" },
+                        { key: "experience_value", name: "工作经历含金量 (权重 30%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-slate-200 dark:bg-white/10" },
+                        { key: "quantification", name: "成果量化程度 (权重 20%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-slate-200 dark:bg-white/10" },
+                        { key: "resume_completeness", name: "简历完整度 (权重 10%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-slate-200 dark:bg-white/10" },
+                        { key: "expression_quality", name: "表达专业度 (权重 10%)", desc: "暂无维度数据（旧版本报告）", score: 0, color: "bg-slate-200 dark:bg-white/10" },
                       ];
                   return items.map((item, idx) => (
-                    <div key={idx} className="space-y-1.5 p-3 rounded-xl bg-white/[0.02] border border-white/5">
+                    <div key={idx} className="space-y-1.5 p-3 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-200 dark:border-white/5">
                       <div className="flex justify-between items-center text-sm font-black">
-                        <span className="text-white/95">{item.name}</span>
-                        <span className="text-white/80 font-mono">{item.score}分</span>
+                        <span className="text-slate-900 dark:text-white/95">{item.name}</span>
+                        <span className="text-slate-700 dark:text-white/80 font-mono">{item.score}分</span>
                       </div>
-                      <p className="text-xs text-white/40 font-bold leading-normal">{item.desc}</p>
-                      <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden mt-1">
+                      <p className="text-xs text-slate-500 dark:text-white/40 font-bold leading-normal">{item.desc}</p>
+                      <div className="h-1.5 w-full bg-slate-200 dark:bg-white/5 rounded-full overflow-hidden mt-1">
                         <div className={`h-full ${item.color} rounded-full`} style={{ width: `${item.score}%` }} />
                       </div>
                     </div>
@@ -1942,9 +1946,9 @@ function ResumeAnalysisPageContent() {
                 })()}
               </div>
 
-              <div className="pt-3 border-t border-white/5 flex justify-between items-center text-xs font-bold text-white/40">
+              <div className="pt-3 border-t border-slate-200 dark:border-white/5 flex justify-between items-center text-xs font-bold text-slate-500 dark:text-white/40">
                 <span>综合评分计算公式</span>
-                <span className="font-mono text-white/60">
+                <span className="font-mono text-slate-700 dark:text-white/60">
                   加权评分
                 </span>
               </div>
@@ -1969,29 +1973,29 @@ function ResumeAnalysisPageContent() {
           {/* Overlay blur shadow */}
           <div
             onClick={() => setShowStructureModal(false)}
-            className="absolute inset-0 bg-[#050B1A]/85 backdrop-blur-md transition-opacity duration-300 cursor-pointer"
+            className="absolute inset-0 bg-black/40 dark:bg-[#050B1A]/85 backdrop-blur-md transition-opacity duration-300 cursor-pointer"
           />
 
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-[#171f33]/95 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 max-w-5xl w-full h-[85vh] text-left relative z-10 flex flex-col shadow-2xl overflow-hidden"
+            className="resume-structure-modal bg-white dark:bg-[#171f33]/95 backdrop-blur-xl border border-slate-200 dark:border-white/10 rounded-3xl p-6 md:p-8 max-w-5xl w-full h-[85vh] text-left relative z-10 flex flex-col shadow-2xl overflow-hidden"
           >
             {/* Modal Header */}
-            <div className="flex justify-between items-center pb-4 border-b border-white/5 shrink-0">
+            <div className="flex justify-between items-center pb-4 border-b border-slate-200 dark:border-white/5 shrink-0">
               <div>
-                <h3 className="font-extrabold text-white text-lg md:text-xl flex items-center gap-2">
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-lg md:text-xl flex items-center gap-2">
                   <span className="material-symbols-outlined text-[#AFA7FF] text-base md:text-lg">map</span>
                   简历完整结构分析地图
                 </h3>
-                <p className="text-xs text-white/40 font-bold mt-1">
+                <p className="text-xs text-slate-500 dark:text-white/40 font-bold mt-1">
                   全面分析简历，精确定位硬伤，对比黄金范例，助力拿到心仪 Offer
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowStructureModal(false)}
-                className="text-white/30 hover:text-white transition-colors cursor-pointer bg-white/5 hover:bg-white/10 p-2 rounded-full flex items-center justify-center"
+                className="text-slate-400 dark:text-white/30 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 p-2 rounded-full flex items-center justify-center"
               >
                 <span className="material-symbols-outlined text-lg">close</span>
               </button>
@@ -1999,10 +2003,10 @@ function ResumeAnalysisPageContent() {
 
             {/* Modal Body: Split-pane Layout */}
             <div className="flex-1 flex flex-col md:flex-row gap-6 mt-6 overflow-hidden min-h-0">
-              
+
               {/* Left Pane: Vertical Node Roadmap */}
-              <div className="w-full md:w-[38%] flex flex-col bg-[#050B1A]/40 border border-white/5 rounded-2xl p-4 overflow-y-auto min-h-0 custom-scrollbar relative">
-                <h4 className="text-sm font-black text-white/60 tracking-wider uppercase mb-4 shrink-0 flex items-center gap-1.5 select-none">
+              <div className="w-full md:w-[38%] flex flex-col bg-slate-50 dark:bg-[#050B1A]/40 border border-slate-200 dark:border-white/5 rounded-2xl p-4 overflow-y-auto min-h-0 custom-scrollbar relative">
+                <h4 className="text-sm font-black text-slate-700 dark:text-white/60 tracking-wider uppercase mb-4 shrink-0 flex items-center gap-1.5 select-none">
                   <span className="material-symbols-outlined text-base text-[#00D4FF]">account_tree</span>
                   简历结构健康度地图
                 </h4>
@@ -2014,31 +2018,31 @@ function ResumeAnalysisPageContent() {
                   {STRUCTURE_NAMES.map((name, idx) => {
                     const isActive = selectedStructureSection === idx;
                     const ds = getDynamicSectionStatus(idx);
-                    let badgeStyle = "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25";
+                    let badgeStyle = "text-[#FF7A95] bg-[#FF7A95]/20 border-[#FF7A95]/40";
                     if (ds.status === "优秀") {
-                      badgeStyle = "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25";
+                      badgeStyle = "text-[#5DECCB] bg-[#5DECCB]/20 border-[#5DECCB]/40";
                     } else if (ds.status === "亮点") {
-                      badgeStyle = "text-[#00D4FF] bg-[#00D4FF]/10 border-[#00D4FF]/25";
+                      badgeStyle = "text-[#00D4FF] bg-[#00D4FF]/20 border-[#00D4FF]/40";
                     } else if (ds.status === "风险") {
-                      badgeStyle = "text-amber-400 bg-amber-400/10 border-amber-400/25";
+                      badgeStyle = "text-amber-500 bg-amber-400/20 border-amber-400/40";
                     }
                     return (
                       <div
                         key={idx}
                         onClick={() => setSelectedStructureSection(idx)}
-                        className={`p-3 rounded-xl border transition-all duration-200 flex justify-between items-center text-sm font-bold cursor-pointer ${
+                        className={`resume-structure-nav-item ${isActive ? "is-active" : ""} p-3 rounded-xl border transition-all duration-200 flex justify-between items-center text-sm font-bold cursor-pointer ${
                           isActive
-                            ? "bg-[#AFA7FF]/15 border-[#AFA7FF]/40 shadow-[0_0_15px_rgba(175,167,255,0.1)]"
-                            : "bg-[#050B1A]/40 border-white/5 hover:border-white/20 hover:bg-[#050B1A]/60"
+                            ? "bg-blue-50 dark:bg-[#AFA7FF]/15 border-blue-300 dark:border-[#AFA7FF]/40 shadow-[0_0_15px_rgba(59,130,246,0.15)]"
+                            : "bg-violet-50 dark:bg-[#050B1A]/40 border-violet-200 dark:border-white/5 hover:border-violet-300 dark:hover:border-white/20 hover:bg-violet-100 dark:hover:bg-[#050B1A]/60"
                         }`}
                       >
                         <div className="flex items-center gap-3">
                           <span className={`w-7 h-7 rounded-full flex items-center justify-center font-mono text-base font-black shrink-0 ${
-                            isActive ? "bg-[#AFA7FF] text-[#050B1A]" : "bg-white/5 text-white/50"
+                            isActive ? "bg-[#AFA7FF] text-[#050B1A]" : "bg-[#AFA7FF]/15 text-[#AFA7FF] border border-[#AFA7FF]/30"
                           }`}>
                             {idx + 1}
                           </span>
-                          <span className={`text-[14.5px] transition-colors ${isActive ? "text-white font-extrabold" : "text-white/80"}`}>
+                          <span className={`text-[14.5px] transition-colors ${isActive ? "text-[#050B1A] dark:text-white font-extrabold" : "text-slate-700 dark:text-white/80"}`}>
                             {name}
                           </span>
                         </div>
@@ -2057,49 +2061,49 @@ function ResumeAnalysisPageContent() {
               </div>
 
               {/* Right Pane: Detailed Section Diagnoses and Before/After Rewrite Diffs */}
-              <div className="flex-1 bg-[#050B1A]/40 border border-white/5 rounded-2xl p-5 md:p-6 overflow-y-auto min-h-0 custom-scrollbar flex flex-col gap-4 text-left">
+              <div className="flex-1 bg-slate-50 dark:bg-[#050B1A]/40 border border-slate-200 dark:border-white/5 rounded-2xl p-5 md:p-6 overflow-y-auto min-h-0 custom-scrollbar flex flex-col gap-4 text-left">
                 {(() => {
                   const section = getDynamicSectionDetails(selectedStructureSection);
 
                   return (
                     <>
                       {/* Section Info Header */}
-                      <div className="flex justify-between items-start pb-3.5 border-b border-white/5 shrink-0">
+                      <div className="flex justify-between items-start pb-3.5 border-b border-slate-200 dark:border-white/5 shrink-0">
                         <div>
-                          <h4 className="text-base font-black text-white flex items-center gap-2">
+                          <h4 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
                             {section.name} (模块分析)
                           </h4>
                           <div className="flex items-center gap-3 mt-1.5">
-                            <span className="text-xs text-white/45 font-bold">健康度评分:</span>
+                            <span className="text-xs text-slate-500 dark:text-white/45 font-bold">健康度评分:</span>
                             <span className={`text-sm font-mono font-black ${section.color}`}>{section.score}分</span>
-                            <div className="w-24 h-1.5 bg-white/5 rounded-full overflow-hidden">
+                            <div className="w-24 h-1.5 bg-slate-200 dark:bg-white/5 rounded-full overflow-hidden">
                               <div className={`h-full ${section.barColor} rounded-full`} style={{ width: `${section.score}%` }} />
                             </div>
                           </div>
                         </div>
-                        <span className={`px-2.5 py-0.5 rounded text-xs font-black uppercase border shrink-0 bg-white/5 ${section.color} border-white/10`}>
+                        <span className={`px-2.5 py-0.5 rounded text-xs font-black uppercase border shrink-0 bg-slate-100 dark:bg-white/5 ${section.color} border-slate-200 dark:border-white/10`}>
                           {section.status}
                         </span>
                       </div>
 
                       {/* Diagnosis Block */}
-                      <div className="bg-[#050B1A]/30 border border-white/5 p-4 rounded-xl flex flex-col gap-2 shrink-0">
-                        <h5 className="text-xs font-black text-white flex items-center gap-1.5 select-none">
+                      <div className="resume-diagnosis-card bg-violet-50 dark:bg-[#050B1A]/30 border border-violet-200 dark:border-white/5 p-4 rounded-xl flex flex-col gap-2 shrink-0">
+                        <h5 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5 select-none">
                           <span className="material-symbols-outlined text-sm text-[#FF7A95]">analytics</span>
                           深度诊断分析
                         </h5>
-                        <p className="text-xs text-white/60 leading-relaxed font-bold">
+                        <p className="text-xs text-slate-600 dark:text-white/60 leading-relaxed font-bold">
                           {section.desc}
                         </p>
                       </div>
 
                       {/* Suggestions Block */}
                       <div className="flex flex-col gap-2 shrink-0">
-                        <h5 className="text-xs font-black text-white flex items-center gap-1.5 select-none">
+                        <h5 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5 select-none">
                           <span className="material-symbols-outlined text-sm text-[#00D4FF]">lightbulb</span>
                           针对性优化建议
                         </h5>
-                        <ul className="space-y-2 text-xs text-white/50 font-bold pl-5 list-disc leading-relaxed">
+                        <ul className="resume-suggestions-list space-y-2 text-xs font-bold pl-5 list-disc leading-relaxed">
                           {section.advice.map((item, i) => (
                             <li key={i}>{item}</li>
                           ))}
@@ -2108,34 +2112,34 @@ function ResumeAnalysisPageContent() {
 
                       {/* Before / After Diff Block */}
                       <div className="flex-1 flex flex-col gap-3 min-h-0">
-                        <h5 className="text-xs font-black text-white flex items-center gap-1.5 select-none shrink-0">
+                        <h5 className="text-xs font-black text-slate-900 dark:text-white flex items-center gap-1.5 select-none shrink-0">
                           <span className="material-symbols-outlined text-sm text-[#5DECCB]">code</span>
                           黄金润色范例 (Before vs After)
                         </h5>
-                        
+
                         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3 min-h-0 overflow-y-auto custom-scrollbar">
                           {/* Before Card */}
-                          <div className="bg-red-950/[0.03] border border-red-500/10 rounded-xl p-4 flex flex-col gap-2 min-h-[100px]">
+                          <div className="bg-rose-50/60 dark:bg-red-950/[0.03] border border-rose-200 dark:border-red-500/10 rounded-xl p-4 flex flex-col gap-2 min-h-[100px]">
                             <div className="flex justify-between items-center shrink-0">
-                              <span className="text-[10px] font-black text-[#FF7A95] bg-[#FF7A95]/10 border border-[#FF7A95]/25 px-1.5 py-0.2 rounded uppercase">
+                              <span className="text-[10px] font-black text-rose-700 bg-rose-100 dark:text-[#FF7A95] dark:bg-[#FF7A95]/10 border border-rose-200 dark:border-[#FF7A95]/25 px-1.5 py-0.2 rounded uppercase">
                                 原始描述 (Before)
                               </span>
                               <span className="material-symbols-outlined text-xs text-[#FF7A95]/40 select-none">remove_circle_outline</span>
                             </div>
-                            <p className="text-xs text-white/45 leading-relaxed font-semibold italic flex-1 flex items-center">
+                            <p className="text-xs text-slate-600 dark:text-white/45 leading-relaxed font-semibold italic flex-1 flex items-center">
                               “ {section.before} ”
                             </p>
                           </div>
 
                           {/* After Card */}
-                          <div className="bg-emerald-950/[0.05] border border-emerald-500/15 rounded-xl p-4 flex flex-col gap-2 min-h-[100px]">
+                          <div className="bg-emerald-50/60 dark:bg-emerald-950/[0.05] border border-emerald-200 dark:border-emerald-500/15 rounded-xl p-4 flex flex-col gap-2 min-h-[100px]">
                             <div className="flex justify-between items-center shrink-0">
-                              <span className="text-[10px] font-black text-[#5DECCB] bg-[#5DECCB]/10 border border-[#5DECCB]/25 px-1.5 py-0.2 rounded uppercase">
+                              <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 dark:text-[#5DECCB] dark:bg-[#5DECCB]/10 border border-emerald-200 dark:border-[#5DECCB]/25 px-1.5 py-0.2 rounded uppercase">
                                 黄金重构 (After)
                               </span>
                               <span className="material-symbols-outlined text-xs text-[#5DECCB]/80 select-none">add_circle_outline</span>
                             </div>
-                            <p className="text-xs text-white leading-relaxed font-bold flex-1 flex items-center">
+                            <p className="text-xs text-slate-800 dark:text-white leading-relaxed font-bold flex-1 flex items-center">
                               “ {section.after} ”
                             </p>
                           </div>
@@ -2161,10 +2165,10 @@ function ResumeAnalysisPageContent() {
             initial={{ opacity: 0, y: -30, x: "-50%" }}
             animate={{ opacity: 1, y: 0, x: "-50%" }}
             exit={{ opacity: 0, y: -20, x: "-50%" }}
-            className="fixed top-10 left-1/2 z-[9999] px-6 py-3.5 bg-[#131b2e]/95 backdrop-blur-md border border-[#AFA7FF]/20 shadow-2xl rounded-2xl flex items-center gap-2.5 select-none"
+            className="fixed top-10 left-1/2 z-[9999] px-6 py-3.5 bg-white dark:bg-[#131b2e]/95 backdrop-blur-md border border-indigo-200 dark:border-[#AFA7FF]/20 shadow-2xl rounded-2xl flex items-center gap-2.5 select-none"
           >
-            <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg">check_circle</span>
-            <span className="text-sm md:text-base font-extrabold text-white">{showNotification}</span>
+            <span className="material-symbols-outlined text-emerald-600 dark:text-[#5DECCB] text-base md:text-lg">check_circle</span>
+            <span className="text-sm md:text-base font-extrabold text-slate-900 dark:text-white">{showNotification}</span>
           </motion.div>
         )}
       </AnimatePresence>

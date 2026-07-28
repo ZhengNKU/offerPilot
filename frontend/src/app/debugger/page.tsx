@@ -5,6 +5,7 @@ import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { pollTaskUntilDone } from "@/app/utils/pollTask";
 import { API_BASE } from "@/lib/api";
@@ -767,13 +768,16 @@ function NewAnalysisDebuggerContent() {
             </a>
           </div>
 
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push("/memory?tab=timeline")}
-              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-base">history</span>历史记录
-            </button>
+          <div className="flex items-center gap-3 md:gap-4">
+            {auth.isLoggedIn && (
+              <button
+                onClick={() => router.push("/memory?tab=timeline")}
+                className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-base">history</span>历史记录
+              </button>
+            )}
+            <ThemeToggle />
             {auth.isLoggedIn ? (
               <UserMenu />
             ) : (
@@ -870,8 +874,8 @@ function NewAnalysisDebuggerContent() {
                         <span className="material-symbols-outlined text-xl">{item.icon}</span>
                       </div>
                       <div>
-                        <h5 className="font-extrabold text-sm md:text-base text-white">{item.title}</h5>
-                        <p className="text-xs text-on-surface-variant/60 mt-1 font-medium leading-relaxed">{item.desc}</p>
+                        <h5 className="font-extrabold text-sm md:text-base text-slate-800 dark:text-white">{item.title}</h5>
+                        <p className="text-xs text-slate-500 dark:text-on-surface-variant/60 mt-1 font-medium leading-relaxed">{item.desc}</p>
                       </div>
                     </div>
                   );
@@ -902,10 +906,10 @@ function NewAnalysisDebuggerContent() {
                   </h3>
                   <p className="text-base md:text-lg text-white/70 font-semibold">
                     {activeMode === "resume"
-                      ? "PDF/DOCX 文本提取 + DeepSeek 智能评估，分析完成后自动进入报告"
+                      ? "PDF/DOCX 文本提取 + 大模型智能评估，分析完成后自动进入报告"
                       : activeMode === "text"
-                      ? "文本诊断 + DeepSeek 智能评估，分析完成后自动进入报告"
-                      : "ASR 语音识别 + DeepSeek 智能评估，分析完成后自动进入报告"}
+                      ? "文本诊断 + 大模型智能评估，分析完成后自动进入报告"
+                      : "ASR 语音识别 +大模型智能评估，分析完成后自动进入报告"}
                   </p>
                 </div>
 
@@ -924,10 +928,10 @@ function NewAnalysisDebuggerContent() {
               {/* Header section */}
               <div className="flex justify-between items-center pb-4 border-b border-white/5">
                 <div>
-                  <span className="text-[10px] font-label-mono tracking-widest text-primary font-bold uppercase">
+                  <span className="text-[10px] font-label-mono tracking-widest text-indigo-600 dark:text-primary font-bold uppercase">
                     New Analysis Panel
                   </span>
-                  <h2 className="text-2xl font-black text-white mt-1">
+                  <h2 className="text-2xl font-black text-slate-900 dark:text-white mt-1">
                     {activeMode === "audio"
                       ? "面试录音深度分析"
                       : activeMode === "text"
@@ -1080,11 +1084,11 @@ function NewAnalysisDebuggerContent() {
                     {/* Pre-Analysis Form (ALL TEXT INPUTS except Date and IsOnJob) */}
                     {activeMode !== "resume" && (
                       <div className="p-6 rounded-2xl bg-surface-container/50 border border-white/5 space-y-4">
-                        <h4 className="text-xs text-primary font-label-mono uppercase tracking-widest font-extrabold mb-3">
+                        <h4 className="text-xs text-indigo-600 dark:text-primary font-label-mono uppercase tracking-widest font-extrabold mb-3">
                           分析前填写面试信息 (*必填)
                         </h4>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-on-surface-variant">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-slate-700 dark:text-on-surface-variant">
                           <div>
                             <label className="block mb-2">面试公司名称 *</label>
                             <input

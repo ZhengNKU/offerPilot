@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { Suspense } from "react";
 
@@ -242,7 +243,8 @@ export default function Home() {
             </a>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3 md:gap-4">
+            <ThemeToggle />
             {auth.isLoggedIn ? (
               <UserMenu />
             ) : (
@@ -292,9 +294,9 @@ export default function Home() {
             <span className="font-label-mono tracking-widest text-primary uppercase" style={{ fontSize: "13px", fontWeight: 600 }}>AI Interview OS · 面试驾到，Offer来到</span>
           </div>
           
-          <h1 className="text-on-surface leading-tight whitespace-nowrap tracking-tight inline-flex flex-col text-left mx-auto select-none" style={{ fontSize: "84px", fontWeight: 800, fontFamily: "'Hanken Grotesk', sans-serif", letterSpacing: "-0.04em" }}>
-            <span>面试驾到</span>
-            <span className="text-primary drop-shadow-[0_0_20px_rgba(192,193,255,0.45)] mt-2 block pl-[2.05em]">
+          <h1 className="leading-tight whitespace-nowrap tracking-tight inline-flex flex-col text-left mx-auto select-none" style={{ fontSize: "84px", fontWeight: 800, fontFamily: "'Hanken Grotesk', sans-serif", letterSpacing: "-0.04em" }}>
+            <span className="shimmer-text-glow">面试驾到</span>
+            <span className="shimmer-text-glow mt-2 block pl-[2.05em]">
               Offer来到
             </span>
           </h1>
@@ -318,13 +320,13 @@ export default function Home() {
           <div className="flex items-center justify-center gap-4 pt-10 w-full mx-auto">
             <div className="flex -space-x-3 select-none">
               {[
-                "https://lh3.googleusercontent.com/aida-public/AB6AXuComJrLf5vmZvFcLGhLQl9dGu96Za7LTW1dHMyyqZzv-1FDkE-s-xlyW7rZSfD8SuQeuF95TNTLIENPvUnYFi14QbdNShVQeONDYuUznboVWl-BHGpcaG7L45UgkZTJBKy7RyBjMMqNrp3GpPB-2nCS4GLj5spdz7GKcYKAhTudDD07YhCamPFBAhBWiIg4dFnPFihvVRIUO4nnuI0Pp_ed4IfimZnxkSb2MWa4XwKfJR05B_1RqCU_5YXQBKGfh8LRv7Kza3lyzaSl",
-                "https://lh3.googleusercontent.com/aida-public/AB6AXuCBf4fUlEHGEs01WLpSs6zHojQbab2fGdBL6GjczVtrjfEalw7TwFGJ3PJtU-sQndTfEXJYqGgEhbZ8qS76Czu_alFepKrPdkQIcHRcZ4h4etK3rm-_AkV9wUG5bQKewELTyYGsXoDhojiSmq5BP0c5IxDWicJDIuhQwmRmvIshAfpkEcLkGugac8RMk3auYxZLdnes3sO5gsYROVT3N60tn-F171ehDsIH5Utz42gNjEaeSzlwJpjMValRGe63sIGgYXEJKMyxutWE",
-                "https://lh3.googleusercontent.com/aida-public/AB6AXuAQPPkorqpB-cF0ffVf0FaR88A9PaYQgJcJ7eyu7eIuRJG8Yp_i-fioeJJfYTAlh0AAdCfg6omR2Cuj3fh9ERuQLtE2VVGBkpXz1wkxhullCZPCyh9PvfDSSdJZgB5VZAQTHWHZdcy3t655qqI5e9vXJJvqagdZ7DDIMAc4obK1ayPKrzy-uX98gsmJ6XJZYeXUlkJtE4MMK6YOnuFAnLzq9QmWOCfoL1UoR7xFSjNc7gkyKeo9_ZM5dr_NtgdqzWmM6t-2QtMuTTj9"
+                "/landingpage/student1.png",
+                "/landingpage/student2.png",
+                "/landingpage/student3.png"
               ].map((src, i) => (
                 <img
                   key={i}
-                  className="w-10 h-10 rounded-full border-2 border-surface-container select-none"
+                  className="w-10 h-10 rounded-full select-none"
                   src={src}
                   alt={`Engineer ${i + 1}`}
                 />
@@ -585,7 +587,7 @@ export default function Home() {
       <section className="py-section-padding bg-surface-container-low/50 px-gutter overflow-hidden relative w-full block">
         {/* z-0 Background Image with transparent gradient overlay */}
         <div 
-          className="absolute inset-0 opacity-50 pointer-events-none z-0"  // 改为 40%
+          className="absolute inset-0 opacity-80 pointer-events-none z-0"  // 改为 40%
           style={{
             backgroundImage: `linear-gradient(to bottom, rgba(11, 19, 38, 0.95) 0%, rgba(11, 19, 38, 0.4) 40%, rgba(11, 19, 38, 0.95) 100%), url('/home-hand.jpg')`,
             backgroundSize: 'cover',
@@ -649,7 +651,7 @@ export default function Home() {
           <div className="grid md:grid-cols-3 gap-8 w-full">
             {[
               {
-                avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuAoBpggRj1UtigDFdEnOK0sAAmSdS-IVJ2H9W38TRex37DPfiHqEvwoY6eQcy4GeTPpfeEJDjyuoSFA55gzpIvv7R5Mfz9ZSXKlQbqUKTzPLxqLTXr-9tvsKlzmM1X0EAYIJVwDIewcFXEEh6EIHymYLEHtaG3QthqZnrrX0q-U87O-FrecJz9XcdHZoz2ZndesMcgGuwEkcaCDeujsrkHIVZ2b_s1ue1sD9aCOzimyGM0EZ6xbYMXOZYnG5fMTc5XCa01xnjuPbNeK",
+                avatar: "/landingpage/student1.png",
                 name: "张同学",
                 title: "知名科技大厂 · 软件开发工程师",
                 quote: "“校招技术面时总是卡在场景设计题，不知道为什么面完就挂。面试驾到帮我定位到了表达逻辑漏洞，AI 重构后的思路非常清晰，二面顺利拿下 Offer！”",
@@ -657,7 +659,7 @@ export default function Home() {
                 tag: "斩获科技大厂 Offer"
               },
               {
-                avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuDFshg7TaIUBGgEoN9JlGImNqjxSHpt7AhRu-PbphzAn5SRZ5yIKPQVnt7MjqHWSjcaFOH3c-Z9RctvigPYZQQzWs5DFeQO_8lLFFNccVXVeYJLk_8B5MUbPOvtedzFCeFMkASReREHENKonnQ5Dgtd3m5h88GZffVVuSKxtNnySeH3A2sgHaysDkze-IycN2pg951zf8B27PdqLrDFqy3SZcvE-YgWmwWmsV5-Y6lPMtJHGu_Qk2cjZdchCxr9yPyUq0ZhXGtK18lj",
+                avatar: "/landingpage/student2.png",
                 name: "李同学",
                 title: "互联网平台 · 产品运营管培生",
                 quote: "“作为非技术背景的文科应届生，面对面试官深挖实习项目时总是心里发虚。AI 重构把我的表达结构梳理得极其严密，帮助我在群面和终面中脱颖而出！”",
@@ -665,7 +667,7 @@ export default function Home() {
                 tag: "斩获名企运营 Offer"
               },
               {
-                avatar: "https://lh3.googleusercontent.com/aida-public/AB6AXuDq0oV8NegQm719QROkK-ggi194pRkwKl7fHB8GEkJwwxEDaGssftR2ZcL4XT3Iu35dejN5439XwRofApsNIVCKgZBrKYNaUhrbwoHxbvncKbDFu1dXrqkTGOxvL4VcAut8iUIAlSvE8TiAIkhn03XFAGoK0knqMY51qStDuYjR2L3bNHY4Sxn502nwfstmS1SsoSFUQxP86Imppj1BGJ2vIUH8tEeclAtdMMFYo856Zpim5zG7DD2nTHwiokYtUOCmtq6SU81uMO5u",
+                avatar: "/landingpage/student3.png",
                 name: "陈同学",
                 title: "知名外企 · 市场营销助理",
                 quote: "“从简历深挖到真实面试分析，面试驾到帮我把零碎的校园经历转化为有说服力的成果数据，面试时心理底气特别足，成功收到了梦寐以求的校招 Offer！”",
@@ -775,12 +777,7 @@ export default function Home() {
         >
           {/* -z-10 Background Image with transparent gradient overlay */}
           <div 
-            className="absolute inset-0 opacity-15 group-hover:opacity-50 transition-opacity duration-500 pointer-events-none -z-10"
-            style={{
-              backgroundImage: `linear-gradient(to bottom, rgba(11, 19, 38, 0.2) 0%, rgba(11, 19, 38, 0.95) 100%), url('/home-start.jpg')`,
-              backgroundSize: 'cover',
-              backgroundPosition: 'center',
-            }}
+            className="absolute inset-0 transition-opacity duration-500 pointer-events-none -z-10 home-cta-bg"
           />
           
           <h2 className="text-on-surface font-black tracking-tight relative z-10" style={{ fontSize: "52px", fontFamily: "'Hanken Grotesk', sans-serif" }}>准备好开启智能职业生涯了吗？</h2>

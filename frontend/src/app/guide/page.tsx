@@ -3,6 +3,7 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { API_BASE } from "@/lib/api";
 
@@ -66,6 +67,9 @@ interface FeaturedContentItem {
   platformBadgeBg: string;
   duration?: string;
   url: string;
+  author: string;
+  authorAvatar: string;
+  authorVerified: boolean;
   category: string;
   reads: number;
   likes: number;
@@ -81,12 +85,15 @@ function formatCount(num: number): string {
 
 const defaultRealGuideItem: FeaturedContentItem = {
   id: "1",
-  title: "在仙林参加了一场AI产品的分享会",
-  coverImg: "/guide/test.jpg",
+  title: "我们想打造一个陪你成长的 AI 职业伙伴 🚀",
+  coverImg: "/guide/context/1.jpg",
   platform: "小红书",
   platformBadgeBg: "bg-[#FF2442]/20 text-[#FF2442] border-[#FF2442]/30",
   duration: "图文笔记",
-  url: "https://www.xiaohongshu.com/user/profile/6799a1aa000000000e010b91/6a2f6eed0000000006021c5c?xsec_token=ABzPxAe_7shsbeXRUnRFatFieduaK2Nxat4Ijb1sTp3E8=&xsec_source=pc_user",
+  url: "https://www.xiaohongshu.com/explore/6a67251d000000001d02342c?xsec_token=ABjNQQTIIKOpQ3qBhwjet_W0eG_ItjLbApVi6GHprq5Xs=&xsec_source=pc_user",
+  author: "面试驾到",
+  authorAvatar: "",
+  authorVerified: true,
   category: "推荐",
   reads: 0,
   likes: 0,
@@ -152,6 +159,9 @@ export default function InterviewGuidePage() {
             platformBadgeBg: item.platform_badge_bg,
             duration: item.duration,
             url: item.url,
+            author: item.author || "",
+            authorAvatar: item.author_avatar || "",
+            authorVerified: Boolean(item.author_verified),
             category: item.category,
             reads: item.reads,
             likes: item.likes,
@@ -1303,31 +1313,31 @@ export default function InterviewGuidePage() {
       title: `${item.topicTitle} · ${item.title}`,
       content: (
         <div className="space-y-5 text-left text-sm">
-          <div className="p-3.5 rounded-xl bg-purple-500/10 border border-purple-500/20">
-            <h5 className="font-extrabold text-purple-300 mb-1 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-base">lightbulb</span>
+          <div className="p-3.5 rounded-xl bg-purple-50 dark:bg-purple-500/10 border border-purple-200 dark:border-purple-500/20 modal-box-purple">
+            <h5 className="font-extrabold text-purple-900 dark:text-purple-300 mb-1 flex items-center gap-1.5 modal-purple-title">
+              <span className="material-symbols-outlined text-base modal-purple-icon text-purple-600 dark:text-purple-300">lightbulb</span>
               {item.detailTitle}
             </h5>
-            <p className="text-white/80 font-medium leading-relaxed">{item.detailContent}</p>
+            <p className="text-slate-900 dark:text-white/80 font-bold leading-relaxed">{item.detailContent}</p>
           </div>
 
           <div className="space-y-2">
-            <h5 className="font-extrabold text-white/90 flex items-center gap-1.5">
-              <span className="material-symbols-outlined text-base text-amber-400">auto_awesome</span>
+            <h5 className="font-extrabold text-slate-900 dark:text-white/90 flex items-center gap-1.5">
+              <span className="material-symbols-outlined text-base text-amber-500 dark:text-amber-400 modal-amber-icon">auto_awesome</span>
               核心公式与逻辑
             </h5>
-            <div className="p-3.5 rounded-xl bg-white/[0.03] border border-white/10 text-white/90 text-xs leading-relaxed font-medium">
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white/90 text-xs leading-relaxed font-extrabold modal-box-slate">
               {item.formula}
             </div>
           </div>
 
           {item.goodExample && (
             <div className="space-y-2">
-              <h5 className="font-extrabold text-emerald-400 flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-base">check_circle</span>
+              <h5 className="font-extrabold text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5 modal-emerald-title">
+                <span className="material-symbols-outlined text-base modal-emerald-icon text-emerald-600 dark:text-emerald-400">check_circle</span>
                 推荐实践范例
               </h5>
-              <div className="p-3.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-white/80 text-xs leading-relaxed font-medium">
+              <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/5 border border-emerald-200 dark:border-emerald-500/20 text-emerald-950 dark:text-white/80 text-xs leading-relaxed font-bold modal-box-emerald">
                 {item.goodExample}
               </div>
             </div>
@@ -1335,11 +1345,11 @@ export default function InterviewGuidePage() {
 
           {item.badExample && (
             <div className="space-y-2">
-              <h5 className="font-extrabold text-[#FF7A95] flex items-center gap-1.5">
-                <span className="material-symbols-outlined text-base">cancel</span>
+              <h5 className="font-extrabold text-rose-700 dark:text-[#FF7A95] flex items-center gap-1.5 modal-rose-title">
+                <span className="material-symbols-outlined text-base modal-rose-icon text-rose-600 dark:text-[#FF7A95]">cancel</span>
                 反面减分例子
               </h5>
-              <div className="p-3.5 rounded-xl bg-[#FF7A95]/5 border border-[#FF7A95]/20 text-white/70 text-xs leading-relaxed font-medium">
+              <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-[#FF7A95]/5 border border-rose-200 dark:border-[#FF7A95]/20 text-rose-950 dark:text-white/70 text-xs leading-relaxed font-bold modal-box-rose">
                 {item.badExample}
               </div>
             </div>
@@ -1397,12 +1407,15 @@ export default function InterviewGuidePage() {
 
           {/* Right Action buttons */}
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push("/home")}
-              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-base">history</span>历史记录
-            </button>
+            {auth.isLoggedIn && (
+              <button
+                onClick={() => router.push("/memory?tab=timeline")}
+                className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-base">history</span>历史记录
+              </button>
+            )}
+            <ThemeToggle />
             {auth.isLoggedIn ? (
               <UserMenu />
             ) : (
@@ -1576,14 +1589,14 @@ export default function InterviewGuidePage() {
                     className="absolute inset-0 bg-cover bg-center opacity-80 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
                     style={{ backgroundImage: "url('/guide/note.jpg')" }}
                   />
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#0b1326] via-[#0b1326]/85 to-transparent pointer-events-none" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f19]/85 via-[#0b0f19]/50 to-transparent pointer-events-none" />
 
                   <div className="space-y-3 max-w-2xl text-left z-10 relative">
                     <div>
-                      <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2">
+                      <h1 className="text-2xl sm:text-3xl font-black !text-white banner-title tracking-tight flex items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
                         精选内容推荐
                       </h1>
-                      <p className="text-xs sm:text-sm text-on-surface-variant/80 font-semibold mt-1 leading-relaxed">
+                      <p className="text-xs sm:text-sm !text-white/95 banner-desc font-bold mt-1 leading-relaxed drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">
                         来自小红书、抖音优质博主的面试经验分享，帮你提升面试表现
                       </p>
                     </div>
@@ -1595,15 +1608,15 @@ export default function InterviewGuidePage() {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="搜索问题、文章或博主..."
-                        className="w-full pl-10 pr-4 py-2.5 bg-slate-900/90 border border-white/15 rounded-xl text-xs sm:text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/60 transition-colors shadow-inner"
+                        className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900/90 border border-slate-300 dark:border-white/15 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/40 focus:outline-none focus:border-indigo-600 dark:focus:border-primary/60 transition-all shadow-sm font-bold"
                       />
-                      <span className="material-symbols-outlined absolute left-3 top-[14px] text-white/40 text-base">
+                      <span className="material-symbols-outlined absolute left-3 top-[14px] text-slate-500 dark:text-white/40 text-base guide-search-icon">
                         search
                       </span>
                       {searchQuery && (
                         <button
                           onClick={() => setSearchQuery("")}
-                          className="absolute right-3 top-[14px] text-white/40 hover:text-white text-xs"
+                          className="absolute right-3 top-[14px] text-slate-500 dark:text-white/40 hover:text-slate-900 dark:hover:text-white text-xs font-bold"
                         >
                           ✕
                         </button>
@@ -1651,7 +1664,7 @@ export default function InterviewGuidePage() {
                     <select
                       value={sortBy}
                       onChange={(e) => setSortBy(e.target.value as any)}
-                      className="bg-slate-900 border border-white/15 rounded-xl px-3 py-1.5 text-sm text-white/80 font-bold focus:outline-none cursor-pointer"
+                      className="bg-[#0f172a] text-white border border-white/20 rounded-xl px-3 py-1.5 text-sm font-bold focus:outline-none cursor-pointer shadow-sm"
                     >
                       <option value="latest">最新发布</option>
                       <option value="likes">最多点赞</option>
@@ -1676,9 +1689,9 @@ export default function InterviewGuidePage() {
                     ))}
                   </div>
                 ) : displayFeaturedList.length === 0 ? (
-                  <div className="glass-panel p-12 rounded-3xl border-white/5 text-center space-y-4 flex-1 flex flex-col items-center justify-center min-h-[580px]">
-                    <span className="material-symbols-outlined !text-5xl text-white/20">favorite_border</span>
-                    <p className="text-xl font-bold text-white/60">您尚未收藏任何精选内容</p>
+                  <div className="glass-panel p-12 rounded-3xl border-slate-200 dark:border-white/5 text-center space-y-4 flex-1 flex flex-col items-center justify-center min-h-[580px] bg-white dark:bg-white/[0.02]">
+                    <span className="material-symbols-outlined !text-5xl text-rose-400 dark:text-rose-400/60 guide-empty-heart">favorite_border</span>
+                    <p className="text-xl font-bold text-slate-700 dark:text-white/60">您尚未收藏任何精选内容</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 flex-1 items-start min-h-[580px]">
@@ -1721,8 +1734,22 @@ export default function InterviewGuidePage() {
                             )}
                           </div>
 
-                          {/* Title Only (Author Info Row completely removed per user request) */}
+                          {/* Title + Author Row (with optional big-V verified badge on the right) */}
                           <div className="p-4 space-y-2">
+                            {/* Author Row: username on the left, big-V on the right (no avatar) */}
+                            {item.author && (
+                              <div className="flex items-center gap-1.5 text-base text-white/85 font-extrabold">
+                                <span className="truncate">{item.author}</span>
+                                {item.authorVerified && (
+                                  <img
+                                    src="/guide/big-V.svg"
+                                    alt="大V认证"
+                                    title="大V认证"
+                                    className="w-5 h-5 object-contain shrink-0 drop-shadow-sm -translate-y-[1px]"
+                                  />
+                                )}
+                              </div>
+                            )}
                             <h4 className="text-sm font-black text-white group-hover:text-primary transition-colors line-clamp-2 leading-snug">
                               {item.title}
                             </h4>
@@ -1838,14 +1865,14 @@ export default function InterviewGuidePage() {
                     className="absolute inset-0 bg-cover bg-center opacity-80 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
                     style={{ backgroundImage: "url('/guide/question.jpg')" }}
                   />
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#0b1326] via-[#0b1326]/85 to-transparent pointer-events-none" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f19]/85 via-[#0b0f19]/50 to-transparent pointer-events-none" />
 
                   <div className="space-y-3 max-w-2xl text-left z-10 relative">
                     <div>
-                      <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2">
+                      <h1 className="text-2xl sm:text-3xl font-black !text-white banner-title tracking-tight flex items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">
                         {questionSubFilter === "全部" ? "通用问题回答指南" : `${questionSubFilter} 深度指南`}
                       </h1>
-                      <p className="text-sm text-on-surface-variant/80 font-semibold mt-1.5 leading-relaxed">
+                      <p className="text-sm !text-white/95 banner-desc font-bold mt-1.5 leading-relaxed drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">
                         {questionSubFilter === "全部"
                           ? "精选 5 大高频通用面试难题拆解，掌握结构化黄金公式、优秀回答示范与避坑指南"
                           : `将“${questionSubFilter}”拆解为 6 张核心解析卡片，包含时间分配、表达要点、满分范例与避坑陷阱`}
@@ -1859,15 +1886,15 @@ export default function InterviewGuidePage() {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder={`搜索${questionSubFilter === "全部" ? "通用问题" : questionSubFilter}要点...`}
-                        className="w-full pl-10 pr-4 py-2.5 bg-slate-900/90 border border-white/15 rounded-xl text-xs sm:text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-primary/60 transition-colors shadow-inner"
+                        className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900/90 border border-slate-300 dark:border-white/15 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/40 focus:outline-none focus:border-indigo-600 dark:focus:border-primary/60 transition-all shadow-sm font-bold"
                       />
-                      <span className="material-symbols-outlined absolute left-3 top-[14px] text-white/40 text-base">
+                      <span className="material-symbols-outlined absolute left-3 top-[14px] text-slate-500 dark:text-white/40 text-base guide-search-icon">
                         search
                       </span>
                       {searchQuery && (
                         <button
                           onClick={() => setSearchQuery("")}
-                          className="absolute right-3 top-[14px] text-white/40 hover:text-white text-xs"
+                          className="absolute right-3 top-[14px] text-slate-500 dark:text-white/40 hover:text-slate-900 dark:hover:text-white text-xs font-bold"
                         >
                           ✕
                         </button>
@@ -1916,15 +1943,15 @@ export default function InterviewGuidePage() {
                           </div>
 
                           <div>
-                            <h4 className="text-base font-black text-white group-hover:text-primary transition-colors">{item.title}</h4>
-                            <p className="text-xs text-white/60 font-medium leading-relaxed mt-1 line-clamp-2">
+                            <h4 className="text-base font-black text-slate-900 dark:text-white group-hover:text-primary transition-colors">{item.title}</h4>
+                            <p className="text-xs text-slate-600 dark:text-white/60 font-medium leading-relaxed mt-1 line-clamp-2">
                               {item.desc}
                             </p>
                           </div>
 
                           {/* Formula Preview Box */}
-                          <div className="p-3 rounded-xl bg-purple-500/10 border border-purple-500/20 text-[11px] text-purple-200/90 leading-relaxed font-medium">
-                            <span className="font-black text-purple-300 block mb-0.5">💡 黄金公式：</span>
+                          <div className="p-3 rounded-xl bg-indigo-50/80 dark:bg-purple-500/10 border border-indigo-200/80 dark:border-purple-500/20 text-[11px] text-slate-800 dark:text-purple-200/90 leading-relaxed font-medium">
+                            <span className="font-black text-indigo-700 dark:text-purple-300 block mb-0.5">💡 黄金公式：</span>
                             {item.formula}
                           </div>
                         </div>
@@ -1953,7 +1980,7 @@ export default function InterviewGuidePage() {
                       </h3>
                       <button
                         onClick={() => setQuestionSubFilter("全部")}
-                        className="text-xs text-white/40 hover:text-white transition-colors cursor-pointer flex items-center gap-1"
+                        className="text-xs text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-white font-bold transition-colors cursor-pointer flex items-center gap-1 guide-back-btn"
                       >
                         ← 返回全部问题概览
                       </button>
@@ -1963,7 +1990,7 @@ export default function InterviewGuidePage() {
                       {currentQuestionCards.detailItems.map((detailCard) => (
                         <div
                           key={detailCard.id}
-                          className="glass-panel p-5 rounded-2xl border-white/10 flex flex-col justify-between text-left hover:border-primary/40 transition-all duration-300 group space-y-4 bg-white/[0.02] hover:bg-white/[0.04] shadow-lg"
+                          className="glass-panel p-5 rounded-2xl border-slate-200 dark:border-white/10 flex flex-col justify-between text-left hover:border-indigo-600 dark:hover:border-primary/40 transition-all duration-300 group space-y-4 bg-white dark:bg-white/[0.02] hover:bg-slate-50 dark:hover:bg-white/[0.04] shadow-lg"
                         >
                           <div className="space-y-3">
                             <div className="flex items-center justify-between">
@@ -1977,25 +2004,25 @@ export default function InterviewGuidePage() {
                                 <span className="material-symbols-outlined text-lg">{detailCard.icon}</span>
                               </div>
                               <div>
-                                <h4 className="text-sm font-black text-white group-hover:text-primary transition-colors leading-snug">
+                                <h4 className="text-sm font-black text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-primary transition-colors leading-snug">
                                   {detailCard.title}
                                 </h4>
-                                <p className="text-xs text-white/60 font-medium leading-relaxed mt-1">
+                                <p className="text-xs text-slate-700 dark:text-white/60 font-bold leading-relaxed mt-1">
                                   {detailCard.summary}
                                 </p>
                               </div>
                             </div>
 
                             {/* Highlight Formula Box */}
-                            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 text-[11px] text-white/90 font-medium leading-relaxed">
-                              <span className="font-bold text-primary block mb-0.5">💡 核心点：</span>
-                              {detailCard.formula}
+                            <div className="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.05] border border-slate-200 dark:border-white/15 text-[11px] leading-relaxed shadow-sm guide-detail-formula-box">
+                              <span className="font-black text-slate-900 dark:text-white block mb-1 guide-formula-title">💡 核心点：</span>
+                              <span className="font-extrabold text-slate-900 dark:text-white block mt-0.5">{detailCard.formula}</span>
                             </div>
                           </div>
 
                           <button
                             onClick={() => handleOpenDetailModal(detailCard)}
-                            className="w-full py-2 bg-white/5 hover:bg-primary/20 text-white/80 hover:text-primary font-bold text-xs rounded-xl border border-white/10 hover:border-primary/30 transition-all cursor-pointer flex items-center justify-center gap-1"
+                            className="w-full py-2.5 bg-indigo-100 hover:bg-indigo-600 dark:bg-white/5 dark:hover:bg-primary/20 text-indigo-800 hover:text-white dark:text-white/80 dark:hover:text-primary font-black text-sm rounded-xl border border-indigo-200 dark:border-white/10 hover:border-indigo-600 dark:hover:border-primary/30 transition-all cursor-pointer flex items-center justify-center gap-1 shadow-sm guide-detail-btn"
                           >
                             <span>查看完整指导细节</span>
                             <span className="material-symbols-outlined text-xs">open_in_new</span>
@@ -2020,14 +2047,14 @@ export default function InterviewGuidePage() {
                     className="absolute inset-0 bg-cover bg-center opacity-80 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
                     style={{ backgroundImage: "url('/guide/polite.jpg')" }}
                   />
-                  <div className="absolute inset-0 bg-gradient-to-r from-[#0b1326] via-[#0b1326]/85 to-transparent pointer-events-none" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f19]/85 via-[#0b0f19]/50 to-transparent pointer-events-none" />
 
                   <div className="space-y-3 max-w-2xl text-left z-10 relative">
                     <div>
-                      <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight flex items-center gap-2">
+                      <h1 className="text-2xl sm:text-3xl font-black !text-white banner-title tracking-tight flex items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]" style={{ color: "#ffffff" }}>
                         {etiquetteSubFilter === "全部" ? "面试礼仪与行为指南" : `${etiquetteSubFilter} 专项行为规范`}
                       </h1>
-                      <p className="text-sm text-on-surface-variant/80 font-semibold mt-1.5 leading-relaxed">
+                      <p className="text-sm !text-white/95 banner-desc font-bold mt-1.5 leading-relaxed drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]" style={{ color: "rgba(255, 255, 255, 0.95)" }}>
                         {etiquetteSubFilter === "全部"
                           ? "从面试前准备、视频设备调试到沟通过程与结束礼仪的全流程考官加分指南"
                           : `将“${etiquetteSubFilter}”拆解为 6 张具体可操作的行为规范卡片，消除细节扣分风险`}
@@ -2041,15 +2068,15 @@ export default function InterviewGuidePage() {
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder={`搜索${etiquetteSubFilter === "全部" ? "礼仪规范" : etiquetteSubFilter}...`}
-                        className="w-full pl-10 pr-4 py-2.5 bg-slate-900/90 border border-white/15 rounded-xl text-xs sm:text-sm text-white placeholder:text-white/30 focus:outline-none focus:border-blue-400/60 transition-colors shadow-inner"
+                        className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-900/90 border border-slate-300 dark:border-white/15 rounded-xl text-xs sm:text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-white/40 focus:outline-none focus:border-indigo-600 dark:focus:border-blue-400/60 transition-all shadow-sm font-bold"
                       />
-                      <span className="material-symbols-outlined absolute left-3 top-[14px] text-white/40 text-base">
+                      <span className="material-symbols-outlined absolute left-3 top-[14px] text-slate-500 dark:text-white/40 text-base guide-search-icon">
                         search
                       </span>
                       {searchQuery && (
                         <button
                           onClick={() => setSearchQuery("")}
-                          className="absolute right-3 top-[14px] text-white/40 hover:text-white text-xs"
+                          className="absolute right-3 top-[14px] text-slate-500 dark:text-white/40 hover:text-slate-900 dark:hover:text-white text-xs font-bold"
                         >
                           ✕
                         </button>
@@ -2091,13 +2118,13 @@ export default function InterviewGuidePage() {
                             <span className="material-symbols-outlined text-xl">{item.icon}</span>
                           </div>
                           
-                          <h4 className="text-base font-black text-white group-hover:text-blue-300 transition-colors">{item.title}</h4>
+                          <h4 className="text-base font-black text-slate-900 dark:text-white group-hover:text-indigo-600 transition-colors">{item.title}</h4>
                           
-                          <div className="space-y-2 pt-1 border-t border-white/5">
+                          <div className="space-y-2 pt-1 border-t border-slate-100 dark:border-white/5">
                             {item.bullets.map((bullet, idx) => (
-                              <div key={idx} className="flex items-center gap-2 text-xs text-white/80 font-medium">
-                                <span className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 text-[10px] font-black flex items-center justify-center shrink-0">✓</span>
-                                <span>{bullet}</span>
+                              <div key={idx} className="flex items-center gap-2 text-xs text-slate-900 dark:text-white/80 font-bold guide-bullet-text">
+                                <span className="w-4 h-4 rounded-full bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 text-[10px] font-black flex items-center justify-center shrink-0">✓</span>
+                                <span className="text-slate-900 dark:text-white font-extrabold">{bullet}</span>
                               </div>
                             ))}
                           </div>
@@ -2105,7 +2132,7 @@ export default function InterviewGuidePage() {
 
                         <button
                           onClick={() => setEtiquetteSubFilter(item.title)}
-                          className="w-full py-2.5 bg-blue-500/10 hover:bg-blue-500 text-blue-300 hover:text-white font-black text-xs rounded-xl border border-blue-400/20 hover:border-blue-400 transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                          className="w-full py-2.5 bg-indigo-50 hover:bg-indigo-600 dark:bg-blue-500/10 dark:hover:bg-blue-500 text-indigo-700 hover:text-white dark:text-blue-300 font-black text-xs rounded-xl border border-indigo-200 dark:border-blue-400/20 hover:border-indigo-600 transition-all cursor-pointer flex items-center justify-center gap-1.5 shadow-sm"
                         >
                           <span>查看该主题 6 张卡片细节</span>
                           <span className="material-symbols-outlined text-xs">arrow_forward</span>
@@ -2119,13 +2146,13 @@ export default function InterviewGuidePage() {
                 {!currentEtiquetteCards.isOverview && (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
-                      <h3 className="text-base font-black text-white flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-blue-400" />
+                      <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full bg-indigo-600 dark:bg-blue-400" />
                         {etiquetteSubFilter} - 行为规范 6 张卡片拆解
                       </h3>
                       <button
                         onClick={() => setEtiquetteSubFilter("全部")}
-                        className="text-xs text-white/40 hover:text-white transition-colors cursor-pointer flex items-center gap-1"
+                        className="text-xs text-slate-500 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-white font-bold transition-colors cursor-pointer flex items-center gap-1 guide-back-btn"
                       >
                         ← 返回全部礼仪概览
                       </button>
@@ -2135,7 +2162,7 @@ export default function InterviewGuidePage() {
                       {currentEtiquetteCards.detailItems.map((detailCard) => (
                         <div
                           key={detailCard.id}
-                          className="glass-panel p-5 rounded-2xl border-white/10 flex flex-col justify-between text-left hover:border-blue-400/40 transition-all duration-300 group space-y-4 bg-white/[0.02] hover:bg-white/[0.04] shadow-lg"
+                          className="glass-panel p-5 rounded-2xl border-slate-200 dark:border-white/10 flex flex-col justify-between text-left hover:border-indigo-600 dark:hover:border-blue-400/40 transition-all duration-300 group space-y-4 bg-white dark:bg-white/[0.02] hover:bg-slate-50 dark:hover:bg-white/[0.04] shadow-lg"
                         >
                           <div className="space-y-3">
                             <div className="flex items-center justify-between">
@@ -2149,25 +2176,25 @@ export default function InterviewGuidePage() {
                                 <span className="material-symbols-outlined text-lg">{detailCard.icon}</span>
                               </div>
                               <div>
-                                <h4 className="text-sm font-black text-white group-hover:text-blue-300 transition-colors leading-snug">
+                                <h4 className="text-sm font-black text-slate-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-blue-300 transition-colors leading-snug">
                                   {detailCard.title}
                                 </h4>
-                                <p className="text-xs text-white/60 font-medium leading-relaxed mt-1">
+                                <p className="text-xs text-slate-700 dark:text-white/60 font-bold leading-relaxed mt-1">
                                   {detailCard.summary}
                                 </p>
                               </div>
                             </div>
 
                             {/* Highlight Formula Box */}
-                            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/10 text-[11px] text-white/90 font-medium leading-relaxed">
-                              <span className="font-bold text-blue-300 block mb-0.5">💡 执行要点：</span>
-                              {detailCard.formula}
+                            <div className="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 text-[11px] leading-relaxed shadow-sm guide-detail-formula-box">
+                              <span className="font-black text-slate-900 dark:text-white block mb-1 guide-formula-title">💡 执行要点：</span>
+                              <span className="font-extrabold text-slate-900 dark:text-white block mt-0.5">{detailCard.formula}</span>
                             </div>
                           </div>
 
                           <button
                             onClick={() => handleOpenDetailModal(detailCard)}
-                            className="w-full py-2 bg-white/5 hover:bg-blue-500/20 text-white/80 hover:text-blue-300 font-bold text-xs rounded-xl border border-white/10 hover:border-blue-400/30 transition-all cursor-pointer flex items-center justify-center gap-1"
+                            className="w-full py-2.5 bg-indigo-100 hover:bg-indigo-600 dark:bg-white/5 dark:hover:bg-blue-500/20 text-indigo-800 hover:text-white dark:text-white/80 dark:hover:text-blue-300 font-black text-sm rounded-xl border border-indigo-200 dark:border-white/10 hover:border-indigo-600 dark:hover:border-blue-400/30 transition-all cursor-pointer flex items-center justify-center gap-1 shadow-sm guide-detail-btn"
                           >
                             <span>查看规范操作细节</span>
                             <span className="material-symbols-outlined text-xs">open_in_new</span>
@@ -2190,24 +2217,25 @@ export default function InterviewGuidePage() {
         <div className="glass-panel p-6 sm:p-8 rounded-3xl border-white/15 relative overflow-hidden flex flex-col sm:flex-row items-center justify-between gap-6 text-left shadow-2xl group cursor-default">
           {/* Background Image: /guide/practice.jpg */}
           <div
-            className="absolute inset-0 bg-cover bg-center opacity-80 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
+            className="absolute inset-0 bg-cover bg-center opacity-90 group-hover:scale-105 transition-transform duration-700 pointer-events-none"
             style={{ backgroundImage: "url('/guide/practice.jpg')" }}
           />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#0b1326] via-[#0b1326]/85 to-transparent pointer-events-none" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f19]/85 via-[#0b0f19]/50 to-transparent pointer-events-none" />
 
           <div className="space-y-1.5 relative z-10">
-            <h3 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
+            <h3 className="text-xl sm:text-2xl font-black !text-white banner-title flex items-center gap-2 drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]" style={{ color: "#ffffff" }}>
               <span className="material-symbols-outlined text-2xl text-purple-300">workspace_premium</span>
               练习才能提升，AI 助你进步
             </h3>
-            <p className="text-xs sm:text-sm text-white/70 font-semibold">
+            <p className="text-xs sm:text-sm !text-white/95 banner-desc font-bold drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]" style={{ color: "rgba(255, 255, 255, 0.95)" }}>
               通过 AI 模拟面试，针对性提升你的回答能力和面试表现
             </p>
           </div>
 
           <button
             onClick={() => router.push("/training")}
-            className="px-8 py-3.5 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white font-black text-sm rounded-2xl transition-all shadow-[0_0_25px_rgba(168,85,247,0.4)] hover:scale-105 active:scale-95 cursor-pointer shrink-0 relative z-10"
+            className="px-8 py-3.5 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 !text-white font-black text-sm rounded-2xl transition-all shadow-[0_0_25px_rgba(168,85,247,0.4)] hover:scale-105 active:scale-95 cursor-pointer shrink-0 relative z-10 guide-start-btn"
+            style={{ color: "#ffffff" }}
           >
             开始模拟面试 →
           </button>
@@ -2237,14 +2265,14 @@ export default function InterviewGuidePage() {
 
       {/* MODAL DIALOG FOR DETAILS */}
       {modalData && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-[#0e1626] border border-white/15 rounded-3xl p-6 max-w-xl w-full space-y-5 shadow-2xl text-left relative max-h-[85vh] overflow-y-auto custom-scrollbar">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in select-none">
+          <div className="bg-white dark:bg-[#0e1626] border border-slate-200 dark:border-white/15 rounded-3xl p-6 max-w-xl w-full space-y-5 shadow-2xl text-left relative max-h-[85vh] overflow-y-auto custom-scrollbar">
             
-            <div className="flex items-center justify-between border-b border-white/10 pb-3">
-              <h4 className="text-lg font-black text-white">{modalData.title}</h4>
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-white/10 pb-3">
+              <h4 className="text-lg font-black text-slate-900 dark:text-white">{modalData.title}</h4>
               <button
                 onClick={() => setModalData(null)}
-                className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                className="w-8 h-8 rounded-full bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-500 dark:text-white/60 hover:text-slate-900 dark:hover:text-white flex items-center justify-center transition-colors cursor-pointer"
               >
                 ✕
               </button>

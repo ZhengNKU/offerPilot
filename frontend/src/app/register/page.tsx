@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { API_BASE } from "@/lib/api";
 
@@ -555,6 +556,7 @@ export default function RegisterPage() {
 
           <div className="flex items-center gap-4 text-sm font-bold">
             <span className="text-white/40">已有账号？</span>
+            <ThemeToggle />
             <button
               onClick={() => { auth.setShowLogin(true); router.push("/"); }}
               className="px-6 py-2 bg-white/5 border border-white/10 rounded-full text-white hover:bg-white/10 transition-all cursor-pointer"
@@ -572,16 +574,16 @@ export default function RegisterPage() {
           {/* ========================================================
               LEFT COLUMN: Slogan & Intro Panel (4 cols)
              ======================================================== */}
-          <div className="col-span-12 lg:col-span-4 flex flex-col justify-between p-8 rounded-3xl border border-white/5 bg-[#060e20]/60 backdrop-blur-xl relative overflow-hidden h-full">
+          <div className="register-step1-left-card col-span-12 lg:col-span-4 flex flex-col justify-between p-8 rounded-3xl border border-slate-200 dark:border-white/5 bg-white dark:bg-[#060e20]/60 backdrop-blur-xl relative overflow-hidden h-full">
             <div className="absolute inset-0 bg-gradient-to-br from-[#AFA7FF]/5 to-transparent pointer-events-none" />
-            
+
             <div className="relative z-10 space-y-8 text-left">
               <div className="space-y-4">
-                <h1 className="text-3xl md:text-4xl lg:text-5xl font-black text-white leading-tight font-display-xl tracking-tight">
+                <h1 className="text-3xl md:text-4xl lg:text-5xl font-black text-slate-900 dark:text-white leading-tight font-display-xl tracking-tight">
                   让每一次面试都成为<br />
                   下一次 <span className="text-[#AFA7FF] drop-shadow-[0_0_15px_rgba(175,167,255,0.35)]">Offer</span> 的养料
                 </h1>
-                <p className="text-sm md:text-base text-white/50 leading-relaxed font-bold">
+                <p className="text-sm md:text-base text-slate-600 dark:text-white/50 leading-relaxed font-bold">
                   AI 驱动的职业成长系统，分析面试、沉淀经验、模拟实战，帮你更快拿到理想 Offer。
                 </p>
               </div>
@@ -595,12 +597,12 @@ export default function RegisterPage() {
                   { icon: "trending_up", title: "Offer 概率预测", desc: "AI 预测通过概率，明确提升方向", color: "text-[#FF7A95]" }
                 ].map((f, i) => (
                   <div key={i} className="flex gap-4.5 items-start">
-                    <div className="w-11 h-11 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
+                    <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 flex items-center justify-center shrink-0">
                       <span className={`material-symbols-outlined text-[22px] ${f.color}`}>{f.icon}</span>
                     </div>
                     <div>
-                      <h4 className="text-sm md:text-base font-black text-white">{f.title}</h4>
-                      <p className="text-xs md:text-sm text-white/40 font-bold mt-0.5">{f.desc}</p>
+                      <h4 className="text-sm md:text-base font-black text-slate-900 dark:text-white">{f.title}</h4>
+                      <p className="text-xs md:text-sm text-slate-500 dark:text-white/40 font-bold mt-0.5">{f.desc}</p>
                     </div>
                   </div>
                 ))}
@@ -897,62 +899,62 @@ export default function RegisterPage() {
                       {/* Right: Security & Reason card info (5 cols) */}
                       <div className="col-span-12 md:col-span-5 flex flex-col gap-4 text-xs md:text-sm font-bold text-white/60">
                         {/* 1. Privacy Guarantee */}
-                        <div className="p-6 rounded-2xl bg-[#060e20]/80 border border-white/5 flex flex-col gap-3.5">
-                          <h4 className="text-[#5DECCB] text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-white/5">
+                        <div className="register-step1-right-card p-6 rounded-2xl bg-white dark:bg-[#060e20]/80 border border-slate-200 dark:border-white/5 flex flex-col gap-3.5">
+                          <h4 className="text-[#5DECCB] text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-slate-200 dark:border-white/5">
                             <span className="material-symbols-outlined text-base md:text-lg">verified_user</span>
                             信息安全与隐私保护
                           </h4>
-                          <p className="text-[11px] md:text-xs leading-relaxed text-white/40">
+                          <p className="text-[11px] md:text-xs leading-relaxed text-slate-600 dark:text-white/40">
                             为了提供更精准的面试分析、职业评估与成长建议，我们需要收集您的职业信息。
                           </p>
                           <div className="space-y-3 mt-1">
                             <div className="flex gap-2.5 items-start">
                               <span className="material-symbols-outlined text-[#AFA7FF] text-base md:text-lg shrink-0">lock</span>
                               <div>
-                                <p className="text-[11px] md:text-xs text-white font-black">AI 分析脱敏处理</p>
-                                <p className="text-[10px] md:text-[11px] text-white/35 font-bold mt-0.5">分析过程中自动脱敏，保护身份信息</p>
+                                <p className="text-[11px] md:text-xs text-slate-900 dark:text-white font-black">AI 分析脱敏处理</p>
+                                <p className="text-[10px] md:text-[11px] text-slate-500 dark:text-white/35 font-bold mt-0.5">分析过程中自动脱敏，保护身份信息</p>
                               </div>
                             </div>
                             <div className="flex gap-2.5 items-start">
                               <span className="material-symbols-outlined text-[#AFA7FF] text-base md:text-lg shrink-0">verified</span>
                               <div>
-                                <p className="text-[11px] md:text-xs text-white font-black">数据仅用于个性化服务</p>
-                                <p className="text-[10px] md:text-[11px] text-white/35 font-bold mt-0.5">仅用于 AI 分析、模拟面试与职业建议</p>
+                                <p className="text-[11px] md:text-xs text-slate-900 dark:text-white font-black">数据仅用于个性化服务</p>
+                                <p className="text-[10px] md:text-[11px] text-slate-500 dark:text-white/35 font-bold mt-0.5">仅用于 AI 分析、模拟面试与职业建议</p>
                               </div>
                             </div>
                             <div className="flex gap-2.5 items-start">
                               <span className="material-symbols-outlined text-[#AFA7FF] text-base md:text-lg shrink-0">security</span>
                               <div>
-                                <p className="text-[11px] md:text-xs text-white font-black">安全存储与传输</p>
-                                <p className="text-[10px] md:text-[11px] text-white/35 font-bold mt-0.5">采用银行级加密技术，保障数据安全</p>
+                                <p className="text-[11px] md:text-xs text-slate-900 dark:text-white font-black">安全存储与传输</p>
+                                <p className="text-[10px] md:text-[11px] text-slate-500 dark:text-white/35 font-bold mt-0.5">采用银行级加密技术，保障数据安全</p>
                               </div>
                             </div>
                           </div>
                         </div>
 
                         {/* 2. Why fill info */}
-                        <div className="p-6 rounded-2xl bg-[#060e20]/80 border border-white/5 flex flex-col gap-3.5">
-                          <h4 className="text-white text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5">
+                        <div className="register-step1-right-card p-6 rounded-2xl bg-white dark:bg-[#060e20]/80 border border-slate-200 dark:border-white/5 flex flex-col gap-3.5">
+                          <h4 className="text-slate-900 dark:text-white text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5">
                             <span className="material-symbols-outlined text-base md:text-lg">help_outline</span>
                             为什么要填写这些信息？
                           </h4>
-                          <p className="text-[11px] md:text-xs leading-relaxed text-white/40">
+                          <p className="text-[11px] md:text-xs leading-relaxed text-slate-600 dark:text-white/40">
                             完整的职业信息将帮助 AI 更准确地理解您的背景，提供：
                           </p>
                           <div className="space-y-3 font-bold text-[11px] md:text-xs">
-                            <div className="flex items-center gap-2 text-white/80">
+                            <div className="register-why-item flex items-center gap-2 text-slate-700 dark:text-white/80">
                               <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                               <span>更精准的面试表现分析</span>
                             </div>
-                            <div className="flex items-center gap-2 text-white/80">
+                            <div className="register-why-item flex items-center gap-2 text-slate-700 dark:text-white/80">
                               <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                               <span>更匹配的面试题库和模拟场景</span>
                             </div>
-                            <div className="flex items-center gap-2 text-white/80">
+                            <div className="register-why-item flex items-center gap-2 text-slate-700 dark:text-white/80">
                               <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                               <span>更合理的 Offer 概率预测</span>
                             </div>
-                            <div className="flex items-center gap-2 text-white/80">
+                            <div className="register-why-item flex items-center gap-2 text-slate-700 dark:text-white/80">
                               <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                               <span>更个性化的职业成长建议</span>
                             </div>
@@ -1043,7 +1045,7 @@ export default function RegisterPage() {
                           </div>
 
                           {/* Guidelines Info */}
-                          <div className="p-4 rounded-xl bg-[#060e20]/60 border border-white/5 text-xs text-white/40 space-y-1.5 font-bold shrink-0 max-w-xs text-left">
+                          <div className="register-avatar-tip p-4 rounded-xl bg-[#060e20]/60 border border-white/5 text-xs text-white/40 space-y-1.5 font-bold shrink-0 max-w-xs text-left">
                             <p className="text-sm text-white font-black mb-1 flex items-center gap-1.5">
                               <span className="material-symbols-outlined text-sm text-[#AFA7FF]">lightbulb</span>头像建议
                             </p>
@@ -1098,7 +1100,7 @@ export default function RegisterPage() {
                             <label className="block mb-1.5">
                               求职状态 <span className="text-[#FF7A95] ml-0.5">*</span>
                             </label>
-                            <div className="flex bg-[#050B1A] p-1.5 rounded-xl border border-white/5 font-bold text-sm select-none">
+                            <div className="register-job-status flex bg-[#050B1A] p-1.5 rounded-xl border border-white/5 font-bold text-sm select-none">
                               {[
                                 { id: "active", label: "在职" },
                                 { id: "resigned", label: "离职" },

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { API_BASE } from "@/lib/api";
 
 export default function CareerDashboard() {
@@ -325,6 +326,7 @@ export default function CareerDashboard() {
                 <span className="text-white font-black whitespace-nowrap">{auth.user.name}</span>
                 <span className="material-symbols-outlined text-sm text-on-surface-variant/40 select-none">expand_more</span>
               </div>
+              <ThemeToggle />
             </div>
           </div>
 
@@ -738,27 +740,29 @@ export default function CareerDashboard() {
               {/* Security info items block */}
               <div className="flex flex-wrap items-center gap-x-6 gap-y-4 flex-1">
                 
-                <div className="flex items-center gap-3 px-4.5 py-3 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-[200px]">
+                <div className="security-card flex items-center gap-3 px-4.5 py-3 rounded-2xl bg-indigo-50/50 dark:bg-white/[0.02] border border-indigo-100 dark:border-white/5 flex-1 min-w-[200px]">
+                  <span className="material-symbols-outlined security-icon text-indigo-600 dark:text-primary text-xl font-bold shrink-0">mail</span>
                   <div className="text-left min-w-0 flex-1 pr-2">
-                    <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">邮箱</span>
-                    <span className="text-sm font-black text-white block mt-0.5 truncate">{accountSecurity.email}</span>
+                    <span className="text-[10px] security-label text-slate-600 dark:text-white/60 font-label-mono uppercase tracking-widest font-black block">邮箱</span>
+                    <span className="text-sm font-black security-value text-slate-900 dark:text-white block mt-0.5 truncate">{accountSecurity.email}</span>
                   </div>
                   <button 
                     onClick={() => setShowEditSecurityModal(true)}
-                    className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-white text-[10px] font-black rounded-lg border border-white/10 transition-all shrink-0 cursor-pointer"
+                    className="security-edit-btn px-3.5 py-1.5 rounded-lg transition-all shrink-0 cursor-pointer text-[10px] font-black"
                   >
                     修改
                   </button>
                 </div>
 
-                <div className="flex items-center gap-3 px-4.5 py-3 rounded-2xl bg-white/[0.02] border border-white/5 flex-1 min-w-[200px]">
+                <div className="security-card flex items-center gap-3 px-4.5 py-3 rounded-2xl bg-indigo-50/50 dark:bg-white/[0.02] border border-indigo-100 dark:border-white/5 flex-1 min-w-[200px]">
+                  <span className="material-symbols-outlined security-icon text-indigo-600 dark:text-primary text-xl font-bold shrink-0">phone_iphone</span>
                   <div className="text-left min-w-0 flex-1 pr-2">
-                    <span className="text-[10px] text-on-surface-variant/40 font-label-mono uppercase tracking-widest font-extrabold block">手机号</span>
-                    <span className="text-sm font-black text-white block mt-0.5 truncate">{accountSecurity.phone}</span>
+                    <span className="text-[10px] security-label text-slate-600 dark:text-white/60 font-label-mono uppercase tracking-widest font-black block">手机号</span>
+                    <span className="text-sm font-black security-value text-slate-900 dark:text-white block mt-0.5 truncate">{accountSecurity.phone}</span>
                   </div>
                   <button 
                     onClick={() => setShowEditSecurityModal(true)}
-                    className="px-3.5 py-1.5 bg-white/5 hover:bg-white/10 text-white text-[10px] font-black rounded-lg border border-white/10 transition-all shrink-0 cursor-pointer"
+                    className="security-edit-btn px-3.5 py-1.5 rounded-lg transition-all shrink-0 cursor-pointer text-[10px] font-black"
                   >
                     修改
                   </button>

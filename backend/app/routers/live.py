@@ -23,10 +23,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models
 from app.config import settings
-from app.database import get_db, async_session, _get_redis_pool
+from app.database import get_db, async_session, _get_redis_pool, get_redis
 from app.routers.auth import get_current_user_optional
 from app.utils.moderation_dep import moderated
 from app.utils.ws_auth import get_current_user_from_ws
+from app.services.live_slots import make_slot_manager, estimate_eta_sec
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +101,9 @@ class CreateLiveSessionRequest(BaseModel):
     """POST /api/live/sessions 入参。"""
     interview_type: Literal["tech_8gu", "tech_project", "tech_scenario", "non_tech", "hr_comprehensive"]
     difficulty: Literal["Lv1", "Lv2", "Lv3", "Lv4"]
-    duration_min: Literal[10, 15, 20]
+    # 实际面试时长（PR-QUOTA-CAP）：正常 10/15/20；剩余配额不足时被截断到剩余，
+    # 所以放宽到 int 1-20（前端 quota 感知按钮已做截断，这里是兜底）。
+    duration_min: int = Field(ge=1, le=20)
     followup_rounds: int = Field(ge=1, le=3)
     target_role: str
     job_level: Optional[str] = None
@@ -185,21 +188,9 @@ async def create_live_session(
             logger.exception(f"[live] 清理 stale session 失败，继续创建: {e}")
             await db.rollback()
 
-    row = models.InterviewLiveSession(
-        user_id=current_user_id,
-        interview_type=req.interview_type,
-        difficulty=req.difficulty,
-        duration_min=req.duration_min,
-        followup_rounds=req.followup_rounds,
-        target_role=req.target_role,
-        job_level=req.job_level,
-        company_style=req.company_style,
-        job_description=req.job_description,
-        status="created",
-        duration_sec=0,
-    )
-
     # PR6 定价限额：登录用户按会员等级查当月已用
+    # 同时计算 effective_duration_min：剩余配额 < 请求时长时，按剩余配额截断（PR-QUOTA-CAP）。
+    effective_duration_min = req.duration_min
     if current_user:
         membership = current_user.membership  # NULL/None/'test'
         # 内测用户超 30 天试用期 → 降级为免费（0 分钟）
@@ -227,9 +218,30 @@ async def create_live_session(
                     f"请升级套餐或下月再试。"
                 )
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+            # 配额截断：剩余配额 < 请求时长 → 实际面试时长 = 剩余配额
+            remaining_min = max(0, limit_min - used_min)
+            if remaining_min > 0 and effective_duration_min > remaining_min:
+                logger.info(
+                    f"[live] user={current_user_id} 请求 {effective_duration_min} 分钟超出剩余 {remaining_min} 分钟，截断"
+                )
+                effective_duration_min = remaining_min
             logger.info(
-                f"[live] user={current_user_id} 当月已用 {used_min}/{limit_min} 分钟，校验通过"
+                f"[live] user={current_user_id} 当月已用 {used_min}/{limit_min} 分钟，effective_duration_min={effective_duration_min} 校验通过"
             )
+
+    row = models.InterviewLiveSession(
+        user_id=current_user_id,
+        interview_type=req.interview_type,
+        difficulty=req.difficulty,
+        duration_min=effective_duration_min,
+        followup_rounds=req.followup_rounds,
+        target_role=req.target_role,
+        job_level=req.job_level,
+        company_style=req.company_style,
+        job_description=req.job_description,
+        status="created",
+        duration_sec=0,
+    )
 
     db.add(row)
     try:
@@ -362,6 +374,22 @@ async def get_live_session_report(
             "interview_type": row.interview_type,
         }
 
+    # 放弃（用户在二次确认后离开页面）：明确告知前端「无报告」
+    if row.status == "abandoned":
+        return {
+            "status": "abandoned",
+            "error_message": "面试已终止，未生成分析报告",
+            "scores": None,
+            "summary": None,
+            "transcript": row.transcript or [],
+            "analysis_result": None,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+            "target_role": row.target_role,
+            "difficulty": row.difficulty,
+            "duration_min": row.duration_min,
+            "interview_type": row.interview_type,
+        }
+
     # 分析尚未完成(analyzing/ended 等)同样不合成假分数
     if row.status not in ("completed",):
         return {
@@ -451,11 +479,18 @@ async def submit_live_feedback(
 @router.post("/sessions/{live_id}/end", response_model=LiveSessionResponse)
 async def end_live_session(
     live_id: int,
+    abandon: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):
     """
-    结束实时面试会话，触发 live 评估分析流程（已从 InterviewSession/Transcript 模块解耦）。
+    结束实时面试会话。
+
+    参数：
+    - abandon=False（默认）：正常结束，触发 live 评估分析流程（已从 InterviewSession/Transcript 模块解耦）。
+    - abandon=True：放弃流程（用户主动离开页面触发），
+      仅标记 status="abandoned" + 扣减时长，**不**触发分析 / 不生成报告。
+      用于用户在二次确认后切换页面 / 刷新 / 关闭标签等场景。
     """
     row = await db.get(models.InterviewLiveSession, live_id)
     if not row:
@@ -468,7 +503,100 @@ async def end_live_session(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权结束该实时面试会话",
         )
-    if row.status in ("analyzing", "completed"):
+
+    # ----- abandon 路径：放弃分析，扣减时长 -----
+    if abandon:
+        # 已 analyzing / completed / abandoned → 直接返回当前状态
+        if row.status in ("analyzing", "completed", "abandoned"):
+            return LiveSessionResponse(
+                live_session_id=row.id,
+                status=row.status,
+                interview_type=row.interview_type,
+                difficulty=row.difficulty,
+                duration_min=row.duration_min,
+                followup_rounds=row.followup_rounds,
+                target_role=row.target_role,
+                job_level=row.job_level,
+                company_style=row.company_style,
+                job_description=row.job_description,
+                voice_id=row.voice_id,
+                persona_cn=row.persona_cn,
+                duration_sec=row.duration_sec,
+                created_at=row.created_at,
+                started_at=row.started_at,
+                ended_at=row.ended_at,
+                session_id=row.session_id,
+                ws_url=None,
+                error_message=row.error_message,
+            )
+
+        # 通知后端把 live_session 标 ending（如果还在 live），让 watchdog 主动关 WS
+        if row.status not in ("ended", "ending"):
+            await db.execute(
+                update(models.InterviewLiveSession)
+                .where(models.InterviewLiveSession.id == live_id)
+                .values(status="ending")
+            )
+            await db.commit()
+            logger.info(f"[live] live_id={live_id} status=ending (abandon 触发)")
+
+        # 轮询等待 status='ended'（最多 8s）—— bridge._on_close 写完 transcript 后会置 ended
+        for _ in range(40):
+            await asyncio.sleep(0.2)
+            await db.refresh(row)
+            if row.status == "ended":
+                break
+        else:
+            logger.warning(f"[live] live_id={live_id} abandon 等待 ended 超时，强制标 abandoned")
+
+        # 标记 abandoned（不触发 _run_analysis_for_live）
+        await db.execute(
+            update(models.InterviewLiveSession)
+            .where(models.InterviewLiveSession.id == live_id)
+            .values(status="abandoned")
+        )
+        await db.commit()
+        logger.info(f"[live] live_id={live_id} status=abandoned (放弃，不生成报告)")
+
+        # 扣减时长（用户已用，就要扣；与正常完成走同一份 quota 表）
+        if row.user_id and row.duration_sec > 0:
+            try:
+                await upsert_user_live_minutes(
+                    db=db,
+                    user_id=row.user_id,
+                    added_seconds=row.duration_sec,
+                    ended_at=row.ended_at or datetime.utcnow(),
+                )
+                logger.info(
+                    f"[live] 累计时长 +{row.duration_sec}s to user={row.user_id} (abandon)"
+                )
+            except Exception as ex:
+                logger.warning(f"[live] 累计时长失败 user={row.user_id}: {ex}")
+
+        await db.refresh(row)
+        return LiveSessionResponse(
+            live_session_id=row.id,
+            status=row.status,
+            interview_type=row.interview_type,
+            difficulty=row.difficulty,
+            duration_min=row.duration_min,
+            followup_rounds=row.followup_rounds,
+            target_role=row.target_role,
+            job_level=row.job_level,
+            company_style=row.company_style,
+            job_description=row.job_description,
+            voice_id=row.voice_id,
+            persona_cn=row.persona_cn,
+            duration_sec=row.duration_sec,
+            created_at=row.created_at,
+            started_at=row.started_at,
+            ended_at=row.ended_at,
+            session_id=row.session_id,
+            ws_url=None,
+        )
+
+    # ----- 正常结束路径 -----
+    if row.status in ("analyzing", "completed", "abandoned"):
         return LiveSessionResponse(
             live_session_id=row.id,
             status=row.status,
@@ -678,6 +806,15 @@ async def _run_analysis_for_live(
                             trigger_knowledge_match(live_sess.user_id, questions)
                         )
             
+        # 7. RAG 索引：fire-and-forget 把本次分析结果和逐字对话写入向量库
+            if live_sess.user_id:
+                from app.services.embedding_indexer import schedule_index
+                schedule_index({
+                    "kind": "live_interview",
+                    "user_id": live_sess.user_id,
+                    "live_session_id": live_id,
+                })
+
         logger.info(f"[live] analysis complete for live_id={live_id}")
     except Exception as e:
         logger.exception(f"[live] _run_analysis_for_live 失败 live_id={live_id}: {e}")
@@ -1230,6 +1367,9 @@ async def ws_live(websocket: WebSocket, live_id: int):
         # redis 使用全局连接池，不 close
 
     # ---------- 2. 校验 live session 归属 ----------
+    # 复用鉴权阶段的全局 Redis 连接池构造槽位管理器（并发限流 + 排队）
+    slots = make_slot_manager(redis_for_auth)
+    slot_held = False
     db = async_session()
     try:
         row = await db.get(models.InterviewLiveSession, live_id)
@@ -1245,6 +1385,101 @@ async def ws_live(websocket: WebSocket, live_id: int):
             )
             await websocket.close(code=4410, reason=f"status={row.status}")
             return
+
+        # ---------- 2.5 并发限流 + 排队（建桥前占槽）----------
+        # 红线：本段所有退出分支都在 status='live' 与 bridge.run() 之前，
+        #       绝不产生 duration_sec、不触发 /end 分析，因此永不扣时长额度。
+        if await slots.acquire(live_id):
+            slot_held = True
+        else:
+            pos = await slots.enqueue(live_id)
+            if pos < 0:
+                # 活跃槽满 + 队列也满 → 快速拒绝，不排队
+                logger.info(f"[ws] live_id={live_id} 并发+队列已满，close 4429")
+                try:
+                    await websocket.send_text(json.dumps({
+                        "type": "live.error",
+                        "code": "server_busy",
+                        "message": "当前模拟面试人数已满，请稍后再试",
+                    }, ensure_ascii=False))
+                except Exception:
+                    pass
+                await websocket.close(code=4429, reason="server busy")
+                return
+
+            # ---------- 排队循环 ----------
+            logger.info(f"[ws] live_id={live_id} 进入排队，初始位置={pos}")
+            waited = 0.0
+            poll = settings.LIVE_QUEUE_POLL_INTERVAL
+            try:
+                while True:
+                    cur_pos = await slots.queue_position(live_id)
+                    if cur_pos is None:
+                        cur_pos = pos
+                    # 队首则尝试抢槽（抢到即出队进入正式流程）
+                    if cur_pos == 0 and await slots.acquire(live_id):
+                        await slots.dequeue(live_id)
+                        slot_held = True
+                        logger.info(f"[ws] live_id={live_id} 排队结束，已获得槽位")
+                        break
+                    # 推送当前排位给前端
+                    try:
+                        await websocket.send_text(json.dumps({
+                            "type": "live.queue",
+                            "position": cur_pos + 1,
+                            "ahead": cur_pos,
+                            "eta_sec": estimate_eta_sec(
+                                cur_pos, row.duration_min, settings.LIVE_MAX_CONCURRENT
+                            ),
+                        }, ensure_ascii=False))
+                    except Exception:
+                        # 推送失败通常意味着前端已断开
+                        await slots.dequeue(live_id)
+                        return
+                    # 在 poll 窗口内监听前端取消/断线
+                    try:
+                        raw_q = await asyncio.wait_for(websocket.receive(), timeout=poll)
+                    except asyncio.TimeoutError:
+                        raw_q = None
+                    except WebSocketDisconnect:
+                        await slots.dequeue(live_id)
+                        return
+                    if raw_q is not None:
+                        if raw_q.get("type") == "websocket.disconnect":
+                            await slots.dequeue(live_id)
+                            return
+                        txt = raw_q.get("text")
+                        if txt:
+                            try:
+                                qmsg = json.loads(txt)
+                            except json.JSONDecodeError:
+                                qmsg = {}
+                            if qmsg.get("type") == "client.cancel_queue":
+                                logger.info(f"[ws] live_id={live_id} 用户取消排队")
+                                await slots.dequeue(live_id)
+                                try:
+                                    await websocket.close(code=1000, reason="queue cancelled")
+                                except Exception:
+                                    pass
+                                return
+                        # 其他消息（排队中误发的 audio/ping 等）忽略
+                    waited += poll
+                    if waited >= settings.LIVE_QUEUE_MAX_WAIT:
+                        logger.info(f"[ws] live_id={live_id} 排队超时 close 4408")
+                        await slots.dequeue(live_id)
+                        try:
+                            await websocket.send_text(json.dumps({
+                                "type": "live.error",
+                                "code": "queue_timeout",
+                                "message": "排队等待超时，请稍后重试",
+                            }, ensure_ascii=False))
+                        except Exception:
+                            pass
+                        await websocket.close(code=4408, reason="queue timeout")
+                        return
+            except WebSocketDisconnect:
+                await slots.dequeue(live_id)
+                return
 
         # ---------- 3. 标记 live + started_at ----------
         await db.execute(
@@ -1435,7 +1670,7 @@ async def ws_live(websocket: WebSocket, live_id: int):
             logger.info(f"[ws] live_id={live_id} 火山 key 未配置，echo 模式（仅供本地调试）")
 
         from app.services.live_bridge import LiveSessionBridge
-        bridge = LiveSessionBridge(ws=websocket, row=row, db=db, volc=volc_bridge, asr_bridge=asr_bridge)
+        bridge = LiveSessionBridge(ws=websocket, row=row, db=db, volc=volc_bridge, asr_bridge=asr_bridge, slots=slots)
         await bridge.run()
     except WebSocketDisconnect:
         logger.info(f"[ws] live_id={live_id} 浏览器中途 disconnect")
@@ -1446,4 +1681,30 @@ async def ws_live(websocket: WebSocket, live_id: int):
         except Exception:
             pass
     finally:
+        # 释放并发槽位（双保险：即便 bridge 未跑到 _on_close 也确保释放；ZREM 幂等）
+        if slot_held:
+            try:
+                await slots.release(live_id)
+            except Exception as e:
+                logger.warning(f"[ws] live_id={live_id} 释放槽位失败: {e}")
         await db.close()
+
+
+@router.get("/_stats")
+async def live_slots_stats(
+    current_user=Depends(get_current_user_optional),
+    redis: aioredis.Redis = Depends(get_redis),
+):
+    """实时面试并发/排队水位（登录用户可见），便于线上观测。
+
+    curl -H "Authorization: Bearer <token>" http://host/api/live/_stats
+    """
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="需要登录")
+    slots = make_slot_manager(redis)
+    return {
+        "active": await slots.active_count(),
+        "queue": await slots.queue_len(),
+        "cap": settings.LIVE_MAX_CONCURRENT,
+        "queue_max": settings.LIVE_QUEUE_MAX,
+    }

@@ -220,3 +220,18 @@ export async function getCounselorStats(): Promise<CounselorStats> {
   return resp.json();
 }
 
+export interface CounselorQuota {
+  remaining: number;
+  limit: number;
+  is_free: boolean;
+}
+
+export async function getCounselorQuota(): Promise<CounselorQuota> {
+  const token = getToken();
+  const resp = await fetch(`${API_BASE}/api/counselor/quota`, {
+    headers: { Authorization: token ? `Bearer ${token}` : "" },
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json();
+}
+

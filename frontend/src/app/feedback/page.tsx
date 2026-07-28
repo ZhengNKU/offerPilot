@@ -5,6 +5,7 @@ import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { API_BASE } from "@/lib/api";
 import { trackPendingFile, untrackPendingFile } from "@/utils/pendingUploads";
@@ -847,12 +848,15 @@ export default function FeedbackPage() {
           </div>
 
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => router.push("/memory?tab=timeline")}
-              className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-base">history</span>历史记录
-            </button>
+            {auth.isLoggedIn && (
+              <button
+                onClick={() => router.push("/memory?tab=timeline")}
+                className="px-4.5 py-2 bg-white/5 border border-white/10 rounded-full text-sm font-bold text-on-surface hover:bg-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <span className="material-symbols-outlined text-base">history</span>历史记录
+              </button>
+            )}
+            <ThemeToggle />
             {auth.isLoggedIn ? (
               <UserMenu />
             ) : (
@@ -884,13 +888,12 @@ export default function FeedbackPage() {
         <div className="glass-panel p-6 md:p-8 rounded-3xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between border-white/10 shadow-[0_4px_30px_rgba(0,0,0,0.2)] h-[220px] shrink-0">
           {/* Semi-transparent background image cover */}
           <div className="absolute inset-0 w-full h-full select-none pointer-events-none z-0">
-            <img 
-              src="/feedback.jpg" 
-              alt="Feedback Background" 
-              className="w-full h-full object-cover object-right opacity-80" 
+            <div
+              className="absolute inset-0 bg-cover bg-center opacity-80 transition-transform duration-700 pointer-events-none"
+              style={{ backgroundImage: "url('/feedback.jpg')" }}
             />
-            {/* Dark overlay gradient to ensure text readability on the left while keeping the image clear on the right */}
-            <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f19] via-[#0b0f19]/45 to-transparent" />
+            {/* Soft translucent dark gradient overlay for crystal white text readability across all themes */}
+            <div className="absolute inset-0 bg-gradient-to-r from-[#0b0f19]/85 via-[#0b0f19]/55 to-transparent pointer-events-none" />
           </div>
 
           {/* Decorative purple glows inside header */}
@@ -900,11 +903,11 @@ export default function FeedbackPage() {
             <img 
               src="/feedback-2.png" 
               alt="Feedback Icon" 
-              className="w-36 h-36 object-contain shrink-0" 
+              className="w-40 h-40 object-contain shrink-0" 
             />
             <div className="text-left">
-              <h1 className="text-2xl md:text-3xl font-extrabold text-on-surface">体验反馈中心</h1>
-              <p className="text-sm md:text-base text-on-surface-variant mt-1.5 font-medium">
+              <h1 className="!text-4xl md:text-3xl font-black text-white banner-title drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]">体验反馈中心</h1>
+              <p className="text-sm md:text-base text-white/90 banner-desc font-bold mt-1.5 drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">
                 你的反馈是我们前进的动力，帮助我们打造更好的面试驾到
               </p>
             </div>
@@ -955,13 +958,16 @@ export default function FeedbackPage() {
                         initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -5 }}
-                        className="absolute z-30 left-0 right-0 mt-1.5 bg-[#171f33] border border-white/10 rounded-xl overflow-hidden shadow-2xl"
+                        className="absolute z-30 left-0 right-0 mt-1.5 bg-[#0f172a] border border-white/20 rounded-xl overflow-hidden shadow-2xl"
                       >
                         {typeOptions.map((opt) => (
                           <div
                             key={opt}
-                            onClick={() => setFeedbackType(opt)}
-                            className="px-4 py-3 hover:bg-white/5 text-sm text-on-surface cursor-pointer font-medium transition-colors"
+                            onClick={() => {
+                              setFeedbackType(opt);
+                              setShowTypeDropdown(false);
+                            }}
+                            className="px-4 py-3 hover:bg-white/10 text-sm text-white font-bold cursor-pointer transition-colors"
                           >
                             {opt}
                           </div>
@@ -998,13 +1004,16 @@ export default function FeedbackPage() {
                         initial={{ opacity: 0, y: -5 }}
                         animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -5 }}
-                        className="absolute z-30 left-0 right-0 mt-1.5 bg-[#171f33] border border-white/10 rounded-xl overflow-hidden shadow-2xl"
+                        className="absolute z-30 left-0 right-0 mt-1.5 bg-[#0f172a] border border-white/20 rounded-xl overflow-hidden shadow-2xl"
                       >
                         {moduleOptions.map((opt) => (
                           <div
                             key={opt}
-                            onClick={() => setTargetModule(opt)}
-                            className="px-4 py-3 hover:bg-white/5 text-sm text-on-surface cursor-pointer font-medium transition-colors"
+                            onClick={() => {
+                              setTargetModule(opt);
+                              setShowModuleDropdown(false);
+                            }}
+                            className="px-4 py-3 hover:bg-white/10 text-sm text-white font-bold cursor-pointer transition-colors"
                           >
                             {opt}
                           </div>
@@ -1161,10 +1170,10 @@ export default function FeedbackPage() {
                     <select
                       value={sortBy}
                       onChange={(e) => setSortBy(e.target.value as any)}
-                      className="appearance-none bg-white/5 border border-white/10 hover:border-white/15 px-4 pr-9 py-1.5 rounded-full text-sm font-bold text-on-surface cursor-pointer focus:outline-none"
+                      className="appearance-none bg-white/5 border border-white/10 hover:border-white/15 px-4 pr-9 py-1.5 rounded-full text-sm font-bold text-slate-900 dark:text-on-surface cursor-pointer focus:outline-none"
                     >
-                      <option value="latest" className="bg-[#171f33]">最新</option>
-                      <option value="popular" className="bg-[#171f33]">最热</option>
+                      <option value="latest" className="bg-white dark:bg-[#171f33] text-slate-900 dark:text-white">最新</option>
+                      <option value="popular" className="bg-white dark:bg-[#171f33] text-slate-900 dark:text-white">最热</option>
                     </select>
                     <span className="material-symbols-outlined text-on-surface-variant text-sm absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
                       keyboard_arrow_down
@@ -1201,7 +1210,7 @@ export default function FeedbackPage() {
                       type="checkbox"
                       checked={filteredFeedbacks.length > 0 && selectedIds.length === filteredFeedbacks.length}
                       onChange={handleSelectAll}
-                      className="rounded border-white/10 text-primary focus:ring-0 focus:ring-offset-0 bg-white/5 w-4 h-4 cursor-pointer"
+                      className="checkbox-white rounded text-primary focus:ring-0 focus:ring-offset-0 w-4 h-4 cursor-pointer"
                     />
                     <span>全选 ({selectedIds.length}/{filteredFeedbacks.length})</span>
                   </label>
@@ -1250,7 +1259,7 @@ export default function FeedbackPage() {
                             checked={selectedIds.includes(item.id)}
                             onChange={() => handleSelectRow(item.id)}
                             onClick={(e) => e.stopPropagation()} // Prevent opening details modal!
-                            className="mt-2.5 rounded border-white/10 text-primary focus:ring-0 focus:ring-offset-0 bg-white/5 w-4.5 h-4.5 cursor-pointer shrink-0"
+                            className="checkbox-white mt-2.5 rounded text-primary focus:ring-0 focus:ring-offset-0 w-4.5 h-4.5 cursor-pointer shrink-0"
                           />
                         )}
 
@@ -1441,10 +1450,10 @@ export default function FeedbackPage() {
                 <div className="min-w-0 pr-4">
                   <div className="flex items-center gap-2.5 mb-2">
                     <span className={`px-2.5 py-1 rounded-md text-xs font-bold ${
-                      selectedFeedback.type === "问题反馈" ? "bg-red-400/10 text-red-300 border border-red-400/15" :
-                      selectedFeedback.type === "功能建议" ? "bg-primary-container/10 text-primary border border-primary-container/15" :
-                      selectedFeedback.type === "体验优化" ? "bg-amber-400/10 text-amber-300 border border-amber-400/15" :
-                      "bg-white/10 text-on-surface-variant border border-white/15"
+                      selectedFeedback.type === "问题反馈" ? "badge-bug bg-rose-100 dark:bg-red-400/10 text-rose-700 dark:text-red-300 border border-rose-200 dark:border-red-400/15" :
+                      selectedFeedback.type === "功能建议" ? "badge-feature bg-indigo-100 dark:bg-primary-container/10 text-indigo-700 dark:text-primary border border-indigo-200 dark:border-primary-container/15" :
+                      selectedFeedback.type === "体验优化" ? "badge-ux bg-emerald-100 dark:bg-amber-400/10 text-emerald-700 dark:text-amber-300 border border-emerald-200 dark:border-amber-400/15" :
+                      "badge-other bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-on-surface-variant border border-slate-200 dark:border-white/15"
                     }`}>
                       {selectedFeedback.type}
                     </span>
@@ -1532,8 +1541,8 @@ export default function FeedbackPage() {
                                 }}
                                 className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer border flex items-center gap-1 ${
                                   onlyShowMyComments
-                                    ? "bg-[#AFA7FF]/10 border-[#AFA7FF] text-[#AFA7FF]"
-                                    : "bg-white/5 border-white/10 text-on-surface-variant/70 hover:bg-white/10"
+                                    ? "bg-indigo-100 dark:bg-[#AFA7FF]/20 border-indigo-300 dark:border-[#AFA7FF] text-indigo-700 dark:text-[#AFA7FF] font-black shadow-sm"
+                                    : "bg-white dark:bg-white/5 border-slate-300 dark:border-white/10 text-slate-600 dark:text-on-surface-variant/70 hover:bg-slate-50 dark:hover:bg-white/10"
                                 }`}
                               >
                                 <span className="material-symbols-outlined text-[12px]">person</span>
@@ -1544,9 +1553,9 @@ export default function FeedbackPage() {
                         </div>
 
                         {/* Comments Card Wrapper - scrollable card */}
-                        <div className="glass-panel p-4 rounded-2xl border-white/5 bg-white/[0.01] min-h-[400px] max-h-[480px] overflow-y-auto custom-scrollbar flex flex-col gap-3 mb-2">
+                        <div className="glass-panel p-4 rounded-2xl border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.01] min-h-[400px] max-h-[480px] overflow-y-auto custom-scrollbar flex flex-col gap-3 mb-2">
                           {displayedComments.length === 0 ? (
-                            <p className="text-base text-on-surface-variant/40 py-4 text-center my-auto">
+                            <p className="text-base text-slate-400 dark:text-on-surface-variant/40 py-4 text-center my-auto font-bold">
                               {onlyShowMyComments ? "没有找到您的评论" : "暂无探讨评论，来发表你的想法吧"}
                             </p>
                           ) : (
@@ -1568,7 +1577,7 @@ export default function FeedbackPage() {
                                 <div key={index} className={`border p-3 rounded-xl flex items-start gap-2.5 transition-all ${
                                   comment.is_pinned 
                                     ? "bg-red-500/[0.02] border-red-500/40 shadow-[0_0_15px_rgba(239,68,68,0.05)]" 
-                                    : "bg-white/[0.015] border-white/[0.04]"
+                                    : "bg-white dark:bg-white/[0.015] border-slate-200 dark:border-white/[0.04]"
                                 }`}>
                                   {(auth.user?.name === "admin" || (onlyShowMyComments && comment.author === auth.user?.name)) && (
                                     <div 
@@ -1576,7 +1585,7 @@ export default function FeedbackPage() {
                                       className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 cursor-pointer select-none transition-all mt-1.5 ${
                                         isChecked 
                                           ? "bg-red-500 border-red-500 text-white" 
-                                          : "border-white/20 hover:border-white/40"
+                                          : "border-slate-300 dark:border-white/20 hover:border-slate-400 dark:hover:border-white/40"
                                       }`}
                                     >
                                       {isChecked && <span className="material-symbols-outlined text-[10px] font-black">check</span>}
@@ -1585,12 +1594,12 @@ export default function FeedbackPage() {
                                   <img 
                                     src={comment.avatar || "/debugger-2.jpg"} 
                                     alt={comment.author} 
-                                    className="w-7 h-7 rounded-full object-cover shrink-0 border border-white/10" 
+                                    className="w-7 h-7 rounded-full object-cover shrink-0 border border-slate-200 dark:border-white/10" 
                                   />
                                   <div className="min-w-0 flex-1">
                                      <div className="flex items-center justify-between gap-2 mb-0.5">
                                        <div className="flex items-center gap-1.5 min-w-0">
-                                         <span className="text-xs font-bold text-on-surface-variant/75 truncate">
+                                         <span className="text-xs font-bold text-slate-700 dark:text-on-surface-variant/75 truncate">
                                            {comment.author.length > 10 ? comment.author.slice(0, 10) + "..." : comment.author}
                                          </span>
                                        </div>
@@ -1602,10 +1611,10 @@ export default function FeedbackPage() {
                                                setCommentToDelete(comment.id!);
                                                setShowCommentDeleteConfirm(true);
                                              }}
-                                             className="text-white/30 hover:text-red-400 transition-colors cursor-pointer p-0.5 rounded hover:bg-white/5 flex items-center justify-center shrink-0"
+                                             className="text-rose-500 dark:text-white/30 hover:text-rose-600 transition-colors cursor-pointer p-0.5 rounded hover:bg-rose-50 dark:hover:bg-white/5 flex items-center justify-center shrink-0 delete-comment-btn"
                                              title="删除评论"
                                            >
-                                             <span className="material-symbols-outlined text-[14px]">delete</span>
+                                             <span className="material-symbols-outlined text-[14px] text-rose-500 dark:text-white/30 delete-comment-icon">delete</span>
                                            </button>
                                          )}
                                          {auth.user?.name === "admin" ? (
@@ -1643,21 +1652,21 @@ export default function FeedbackPage() {
               </div>
 
               {/* Add comment form - pinned at bottom with admin quick replies */}
-              <div className="p-6 border-t border-white/5 bg-[#0f1422]/60 backdrop-blur-md flex flex-col gap-3 relative shrink-0 rounded-b-3xl">
+              <div className="p-6 border-t border-slate-200 dark:border-white/5 bg-purple-50/80 dark:bg-[#0f1422]/60 backdrop-blur-md flex flex-col gap-3 relative shrink-0 rounded-b-3xl feedback-comment-bar">
                 {auth.user?.name === "admin" && (
                   <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="text-on-surface-variant/40 font-bold">快捷回复:</span>
+                    <span className="text-slate-500 dark:text-on-surface-variant/40 font-bold">快捷回复:</span>
                     <button
                       type="button"
                       onClick={() => postQuickComment("感谢您的反馈！此建议非常棒，我们已确认此需求，并已将其排入后续开发计划中，会尽快予以优化和实现。再次感谢您对 面试驾到 的支持！")}
-                      className="px-2 py-0.5 bg-primary/10 border border-primary/20 text-[#AFA7FF] rounded hover:bg-primary/20 transition-all font-bold cursor-pointer"
+                      className="px-2 py-0.5 bg-indigo-100 dark:bg-primary/10 border border-indigo-200 dark:border-primary/20 text-indigo-700 dark:text-[#AFA7FF] rounded hover:bg-indigo-200 dark:hover:bg-primary/20 transition-all font-bold cursor-pointer"
                     >
                       接受建议
                     </button>
                     <button
                       type="button"
                       onClick={() => postQuickComment("非常感谢您的用心反馈！经内部评估，由于现阶段产品定位差异，此建议暂不便排入近期版本规划。我们会持续记录并关注您的提议，感谢理解！")}
-                      className="px-2 py-0.5 bg-white/5 border border-white/10 text-white/70 rounded hover:bg-white/10 transition-all font-bold cursor-pointer"
+                      className="px-2 py-0.5 bg-slate-200 dark:bg-white/5 border border-slate-300 dark:border-white/10 text-slate-700 dark:text-white/70 rounded hover:bg-slate-300 dark:hover:bg-white/10 transition-all font-bold cursor-pointer"
                     >
                       委婉拒绝
                     </button>
@@ -1673,9 +1682,9 @@ export default function FeedbackPage() {
                         onBlur={(e) => commentMod.check(e.target.value, "comment_hint")}
                         maxLength={300}
                         placeholder="写下你的想法，一起交流讨论..."
-                        className="w-full bg-white/5 border border-white/10 hover:border-white/15 focus:border-primary-container/30 transition-all pl-4 pr-16 py-2.5 rounded-xl text-xs text-on-surface placeholder-on-surface-variant/30 focus:outline-none"
+                        className="w-full bg-white dark:bg-white/5 border border-indigo-200 dark:border-white/10 transition-all pl-4 pr-16 py-2.5 rounded-xl text-xs text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-on-surface-variant/30 focus:outline-none feedback-comment-input"
                       />
-                      <span className="absolute right-3 text-[10px] font-bold text-on-surface-variant/40 select-none">
+                      <span className="absolute right-3 text-[10px] font-bold text-slate-400 dark:text-on-surface-variant/40 select-none">
                         {newCommentText.length}/300
                       </span>
                     </div>
@@ -1734,10 +1743,10 @@ export default function FeedbackPage() {
             </div>
 
             <div className="space-y-2">
-              <div className="w-16 h-16 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2">
-                <span className="material-symbols-outlined" style={{ fontSize: "40px" }}>warning</span>
+              <div className="w-16 h-16 rounded-full bg-rose-100 dark:bg-red-500/10 text-rose-500 flex items-center justify-center mx-auto mb-2 border border-rose-200 dark:border-rose-500/20">
+                <span className="material-symbols-outlined danger-warning-icon text-rose-500 dark:text-rose-500" style={{ fontSize: "40px", color: "#f43f5e" }}>warning</span>
               </div>
-              <h3 className="font-extrabold text-white text-2xl">确认要删除吗？</h3>
+              <h3 className="font-extrabold text-slate-900 dark:text-white text-2xl">确认要删除吗？</h3>
               <p className="text-on-surface-variant text-sm leading-relaxed max-w-xs mx-auto font-semibold">
                 {deleteTarget === "batch"
                   ? `您已选择批量删除 ${selectedIds.length} 条反馈记录，此操作将永久从数据库和存储中删除这些记录，且不可撤销。`
@@ -1809,10 +1818,10 @@ export default function FeedbackPage() {
             </div>
 
             <div className="space-y-2">
-              <div className="w-16 h-16 rounded-full bg-red-500/10 text-red-500 flex items-center justify-center mx-auto mb-2">
-                <span className="material-symbols-outlined" style={{ fontSize: "40px" }}>warning</span>
+              <div className="w-16 h-16 rounded-full bg-rose-100 dark:bg-red-500/10 text-rose-500 flex items-center justify-center mx-auto mb-2 border border-rose-200 dark:border-rose-500/20">
+                <span className="material-symbols-outlined danger-warning-icon text-rose-500 dark:text-rose-500" style={{ fontSize: "40px", color: "#f43f5e" }}>warning</span>
               </div>
-              <h3 className="font-extrabold text-white text-2xl">确认要删除评论吗？</h3>
+              <h3 className="font-extrabold text-slate-900 dark:text-white text-2xl">确认要删除评论吗？</h3>
               <p className="text-on-surface-variant text-sm leading-relaxed max-w-xs mx-auto font-semibold">
                 {commentToDelete === null
                   ? `您已选择批量删除 ${selectedCommentIds.size} 条评论记录，此操作将永久从数据库中删除，且不可撤销。`
