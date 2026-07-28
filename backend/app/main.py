@@ -367,7 +367,7 @@ PRESET_FEATURED_GUIDES_SQL: list[str] = [
         fans_count, category, reads, likes, favorites, created_at
     ) VALUES (
         1,
-        '我们想打造一个陪你成长的 AI 职业伙伴 🚀',
+        '我们想打造一个陪你成长的 AI 职业伙伴🚀',
         '/guide/context/1.jpg',
         '小红书',
         'bg-[#FF2442]/20 text-[#FF2442] border-[#FF2442]/30',

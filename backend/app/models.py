@@ -814,9 +814,10 @@ class FeaturedGuide(Base):
     duration: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # 图文笔记, 05:23, etc.
     url: Mapped[str] = mapped_column(String(1000), nullable=False)
     author: Mapped[str] = mapped_column(String(100), nullable=False)
-    author_avatar: Mapped[str] = mapped_column(String(500), nullable=False, default="/test.jpg")
+    author_avatar: Mapped[str] = mapped_column(String(500), nullable=False, default="/guide/context/1.jpg")
     author_verified: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     category: Mapped[str] = mapped_column(String(50), default="推荐", index=True)
+    fans_count: Mapped[str] = mapped_column(String(20), nullable=False, server_default="'0'")
     reads: Mapped[int] = mapped_column(Integer, default=1240)
     likes: Mapped[int] = mapped_column(Integer, default=86)
     favorites: Mapped[int] = mapped_column(Integer, default=42)
