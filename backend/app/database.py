@@ -3,7 +3,13 @@ from sqlalchemy.orm import DeclarativeBase
 from app.config import settings
 import redis.asyncio as aioredis
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False)
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=False,
+    pool_size=20,        # 默认 5，高并发下不够
+    max_overflow=10,     # 溢出连接数，总共 30
+    pool_recycle=1800,   # 30分钟回收，防止 PG 端断开
+)
 async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 class Base(DeclarativeBase):

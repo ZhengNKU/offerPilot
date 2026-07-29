@@ -79,6 +79,66 @@ def _strip_codeblock(text: str) -> str:
     return cleaned
 
 
+def _escape_chinese_quotes_in_json(text: str) -> str:
+    """转义 JSON 文本中用作中文引号的 ASCII 双引号。
+
+    启发式规则：如果一个 ASCII 双引号 " 的前后字符都是 CJK 字符（中日韩统一表意文字），
+    则将其视为中文语境下的引号并转义为 \\"。这种保守的双侧 CJK 检查可以避免
+    误转义真正的 JSON 结构分隔符：
+      - JSON 结构开引号前面一般是 { [ , :  → 不会是 CJK 字符
+      - JSON 结构闭引号后面一般是 } ] , :  → 不会是 CJK 字符
+
+    因此 "前后都是 CJK" 的引号几乎肯定是字符串值内的中文引号，需要转义。
+    已转义的 \\" 不会被重复转义。
+
+    示例：
+      使用"双重缓存"策略  →  使用\\"双重缓存\\"策略
+      "key":"正常值"       →  不变（结构引号不同时前后都是 CJK）
+    """
+    # Unicode CJK Unified Ideographs 范围 + 中文标点
+    _CJK_RANGES = (
+        (0x4E00, 0x9FFF),   # CJK Unified Ideographs (常用汉字)
+        (0x3400, 0x4DBF),   # CJK Unified Ideographs Extension A
+        (0xF900, 0xFAFF),   # CJK Compatibility Ideographs
+        (0x3000, 0x303F),   # CJK Symbols and Punctuation (。、〃 etc)
+        (0xFF00, 0xFFEF),   # Halfwidth and Fullwidth Forms (，）！ etc)
+    )
+
+    def _is_cjk(ch: str) -> bool:
+        cp = ord(ch)
+        return any(lo <= cp <= hi for lo, hi in _CJK_RANGES)
+
+    result: list[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == '"':
+            # 检查前面是否有转义反斜杠
+            backslash_count = 0
+            j = i - 1
+            while j >= 0 and text[j] == '\\':
+                backslash_count += 1
+                j -= 1
+            # 奇数个反斜杠说明该引号已被转义，跳过
+            if backslash_count % 2 == 1:
+                result.append(ch)
+                i += 1
+                continue
+
+            prev_ch = text[i - 1] if i > 0 else ''
+            next_ch = text[i + 1] if i + 1 < len(text) else ''
+
+            if _is_cjk(prev_ch) and _is_cjk(next_ch):
+                # 前后都是 CJK → 中文语境引号 → 转义
+                result.append('\\"')
+            else:
+                result.append(ch)
+        else:
+            result.append(ch)
+        i += 1
+    return ''.join(result)
+
+
 def _repair_llm_json(text: str) -> str:
     """尝试修复 LLM 返回的常见 JSON 格式错误。
 
@@ -95,6 +155,10 @@ def _repair_llm_json(text: str) -> str:
     # ── 策略1: 删除尾逗号 ──
     # "value", } → "value" }   /   "value", ] → "value" ]
     repaired = re.sub(r',\s*([}\]])', r'\1', repaired)
+
+    # ── 策略1.5: 转义中文语境下的 ASCII 双引号 ──
+    # 必须在 _fix_string_values 之前执行，否则状态机会因为未转义引号而翻转错误
+    repaired = _escape_chinese_quotes_in_json(repaired)
 
     # ── 策略2: 修复 JSON 字符串内的未转义换行符（常见于 summary 字段） ──
     # 只在 JSON 字符串值内部（双引号之间）修复
@@ -130,6 +194,16 @@ def _repair_llm_json(text: str) -> str:
                 i += 1
                 continue
             if ch == '\\':
+                if in_string and i + 1 < len(s):
+                    # 检查下一个字符是否是合法的 JSON 转义字符
+                    # 合法: " \ / b f n r t u
+                    next_ch = s[i + 1]
+                    if next_ch not in ('"', '\\', '/', 'b', 'f', 'n', 'r', 't', 'u'):
+                        # 非法转义序列（如 \开）：将 \ 加倍为 \\，
+                        # 这样 \ 变成普通反斜杠字面量，后面的字符不受影响
+                        result.append('\\\\')
+                        i += 1
+                        continue
                 result.append(ch)
                 escape_next = True
                 i += 1
@@ -161,6 +235,23 @@ def _repair_llm_json(text: str) -> str:
         return ''.join(result)
 
     repaired = _fix_string_values(repaired)
+
+    # ── 策略2.5: 批量修复 LLM 最常见的 JSON 格式错误 ──
+    # 在迭代修复之前用正则批量处理，节省迭代次数，避免连锁错误
+    # 模式: "string_value"后缺逗号直接跟下一个 "key":
+    #   错误: "core": "text" "s": "text"
+    #   修复: "core": "text", "s": "text"
+    repaired = re.sub(r'"\s+(?="[^"]{1,60}"\s*:)', r'", ', repaired)
+    # 模式: ] 或 } 后缺逗号直接跟 "key":
+    #   错误: ...], "key": ...  或  ...}, "key": ...
+    #   修复: ...], "key": ... (already correct)
+    #   错误: ...] "key": ...  或  ...} "key": ...
+    #   修复: ...], "key": ...  或  ...}, "key": ...
+    repaired = re.sub(r'([}\]])(")', r'\1, \2', repaired)
+    # 模式: 数字后缺逗号直接跟 "key":
+    #   错误: "freq": 14 "title":
+    #   修复: "freq": 14, "title":
+    repaired = re.sub(r'(\d)\s+(")', r'\1, \2', repaired)
 
     # ── 策略3: 迭代修复，每次用 json.loads 的错误位置修复一处 ──
     # 截断产生的多处结构错误（缺 `}`、缺 `]`、未闭合字符串）会消耗迭代次数，
@@ -194,7 +285,29 @@ def _repair_llm_json(text: str) -> str:
             elif "Invalid control character" in msg and e.pos > 0:
                 # 字符串中有未转义的控制字符，转义它
                 ch = repaired[e.pos] if e.pos < len(repaired) else ''
-                repaired = repaired[:e.pos] + '\\n' + repaired[e.pos + 1:]
+                if ch == '\n':
+                    esc = '\\n'
+                elif ch == '\r':
+                    esc = '\\r'
+                elif ch == '\t':
+                    esc = '\\t'
+                else:
+                    esc = f'\\u{ord(ch):04x}'
+                repaired = repaired[:e.pos] + esc + repaired[e.pos + 1:]
+            elif "Unterminated string" in msg:
+                # 字符串未闭合就到达了输入末尾。
+                # 常见原因：1) LLM 输出被 max_tokens 截断；
+                # 2) 字符串值中有未转义的 ASCII 双引号，导致 JSON 解析器
+                #    认为字符串已结束，真正的结构引号反而变成了新字符串的开头。
+                # 策略：在错误起始位置打开引号之后寻找一个合理的闭合点并插入 "。
+                if e.pos >= len(repaired):
+                    repaired = repaired + '"'
+                else:
+                    repaired = repaired[:e.pos] + '"' + repaired[e.pos:]
+            elif "Invalid \\escape" in msg and e.pos > 0:
+                # 非法转义序列：字符串中 \ 后跟了非法的转义字符（如 \开）。
+                # 将 \ 加倍为 \\，使其成为合法的反斜杠字面量。
+                repaired = repaired[:e.pos] + '\\' + repaired[e.pos:]
             else:
                 # 无法识别的错误类型，停止修复
                 break
@@ -444,6 +557,7 @@ async def call_llm_stream_with_tokens(
     max_iters: int = 2,
     on_tool_event: Optional[Callable[[str, dict], Awaitable[None]]] = None,
     on_reasoning_event: Optional[Callable[[str], Awaitable[None]]] = None,
+    _finish_capture: Optional[dict] = None,
 ) -> AsyncIterator[str]:
     """流式 LLM + tool calling 循环，逐 chunk yield content 文本片段。
 
@@ -478,6 +592,8 @@ async def call_llm_stream_with_tokens(
             log.warning(f"[call_llm_stream_with_tokens] on_tool_event({phase}) 异常: {e!r}")
 
     if not tools:
+        if _finish_capture is not None:
+            _finish_capture["reason"] = None
         async for piece in call_llm_stream_chunks(payload):
             yield piece
         return
@@ -501,6 +617,9 @@ async def call_llm_stream_with_tokens(
             async for piece in _stream_one_with_tools(stream_payload, log):
                 if piece["kind"] == "content":
                     yield piece["piece"]
+                elif piece["kind"] == "finish":
+                    if _finish_capture is not None:
+                        _finish_capture["reason"] = piece["reason"]
             return
 
         stream_payload["messages"] = messages
@@ -542,6 +661,8 @@ async def call_llm_stream_with_tokens(
         if not streamed_calls:
             # 工具未触发，正常完成
             log.info(f"[call_llm_stream_with_tokens] iter={i} no tool_calls, done")
+            if _finish_capture is not None:
+                _finish_capture["reason"] = finish_reason
             return
 
         # ── 跑所有 tool_calls ──
@@ -601,6 +722,9 @@ async def call_llm_stream_with_tokens(
     async for piece in _stream_one_with_tools(stream_payload, log):
         if piece["kind"] == "content":
             yield piece["piece"]
+        elif piece["kind"] == "finish":
+            if _finish_capture is not None:
+                _finish_capture["reason"] = piece["reason"]
 
 
 # ── 通用 LLM 调用 wrapper ────────────────────────────────────────
@@ -660,11 +784,18 @@ async def _run_with_optional_tools(
     # 流式 + tool calling：消费所有 content piece，tool_call 事件丢弃
     # （分析场景不需要把工具事件透传给前端；tool 内部已运行并把结果塞回 messages）
     text_parts: list[str] = []
+    finish_capture: dict = {}
     async for piece in call_llm_stream_with_tokens(
         payload, _all_tools(), ctx=ctx, max_iters=max_iters,
+        _finish_capture=finish_capture,
     ):
         text_parts.append(piece)
-    return {"choices": [{"message": {"content": "".join(text_parts)}}]}
+    return {
+        "choices": [{
+            "message": {"content": "".join(text_parts)},
+            "finish_reason": finish_capture.get("reason"),
+        }]
+    }
 
 
 async def analyze_interview_dialogue(
@@ -1273,6 +1404,7 @@ def call_llm_stream(payload: dict, timeout: float = 300.0) -> dict:
     for attempt in range(max_attempts):
         try:
             content_parts: list[str] = []
+            finish_reason = None
             with requests.post(
                 url, headers=headers, json=stream_payload, timeout=timeout,
                 proxies={"http": None, "https": None}, stream=True,
@@ -1302,10 +1434,16 @@ def call_llm_stream(payload: dict, timeout: float = 300.0) -> dict:
                         piece = delta.get("content")
                         if piece:
                             content_parts.append(piece)
+                        fr = chunk["choices"][0].get("finish_reason")
+                        if fr:
+                            finish_reason = fr
                     except (KeyError, IndexError, TypeError):
                         continue
             return {
-                "choices": [{"message": {"content": "".join(content_parts)}}]
+                "choices": [{
+                    "message": {"content": "".join(content_parts)},
+                    "finish_reason": finish_reason,
+                }]
             }
         except requests.HTTPError as e:
             last_exc = e

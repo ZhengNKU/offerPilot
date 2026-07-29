@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 # Redis 缓存 TTL
 REDIS_CACHE_TTL = 6 * 3600  # 6 小时
 
+# 防止同一用户并发重生成（比如 invalidate_and_regenerate 和 get_questions_for_sub_ability 同时触发）
+_user_regeneration_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_user_lock(user_id: int) -> asyncio.Lock:
+    if user_id not in _user_regeneration_locks:
+        _user_regeneration_locks[user_id] = asyncio.Lock()
+    return _user_regeneration_locks[user_id]
+
 
 # ============================================================================
 # 批量生成：一次 LLM 调用生成所有细化能力的面试题
@@ -75,18 +84,53 @@ def _build_batch_prompt(
     else:
         tool_block = ""
 
+    # 构建一个完整的正确示例（恰好1个能力项、1道题），让 LLM 有明确的模板可参照
+    example_json = """{
+  "abilities": [
+    {
+      "sub_ability_name": "缓存穿透",
+      "core_ability_name": "Redis",
+      "questions": [
+        {
+          "title": "如何用布隆过滤器解决缓存穿透？",
+          "freq": 14,
+          "aiAnswer": {
+            "core": "布隆过滤器在缓存层前做第一层拦截，用多个哈希函数判断key是否存在，不存在则直接返回空，避免穿透到DB。",
+            "s": "电商大促时大量请求查询不存在的商品ID，绕过缓存直接打到MySQL，导致DB负载飙升。",
+            "t": "设计一个方案在缓存层前拦截非法key请求，保护下游数据库不被恶意或无效请求击穿。",
+            "a": [
+              "初始化布隆过滤器，将所有合法商品ID预先加载到位数组中",
+              "请求到达时先经过布隆过滤器判断key是否可能存在",
+              "过滤器判定不存在则直接返回空结果，不查询缓存和数据库"
+            ],
+            "r": "缓存穿透率从35%降至0.1%以下，MySQL CPU使用率从90%降至30%。",
+            "keyPoints": ["布隆过滤器","多哈希函数","位数组预加载"],
+            "followUps": ["布隆过滤器误判率如何控制？","如何应对数据新增导致的过滤器更新？"]
+          }
+        }
+      ]
+    }
+  ]
+}"""
+
     system_prompt = (
         "你是资深AI面试教练。针对以下所有细化能力知识点，为每个知识点各生成10道个性化面试题，"
-        "难度匹配用户职级和年限。\n"
-        "返回严格JSON（不含Markdown标记）：\n"
-        '{"abilities":[{"sub_ability_name":"细化能力名称1","core_ability_name":"所属核心能力1",'
-        '"questions":[{"title":"题目标题(15-30字)","freq":14,"aiAnswer":{'
-        '"core":"核心策略(40-60字)","s":"场景(20-40字)","t":"任务(20-40字)",'
-        '"a":["步骤1(15-30字)","步骤2(15-30字)","步骤3(15-30字)"],'
-        '"r":"结果(20-40字)","keyPoints":["要点1","要点2"],"followUps":["追问1","追问2"]'
-        '}},{"title":"...",...}]},...]}\n'
-        "每个细化能力恰好10道题。每道题总字数200字以内。freq从14递减到5。a恰好3条。followUps恰好2条。"
-        f"共{len(sub_abilities)}个细化能力，每个10题。"
+        "难度匹配用户职级和年限。\n\n"
+        "【输出格式】严格按照以下JSON结构输出，每个字段都不能省略：\n"
+        f"{example_json}\n\n"
+        "【关键约束】\n"
+        "1. 每个细化能力恰好10道题，每道题总字数200字以内\n"
+        "2. freq从14递减到5（第1题14、第2题13...第10题5）\n"
+        "3. a数组恰好3条，keyPoints恰好2条，followUps恰好2条\n"
+        "4. core字段40-60字概括核心策略\n"
+        f"5. 共{len(sub_abilities)}个细化能力，每个10题\n\n"
+        "【JSON语法铁律（违反将导致解析失败）】\n"
+        "- 对象属性之间必须有逗号：\"key1\":\"v1\", \"key2\":\"v2\"（注意逗号）\n"
+        "- 数组元素之间必须有逗号：[\"a\", \"b\", \"c\"]\n"
+        "- 最后一个元素/属性后面不要加逗号\n"
+        "- 字符串值内如需使用引号请用中文引号「」，严禁用ASCII双引号\n"
+        "- 字符串值内的反斜杠\\必须写成\\\\（两个反斜杠），例如路径\"C:\\\\Users\"\n"
+        "- 所有字符串值必须用双引号包裹，不得包含未转义的换行符\n"
         f"{tool_block}"
     )
 
@@ -322,6 +366,7 @@ async def _call_llm_batch_parallel(
     recalled_text: str,
     enable_network: bool = True,
     ctx: Optional[dict] = None,
+    web_context: str = "",
 ) -> list[dict]:
     """按核心能力分组，并行调用 LLM 生成面试题。
 
@@ -330,6 +375,7 @@ async def _call_llm_batch_parallel(
 
     enable_network / ctx: 透传给每组 LLM 调用；模拟面试场景下推荐 enable_network=True
     让 LLM 先 web_search 真实面经，再生成题目。
+    web_context: 预取的真实面经文本；非空时跳过内部联网预取。
     """
     # 按 core 分组
     groups: dict[str, list[dict]] = {}
@@ -339,16 +385,17 @@ async def _call_llm_batch_parallel(
 
     # 预取一次联网面经，多 chunk 共享（替代每个 chunk 在 LLM 循环里各自 web_search，
     # 消除 N 次联网空等；命中则注入 prompt，失败则退回纯语料）
-    web_context = ""
-    if enable_network:
+    # 若外部已预取 web_context 则跳过
+    if enable_network and not web_context:
         web_context = await _prefetch_web_context(target_role, target_grade, experience_years)
         logger.info(
             f"[question_generator] 联网预取{'命中' if web_context else '空/降级'} "
             f"user={user_id} chars={len(web_context)}"
         )
 
-    # 限制最多 2 路并发生成，防止 12 路极速并发触发下游限流
-    sem = asyncio.Semaphore(2)
+    # 限制最多 10 路并发生成
+    # Semaphore(6) 时 12 chunk 需 ~104s，10 路并发 ~60-70s
+    sem = asyncio.Semaphore(10)
 
     async def _call_one(label_name: str, items: list[dict]) -> list[dict]:
         async with sem:
@@ -463,6 +510,17 @@ async def _redis_delete(user_id: int, redis_client):
 # ============================================================================
 
 
+async def _pg_delete_user_questions(db: AsyncSession, user_id: int):
+    """删除用户的所有 PG 面试题缓存（公开接口，供 trigger_knowledge_generation 调用）。"""
+    from sqlalchemy import delete as sa_delete
+
+    await db.execute(
+        sa_delete(models.KnowledgeQuestionCache).where(
+            models.KnowledgeQuestionCache.user_id == user_id
+        )
+    )
+
+
 async def _pg_save_batch(
     db: AsyncSession, user_id: int, abilities: list[dict]
 ):
@@ -569,17 +627,30 @@ async def regenerate_and_cache_all_questions(
         for sa in sub_abilities
     ]
 
-    # 3. 向量召回
-    recalled_text = await _do_vector_recall(
-        db, user_id, target_role, target_grade, experience_years
-    )
+    # 3. 向量召回 + 联网预取（并行执行，合并为 ~4s 而非 ~1.3s + ~4s = ~5.3s）
+    web_context = ""
+    if enable_network:
+        recall_task = asyncio.create_task(
+            _do_vector_recall(db, user_id, target_role, target_grade, experience_years)
+        )
+        web_task = asyncio.create_task(
+            _prefetch_web_context(target_role, target_grade, experience_years)
+        )
+        recalled_text, web_context = await asyncio.gather(recall_task, web_task)
+        recalled_text = recalled_text  # unwrap from gather
+        logger.info(
+            f"[question_generator] 联网预取{'命中' if web_context else '空/降级'} "
+            f"user={user_id} chars={len(web_context)}"
+        )
+    else:
+        recalled_text = await _do_vector_recall(
+            db, user_id, target_role, target_grade, experience_years
+        )
 
     # 4. 并行 LLM 生成（按核心能力分组）
-    # 透传 enable_network；ctx 暂不传（web_search 不依赖 db/user_id，
-    # 未来若需 recall_user_history 再补 db/user_id）
     abilities = await _call_llm_batch_parallel(
         user_id, target_role, target_grade, experience_years, sa_list, recalled_text,
-        enable_network=enable_network,
+        enable_network=enable_network, web_context=web_context,
     )
 
     if not abilities:
@@ -683,35 +754,53 @@ async def get_questions_for_sub_ability(
             )
 
     # 2. Redis 过期/不存在 → 批量重生成 + 写 Redis + PG
-    logger.info(
-        f"[question_generator] Redis MISS user={user_id} → regenerating all"
-    )
-    abilities = await regenerate_with_retry(
-        db, user_id, redis_client,
-        trigger_reason="cache_miss", enable_network=enable_network,
-    )
-    if abilities:
-        for ab in abilities:
-            if ab.get("sub_ability_name") == sub_ability_name:
-                return ab.get("questions", [])[:10]
-        # 重生成成功但没有找到对应 sub_ability（可能是 LLM 输出格式问题）
-        logger.warning(
-            f"[question_generator] regenerated but sub={sub_ability_name!r} "
-            f"not found in LLM output, falling back to PG"
-        )
-
-    # 3. 重生成失败 → PG 兜底
-    logger.info(
-        f"[question_generator] falling back to PG for user={user_id} "
-        f"sub={sub_ability_name!r}"
-    )
-    questions = await _pg_query_sub(db, user_id, sub_ability_name)
-    if questions:
+    lock = _get_user_lock(user_id)
+    if lock.locked():
+        # 重生成正在进行中（由 invalidate_and_regenerate 或另一个请求触发）
+        # 不等待，直接返回空，避免大量请求排队阻塞
         logger.info(
-            f"[question_generator] PG FALLBACK OK user={user_id} "
-            f"sub={sub_ability_name!r} questions={len(questions)}"
+            f"[question_generator] regeneration in progress for user={user_id}, "
+            f"returning empty for sub={sub_ability_name!r}"
         )
-    return questions[:10] if questions else []
+        return []
+
+    async with lock:
+        # 再次检查 Redis：可能在等待锁期间已完成重生成
+        if redis_client:
+            cached = await _redis_get(user_id, redis_client)
+            if cached and cached.get("abilities"):
+                for ab in cached["abilities"]:
+                    if ab.get("sub_ability_name") == sub_ability_name:
+                        return ab.get("questions", [])[:10]
+
+        logger.info(
+            f"[question_generator] Redis MISS user={user_id} → regenerating all"
+        )
+        abilities = await regenerate_with_retry(
+            db, user_id, redis_client,
+            trigger_reason="cache_miss", enable_network=enable_network,
+        )
+        if abilities:
+            for ab in abilities:
+                if ab.get("sub_ability_name") == sub_ability_name:
+                    return ab.get("questions", [])[:10]
+            logger.warning(
+                f"[question_generator] regenerated but sub={sub_ability_name!r} "
+                f"not found in LLM output, falling back to PG"
+            )
+
+        # 3. 重生成失败 → PG 兜底
+        logger.info(
+            f"[question_generator] falling back to PG for user={user_id} "
+            f"sub={sub_ability_name!r}"
+        )
+        questions = await _pg_query_sub(db, user_id, sub_ability_name)
+        if questions:
+            logger.info(
+                f"[question_generator] PG FALLBACK OK user={user_id} "
+                f"sub={sub_ability_name!r} questions={len(questions)}"
+            )
+        return questions[:10] if questions else []
 
 
 # ============================================================================
@@ -744,9 +833,19 @@ async def generate_and_cache_with_abilities(
     )
 
     t_recall = asyncio.get_event_loop().time()
-    recalled_text = await _do_vector_recall(
-        db, user_id, target_role, target_grade, experience_years
-    )
+    web_context = ""
+    if enable_network:
+        recall_task = asyncio.create_task(
+            _do_vector_recall(db, user_id, target_role, target_grade, experience_years)
+        )
+        web_task = asyncio.create_task(
+            _prefetch_web_context(target_role, target_grade, experience_years)
+        )
+        recalled_text, web_context = await asyncio.gather(recall_task, web_task)
+    else:
+        recalled_text = await _do_vector_recall(
+            db, user_id, target_role, target_grade, experience_years
+        )
     logger.debug(
         f"[question_generator] GENERATE_WITH_ABILITIES recall done "
         f"user={user_id} elapsed={asyncio.get_event_loop().time() - t_recall:.1f}s"
@@ -755,7 +854,7 @@ async def generate_and_cache_with_abilities(
     abilities = await _call_llm_batch_parallel(
         user_id, target_role, target_grade, experience_years,
         abilities_data, recalled_text,
-        enable_network=enable_network,
+        enable_network=enable_network, web_context=web_context,
     )
     if not abilities:
         logger.error(
@@ -790,10 +889,16 @@ async def invalidate_and_regenerate(
     user_id: int,
     redis_client=None,
 ):
-    """能力标签变更后：删除 Redis 缓存 → 批量重生成 → 写 Redis + PG。
+    """能力标签变更后：删除 Redis + PG 缓存 → 批量重生成 → 写 Redis + PG。
 
+    同时删除 PG 兜底数据，避免重生成期间前台回退到旧的历史题目。
     供 trigger_knowledge_generation / trigger_knowledge_match 调用。
     """
-    if redis_client:
-        await _redis_delete(user_id, redis_client)
-    await regenerate_with_retry(db, user_id, redis_client, trigger_reason="ability_change")
+    # 获取用户级锁，防止与 get_questions_for_sub_ability 并发重生成
+    async with _get_user_lock(user_id):
+        if redis_client:
+            await _redis_delete(user_id, redis_client)
+        await _pg_delete_user_questions(db, user_id)
+        await db.commit()
+        logger.info(f"[question_generator] cleared cache for user={user_id} (ability_change)")
+        await regenerate_with_retry(db, user_id, redis_client, trigger_reason="ability_change")

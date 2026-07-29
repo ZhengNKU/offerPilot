@@ -477,6 +477,20 @@ class KnowledgeAbilityService:
         return reloaded
 
     @staticmethod
+    async def delete_user_abilities(db: AsyncSession, user_id: int):
+        """删除用户的所有能力标签（核心 + 细化），级联删除。"""
+        await db.execute(
+            delete(models.KnowledgeSubAbility).where(
+                models.KnowledgeSubAbility.user_id == user_id
+            )
+        )
+        await db.execute(
+            delete(models.KnowledgeCoreAbility).where(
+                models.KnowledgeCoreAbility.user_id == user_id
+            )
+        )
+
+    @staticmethod
     async def save_abilities_to_db(
         db: AsyncSession,
         user_id: int,
@@ -843,20 +857,31 @@ async def trigger_knowledge_generation(user_id: int):
                     f"[trigger_knowledge_generation] START user={user_id} attempt={attempt}"
                 )
 
-                # ① LLM 生成能力标签（不写 DB）
+                # ① 删除历史数据（能力标签 + Redis面试题 + PG面试题）
+                await KnowledgeAbilityService.delete_user_abilities(db, user_id)
+                await db.commit()
+                if redis_client:
+                    from app.services.question_generator import _redis_delete
+                    await _redis_delete(user_id, redis_client)
+                from app.services.question_generator import _pg_delete_user_questions
+                await _pg_delete_user_questions(db, user_id)
+                await db.commit()
+                logger.info(f"[trigger_knowledge_generation] cleared all old data for user={user_id}")
+
+                # ② LLM 生成能力标签（不写 DB）
                 abilities_data = await KnowledgeAbilityService.generate_abilities_data(
                     target_role, experience_years, target_grade, user_id
                 )
                 if not abilities_data:
                     raise ValueError("abilities_data is empty")
 
-                # ② 展开为 question_generator 需要的格式
+                # ③ 展开为 question_generator 需要的格式
                 sa_list = []
                 for ca in abilities_data:
                     for sub in ca["subs"]:
                         sa_list.append({"core": ca["core"], "sub": sub})
 
-                # ③ LLM 批量生成面试题 + 写 Redis + PG
+                # ④ LLM 批量生成面试题
                 from app.services.question_generator import (
                     generate_and_cache_with_abilities,
                 )
@@ -864,16 +889,19 @@ async def trigger_knowledge_generation(user_id: int):
                     db, user_id, sa_list,
                     target_role, target_grade, experience_years,
                     redis_client,
-                    enable_network=True,  # 知识库高频面试题：联网搜索真实面经再生成
+                    enable_network=True,
                 )
                 if not result:
                     raise ValueError("question generation returned empty")
 
-                # ④ 面试题成功后 → 能力标签入库
+                # ⑤ 全部成功后 → 能力标签入库（标签和面试题保持一致）
                 await KnowledgeAbilityService.save_abilities_to_db(
                     db, user_id, abilities_data,
-                    target_role, experience_years, target_grade,
+                    target_role=target_role,
+                    target_grade=target_grade,
+                    experience_years=experience_years,
                 )
+                await db.commit()
 
                 logger.info(
                     f"[trigger_knowledge_generation] DONE user={user_id} "
