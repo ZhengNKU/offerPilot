@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import Footer from "@/components/Footer";
 import { API_BASE } from "@/lib/api";
 
 function ResumeAnalysisPageContent() {
@@ -1692,26 +1693,7 @@ function ResumeAnalysisPageContent() {
       {/* ========================================================
           GLOBAL FOOTER
          ======================================================== */}
-      <footer className="bg-white dark:bg-[#060e20] border-t border-slate-200 dark:border-white/5 w-full block mt-8">
-        <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left select-none">
-          <div className="flex items-center gap-4">
-            <span className="text-xs text-slate-500 dark:text-white/30 font-label-mono font-bold tracking-widest">
-              © 2026 面试驾到. All rights reserved.
-            </span>
-          </div>
-          <div className="flex gap-8 text-xs text-slate-500 dark:text-white/30 font-label-mono font-bold tracking-widest animate-pulse">
-            <a onClick={() => router.push("/")} className="hover:text-indigo-600 dark:hover:text-primary transition-colors cursor-pointer">
-              返回主页
-            </a>
-            <a className="hover:text-indigo-600 dark:hover:text-primary transition-colors cursor-default" href="#">
-              隐私政策
-            </a>
-            <a className="hover:text-indigo-600 dark:hover:text-primary transition-colors cursor-default" href="#">
-              服务条款
-            </a>
-          </div>
-        </div>
-      </footer>
+      <Footer showHomeLink={true} />
 
       {/* ========================================================
           MODAL: EDIT PROFILE FORM

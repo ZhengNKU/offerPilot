@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
+import Footer from "@/components/Footer";
 import GrowthCurveChart, { type GrowthPoint } from "@/components/GrowthCurveChart";
 import CounselorPanel from "@/components/counselor/CounselorPanel";
 import {
@@ -531,11 +532,15 @@ export default function CareerMemoryDashboard() {
     status?: string;
   } | null>(null);
   const [isLoadingAdvisorInsights, setIsLoadingAdvisorInsights] = useState(false);
+  const fetchingAdvisorInsightsRef = useRef(false);
 
   const fetchAdvisorInsights = useCallback(async () => {
+    if (fetchingAdvisorInsightsRef.current) return;
+    fetchingAdvisorInsightsRef.current = true;
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
     if (!auth.isLoggedIn || !token) {
       setAdvisorInsights(null);
+      fetchingAdvisorInsightsRef.current = false;
       return;
     }
     setIsLoadingAdvisorInsights(true);
@@ -552,6 +557,7 @@ export default function CareerMemoryDashboard() {
     } catch (e) {
       console.error("fetch advisor insights failed:", e);
     } finally {
+      fetchingAdvisorInsightsRef.current = false;
       setIsLoadingAdvisorInsights(false);
     }
   }, [auth.isLoggedIn]);
@@ -804,10 +810,16 @@ export default function CareerMemoryDashboard() {
     from_grade: null,
   });
   const [isLoadingAbilities, setIsLoadingAbilities] = useState(false);
+  const fetchingKnowledgeAbilitiesRef = useRef(false);
 
   const fetchKnowledgeAbilities = useCallback(async () => {
+    if (fetchingKnowledgeAbilitiesRef.current) return;
+    fetchingKnowledgeAbilitiesRef.current = true;
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
-    if (!auth.isLoggedIn || !token) return;
+    if (!auth.isLoggedIn || !token) {
+      fetchingKnowledgeAbilitiesRef.current = false;
+      return;
+    }
     setIsLoadingAbilities(true);
     try {
       const res = await fetch(`${API_BASE}/api/memory/knowledge/abilities`, {
@@ -826,6 +838,7 @@ export default function CareerMemoryDashboard() {
     } catch (e) {
       console.error("fetch knowledge abilities failed:", e);
     } finally {
+      fetchingKnowledgeAbilitiesRef.current = false;
       setIsLoadingAbilities(false);
     }
   }, [auth.isLoggedIn]);
@@ -867,6 +880,8 @@ export default function CareerMemoryDashboard() {
   const tagsFetchedRef = useRef(false);
   const fetchingProjectsRef = useRef(false);
   const fetchingSessionsRef = useRef(false);
+  const fetchingGrowthRef = useRef(false);
+  const fetchingOfferTrendRef = useRef(false);
 
   const handleDeleteProject = (projectId: number) => {
     handleDeleteClick(`project-${projectId}`);
@@ -1016,7 +1031,7 @@ export default function CareerMemoryDashboard() {
           raw_created_at: l.created_at || "",
           type: "live" as const,
           title: `实时模拟面试 · ${l.target_role || '面试'}`,
-          score: 0,                            // 报告生成后会被 report 页填充；这里先给 0
+          score: l.ipi_score || l.score || 0,
           grade: (
             {
               created: "等待开始",
@@ -1053,11 +1068,14 @@ export default function CareerMemoryDashboard() {
   };
 
   const fetchGrowthCurve = async () => {
+    if (fetchingGrowthRef.current) return;
+    fetchingGrowthRef.current = true;
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
     if (!auth.isLoggedIn || !token) {
       setGrowthPoints([]);
       setGrowthAxisLabels([]);
       setGrowthTotal(0);
+      fetchingGrowthRef.current = false;
       return;
     }
     setIsLoadingGrowth(true);
@@ -1074,6 +1092,7 @@ export default function CareerMemoryDashboard() {
     } catch (err) {
       console.error("Failed to fetch growth curve:", err);
     } finally {
+      fetchingGrowthRef.current = false;
       setIsLoadingGrowth(false);
     }
   };
@@ -1101,12 +1120,15 @@ export default function CareerMemoryDashboard() {
   }, [router]);
 
   const fetchOfferTrend = async () => {
+    if (fetchingOfferTrendRef.current) return;
+    fetchingOfferTrendRef.current = true;
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
     if (!auth.isLoggedIn || !token) {
       setOfferTrendPoints([]);
       setOfferCurrentProb(null);
       setOfferTotalSessions(0);
       setOfferSuggestion(null);
+      fetchingOfferTrendRef.current = false;
       return;
     }
     setIsLoadingOfferTrend(true);
@@ -1124,6 +1146,7 @@ export default function CareerMemoryDashboard() {
     } catch (err) {
       console.error("Failed to fetch offer trend:", err);
     } finally {
+      fetchingOfferTrendRef.current = false;
       setIsLoadingOfferTrend(false);
     }
   };
@@ -1203,12 +1226,10 @@ export default function CareerMemoryDashboard() {
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [auth.isLoggedIn]);
 
-  // 切换到总览看板时，刷新项目、分析趋势及AI顾问意见；切换到项目记忆库 Tab 时刷新项目
+  // 切换到总览看板时，仅刷新 AI 顾问意见；首屏数据已在登录态初始化时加载，避免与首次渲染重复请求。
+  // 切换到项目记忆库 Tab 时刷新项目。
   useEffect(() => {
     if (activeTab === "overview" && auth.isLoggedIn) {
-      fetchProjects();
-      fetchGrowthCurve();
-      fetchOfferTrend();
       fetchAdvisorInsights();
     } else if (activeTab === "projects") {
       fetchProjects();
@@ -2263,7 +2284,7 @@ export default function CareerMemoryDashboard() {
                             }
                             if (topSubs.length === 0) {
                               return (
-                                <p className="text-xs text-on-surface-variant/40 text-center py-4">
+                                <p className="text-base text-on-surface-variant/40 text-center py-4">
                                   暂无知识库数据
                                 </p>
                               );
@@ -3553,24 +3574,7 @@ export default function CareerMemoryDashboard() {
       </div>
 
       {/* Footer */}
-      <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
-        <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
-          <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 面试驾到. All rights reserved.
-          </span>
-          <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-            <span onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer select-none">
-              服务条款
-            </span>
-            <span onClick={() => openLegalPrivacy()} className="hover:text-primary transition-colors cursor-pointer select-none">
-              隐私政策
-            </span>
-            <span onClick={() => openLegalContact()} className="hover:text-primary transition-colors cursor-pointer select-none">
-              联系方式
-            </span>
-          </div>
-        </div>
-      </footer>
+      <Footer />
 
       {/* 内测版本：删除原假微信登录 modal（只保留邮箱登录/注册入口） */}
 
@@ -3811,14 +3815,14 @@ export default function CareerMemoryDashboard() {
               <h3 className="font-extrabold text-white text-2xl">确认要删除吗？</h3>
               <p className="text-on-surface-variant text-sm leading-relaxed max-w-xs mx-auto font-semibold">
                 {deleteTarget === "batch"
-                  ? `您已选择批量删除 ${selectedIds.length} 条面试分析记录，此操作将永久删除关联的对象存储音频文件和数据库分析报告，且不可撤销。`
+                  ? `您已选择批量删除 ${selectedIds.length} 条分析记录，此操作将永久删除关联的对象存储音频文件和数据库分析报告，且不可撤销。`
                   : deleteTarget === "counselor-batch"
                     ? `您已选择批量删除 ${selectedCounselorIds.length} 个会话，此操作不可撤销。`
                     : typeof deleteTarget === "string" && deleteTarget.startsWith("counselor-")
                       ? "此操作将永久删除该会话，且不可撤销。"
                       : deleteTarget && typeof deleteTarget === "string" && deleteTarget.startsWith("project-")
                         ? "此操作将永久删除该项目记忆记录，且不可撤销。"
-                        : "此操作将永久删除此面试分析记录，以及关联的对象存储音频文件和数据库分析报告，且不可撤销。"}
+                        : "此操作将永久删除此分析记录，以及关联的对象存储音频文件和数据库分析报告，且不可撤销。"}
               </p>
             </div>
 

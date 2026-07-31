@@ -2,9 +2,15 @@
 
 核心设计：
 - 一次 LLM 调用生成用户所有细化能力的面试题（批量，而非逐条）
-- Redis 为主缓存（6 小时 TTL），PG 为兜底
+- Redis 为主缓存（热缓存），PG（knowledge_question_cache）为永久真源
 - 所有生成逻辑统一入口：regenerate_and_cache_all_questions()
 - 无定时任务
+
+刷新策略（2026-07 起，为省 token）：
+- 免费 / 内测用户：Redis 过期后**不再重新调用 LLM**，直接回落 PG 并把 PG 数据回填 Redis。
+  题目只在「首次生成」和「换目标岗位」时由 trigger_knowledge_generation 重建。
+- 付费用户（PRO/MAX，尚未上线）：保持原行为，Redis 过期后用户点开题谱时静默全量重生成。
+  闸门见 app.services.quota.can_refresh_knowledge_by_id。
 """
 import asyncio
 import json
@@ -26,8 +32,13 @@ from app.utils.llm import (
 
 logger = logging.getLogger(__name__)
 
-# Redis 缓存 TTL
+# Redis 缓存 TTL：LLM 新生成的数据写入时用。
+# 注意这个 6 小时只对**付费档位**构成「过期即重生成」；免费/内测过期后回落 PG，不触发 LLM。
 REDIS_CACHE_TTL = 6 * 3600  # 6 小时
+
+# 免费/内测用户从 PG 回填 Redis 时的 TTL。纯粹为了省掉重复的 DB 查询，
+# 过期后也只是再查一次 PG，永远不会触发 LLM，所以可以放很长。
+REDIS_CACHE_TTL_STATIC = 7 * 24 * 3600  # 7 天
 
 # 防止同一用户并发重生成（比如 invalidate_and_regenerate 和 get_questions_for_sub_ability 同时触发）
 _user_regeneration_locks: dict[int, asyncio.Lock] = {}
@@ -480,17 +491,20 @@ async def _redis_get(user_id: int, redis_client) -> Optional[dict]:
     return None
 
 
-async def _redis_set(user_id: int, data: dict, redis_client):
-    """将面试题数据写入 Redis，TTL 6 小时。"""
+async def _redis_set(user_id: int, data: dict, redis_client, ttl: int = REDIS_CACHE_TTL):
+    """将面试题数据写入 Redis。
+
+    ttl 默认 6 小时（LLM 新生成的数据）；从 PG 回填时传 REDIS_CACHE_TTL_STATIC。
+    """
     try:
         await redis_client.set(
             _redis_key(user_id),
             json.dumps(data, ensure_ascii=False),
-            ex=REDIS_CACHE_TTL,
+            ex=ttl,
         )
         logger.info(
             f"[question_generator] Redis SET OK user={user_id} "
-            f"abilities={len(data.get('abilities',[]))}"
+            f"abilities={len(data.get('abilities',[]))} ttl={ttl}s"
         )
     except Exception as e:
         logger.warning(f"[question_generator] Redis SET failed for user={user_id}: {e}")
@@ -559,6 +573,47 @@ async def _pg_query_sub(
     )
     row = result.scalars().first()
     return row.questions if row else []
+
+
+async def _pg_query_all(db: AsyncSession, user_id: int) -> list[dict]:
+    """查询该用户 PG 里全部细化能力的面试题，组装成与 LLM 输出一致的格式。"""
+    result = await db.execute(
+        select(models.KnowledgeQuestionCache).where(
+            models.KnowledgeQuestionCache.user_id == user_id
+        )
+    )
+    return [
+        {
+            "sub_ability_name": row.sub_ability_name,
+            "core_ability_name": row.core_ability_name or "",
+            "questions": row.questions or [],
+        }
+        for row in result.scalars().all()
+    ]
+
+
+async def _warm_redis_from_pg(db: AsyncSession, user_id: int, redis_client) -> list[dict]:
+    """用 PG 里的永久数据回填 Redis（长 TTL），返回 abilities 列表。
+
+    供免费/内测用户在 Redis 过期后使用：只查 DB + 写 Redis，零 LLM 调用。
+    Redis 写失败静默忽略（下次再查一遍 PG 即可）。
+    """
+    abilities = await _pg_query_all(db, user_id)
+    if not abilities:
+        return []
+    if redis_client:
+        try:
+            await _redis_set(
+                user_id,
+                {"abilities": abilities, "from_pg": True},
+                redis_client,
+                ttl=REDIS_CACHE_TTL_STATIC,
+            )
+        except Exception as e:
+            logger.warning(
+                f"[question_generator] warm redis from PG failed user={user_id}: {e}"
+            )
+    return abilities
 
 
 # ============================================================================
@@ -732,7 +787,10 @@ async def get_questions_for_sub_ability(
 ) -> list[dict]:
     """查询单个细化能力的面试题。
 
-    流程：Redis → (过期) → 批量重生成 → (失败3次) → PG 兜底
+    流程按会员档位分叉：
+    - 免费 / 内测：Redis → (未命中) → PG 永久缓存 + 回填 Redis，**不调用 LLM**。
+      仅当该用户 PG 里一条数据都没有（从未生成 / 首次生成失败）时，才放行一次全量生成。
+    - 付费（PRO/MAX）：Redis → (过期) → 批量重生成（含 3 次重试） → PG 兜底。
 
     enable_network: 透传到 regenerate_with_retry；模拟面试推荐默认开启。
     """
@@ -747,13 +805,38 @@ async def get_questions_for_sub_ability(
                         f"sub={sub_ability_name!r}"
                     )
                     return ab.get("questions", [])[:10]
-            # Redis 有数据但没找到这个 sub_ability → 说明是新增的标签，触发全量重生成
+            # Redis 有数据但没找到这个 sub_ability → 说明是新增的标签
             logger.info(
                 f"[question_generator] Redis PARTIAL MISS user={user_id} "
-                f"sub={sub_ability_name!r} → regenerating all"
+                f"sub={sub_ability_name!r}"
             )
 
-    # 2. Redis 过期/不存在 → 批量重生成 + 写 Redis + PG
+    # 2. 【会员闸门】非付费用户不因缓存过期而重新调用 LLM，直接读 PG 永久缓存
+    from app.services.quota import can_refresh_knowledge_by_id
+
+    if not await can_refresh_knowledge_by_id(db, user_id):
+        abilities = await _warm_redis_from_pg(db, user_id, redis_client)
+        if abilities:
+            for ab in abilities:
+                if ab.get("sub_ability_name") == sub_ability_name:
+                    logger.debug(
+                        f"[question_generator] PG PERMANENT HIT user={user_id} "
+                        f"sub={sub_ability_name!r} (refresh not allowed for this membership)"
+                    )
+                    return ab.get("questions", [])[:10]
+            # PG 有该用户的数据，只是没有这个标签（新增标签）→ 不为此重跑全量，返回空
+            logger.debug(
+                f"[question_generator] PG PERMANENT MISS user={user_id} "
+                f"sub={sub_ability_name!r}, no regeneration (membership gated)"
+            )
+            return []
+        # PG 完全没有该用户任何数据 → 属于「首次生成」，放行（不受会员限制）
+        logger.info(
+            f"[question_generator] user={user_id} has no PG questions at all → "
+            f"allowing first-time generation despite membership gate"
+        )
+
+    # 3. Redis 过期/不存在（付费用户或首次生成）→ 批量重生成 + 写 Redis + PG
     lock = _get_user_lock(user_id)
     if lock.locked():
         # 重生成正在进行中（由 invalidate_and_regenerate 或另一个请求触发）
@@ -789,7 +872,7 @@ async def get_questions_for_sub_ability(
                 f"not found in LLM output, falling back to PG"
             )
 
-        # 3. 重生成失败 → PG 兜底
+        # 4. 重生成失败 → PG 兜底
         logger.info(
             f"[question_generator] falling back to PG for user={user_id} "
             f"sub={sub_ability_name!r}"

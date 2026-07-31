@@ -69,6 +69,44 @@ const defaultUser: UserProfile = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+export function formatErrorMessage(detail: any, fallback: string = "操作失败，请重试！"): string {
+  if (!detail) return fallback;
+
+  const translateMsg = (msg: string): string => {
+    if (!msg) return fallback;
+    if (typeof msg !== "string") return String(msg);
+    if (msg.includes("value is not a valid email address") || msg.includes("not within a valid top-level domain")) {
+      return "邮箱地址格式无效，请检查后缀域名（如 .com, .cn）";
+    }
+    if (msg.toLowerCase().includes("field required") || msg.toLowerCase().includes("missing")) return "必填字段不能为空";
+    if (msg.includes("value is not a valid phone")) return "手机号码格式无效";
+    if (msg.includes("value is not a valid integer")) return "输入格式有误，请输入有效数字";
+    return msg;
+  };
+
+  if (typeof detail === "string") return translateMsg(detail);
+
+  if (Array.isArray(detail)) {
+    const msgs = detail
+      .map((item) => {
+        if (typeof item === "string") return translateMsg(item);
+        if (item && typeof item === "object") {
+          const raw = item.msg || item.detail || (item.loc ? `${item.loc.join(".")}: ${item.msg}` : null);
+          return translateMsg(raw || "");
+        }
+        return String(item);
+      })
+      .filter(Boolean);
+    return msgs.length > 0 ? msgs.join("；") : fallback;
+  }
+
+  if (typeof detail === "object") {
+    return translateMsg(detail.msg || detail.detail || JSON.stringify(detail));
+  }
+
+  return String(detail);
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -91,7 +129,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       } else {
         setIsLoggedIn(false);
       }
- 
+
       const storedUser = localStorage.getItem("interviewVar_user");
       if (storedUser) {
         try {
@@ -146,8 +184,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const triggerToast = (msg: string, kind: "info" | "error" = "info") => {
-    setToastMsg({ msg, kind });
+  const triggerToast = (msg: any, kind: "info" | "error" = "info") => {
+    const text = formatErrorMessage(msg, "操作提示");
+    setToastMsg({ msg: text, kind });
     setTimeout(() => {
       setToastMsg(null);
     }, 2500);
@@ -477,14 +516,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             initial={{ opacity: 0, y: -30, x: "-50%" }}
             animate={{ opacity: 1, y: 0, x: "-50%" }}
             exit={{ opacity: 0, y: -20, x: "-50%" }}
-            className="global-app-toast fixed top-10 left-1/2 z-[9999] px-5 py-3 bg-emerald-50/95 dark:bg-[#131b2e]/95 backdrop-blur-md border border-emerald-200 dark:border-[#AFA7FF]/20 shadow-xl rounded-2xl flex items-center gap-2.5 select-none"
+            className={`global-app-toast fixed top-10 left-1/2 z-[9999] px-5 py-3 backdrop-blur-md shadow-xl rounded-2xl flex items-center gap-2.5 select-none ${
+              toastMsg.kind === "error"
+                ? "global-app-toast-error bg-rose-50 border border-rose-200 text-rose-600 dark:bg-[#280c14] dark:border-rose-500/30 dark:text-rose-300"
+                : "bg-emerald-50/95 border border-emerald-200 text-emerald-950 dark:bg-[#131b2e]/95 dark:border-[#AFA7FF]/20 dark:text-white"
+            }`}
           >
             {toastMsg.kind === "error" ? (
-              <span className="material-symbols-outlined text-rose-500 dark:text-[#FF6B7A] text-base md:text-lg">error</span>
+              <span className="material-symbols-outlined text-rose-600 dark:text-[#FF6B7A] text-base md:text-lg font-black">error</span>
             ) : (
-              <span className="material-symbols-outlined text-emerald-600 dark:text-[#5DECCB] text-base md:text-lg">check_circle</span>
+              <span className="material-symbols-outlined text-emerald-600 dark:text-[#5DECCB] text-base md:text-lg font-black">check_circle</span>
             )}
-            <span className="text-xs md:text-sm font-extrabold text-emerald-950 dark:text-white">{toastMsg.msg}</span>
+            <span className={`text-xs md:text-sm font-extrabold ${toastMsg.kind === "error" ? "text-rose-600 dark:text-rose-300" : "text-emerald-950 dark:text-white"}`}>
+              {toastMsg.msg}
+            </span>
           </motion.div>
         )}
       </AnimatePresence>
@@ -507,20 +552,34 @@ function AuthModals() {
   const router = useRouter();
 
   // Login Form State
-  // 内测版本：删除"验证码登录"tab 和"手机找回"分支，只保留密码登录 + 邮箱找回
+  const [loginTab, setLoginTab] = useState<"password" | "sms">("password");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [smsPhone, setSmsPhone] = useState("");
+  const [smsCode, setSmsCode] = useState("");
+  const [smsCountdown, setSmsCountdown] = useState(0);
   const [showPassword, setShowPassword] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isSendingSmsCode, setIsSendingSmsCode] = useState(false);
 
   // Forgot Password State
   const [showForgot, setShowForgot] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState("");
+  const [resetTab, setResetTab] = useState<"phone" | "email">("phone");
+  const [forgotTarget, setForgotTarget] = useState("");
   const [forgotCode, setForgotCode] = useState("");
   const [forgotCountdown, setForgotCountdown] = useState(0);
   const [forgotPassword, setForgotPassword] = useState("");
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
   const [showForgotPwd, setShowForgotPwd] = useState(false);
+  const [isSendingForgotCode, setIsSendingForgotCode] = useState(false);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (smsCountdown > 0) {
+      timer = setTimeout(() => setSmsCountdown(smsCountdown - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [smsCountdown]);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -533,7 +592,7 @@ function AuthModals() {
   // Reset forgot password state when recovery panel is closed or switched away
   useEffect(() => {
     if (!auth.showLogin || !showForgot) {
-      setForgotEmail("");
+      setForgotTarget("");
       setForgotCode("");
       setForgotPassword("");
       setForgotConfirmPassword("");
@@ -541,20 +600,71 @@ function AuthModals() {
     }
   }, [auth.showLogin, showForgot]);
 
+  const handleSendSmsCode = async () => {
+    if (isSendingSmsCode || smsCountdown > 0) return;
+
+    if (!smsPhone) {
+      auth.triggerToast("请输入手机号码！", "error");
+      return;
+    }
+    const phoneRegex = /^1[3-9]\d{9}$/;
+    if (!phoneRegex.test(smsPhone)) {
+      auth.triggerToast("请输入正确的手机号码！", "error");
+      return;
+    }
+    setIsSendingSmsCode(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/send-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "phone", target: smsPhone })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        auth.triggerToast(errData.detail || "短信验证码发送失败！", "error");
+        return;
+      }
+      setSmsCountdown(60);
+      auth.triggerToast("短信验证码已发送，请查收！");
+    } catch (err) {
+      auth.triggerToast("无法连接到后端服务！", "error");
+    } finally {
+      setIsSendingSmsCode(false);
+    }
+  };
+
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isLoggingIn) return;
-    // 内测版本：只支持密码登录（验证码登录已禁用）
-    if (!username || !password) {
-      auth.triggerToast("请输入邮箱和密码！", "error");
-      return;
-    }
     try {
-      const body = {
-        login_type: "password",
-        account: username,
-        password: password,
-      };
+      let body: any = {};
+      if (loginTab === "password") {
+        if (!username || !password) {
+          auth.triggerToast("请输入账号和密码！", "error");
+          return;
+        }
+        body = {
+          login_type: "password",
+          account: username,
+          password: password,
+        };
+      } else {
+        if (!smsPhone || !smsCode) {
+          auth.triggerToast("请输入手机号码和验证码！", "error");
+          return;
+        }
+        const phoneRegex = /^1[3-9]\d{9}$/;
+        if (!phoneRegex.test(smsPhone)) {
+          auth.triggerToast("请输入正确的手机号码！", "error");
+          return;
+        }
+        body = {
+          login_type: "sms",
+          phone: smsPhone,
+          verify_code: smsCode,
+        };
+      }
+
       setIsLoggingIn(true);
       const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: "POST",
@@ -564,7 +674,7 @@ function AuthModals() {
 
       if (!res.ok) {
         const errData = await res.json();
-        auth.triggerToast(errData.detail || "登录失败，请检查账号密码！", "error");
+        auth.triggerToast(errData.detail || "登录失败，请检查账号和密码！", "error");
         setIsLoggingIn(false);
         return;
       }
@@ -572,16 +682,12 @@ function AuthModals() {
       const data = await res.json();
       localStorage.setItem("interviewVar_token", data.access_token);
       auth.login(data.user);
-      // 通知同浏览器其他 tab：本账号刚在另一个 tab 签发了新 token，让它们立即验证自己的 token。
-      // 不广播的话，跨 tab 只能等 60s 长轮询才发现被踢，体验差。
       try {
         new BroadcastChannel("auth:sessions").postMessage({
           type: "token-issued"
         });
       } catch {
-        // 老浏览器不支持
       }
-      // 登录成功 → 跳转到落地页
       router.push("/");
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！", "error");
@@ -591,26 +697,36 @@ function AuthModals() {
   };
 
   const handleForgotGetCode = async () => {
-    // 内测版本：只支持邮箱找回密码
-    const target = forgotEmail;
+    const isPhone = resetTab === "phone";
+    const target = forgotTarget.strip ? forgotTarget.strip() : forgotTarget;
     if (!target) {
-      auth.triggerToast("请输入邮箱地址！", "error");
-      return;
-    }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(target)) {
-      auth.triggerToast("请输入正确的邮箱地址格式！", "error");
+      auth.triggerToast(`请输入绑定的${isPhone ? "手机号码" : "邮箱地址"}！`, "error");
       return;
     }
 
+    if (isPhone) {
+      const phoneRegex = /^1[3-9]\d{9}$/;
+      if (!phoneRegex.test(target)) {
+        auth.triggerToast("请输入正确的手机号码！", "error");
+        return;
+      }
+    } else {
+      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,10}$/;
+      if (!emailRegex.test(target)) {
+        auth.triggerToast("邮箱地址格式无效，请检查后缀域名（例: user@example.com）！", "error");
+        return;
+      }
+    }
+
+    setIsSendingForgotCode(true);
     try {
       const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "email", target })
+        body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
       });
       if (!res.ok) {
-        const errData = await res.json();
+        const errData = await res.json().catch(() => ({}));
         auth.triggerToast(errData.detail || "发送验证码失败！", "error");
         return;
       }
@@ -618,18 +734,28 @@ function AuthModals() {
       auth.triggerToast("验证码已发送，请查收！");
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！", "error");
+    } finally {
+      setIsSendingForgotCode(false);
     }
   };
 
   const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // 内测版本：只支持邮箱找回密码
-    const target = forgotEmail;
+    const isPhone = resetTab === "phone";
+    const target = forgotTarget;
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(target)) {
-      auth.triggerToast("请输入正确的邮箱地址格式！", "error");
-      return;
+    if (isPhone) {
+      const phoneRegex = /^1[3-9]\d{9}$/;
+      if (!phoneRegex.test(target)) {
+        auth.triggerToast("请输入正确的手机号码！", "error");
+        return;
+      }
+    } else {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(target)) {
+        auth.triggerToast("请输入正确的邮箱地址格式！", "error");
+        return;
+      }
     }
 
     if (!forgotCode) {
@@ -655,7 +781,7 @@ function AuthModals() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: "email",
+          type: isPhone ? "phone" : "email",
           target,
           verify_code: forgotCode,
           new_password: forgotPassword
@@ -663,14 +789,14 @@ function AuthModals() {
       });
 
       if (!res.ok) {
-        const errData = await res.json();
-        auth.triggerToast(errData.detail || "密码重置失败，请检查验证码！", "error");
+        const errData = await res.json().catch(() => ({}));
+        auth.triggerToast(formatErrorMessage(errData.detail, "密码重置失败，请检查验证码！"), "error");
         return;
       }
 
       auth.triggerToast("密码重置成功，请使用新密码登录！");
       setShowForgot(false);
-      setForgotEmail("");
+      setForgotTarget("");
       setForgotCode("");
       setForgotPassword("");
       setForgotConfirmPassword("");
@@ -714,7 +840,37 @@ function AuthModals() {
                 <div className="space-y-1.5 flex flex-col items-center">
                   <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-16 h-16 object-contain mb-1 drop-shadow-md" />
                   <h3 className="font-black text-white text-xl md:text-2xl">欢迎登录 面试驾到</h3>
-                  <p className="text-white/45 text-xs md:text-sm font-bold">内测版本 · 邮箱密码登录</p>
+                  <p className="text-white/45 text-xs md:text-sm font-bold">登录后即刻体验</p>
+                </div>
+
+                {/* Login Mode Tab Switcher */}
+                <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 text-sm font-black">
+                  <button
+                    type="button"
+                    onClick={() => setLoginTab("password")}
+                    className={`flex-1 py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      loginTab === "password"
+                        ? "bg-[#AFA7FF] text-[#050B1A] shadow-md"
+                        : "text-white/60 hover:text-white"
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-base">lock</span>
+                    密码登录
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLoginTab("sms")}
+                    className={`flex-1 py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      loginTab === "sms"
+                        ? "bg-[#AFA7FF] text-[#050B1A] shadow-md"
+                        : "text-white/60 hover:text-white"
+                    }`}
+                  >
+                    <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 1024 1024">
+                      <path d="M776.676 1010.080h-479.92c-28.332 0-51.33-22.999-51.33-51.33v-891.12c0-28.332 22.999-51.33 51.33-51.33h479.92c28.332 0 51.33 22.999 51.33 51.33v891.12c0 28.332-22.999 51.33-51.33 51.33v0zM536.576 958.751c19.073 0 34.221-15.426 34.221-34.221s-15.426-34.221-34.221-34.221-34.221 15.426-34.221 34.221 15.426 34.221 34.221 34.221v0zM776.676 118.96h-479.92v719.742h479.641v-719.742h0.279z" />
+                    </svg>
+                    短信验证码登录
+                  </button>
                 </div>
 
                 {/* Form */}
@@ -727,40 +883,91 @@ function AuthModals() {
                   }}
                   className="space-y-4 text-sm font-semibold text-white/60 text-left"
                 >
-                  {/* 内测版本：登录支持用户名 / 邮箱地址 + 密码（删除验证码登录 tab） */}
-                  <div>
-                    <label className="block mb-1.5">用户名 / 邮箱地址</label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="请输入用户名或邮箱地址"
-                      value={username}
-                      onChange={(e) => setUsername(e.target.value)}
-                      className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
-                    />
-                  </div>
-                  <div>
-                    <label className="block mb-1.5">登录密码</label>
-                    <div className="relative">
-                      <input
-                        type={showPassword ? "text" : "password"}
-                        required
-                        placeholder="请输入密码"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 pr-10 text-sm md:text-base font-semibold"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
-                      >
-                        <span className="material-symbols-outlined text-base">
-                          {showPassword ? "visibility_off" : "visibility"}
-                        </span>
-                      </button>
-                    </div>
-                  </div>
+                  {loginTab === "password" ? (
+                    <>
+                      <div>
+                        <label className="block mb-1.5">账号 (用户名 / 手机号 / 邮箱)</label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="请输入用户名、手机号或邮箱地址"
+                          value={username}
+                          onChange={(e) => setUsername(e.target.value)}
+                          className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block mb-1.5">登录密码</label>
+                        <div className="relative">
+                          <input
+                            type={showPassword ? "text" : "password"}
+                            required
+                            placeholder="请输入密码"
+                            value={password}
+                            onChange={(e) => setPassword(e.target.value)}
+                            className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 pr-10 text-sm md:text-base font-semibold"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowPassword(!showPassword)}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                          >
+                            <span className="material-symbols-outlined text-base">
+                              {showPassword ? "visibility_off" : "visibility"}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div>
+                        <label className="block mb-1.5">手机号码</label>
+                        <input
+                          type="tel"
+                          maxLength={11}
+                          required
+                          placeholder="请输入手机号码"
+                          value={smsPhone}
+                          onChange={(e) => setSmsPhone(e.target.value)}
+                          className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
+                        />
+                      </div>
+                      <div>
+                        <label className="block mb-1.5">短信验证码</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            required
+                            placeholder="输入 6 位验证码"
+                            value={smsCode}
+                            onChange={(e) => setSmsCode(e.target.value)}
+                            className="flex-1 py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSendSmsCode}
+                            disabled={isSendingSmsCode || smsCountdown > 0}
+                            className={`px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer flex items-center justify-center gap-1.5 ${
+                              (isSendingSmsCode || smsCountdown > 0) ? "opacity-50 cursor-not-allowed" : ""
+                            }`}
+                          >
+                            {isSendingSmsCode ? (
+                              <>
+                                <svg className="animate-spin h-4 w-4 text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                </svg>
+                                发送中
+                              </>
+                            ) : (
+                              smsCountdown > 0 ? `${smsCountdown}s` : "获取验证码"
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
 
                   <button
                     type="submit"
@@ -805,7 +1012,37 @@ function AuthModals() {
                 <div className="space-y-1.5 flex flex-col items-center">
                   <img src="/logo/logo_icon.svg" alt="面试驾到" className="w-16 h-16 object-contain mb-1 drop-shadow-md" />
                   <h3 className="font-black text-white text-xl md:text-2xl">重置账户密码</h3>
-                  <p className="text-white/45 text-xs md:text-sm font-bold">通过邮箱验证身份后设定新密码</p>
+                  <p className="text-white/45 text-xs md:text-sm font-bold">验证身份后设定新密码</p>
+                </div>
+
+                {/* Reset Mode Tab Switcher */}
+                <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 text-sm font-black">
+                  <button
+                    type="button"
+                    onClick={() => { setResetTab("phone"); setForgotTarget(""); }}
+                    className={`flex-1 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      resetTab === "phone"
+                        ? "bg-[#AFA7FF] text-[#050B1A] shadow-md"
+                        : "text-white/60 hover:text-white"
+                    }`}
+                  >
+                    <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 1024 1024">
+                      <path d="M776.676 1010.080h-479.92c-28.332 0-51.33-22.999-51.33-51.33v-891.12c0-28.332 22.999-51.33 51.33-51.33h479.92c28.332 0 51.33 22.999 51.33 51.33v891.12c0 28.332-22.999 51.33-51.33 51.33v0zM536.576 958.751c19.073 0 34.221-15.426 34.221-34.221s-15.426-34.221-34.221-34.221-34.221 15.426-34.221 34.221 15.426 34.221 34.221 34.221v0zM776.676 118.96h-479.92v719.742h479.641v-719.742h0.279z" />
+                    </svg>
+                    手机找回
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setResetTab("email"); setForgotTarget(""); }}
+                    className={`flex-1 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                      resetTab === "email"
+                        ? "bg-[#AFA7FF] text-[#050B1A] shadow-md"
+                        : "text-white/60 hover:text-white"
+                    }`}
+                  >
+                    <span className="material-symbols-outlined text-base">mail</span>
+                    邮箱找回
+                  </button>
                 </div>
 
                 {/* Form */}
@@ -818,15 +1055,15 @@ function AuthModals() {
                   }}
                   className="space-y-4 text-sm font-semibold text-white/60 text-left"
                 >
-                  {/* 内测版本：只支持邮箱找回（删除手机找回 tab） */}
                   <div>
-                    <label className="block mb-1.5">邮箱地址</label>
+                    <label className="block mb-1.5">{resetTab === "phone" ? "绑定的手机号码" : "绑定的邮箱地址"}</label>
                     <input
-                      type="email"
+                      type={resetTab === "phone" ? "tel" : "email"}
+                      maxLength={resetTab === "phone" ? 11 : undefined}
                       required
-                      placeholder="请输入绑定的邮箱"
-                      value={forgotEmail}
-                      onChange={(e) => setForgotEmail(e.target.value)}
+                      placeholder={resetTab === "phone" ? "请输入手机号码" : "请输入绑定的邮箱地址"}
+                      value={forgotTarget}
+                      onChange={(e) => setForgotTarget(e.target.value)}
                       className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
                     />
                   </div>
@@ -845,12 +1082,21 @@ function AuthModals() {
                       <button
                         type="button"
                         onClick={handleForgotGetCode}
-                        disabled={forgotCountdown > 0}
-                        className={`px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer ${
-                          forgotCountdown > 0 ? "opacity-50 cursor-not-allowed" : ""
+                        disabled={forgotCountdown > 0 || isSendingForgotCode}
+                        className={`px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer flex items-center justify-center gap-1.5 ${
+                          forgotCountdown > 0 || isSendingForgotCode ? "opacity-50 cursor-not-allowed" : ""
                         }`}
                       >
-                        {forgotCountdown > 0 ? `${forgotCountdown}s` : "获取验证码"}
+                        {isSendingForgotCode ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-3.5 h-3.5 border-2 border-[#AFA7FF] border-t-transparent rounded-full animate-spin" />
+                            发送中...
+                          </span>
+                        ) : forgotCountdown > 0 ? (
+                          `${forgotCountdown}s`
+                        ) : (
+                          "获取验证码"
+                        )}
                       </button>
                     </div>
                   </div>
@@ -1031,7 +1277,7 @@ export function UserMenu() {
         <div className="w-8 h-8 rounded-full bg-slate-900 border border-slate-200 dark:border-white/10 overflow-hidden shrink-0 group-hover:border-indigo-500/40 dark:group-hover:border-[#AFA7FF]/40 transition-colors">
           <img src={auth.user.avatar || "/register.jpg"} alt={auth.user.name} className="w-full h-full object-cover" />
         </div>
-        <span className="text-slate-900 dark:text-on-surface font-extrabold text-sm whitespace-nowrap hidden sm:block user-name-label transition-colors">
+        <span className="text-white font-extrabold text-sm whitespace-nowrap hidden sm:block user-name-label transition-colors">
           {auth.user.name}
         </span>
         <span className={`material-symbols-outlined text-xs transition-all transform user-arrow-icon ${isOpen ? "rotate-180" : ""}`}>

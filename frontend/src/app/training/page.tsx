@@ -7,6 +7,7 @@ import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
+import Footer from "@/components/Footer";
 import { useRealtimeSession } from "@/app/utils/useRealtimeSession";
 import { useRealtimeAudio } from "./hooks/useRealtimeAudio";
 import { API_BASE } from "@/lib/api";
@@ -111,6 +112,7 @@ function InterviewTrainingPageContent() {
   // ---------- Live 状态 ----------
   const [liveSession, setLiveSession] = useState<LiveSession | null>(null);
   const [bootState, setBootState] = useState<"idle" | "loading" | "live" | "ending" | "analyzing" | "error" | "report">("idle");
+  const isLive = bootState === "live";
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   // PR5: WS 状态、transcript、AI 状态机、计时都由 useRealtimeSession Hook 管理
   const live = useRealtimeSession();
@@ -120,6 +122,24 @@ function InterviewTrainingPageContent() {
   const durationSec = live.metrics.durationSec;
   const micMuted = live.micMuted;
   const speakerMuted = live.speakerMuted;
+
+  // AI 是否正在提问/输出语音（涵盖后端 WS 状态 + 本地扬声器 AudioContext 播放状态）
+  const isAiSpeaking = aiState === "speaking" || audio.isPlaying;
+  const [hasFirstQuestionFinished, setHasFirstQuestionFinished] = useState(false);
+  const hasAiStartedSpeakingRef = useRef(false);
+
+  useEffect(() => {
+    if (bootState !== "live") {
+      setHasFirstQuestionFinished(false);
+      hasAiStartedSpeakingRef.current = false;
+      return;
+    }
+    if (isAiSpeaking) {
+      hasAiStartedSpeakingRef.current = true;
+    } else if (hasAiStartedSpeakingRef.current && !isAiSpeaking) {
+      setHasFirstQuestionFinished(true);
+    }
+  }, [bootState, isAiSpeaking]);
 
   // ---------- UI 状态 ----------
   const [isPreparingTraining, setIsPreparingTraining] = useState(false);
@@ -153,8 +173,33 @@ function InterviewTrainingPageContent() {
   // 快捷操作：暂停倒计时
   const [isPaused, setIsPaused] = useState(false);
   const [pauseCountdown, setPauseCountdown] = useState(0);
+
+  const isInterviewerActive = !isLive || isPaused || isAiSpeaking || !hasFirstQuestionFinished;
+
+  // 候选人当前轮次是否已开口发言作答
+  const [hasCandidateSpokenInCurrentTurn, setHasCandidateSpokenInCurrentTurn] = useState(false);
+  const candidateUtteranceCountRef = useRef(0);
+
+  useEffect(() => {
+    // 处于面试官提问/说话阶段时，重置候选人发言标记
+    if (isInterviewerActive) {
+      setHasCandidateSpokenInCurrentTurn(false);
+      candidateUtteranceCountRef.current = transcript.filter((t) => t.role === "candidate").length;
+      return;
+    }
+
+    // 处于候选人作答阶段时：若 ASR 识别到属于 candidate 的新字幕，解锁"回答完毕"按钮
+    const currentCandidateCount = transcript.filter((t) => t.role === "candidate").length;
+    if (currentCandidateCount > candidateUtteranceCountRef.current) {
+      setHasCandidateSpokenInCurrentTurn(true);
+    }
+  }, [isInterviewerActive, transcript]);
+
+  // 发言交接模式：auto (自动感应 VAD) | manual (手动点击我已回答完毕)
+  const [speechMode, setSpeechMode] = useState<"auto" | "manual">("auto");
+  const [showSpeechModeTip, setShowSpeechModeTip] = useState(false);
   // 按钮 active 闪烁反馈（按下后 0.6s 高亮）
-  const [activeAction, setActiveAction] = useState<"" | "pause" | "skip" | "hint" | "feedback">("");
+  const [activeAction, setActiveAction] = useState<"" | "pause" | "skip" | "hint" | "feedback" | "complete_turn">("");
   // 离开二次确认（切换页面/刷新前必弹）
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const pendingNavRef = useRef<{ path: string; external: boolean } | null>(null);
@@ -248,6 +293,19 @@ function InterviewTrainingPageContent() {
   //   - 新建页（/training）→ URL 干净，不带 liveId
   //   - 报告页（已完成） → URL 带 ?liveId=N（可分享/可刷新回到报告）
   //   - 进行中刷新/返回  → 靠 localStorage 静默恢复，URL 保持干净
+  // PR6: 刷新配额 helper
+  const fetchQuota = useCallback(() => {
+    quotaFetchedRef.current = true;
+    fetch(`${apiBase}/api/live/quota`, { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((q) => {
+        if (q) setQuota(q);
+      })
+      .catch(() => {
+        quotaFetchedRef.current = false;
+      });
+  }, [apiBase]);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const urlLiveId = params.get("liveId");
@@ -256,11 +314,7 @@ function InterviewTrainingPageContent() {
 
     // PR6: 拉配额信息 (防重加锁)
     if (!quotaFetchedRef.current) {
-      quotaFetchedRef.current = true;
-      fetch(`${apiBase}/api/live/quota`, { headers: authHeaders() })
-        .then((r) => r.ok ? r.json() : null)
-        .then((q) => { if (q) setQuota(q); })
-        .catch(() => { quotaFetchedRef.current = false; });
+      fetchQuota();
     }
 
     if (!liveId) {
@@ -340,6 +394,29 @@ function InterviewTrainingPageContent() {
     else if (live.status === "ended" || live.status === "ending") setBootState("ending");
   }, [live.status]);
 
+  // ---------- 模拟面试超时智能自动结束 ----------
+  // 当已进行时长 durationSec 达到实际设定的总时长 (actualDurationMin * 60) 时：
+  // 1. 若 AI 正在发言 (aiState === "speaking")，优雅等待 AI 面试官说完本句话后再自动结束；
+  // 2. 若 AI 未在发言（或发言结束后），自动触发 handleEnd() 进入报告分析流程，避免超时挂挂。
+  const autoEndTriggeredRef = useRef(false);
+
+  useEffect(() => {
+    if (bootState !== "live" || !liveSession) return;
+
+    const targetSec = actualDurationMin * 60;
+    if (durationSec >= targetSec) {
+      if (autoEndTriggeredRef.current) return;
+
+      // 如果 AI 还在说话且超标未满 15 秒，等待 AI 面试官把本句说完；
+      // 若 AI 未在说话（或超过 15 秒兜底），自动调 handleEnd() 结束面试并生成报告
+      if (!isAiSpeaking || durationSec >= targetSec + 15) {
+        autoEndTriggeredRef.current = true;
+        console.log(`[training] 面试达到设定时长 (${durationSec}s >= ${targetSec}s)，自动结束并生成分析报告`);
+        void handleEnd();
+      }
+    }
+  }, [durationSec, actualDurationMin, isAiSpeaking, bootState, liveSession]);
+
   // ---------- 页面销毁时清理摄像头 ----------
   useEffect(() => {
     return () => {
@@ -393,6 +470,7 @@ function InterviewTrainingPageContent() {
       liveId,
       wsPath: wsUrl,
       token,
+      speechMode,
       onAudioFrame: (pcm16) => audio.play(pcm16),
     });
     // 候选人字幕优先走火山流式 ASR（后端 asr_bridge），
@@ -420,6 +498,8 @@ function InterviewTrainingPageContent() {
         setBootState("report");
         // 进入报告态：把 liveId 写进 URL（可分享、可刷新回到报告页）
         window.history.replaceState(null, "", `/training?liveId=${liveId}`);
+        // 关键：报告加载完成，即刻重新拉取最新已扣减配额
+        fetchQuota();
       } else {
         fetchedLiveIdRef.current = null;
         setErrorMsg("获取面试报告失败");
@@ -563,6 +643,7 @@ function InterviewTrainingPageContent() {
       }
 
       const sess: LiveSession = await res.json();
+      autoEndTriggeredRef.current = false;
       setLiveSession(sess);
       localStorage.setItem("interviewVar_live_id", String(sess.live_session_id));
       setIsPreparingTraining(false);
@@ -576,7 +657,7 @@ function InterviewTrainingPageContent() {
       }
       setIsCountingDown(false);
 
-      setBootState("live");
+      setBootState("loading");
       if (sess.ws_url) {
         const token = localStorage.getItem("interviewVar_token") || "";
         const targetLiveId = sess.live_session_id;
@@ -585,6 +666,7 @@ function InterviewTrainingPageContent() {
           liveId: targetLiveId,
           wsPath: sess.ws_url,
           token,
+          speechMode,
           onAudioFrame: (pcm16) => audio.play(pcm16),
           // WS 中途异常断开兜底：触发后端分析（不浪费已采集的 transcript）
           onAutoEnd: (autoLiveId) => {
@@ -734,6 +816,8 @@ function InterviewTrainingPageContent() {
   };
 
   const handleReset = () => {
+    autoEndTriggeredRef.current = false;
+    quotaFetchedRef.current = false;
     localStorage.removeItem("interviewVar_live_id");
     localStorage.removeItem("interviewVar_live_config");
     window.history.replaceState(null, "", "/training");
@@ -745,6 +829,7 @@ function InterviewTrainingPageContent() {
     audio.stop();
     stopCamera();
     setErrorMsg(null);
+    fetchQuota();
   };
 
   const handleConsultAdvisor = (suggestion: string, index: number) => {
@@ -859,7 +944,10 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
   // 快捷操作（PR-N：暂停 / 跳过 / 提示 / 反馈）
   // ============================================================
 
-  const flashActive = (kind: "pause" | "skip" | "hint" | "feedback") => {
+  // 快捷操作（PR-N：暂停 / 跳过 / 提示 / 反馈 / 完成发言）
+  // ============================================================
+
+  const flashActive = (kind: "pause" | "skip" | "hint" | "feedback" | "complete_turn") => {
     setActiveAction(kind);
     setTimeout(() => setActiveAction((cur) => (cur === kind ? "" : cur)), 600);
   };
@@ -913,6 +1001,13 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
   const handleFeedback = () => {
     setShowFeedbackModal(true);
     flashActive("feedback");
+  };
+
+  const handleCompleteTurn = () => {
+    if (live.status !== "live" || isPaused) return;
+    live.sendQuickAction("complete_turn");
+    flashActive("complete_turn");
+    auth.triggerToast("已确认回答完毕，提交给面试官接话");
   };
 
   const [isSubmittingTrainingFeedback, setIsSubmittingTrainingFeedback] = useState(false);
@@ -977,7 +1072,6 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
   };
 
   const questionRange = durationMin >= 20 ? "7~9" : durationMin >= 15 ? "5~7" : "3~5";
-  const isLive = bootState === "live";
   const isAnalyzing = bootState === "analyzing" || bootState === "ending";
   const isReportMode = bootState === "report";
 
@@ -1149,7 +1243,7 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
                       strokeWidth="8"
                       fill="transparent"
                       strokeDasharray={251.2}
-                      strokeDashoffset={251.2 - (251.2 * (reportData.scores?.ipi ?? 70)) / 100}
+                      strokeDashoffset={251.2 - (251.2 * (reportData.scores?.ipi ?? 0)) / 100}
                       strokeLinecap="round"
                       className="transition-all duration-1000 ease-out"
                     />
@@ -1162,7 +1256,7 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
                   </svg>
                   <div className="absolute flex flex-col items-center justify-center">
                     <span className="text-4xl font-black text-white font-label-mono tracking-tighter">
-                      {reportData.scores?.ipi ?? 70}
+                      {reportData.scores?.ipi ?? 0}
                     </span>
                     <span className="text-xs text-on-surface-variant/40 font-bold uppercase tracking-wider mt-1">IPI 综合得分</span>
                   </div>
@@ -1239,7 +1333,7 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
                     { label: "项目真实度", key: "expression", icon: "verified", color: "from-[#AFA7FF] to-[#8d82ff]" },
                     { label: "沟通主动性", key: "ownership", icon: "psychology", color: "from-[#FF7A95] to-[#ff5274]" }
                   ].map((dim) => {
-                    const scoreVal = reportData.scores?.[dim.key] ?? 70;
+                    const scoreVal = reportData.scores?.[dim.key] ?? 0;
                     return (
                       <div key={dim.key} className="space-y-1.5">
                         <div className="flex justify-between items-center text-sm">
@@ -1293,7 +1387,7 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
                     </button>
                   ))}
                   {(reportData.summary?.suggestions || []).length === 0 && (
-                    <p className="text-xs text-on-surface-variant/40 text-center py-6">暂无推荐改进方案</p>
+                    <p className="text-base text-on-surface-variant/40 text-center py-6">暂无推荐改进方案</p>
                   )}
                 </div>
               </div>
@@ -1373,7 +1467,7 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
                     模拟面试已结束，正在生成复盘报告
                   </h3>
                   <p className="text-base text-white/70 font-semibold">
-                    基于你的全场表达与问答逻辑，DeepSeek 大模型正在深度评估能力维度...
+                    基于你的全场表达与问答逻辑，大模型正在深度评估能力维度...
                   </p>
                 </div>
 
@@ -1396,7 +1490,7 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
                 </div>
                 <div className="space-y-2">
                   <h3 className="text-3xl font-black text-white animate-pulse tracking-wide">正在加载模拟面试复盘报告...</h3>
-                  <p className="text-sm text-on-surface-variant/50 font-bold">正在提取会话记录与 DeepSeek 智能评估结果</p>
+                  <p className="text-sm text-on-surface-variant/50 font-bold">正在提取会话记录与大模型智能评估结果</p>
                 </div>
               </>
             )}
@@ -1488,6 +1582,89 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
                             </option>
                           ))}
                         </select>
+                      </div>
+
+                      {/* 2.5 发言交接模式 */}
+                      <div className="space-y-1.5 relative">
+                        <div
+                          className="relative inline-flex items-center gap-1.5 cursor-pointer"
+                          onMouseEnter={() => setShowSpeechModeTip(true)}
+                          onMouseLeave={() => setShowSpeechModeTip(false)}
+                        >
+                          <label className="text-[13px] md:text-[14px] text-on-surface-variant/50 font-label-mono uppercase tracking-wider font-extrabold block cursor-pointer">
+                            发言交接模式
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setShowSpeechModeTip(!showSpeechModeTip)}
+                            className="text-on-surface-variant/60 hover:text-white transition-colors cursor-pointer flex items-center justify-center"
+                            title="什么是发言交接模式？"
+                          >
+                            <span className="material-symbols-outlined !text-[18px]">info</span>
+                          </button>
+
+                          {/* Hover Popover Tooltip */}
+                          {showSpeechModeTip && (
+                            <div
+                              className="absolute left-0 top-7 z-50 w-72 p-3.5 bg-[#0e1626] border border-white/15 rounded-2xl shadow-2xl text-xs space-y-2 text-white animate-fade-in pointer-events-none"
+                              style={{ color: "#ffffff" }}
+                            >
+                              <div className="flex justify-between items-center pb-1.5 border-b border-white/10">
+                                <span className="font-extrabold text-[#5DECCB]" style={{ color: "#5DECCB" }}>发言交接说明</span>
+                              </div>
+                              <div className="leading-relaxed font-medium" style={{ color: "rgba(255, 255, 255, 0.9)" }}>
+                                <strong className="text-emerald-400" style={{ color: "#34d399" }}>自动感应：</strong>系统使用 VAD 语音静音识别，停顿约 1.5 秒后自动判别发言结束并交由 AI 接话。
+                              </div>
+                              <div className="leading-relaxed font-medium" style={{ color: "rgba(255, 255, 255, 0.9)" }}>
+                                <strong className="text-purple-300" style={{ color: "#d8b4fe" }}>手动提交：</strong>避免停顿被误切断，允许您充分思考组织语言，回答完毕后手动点击“我已回答完毕”。
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            disabled={isLive || isQuotaExhausted}
+                            onClick={() => { setSpeechMode("auto"); live.setSpeechMode("auto"); }}
+                            className={`py-2.5 px-3 rounded-xl border font-bold text-xs md:text-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${
+                              speechMode === "auto"
+                                ? "bg-emerald-500/10 border-emerald-500/50 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.15)]"
+                                : "bg-white/[0.02] border-white/5 text-on-surface-variant/70 hover:bg-white/[0.05]"
+                            }`}
+                          >
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                            自动感应
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isLive || isQuotaExhausted}
+                            onClick={() => { setSpeechMode("manual"); live.setSpeechMode("manual"); }}
+                            className={`py-2.5 px-3 rounded-xl border font-bold text-xs md:text-sm transition-all cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed ${
+                              speechMode === "manual"
+                                ? "bg-purple-500/15 border-purple-500/50 text-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.15)]"
+                                : "bg-white/[0.02] border-white/5 text-on-surface-variant/70 hover:bg-white/[0.05]"
+                            }`}
+                          >
+                            <span className="w-2 h-2 rounded-full bg-purple-400" />
+                            手动提交
+                          </button>
+                        </div>
+
+                        <p className="text-[11px] font-semibold text-on-surface-variant/60 pt-0.5 flex items-center gap-1">
+                          {speechMode === "auto" ? (
+                            <>
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                              适用于沟通顺畅、快问快答或压力面试
+                            </>
+                          ) : (
+                            <>
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+                              适用于回答较长、逻辑思考多或环境噪音大的场景，回答完毕后手动点击交接
+                            </>
+                          )}
+                        </p>
                       </div>
 
                       {/* 3. 难度等级（PR4 §8.4.1 4 选 1） */}
@@ -1891,8 +2068,28 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
                     <span className="material-symbols-outlined text-lg text-primary">touch_app</span>
                     快捷操作
                   </h4>
+
+                  {/* 发言交接模式 Toggle & Popover Tooltip */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setSpeechMode((prev) => (prev === "auto" ? "manual" : "auto"))}
+                      onMouseEnter={() => setShowSpeechModeTip(true)}
+                      onMouseLeave={() => setShowSpeechModeTip(false)}
+                      className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/10 hover:border-indigo-500/30 text-xs font-black cursor-pointer transition-all"
+                    >
+                      <span className="material-symbols-outlined text-sm text-indigo-400">swap_calls</span>
+                      <span className="text-white/60">交接:</span>
+                      {speechMode === "auto" ? (
+                        <span className="speech-mode-tip-tag-auto text-emerald-400">自动感应</span>
+                      ) : (
+                        <span className="speech-mode-tip-tag-manual text-indigo-400">手动提交</span>
+                      )}
+                    </button>
+                  </div>
+
                   {isPaused && (
-                    <span className="text-[10px] font-black text-secondary font-label-mono flex items-center gap-1 animate-pulse">
+                    <span className="text-[10px] font-black text-secondary font-label-mono flex items-center gap-1 animate-pulse ml-2">
                       <span className="material-symbols-outlined text-xs">pause_circle</span>
                       暂停中 {pauseCountdown}s
                     </span>
@@ -1907,6 +2104,40 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
                     </motion.div>
                   )}
                 </AnimatePresence>
+
+                {/* 手动交接模式下的【我已回答完毕】主要操作按钮 */}
+                {speechMode === "manual" && (
+                  <button
+                    disabled={isInterviewerActive || !hasCandidateSpokenInCurrentTurn}
+                    onClick={handleCompleteTurn}
+                    className={`w-full py-3 px-4 rounded-2xl border flex items-center justify-center gap-2 text-center transition-all font-black text-sm shadow-lg ${
+                      isInterviewerActive
+                        ? "bg-[#f3e8ff] dark:bg-slate-800/50 border-purple-200 dark:border-slate-700/60 text-slate-900 dark:text-slate-200 opacity-90 cursor-not-allowed"
+                        : !hasCandidateSpokenInCurrentTurn
+                        ? "bg-slate-100 dark:bg-slate-800/30 border-slate-200 dark:border-slate-700/40 text-slate-400 dark:text-slate-500 opacity-70 cursor-not-allowed"
+                        : activeAction === "complete_turn"
+                        ? "bg-emerald-500 text-white border-emerald-400 scale-[0.98]"
+                        : "bg-emerald-500 hover:bg-emerald-400 text-white border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.35)] hover:scale-[1.01] cursor-pointer"
+                    }`}
+                  >
+                    {isInterviewerActive ? (
+                      <>
+                        <span className="material-symbols-outlined text-lg animate-pulse text-purple-600 dark:text-indigo-400">graphic_eq</span>
+                        <span className="text-slate-900 dark:text-slate-200 font-black">面试官提问中...</span>
+                      </>
+                    ) : !hasCandidateSpokenInCurrentTurn ? (
+                      <>
+                        <span className="material-symbols-outlined text-lg text-slate-400">mic_none</span>
+                        <span>回答完毕（请先发言作答）</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="material-symbols-outlined text-lg">check_circle</span>
+                        <span>回答完毕（点击交接）</span>
+                      </>
+                    )}
+                  </button>
+                )}
 
                 <div className="grid grid-cols-2 gap-2 mt-[-2px]">
                   <button
@@ -1981,18 +2212,7 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
       </div>
 
       {/* FOOTER */}
-      <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
-        <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
-          <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 面试驾到. All rights reserved.
-          </span>
-          <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-            <span onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer select-none">服务条款</span>
-            <span onClick={() => openLegalPrivacy()} className="hover:text-primary transition-colors cursor-pointer select-none">隐私政策</span>
-            <span onClick={() => openLegalContact()} className="hover:text-primary transition-colors cursor-pointer select-none">联系方式</span>
-          </div>
-        </div>
-      </footer>
+      <Footer />
 
       {/* 结束确认 Modal */}
       <AnimatePresence>

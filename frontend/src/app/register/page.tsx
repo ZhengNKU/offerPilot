@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import Footer from "@/components/Footer";
 import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { API_BASE } from "@/lib/api";
 
@@ -102,7 +103,9 @@ export default function RegisterPage() {
   // -------------------------------------------------------------
   // STEP 1: ACCOUNT REGISTRATION STATE
   // -------------------------------------------------------------
-  // 内测版本：只保留邮箱注册（删除手机号相关 state）
+  const [regMethod, setRegMethod] = useState<"phone" | "email">("phone");
+  const [phone, setPhone] = useState("");
+  const [phoneVerifyCode, setPhoneVerifyCode] = useState("");
   const [email, setEmail] = useState("");
   const [emailVerifyCode, setEmailVerifyCode] = useState("");
   const [isSendingCode, setIsSendingCode] = useState(false);
@@ -114,6 +117,7 @@ export default function RegisterPage() {
   const [agreePolicy, setAgreePolicy] = useState(false);
   const [showAgreementModal, setShowAgreementModal] = useState(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [phoneTimer, setPhoneTimer] = useState(0);
   const [emailTimer, setEmailTimer] = useState(0);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
 
@@ -133,6 +137,14 @@ export default function RegisterPage() {
 
   useEffect(() => {
     let t: NodeJS.Timeout;
+    if (phoneTimer > 0) {
+      t = setTimeout(() => setPhoneTimer(phoneTimer - 1), 1000);
+    }
+    return () => clearTimeout(t);
+  }, [phoneTimer]);
+
+  useEffect(() => {
+    let t: NodeJS.Timeout;
     if (emailTimer > 0) {
       t = setTimeout(() => setEmailTimer(emailTimer - 1), 1000);
     }
@@ -140,18 +152,28 @@ export default function RegisterPage() {
   }, [emailTimer]);
 
   const handleSendCode = async () => {
-    // 内测版本：只支持邮箱验证码
-    const target = email;
+    const isPhone = regMethod === "phone";
+    const target = isPhone ? phone : email;
     if (!target) {
-      setErrors(prev => ({ ...prev, email: true }));
-      auth.triggerToast("请输入邮箱地址！", "error");
+      setErrors(prev => ({ ...prev, [isPhone ? "phone" : "email"]: true }));
+      auth.triggerToast(`请输入${isPhone ? "手机号码" : "邮箱地址"}！`, "error");
       return;
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(target)) {
-      setErrors(prev => ({ ...prev, email: true }));
-      auth.triggerToast("请输入正确的邮箱地址格式！", "error");
-      return;
+
+    if (isPhone) {
+      const phoneRegex = /^1[3-9]\d{9}$/;
+      if (!phoneRegex.test(target)) {
+        setErrors(prev => ({ ...prev, phone: true }));
+        auth.triggerToast("请输入正确的手机号码！", "error");
+        return;
+      }
+    } else {
+      const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,10}$/;
+      if (!emailRegex.test(target)) {
+        setErrors(prev => ({ ...prev, email: true }));
+        auth.triggerToast("邮箱地址格式无效，请检查后缀域名（例: user@example.com）！", "error");
+        return;
+      }
     }
 
     setIsSendingCode(true);
@@ -159,14 +181,18 @@ export default function RegisterPage() {
       const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "email", target })
+        body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
       });
       if (!res.ok) {
-        const errData = await res.json();
+        const errData = await res.json().catch(() => ({}));
         auth.triggerToast(errData.detail || "发送验证码失败！", "error");
         return;
       }
-      setEmailTimer(60);
+      if (isPhone) {
+        setPhoneTimer(60);
+      } else {
+        setEmailTimer(60);
+      }
       auth.triggerToast("验证码已发送，请查收！");
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！", "error");
@@ -176,22 +202,41 @@ export default function RegisterPage() {
   };
 
   const handleNextToStep2 = async () => {
-    // 内测版本：只走邮箱验证
     const newErrors: Record<string, boolean> = {};
-    if (!email) {
-      newErrors.email = true;
+    const isPhone = regMethod === "phone";
+
+    if (isPhone) {
+      if (!phone) {
+        newErrors.phone = true;
+      } else {
+        const phoneRegex = /^1[3-9]\d{9}$/;
+        if (!phoneRegex.test(phone)) {
+          newErrors.phone = true;
+          setErrors(prev => ({ ...prev, phone: true }));
+          auth.triggerToast("请输入正确的手机号码！", "error");
+          return;
+        }
+      }
+      if (!phoneVerifyCode) {
+        newErrors.phoneVerifyCode = true;
+      }
     } else {
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
+      if (!email) {
         newErrors.email = true;
-        setErrors(prev => ({ ...prev, email: true }));
-        auth.triggerToast("请输入正确的邮箱地址格式！", "error");
-        return;
+      } else {
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+          newErrors.email = true;
+          setErrors(prev => ({ ...prev, email: true }));
+          auth.triggerToast("请输入正确的邮箱地址格式！", "error");
+          return;
+        }
+      }
+      if (!emailVerifyCode) {
+        newErrors.emailVerifyCode = true;
       }
     }
-    if (!emailVerifyCode) {
-      newErrors.emailVerifyCode = true;
-    }
+
     if (!username) {
       newErrors.username = true;
     }
@@ -233,7 +278,6 @@ export default function RegisterPage() {
 
     setIsSubmittingStep1(true);
     try {
-      // 敏感词零延迟即时校验
       if (username && username.trim().length >= 2) {
         const uStatus = await usernameMod.checkNow(username, "username_hint");
         if (uStatus === "block") {
@@ -246,9 +290,10 @@ export default function RegisterPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          reg_method: "email",
-          email: email,
-          verify_code: emailVerifyCode,
+          reg_method: regMethod,
+          phone: isPhone ? phone : undefined,
+          email: !isPhone ? email : undefined,
+          verify_code: isPhone ? phoneVerifyCode : emailVerifyCode,
           username,
           password
         })
@@ -574,16 +619,16 @@ export default function RegisterPage() {
           {/* ========================================================
               LEFT COLUMN: Slogan & Intro Panel (4 cols)
              ======================================================== */}
-          <div className="register-step1-left-card col-span-12 lg:col-span-4 flex flex-col justify-between p-8 rounded-3xl border border-slate-200 dark:border-white/5 bg-white dark:bg-[#060e20]/60 backdrop-blur-xl relative overflow-hidden h-full">
+          <div className="register-step1-left-card col-span-12 lg:col-span-4 flex flex-col justify-between p-8 rounded-3xl border border-white/5 bg-[#060e20]/60 backdrop-blur-xl relative overflow-hidden h-full">
             <div className="absolute inset-0 bg-gradient-to-br from-[#AFA7FF]/5 to-transparent pointer-events-none" />
 
             <div className="relative z-10 space-y-8 text-left">
               <div className="space-y-4">
-                <h1 className="text-3xl md:text-4xl lg:text-5xl font-black text-slate-900 dark:text-white leading-tight font-display-xl tracking-tight">
+                <h1 className="text-3xl md:text-4xl lg:text-5xl font-black text-white leading-tight font-display-xl tracking-tight">
                   让每一次面试都成为<br />
                   下一次 <span className="text-[#AFA7FF] drop-shadow-[0_0_15px_rgba(175,167,255,0.35)]">Offer</span> 的养料
                 </h1>
-                <p className="text-sm md:text-base text-slate-600 dark:text-white/50 leading-relaxed font-bold">
+                <p className="text-sm md:text-base text-white/50 leading-relaxed font-bold">
                   AI 驱动的职业成长系统，分析面试、沉淀经验、模拟实战，帮你更快拿到理想 Offer。
                 </p>
               </div>
@@ -597,12 +642,12 @@ export default function RegisterPage() {
                   { icon: "trending_up", title: "Offer 概率预测", desc: "AI 预测通过概率，明确提升方向", color: "text-[#FF7A95]" }
                 ].map((f, i) => (
                   <div key={i} className="flex gap-4.5 items-start">
-                    <div className="w-11 h-11 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 flex items-center justify-center shrink-0">
+                    <div className="w-11 h-11 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center shrink-0">
                       <span className={`material-symbols-outlined text-[22px] ${f.color}`}>{f.icon}</span>
                     </div>
                     <div>
-                      <h4 className="text-sm md:text-base font-black text-slate-900 dark:text-white">{f.title}</h4>
-                      <p className="text-xs md:text-sm text-slate-500 dark:text-white/40 font-bold mt-0.5">{f.desc}</p>
+                      <h4 className="text-sm md:text-base font-black text-white">{f.title}</h4>
+                      <p className="text-xs md:text-sm text-white/40 font-bold mt-0.5">{f.desc}</p>
                     </div>
                   </div>
                 ))}
@@ -675,32 +720,85 @@ export default function RegisterPage() {
                         <div className="space-y-4.5 w-full">
                           <div>
                             <h2 className="text-xl md:text-2xl font-black text-white">创建账号</h2>
-                            <p className="text-xs md:text-sm text-white/40 font-bold mt-1">内测版本：仅支持邮箱注册</p>
+                            <p className="text-xs md:text-sm text-white/40 font-bold mt-1">支持手机号码或电子邮箱快捷注册</p>
+                          </div>
+
+                          {/* Mode Switcher */}
+                          <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 text-xs font-black">
+                            <button
+                              type="button"
+                              onClick={() => setRegMethod("phone")}
+                              className={`flex-1 py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                                regMethod === "phone"
+                                  ? "bg-[#AFA7FF] text-[#050B1A] shadow-md"
+                                  : "text-white/60 hover:text-white"
+                              }`}
+                            >
+                              <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 1024 1024">
+                                <path d="M776.676 1010.080h-479.92c-28.332 0-51.33-22.999-51.33-51.33v-891.12c0-28.332 22.999-51.33 51.33-51.33h479.92c28.332 0 51.33 22.999 51.33 51.33v891.12c0 28.332-22.999 51.33-51.33 51.33v0zM536.576 958.751c19.073 0 34.221-15.426 34.221-34.221s-15.426-34.221-34.221-34.221-34.221 15.426-34.221 34.221 15.426 34.221 34.221 34.221v0zM776.676 118.96h-479.92v719.742h479.641v-719.742h0.279z" />
+                              </svg>
+                              手机号注册
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setRegMethod("email")}
+                              className={`flex-1 py-2.5 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                                regMethod === "email"
+                                  ? "bg-[#AFA7FF] text-[#050B1A] shadow-md"
+                                  : "text-white/60 hover:text-white"
+                              }`}
+                            >
+                              <span className="material-symbols-outlined text-base">mail</span>
+                              邮箱注册
+                            </button>
                           </div>
 
                           {/* Fields */}
                           <div className="space-y-4">
-                            <div>
-                              <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
-                                邮箱地址 <span className="text-[#FF7A95] ml-0.5">*</span>
-                              </label>
-                              <input
-                                type="email"
-                                placeholder="请输入邮箱地址"
-                                value={email}
-                                onChange={(e) => {
-                                  setEmail(e.target.value);
-                                  if (errors.email) setErrors(prev => ({ ...prev, email: false }));
-                                }}
-                                className={`w-full py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
-                                  errors.email
-                                    ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]"
-                                    : "border-white/10 focus:border-[#AFA7FF]/40"
-                                }`}
-                              />
-                            </div>
+                            {regMethod === "phone" ? (
+                              <div>
+                                <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
+                                  手机号码 <span className="text-[#FF7A95] ml-0.5">*</span>
+                                </label>
+                                <input
+                                  type="tel"
+                                  maxLength={11}
+                                  placeholder="请输入手机号码"
+                                  value={phone}
+                                  onChange={(e) => {
+                                    setPhone(e.target.value);
+                                    if (errors.phone) setErrors(prev => ({ ...prev, phone: false }));
+                                  }}
+                                  className={`w-full py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
+                                    errors.phone
+                                      ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]"
+                                      : "border-white/10 focus:border-[#AFA7FF]/40"
+                                  }`}
+                                />
+                              </div>
+                            ) : (
+                              <div>
+                                <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
+                                  邮箱地址 <span className="text-[#FF7A95] ml-0.5">*</span>
+                                </label>
+                                <input
+                                  type="email"
+                                  placeholder="请输入邮箱地址"
+                                  value={email}
+                                  onChange={(e) => {
+                                    setEmail(e.target.value);
+                                    if (errors.email) setErrors(prev => ({ ...prev, email: false }));
+                                  }}
+                                  className={`w-full py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
+                                    errors.email
+                                      ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]"
+                                      : "border-white/10 focus:border-[#AFA7FF]/40"
+                                  }`}
+                                />
+                              </div>
+                            )}
 
-                            {/* Verification Code for Email */}
+                            {/* Verification Code */}
                             <div>
                               <label className="block text-xs md:text-sm text-white/50 mb-1.5 font-bold">
                                 验证码 <span className="text-[#FF7A95] ml-0.5">*</span>
@@ -708,14 +806,19 @@ export default function RegisterPage() {
                               <div className="flex gap-2">
                                 <input
                                   type="text"
-                                  placeholder="请输入验证码"
-                                  value={emailVerifyCode}
+                                  placeholder="请输入 6 位验证码"
+                                  value={regMethod === "phone" ? phoneVerifyCode : emailVerifyCode}
                                   onChange={(e) => {
-                                    setEmailVerifyCode(e.target.value);
-                                    if (errors.emailVerifyCode) setErrors(prev => ({ ...prev, emailVerifyCode: false }));
+                                    if (regMethod === "phone") {
+                                      setPhoneVerifyCode(e.target.value);
+                                      if (errors.phoneVerifyCode) setErrors(prev => ({ ...prev, phoneVerifyCode: false }));
+                                    } else {
+                                      setEmailVerifyCode(e.target.value);
+                                      if (errors.emailVerifyCode) setErrors(prev => ({ ...prev, emailVerifyCode: false }));
+                                    }
                                   }}
                                   className={`flex-1 py-3 px-4 bg-white/5 border rounded-xl text-white placeholder-white/20 focus:outline-none text-xs md:text-sm font-semibold ${
-                                    errors.emailVerifyCode
+                                    (regMethod === "phone" ? errors.phoneVerifyCode : errors.emailVerifyCode)
                                       ? "border-[#FF7A95]/60 bg-[#FF7A95]/5 focus:border-[#FF7A95]"
                                       : "border-white/10 focus:border-[#AFA7FF]/40"
                                   }`}
@@ -723,27 +826,31 @@ export default function RegisterPage() {
                                 <button
                                   type="button"
                                   onClick={handleSendCode}
-                                  disabled={isSendingCode || emailTimer > 0}
+                                  disabled={isSendingCode || (regMethod === "phone" ? phoneTimer > 0 : emailTimer > 0)}
                                   className={`px-5 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-xs md:text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer flex items-center justify-center gap-1.5 ${
-                                    (isSendingCode || emailTimer > 0) ? "opacity-50 cursor-not-allowed" : ""
+                                    (isSendingCode || (regMethod === "phone" ? phoneTimer > 0 : emailTimer > 0)) ? "opacity-50 cursor-not-allowed" : ""
                                   }`}
                                 >
                                   {isSendingCode ? (
-                                      <>
-                                        <svg className="animate-spin h-4 w-4 text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
-                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                        </svg>
-                                        发送中
-                                      </>
-                                    ) : (
-                                      emailTimer > 0 ? `${emailTimer}s 后重发` : "获取验证码"
-                                    )}
-                                  </button>
-                                </div>
-                                <span className="text-[10px] md:text-xs text-white/30 font-bold block mt-1">验证码将发送至您的邮箱</span>
+                                    <>
+                                      <svg className="animate-spin h-4 w-4 text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                      </svg>
+                                      发送中
+                                    </>
+                                  ) : (
+                                    (regMethod === "phone" ? phoneTimer : emailTimer) > 0 
+                                      ? `${regMethod === "phone" ? phoneTimer : emailTimer}s 后重发` 
+                                      : "获取验证码"
+                                  )}
+                                </button>
                               </div>
+                              <span className="text-[10px] md:text-xs text-white/30 font-bold block mt-1">
+                                {regMethod === "phone" ? "短信验证码将发送至您的手机" : "验证码将发送至您的邮箱"}
+                              </span>
                             </div>
+                          </div>
 
                           {/* Account username & password */}
                           <div className="grid grid-cols-2 gap-4">
@@ -899,62 +1006,62 @@ export default function RegisterPage() {
                       {/* Right: Security & Reason card info (5 cols) */}
                       <div className="col-span-12 md:col-span-5 flex flex-col gap-4 text-xs md:text-sm font-bold text-white/60">
                         {/* 1. Privacy Guarantee */}
-                        <div className="register-step1-right-card p-6 rounded-2xl bg-white dark:bg-[#060e20]/80 border border-slate-200 dark:border-white/5 flex flex-col gap-3.5">
-                          <h4 className="text-[#5DECCB] text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-slate-200 dark:border-white/5">
+                        <div className="register-step1-right-card p-6 rounded-2xl bg-[#060e20]/80 border border-white/5 flex flex-col gap-3.5">
+                          <h4 className="text-[#5DECCB] text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5 pb-2 border-b border-white/5">
                             <span className="material-symbols-outlined text-base md:text-lg">verified_user</span>
                             信息安全与隐私保护
                           </h4>
-                          <p className="text-[11px] md:text-xs leading-relaxed text-slate-600 dark:text-white/40">
+                          <p className="text-[11px] md:text-xs leading-relaxed text-white/40">
                             为了提供更精准的面试分析、职业评估与成长建议，我们需要收集您的职业信息。
                           </p>
                           <div className="space-y-3 mt-1">
                             <div className="flex gap-2.5 items-start">
                               <span className="material-symbols-outlined text-[#AFA7FF] text-base md:text-lg shrink-0">lock</span>
                               <div>
-                                <p className="text-[11px] md:text-xs text-slate-900 dark:text-white font-black">AI 分析脱敏处理</p>
-                                <p className="text-[10px] md:text-[11px] text-slate-500 dark:text-white/35 font-bold mt-0.5">分析过程中自动脱敏，保护身份信息</p>
+                                <p className="text-[11px] md:text-xs text-white font-black">AI 分析脱敏处理</p>
+                                <p className="text-[10px] md:text-[11px] text-white/35 font-bold mt-0.5">分析过程中自动脱敏，保护身份信息</p>
                               </div>
                             </div>
                             <div className="flex gap-2.5 items-start">
                               <span className="material-symbols-outlined text-[#AFA7FF] text-base md:text-lg shrink-0">verified</span>
                               <div>
-                                <p className="text-[11px] md:text-xs text-slate-900 dark:text-white font-black">数据仅用于个性化服务</p>
-                                <p className="text-[10px] md:text-[11px] text-slate-500 dark:text-white/35 font-bold mt-0.5">仅用于 AI 分析、模拟面试与职业建议</p>
+                                <p className="text-[11px] md:text-xs text-white font-black">数据仅用于个性化服务</p>
+                                <p className="text-[10px] md:text-[11px] text-white/35 font-bold mt-0.5">仅用于 AI 分析、模拟面试与职业建议</p>
                               </div>
                             </div>
                             <div className="flex gap-2.5 items-start">
                               <span className="material-symbols-outlined text-[#AFA7FF] text-base md:text-lg shrink-0">security</span>
                               <div>
-                                <p className="text-[11px] md:text-xs text-slate-900 dark:text-white font-black">安全存储与传输</p>
-                                <p className="text-[10px] md:text-[11px] text-slate-500 dark:text-white/35 font-bold mt-0.5">采用银行级加密技术，保障数据安全</p>
+                                <p className="text-[11px] md:text-xs text-white font-black">安全存储与传输</p>
+                                <p className="text-[10px] md:text-[11px] text-white/35 font-bold mt-0.5">采用银行级加密技术，保障数据安全</p>
                               </div>
                             </div>
                           </div>
                         </div>
 
                         {/* 2. Why fill info */}
-                        <div className="register-step1-right-card p-6 rounded-2xl bg-white dark:bg-[#060e20]/80 border border-slate-200 dark:border-white/5 flex flex-col gap-3.5">
-                          <h4 className="text-slate-900 dark:text-white text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5">
+                        <div className="register-step1-right-card p-6 rounded-2xl bg-[#060e20]/80 border border-white/5 flex flex-col gap-3.5">
+                          <h4 className="text-white text-xs md:text-sm font-black uppercase tracking-wider flex items-center gap-1.5">
                             <span className="material-symbols-outlined text-base md:text-lg">help_outline</span>
                             为什么要填写这些信息？
                           </h4>
-                          <p className="text-[11px] md:text-xs leading-relaxed text-slate-600 dark:text-white/40">
+                          <p className="text-[11px] md:text-xs leading-relaxed text-white/40">
                             完整的职业信息将帮助 AI 更准确地理解您的背景，提供：
                           </p>
                           <div className="space-y-3 font-bold text-[11px] md:text-xs">
-                            <div className="register-why-item flex items-center gap-2 text-slate-700 dark:text-white/80">
+                            <div className="register-why-item flex items-center gap-2 text-white/80">
                               <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                               <span>更精准的面试表现分析</span>
                             </div>
-                            <div className="register-why-item flex items-center gap-2 text-slate-700 dark:text-white/80">
+                            <div className="register-why-item flex items-center gap-2 text-white/80">
                               <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                               <span>更匹配的面试题库和模拟场景</span>
                             </div>
-                            <div className="register-why-item flex items-center gap-2 text-slate-700 dark:text-white/80">
+                            <div className="register-why-item flex items-center gap-2 text-white/80">
                               <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                               <span>更合理的 Offer 概率预测</span>
                             </div>
-                            <div className="register-why-item flex items-center gap-2 text-slate-700 dark:text-white/80">
+                            <div className="register-why-item flex items-center gap-2 text-white/80">
                               <span className="material-symbols-outlined text-[#5DECCB] text-base md:text-lg" style={{ fontVariationSettings: "'wght' 700" }}>check</span>
                               <span>更个性化的职业成长建议</span>
                             </div>
@@ -1696,25 +1803,11 @@ export default function RegisterPage() {
               </div>
             </div> */}
           </div>
-
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-left">
-            <span className="text-xs md:text-sm text-white/30 font-label-mono font-bold tracking-widest">
-              © 2026 面试驾到. All rights reserved.
-            </span>
-            <div className="flex gap-8 text-xs md:text-sm text-white/30 font-label-mono font-bold tracking-widest">
-              <a onClick={() => router.push("/")} className="hover:text-[#AFA7FF] transition-colors cursor-pointer">
-                返回主页
-              </a>
-              <a className="hover:text-[#AFA7FF] transition-colors cursor-default" href="#">
-                隐私政策
-              </a>
-              <a className="hover:text-[#AFA7FF] transition-colors cursor-default" href="#">
-                服务条款
-              </a>
-            </div>
-          </div>
         </div>
       </footer>
+
+      {/* FOOTER */}
+      <Footer showHomeLink={true} />
 
       {/* USER AGREEMENT MODAL */}
       <AnimatePresence>

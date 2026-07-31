@@ -1165,6 +1165,7 @@ async def sectionize_transcript(
     }
 
     raw_sections: List[Dict[str, Any]] = []
+    res_data = None
     try:
         # sync=True 走 call_llm_sync_with_tools 或 call_llm_sync，与原行为等价
         res_data = await _run_with_optional_tools(payload, enable_network, sync=True)
@@ -1180,10 +1181,11 @@ async def sectionize_transcript(
     except Exception as e:
         logger.error(f"[sectionize] DeepSeek call failed: {e}")
         # Dump the whole response so we can see what LLM actually returned
-        try:
-            logger.error(f"[sectionize] raw response_data dump: {json.dumps(res_data, ensure_ascii=False)[:2000]}")
-        except Exception:
-            logger.error(f"[sectionize] raw response_data (no json): {res_data!r}")
+        if res_data is not None:
+            try:
+                logger.error(f"[sectionize] raw response_data dump: {json.dumps(res_data, ensure_ascii=False)[:2000]}")
+            except Exception:
+                logger.error(f"[sectionize] raw response_data (no json): {res_data!r}")
         return []
 
     if not raw_sections:

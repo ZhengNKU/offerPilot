@@ -680,10 +680,14 @@ class KnowledgeSubAbility(Base):
 
 
 class KnowledgeQuestionCache(Base):
-    """细化能力面试题预生成缓存。
+    """细化能力面试题**永久**存储（Redis 之下的真源，而非临时缓存）。
 
     每个用户每个细化能力存储恰好 10 道 LLM 生成的个性化面试题。
-    能力标签生成/更新时异步触发生成，定时任务 6 小时增量刷新。
+    写入时机：首次生成（注册后）/ 换目标岗位后重建 —— 均由
+    knowledge_ability_service.trigger_knowledge_generation 触发。
+
+    没有任何定时任务在刷新这张表。免费/内测用户的题目一旦生成就长期复用；
+    付费档位（PRO/MAX，尚未上线）在 Redis 6h TTL 过期后点开题谱会静默全量重生成。
     """
     __tablename__ = "knowledge_question_cache"
 
@@ -859,9 +863,9 @@ class ModerationAuditLog(Base):
     content_length: Mapped[int] = mapped_column(Integer, nullable=False)
     # 命中关键词的 SHA-256[:16] 数组(JSONB);不存明文
     keywords_hash: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
-    # 标识:是否走了本地兜底词库(非 TMS 真审)
+    # 标识:是否走了本地内置词库/本地放行
     is_fallback: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    # 失败时存放错误码(如 tms_error_open:timeout)
+    # 失败时存放错误码(当前本地审核路径通常为空)
     error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
 

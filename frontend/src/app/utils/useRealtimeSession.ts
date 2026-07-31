@@ -58,6 +58,7 @@ export interface StartOpts {
   liveId: number;
   wsPath: string;
   token: string;
+  speechMode?: "auto" | "manual";
   apiBase?: string; // 默认取 lib/api 中的 API_BASE
   /** 收到服务端 tts_audio 二进制帧时回调（火山 24kHz/mono PCM16） */
   onAudioFrame?: (pcm16: ArrayBuffer) => void;
@@ -72,6 +73,7 @@ export interface StartOpts {
 export interface UseRealtimeSessionApi extends RealtimeState {
   start: (opts: StartOpts) => Promise<void>;
   end: () => Promise<void>;
+  setSpeechMode: (mode: "auto" | "manual") => void;
   toggleMic: () => void;
   toggleSpeaker: () => void;
   sendEvent: (name: string, payload?: unknown) => void;
@@ -82,7 +84,7 @@ export interface UseRealtimeSessionApi extends RealtimeState {
    * - skip / hint：后端注入文本让 AI 自然回应，不影响客户端状态。
    */
   sendQuickAction: (
-    action: "pause" | "skip" | "hint",
+    action: "pause" | "skip" | "hint" | "complete_turn",
     payload?: { duration?: number }
   ) => void;
   /**
@@ -305,6 +307,9 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
 
     socket.onopen = () => {
       socket.send(JSON.stringify({ type: "auth", token }));
+      if (opts.speechMode) {
+        socket.send(JSON.stringify({ type: "client.speech_mode", mode: opts.speechMode }));
+      }
     };
     socket.onmessage = handleMessage;
     socket.onclose = (ev) => handleClose(ev.code, ev.reason);
@@ -374,7 +379,7 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
   }, []);
 
   const sendQuickAction = useCallback(
-    (action: "pause" | "skip" | "hint", payload?: { duration?: number }) => {
+    (action: "pause" | "skip" | "hint" | "complete_turn", payload?: { duration?: number }) => {
       if (wsRef.current?.readyState !== WebSocket.OPEN) return;
       wsRef.current.send(
         JSON.stringify({ type: "client.quick_action", action, payload: payload ?? {} })
@@ -437,6 +442,15 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
     optsRef.current = null;
   }, []);
 
+  const setSpeechMode = useCallback((mode: "auto" | "manual") => {
+    if (optsRef.current) {
+      optsRef.current.speechMode = mode;
+    }
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: "client.speech_mode", mode }));
+    }
+  }, []);
+
   // ---------- 卸载清理 ----------
 
   useEffect(() => {
@@ -455,7 +469,7 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
     // state
     status, aiState, micMuted, speakerMuted, transcript, metrics, error, wsUrl,
     // actions
-    start, end, toggleMic, toggleSpeaker, sendEvent, sendText, sendStt, sendBinary, interrupt, reset, sendQuickAction,
+    start, end, setSpeechMode, toggleMic, toggleSpeaker, sendEvent, sendText, sendStt, sendBinary, interrupt, reset, sendQuickAction,
   };
 }
 

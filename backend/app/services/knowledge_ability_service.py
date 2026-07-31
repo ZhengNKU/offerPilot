@@ -922,9 +922,14 @@ async def trigger_knowledge_generation(user_id: int):
 
 
 async def trigger_knowledge_match(user_id: int, issues: list[dict]):
-    """后台任务：匹配面试分析结果中的问题到知识库细化能力 + 刷新面试题。
+    """后台任务：匹配面试分析结果中的问题到知识库细化能力（只递增计数）。
 
     使用独立的 async_session()，不依赖请求上下文中的 db 会话。
+
+    注意（2026-07 起）：这里**不再**触发面试题全量重生成。原先每次面试分析结束都会调用
+    invalidate_and_regenerate 把 20 个细化能力 × 10 道题整个重跑一遍 LLM，是最大的 token 黑洞。
+    面试题现在只在「首次生成」和「换目标岗位」时由 trigger_knowledge_generation 重建；
+    付费用户额外享有 Redis 过期后点开题谱静默刷新（见 question_generator 的会员闸门）。
     """
     if not user_id or not issues:
         return
@@ -938,34 +943,11 @@ async def trigger_knowledge_match(user_id: int, issues: list[dict]):
             )
             await KnowledgeAbilityService.match_session_issues(db, user_id, issues)
             logger.info(
-                f"[trigger_knowledge_match] match OK user={user_id}"
+                f"[trigger_knowledge_match] match OK user={user_id} "
+                f"(question cache untouched — no LLM regeneration)"
             )
         except Exception as e:
             logger.error(
                 f"[trigger_knowledge_match] match FAILED user={user_id}: {e}",
-                exc_info=True,
-            )
-            return
-
-        # 匹配完成后批量刷新面试题（写 Redis + PG）
-        try:
-            from app.database import _get_redis_pool
-            redis_client = _get_redis_pool()
-            try:
-                from app.services.question_generator import (
-                    invalidate_and_regenerate,
-                )
-                logger.info(
-                    f"[trigger_knowledge_match] batch question refresh START user={user_id}"
-                )
-                await invalidate_and_regenerate(db, user_id, redis_client)
-                logger.info(
-                    f"[trigger_knowledge_match] batch question refresh DONE user={user_id}"
-                )
-            finally:
-                pass  # redis 使用全局连接池，不 close
-        except Exception as e:
-            logger.error(
-                f"[trigger_knowledge_match] batch question refresh FAILED user={user_id}: {e}",
                 exc_info=True,
             )

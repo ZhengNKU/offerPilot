@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     TENCENT_SMS_APP_ID: str = ""
     TENCENT_SMS_SIGN_NAME: str = ""
     TENCENT_SMS_TEMPLATE_ID: str = ""
+    TENCENT_SMS_REGION: str = "ap-guangzhou"
     
     # Tencent Cloud SES（邮件推送）configuration
     # 复用上方已有的 TENCENT_SECRET_ID / TENCENT_SECRET_KEY
@@ -32,36 +33,17 @@ class Settings(BaseSettings):
     TENCENT_SES_REPLY_TO: str = ""              # 可选：回信地址
     TENCENT_SES_TEMPLATE_ID: int = 0            # SES 控制台创建的模板 ID（数字），普通账户仅支持模板发送
 
-    # ── 内容审核（腾讯云 TMS 文本 + IMS 图片）─────────────────
-    # 复用上方 TENCENT_SECRET_ID / TENCENT_SECRET_KEY，无需新增秘钥。
-    # 控制台：
-    #   TMS：https://console.cloud.tencent.com/cms/clouds/manage
-    #   IMS：https://console.cloud.tencent.com/ims/manage
-    # BizType 留空 = 使用默认通用策略；运营在控制台配置自定义策略后填入 BizType 字符串。
-    TENCENT_TMS_BIZ_TYPE: str = ""              # 文本策略编号；空=默认通用策略
-    TMS_REGION: str = "ap-guangzhou"            # TMS 地域
-    TENCENT_IMS_BIZ_TYPE: str = ""              # 图片策略编号；空=默认
-    IMS_REGION: str = "ap-guangzhou"            # IMS 地域
-    # 失败策略：秘钥缺失时自动 fail-open（dev 模式），秘钥配齐后由本开关控制
-    # False = fail-closed（TMS 故障时 503 拦截）；True = fail-open（仅灰度期建议）
-    # 默认开启兜底,避免 IMS/TMS 偶发超时阻塞用户上传;后台
-    # 巡检任务 (run_periodic_rescan, 默认每 6h) 会兜底复查。
-    CONTENT_MODERATION_FAIL_OPEN: bool = True
-    # TMS / IMS 调用超时（asyncio.wait_for 包裹），防 SDK hang
-    # 同时覆盖文本 (TMS) 与图片 (IMS) 两种调用。IMS 走 ≤5MB base64 跨地域，
-    # 生产环境从 4.0s 提到 8.0s 以兼容 ap-guangzhou 跨区冷连接。
-    TMS_TIMEOUT_S: float = 8.0
     # 单次 web_search 联网检索硬超时（asyncio.wait_for 包裹）。
     # tool 调用降级到本地纯 LLM 后会立即结束工具循环，不再多跑 iter 浪费时间。
     # 阿里百炼 MCP 正常返回约需 1.5~4s，阈值需留足余量（原 4.0 卡在返回耗时上，导致大面积超时降级）。
     WEB_SEARCH_TIMEOUT_S: float = 12.0
     # 阿里百炼 WebSearch MCP 服务端点（streamableHttp 协议）
     ALIYUN_MCP_SEARCH_URL: str = "https://dashscope.aliyuncs.com/api/v1/mcps/WebSearch/mcp"
-    # 本地兜底词库开关；True=开启（默认）；False=跳过本地匹配（全靠 TMS）
+    # 文本安全本地内置词库开关；True=开启（默认）；False=跳过本地匹配。
     CONTENT_MODERATION_LOCAL_WORDS_ENABLED: bool = True
     # 审计写入策略：False=仅 Review/Block 写审计（默认，省空间）；True=连 Pass 也写
     CONTENT_MODERATION_AUDIT_ALL: bool = False
-    # 后台巡检：定期重扫最近内容,TMS 模型升级后能发现旧内容中的违规
+    # 后台巡检：定期用本地词库重扫最近内容,用于补写违规审计记录。
     CONTENT_MODERATION_RESCAN_ENABLED: bool = True
     CONTENT_MODERATION_RESCAN_HOURS: int = 6
     

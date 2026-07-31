@@ -5,6 +5,8 @@ from datetime import datetime
 class SendCodeRequest(BaseModel):
     type: str = Field(..., description="phone or email")
     target: str = Field(..., description="手机号或邮箱地址")
+    scene: Optional[str] = Field(None, description="场景: security_update / register / reset")
+    check_exist: Optional[bool] = Field(False, description="是否校验该账号是否被绑定")
 
 class RegisterStep1Request(BaseModel):
     reg_method: str = Field(..., description="phone or email")
@@ -44,8 +46,9 @@ class RegisterCompleteRequest(BaseModel):
     expectations: ExpectationsSchema
 
 class LoginRequest(BaseModel):
-    login_type: str = Field(..., description="password or code")
-    account: str = Field(..., description="用户名 / 手机号 / 邮箱")
+    login_type: str = Field(..., description="password or code/sms")
+    account: Optional[str] = Field(None, description="用户名 / 手机号 / 邮箱")
+    phone: Optional[str] = Field(None, description="手机号")
     password: Optional[str] = None
     verify_code: Optional[str] = None
 
@@ -56,10 +59,14 @@ class ResetPasswordRequest(BaseModel):
     new_password: str
 
 class SecurityUpdateRequest(BaseModel):
-    update_type: str = Field(..., description="phone or email")
+    update_type: Optional[str] = Field(None, description="phone or email")
+    type: Optional[str] = Field(None, description="phone or email alias")
     value: str = Field(..., description="新手机号码或新邮箱地址")
     verify_code: str
     new_password: Optional[str] = None
+
+    def get_update_type(self) -> str:
+        return self.update_type or self.type or "email"
 
 class UserProfileResponse(BaseModel):
     name: str

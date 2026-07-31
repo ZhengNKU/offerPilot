@@ -585,7 +585,7 @@ async def get_growth_curve(
     total = len(points)
     axis_labels = _compute_axis_labels(total)
 
-    logger.info(
+    logger.debug(
         f"[memory] growth-curve user_id={current_user.id} total={total}"
     )
     return {
@@ -718,7 +718,7 @@ async def get_timeline(
     # 按 created_at 倒序
     items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
 
-    logger.info(f"[memory] timeline user_id={current_user.id} total={len(items)}")
+    logger.debug(f"[memory] timeline user_id={current_user.id} total={len(items)}")
     return {"items": items}
 
 
@@ -794,8 +794,25 @@ async def generate_knowledge_abilities(
 
     - rematch=false（默认）：清空所有计数，生成新能力，后续分析自然累加
     - rematch=true：生成新能力后扫描所有历史面试记录回填计数
+
+    会员闸门：免费 / 内测用户只允许「首次生成」（当前没有任何能力卡片时）。
+    已有知识库后想重新生成需修改目标岗位（走 trigger_knowledge_generation）或升级会员。
     """
     user = _require_user(current_user)
+
+    # 会员闸门：已有知识库 + 非付费档位 → 拒绝重新生成（避免全量 LLM 重跑烧 token）
+    from app.services.quota import can_refresh_knowledge
+
+    existing_count = await db.scalar(
+        select(func.count(models.KnowledgeCoreAbility.id)).where(
+            models.KnowledgeCoreAbility.user_id == user.id
+        )
+    )
+    if (existing_count or 0) > 0 and not can_refresh_knowledge(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="当前会员等级不支持重新生成知识库，如需更新请修改目标岗位或升级会员",
+        )
 
     profile_stmt = select(models.UserProfile).where(
         models.UserProfile.user_id == user.id
@@ -884,8 +901,10 @@ async def get_knowledge_questions(
 ):
     """查询细化能力对应的 10 道面试题。
 
-    查询链路：Redis(6h) → (过期)批量重生成(含3次重试) → PG兜底。
-    如果 Redis 未命中且重生成正在进行中（返回空），前端会 2s 轮询。
+    查询链路按会员档位分叉（见 question_generator.get_questions_for_sub_ability）：
+    - 免费 / 内测：Redis → (未命中) → PG 永久缓存 + 回填 Redis，不调用 LLM，秒回
+    - 付费（PRO/MAX）：Redis(6h) → (过期)批量重生成(含3次重试) → PG兜底
+    重生成正在进行中时返回空，前端会轮询等待。
     """
     user = _require_user(current_user)
 

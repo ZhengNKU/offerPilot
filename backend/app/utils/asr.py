@@ -155,8 +155,8 @@ def call_volc_asr(audio_url: str) -> List[Dict[str, Any]]:
             except Exception:
                 qdata = {}
 
-            logger.info(f"[Volc ASR] Poll #{attempt+1}: HTTP {qresp.status_code}, "
-                        f"code={q_status_code}, msg={q_message}, body_keys={list(qdata.keys())}")
+            logger.debug(f"[Volc ASR] Poll #{attempt+1}: HTTP {qresp.status_code}, "
+                          f"code={q_status_code}, msg={q_message}, body_keys={list(qdata.keys())}")
 
             # Status codes from Volc docs:
             # 20000000 = succeeded  |  20000001 = processing  |  20000002+ = failed

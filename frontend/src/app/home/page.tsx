@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useModerationPreview } from "@/hooks/useModerationPreview";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
+import Footer from "@/components/Footer";
 import { API_BASE } from "@/lib/api";
 import { getQuotaStatus } from "@/lib/quotaClient";
 
@@ -61,11 +62,18 @@ export default function CareerDashboard() {
   const [recentActivity, setRecentActivity] = useState<TimelineItem[]>([]);
   const [quotaStatus, setQuotaStatus] = useState<any>(null);
   const [liveQuota, setLiveQuota] = useState<any>(null);
+  const dashboardBootstrapFetchedRef = useRef(false);
 
   // 最近活动 & 资源配额获取
   useEffect(() => {
     const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
-    if (!auth.isLoggedIn || !token) return;
+    if (!auth.isLoggedIn || !token) {
+      dashboardBootstrapFetchedRef.current = false;
+      return;
+    }
+    if (dashboardBootstrapFetchedRef.current) return;
+    dashboardBootstrapFetchedRef.current = true;
+
     fetchTimeline(token).then(items => setRecentActivity(items));
 
     // 获取分析配额
@@ -206,6 +214,19 @@ export default function CareerDashboard() {
       auth.triggerToast(isEmail ? "请输入邮箱地址！" : "请输入手机号码！", "error");
       return;
     }
+    if (isEmail) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(value.trim())) {
+        auth.triggerToast("请输入正确的邮箱格式（例: user@example.com）！", "error");
+        return;
+      }
+    } else {
+      const phoneRegex = /^1[3-9]\d{9}$/;
+      if (!phoneRegex.test(value.trim())) {
+        auth.triggerToast("请输入正确的11位手机号码！", "error");
+        return;
+      }
+    }
     if (!verify_code) {
       auth.triggerToast("请输入验证码！", "error");
       return;
@@ -218,8 +239,9 @@ export default function CareerDashboard() {
         return;
       }
       const body = {
+        update_type: isEmail ? "email" : "phone",
         type: isEmail ? "email" : "phone",
-        value,
+        value: value.trim(),
         verify_code,
         new_password: securityForm.password || null,
       };
@@ -232,7 +254,7 @@ export default function CareerDashboard() {
         body: JSON.stringify(body),
       });
       if (!res.ok) {
-        const errData = await res.json();
+        const errData = await res.json().catch(() => ({}));
         auth.triggerToast(errData.detail || "安全信息修改失败，请核对输入！", "error");
         return;
       }
@@ -570,23 +592,38 @@ export default function CareerDashboard() {
   };
 
   const handleGetSecurityEmailCode = async () => {
-    if (!securityForm.email) {
+    if (isSendingCode || emailCountdown > 0) return;
+
+    const targetEmail = securityForm.email ? securityForm.email.trim() : "";
+    if (!targetEmail) {
       auth.triggerToast("请输入邮箱地址！", "error");
       return;
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(securityForm.email)) {
-      auth.triggerToast("请输入正确的邮箱地址格式！", "error");
+
+    // 1. 检查是否与原绑定邮箱相同
+    const currentBoundEmail = (accountSecurity.email || auth.user?.email || "").trim().toLowerCase();
+    if (currentBoundEmail && targetEmail.toLowerCase() === currentBoundEmail) {
+      auth.triggerToast("新邮箱地址与原绑定邮箱相同，无需修改！", "error");
       return;
     }
+
+    // 2. 检查格式
+    const emailRegex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,10}$/;
+    if (!emailRegex.test(targetEmail)) {
+      auth.triggerToast("邮箱地址格式无效，请检查后缀域名（例: user@example.com）！", "error");
+      return;
+    }
+
+    // 3. 发送验证码 (带 scene: security_update 触发后端已绑定查重)
+    setIsSendingCode(true);
     try {
       const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "email", target: securityForm.email })
+        body: JSON.stringify({ type: "email", target: targetEmail, scene: "security_update" })
       });
       if (!res.ok) {
-        const errData = await res.json();
+        const errData = await res.json().catch(() => ({}));
         auth.triggerToast(errData.detail || "发送验证码失败！", "error");
         return;
       }
@@ -594,6 +631,8 @@ export default function CareerDashboard() {
       auth.triggerToast("验证码已发送，请查收！");
     } catch (e) {
       auth.triggerToast("无法连接到后端服务！", "error");
+    } finally {
+      setIsSendingCode(false);
     }
   };
 
@@ -1195,24 +1234,7 @@ export default function CareerDashboard() {
       </div>
 
       {/* Footer */}
-      <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
-        <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
-          <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 面试驾到. All rights reserved.
-          </span>
-          <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-            <span onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer select-none">
-              服务条款
-            </span>
-            <span onClick={() => openLegalPrivacy()} className="hover:text-primary transition-colors cursor-pointer select-none">
-              隐私政策
-            </span>
-            <span onClick={() => openLegalContact()} className="hover:text-primary transition-colors cursor-pointer select-none">
-              联系方式
-            </span>
-          </div>
-        </div>
-      </footer>
+      <Footer />
 
       {/* ========================================================
           MODALS & FLOATING INTERACTIVE DRAWER CANVASES
@@ -1638,11 +1660,23 @@ export default function CareerDashboard() {
                     />
                     <button
                       type="button"
-                      disabled={emailCountdown > 0}
+                      disabled={isSendingCode || emailCountdown > 0}
                       onClick={handleGetSecurityEmailCode}
-                      className="px-4 py-3 rounded-xl border border-indigo-200 dark:border-[#AFA7FF]/20 text-indigo-600 dark:text-[#AFA7FF] font-black text-sm bg-indigo-50 hover:bg-indigo-100 dark:bg-transparent dark:hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer shadow-sm verify-code-btn"
+                      className={`px-4 py-3 rounded-xl border border-indigo-200 dark:border-[#AFA7FF]/20 text-indigo-600 dark:text-[#AFA7FF] font-black text-sm bg-indigo-50 hover:bg-indigo-100 dark:bg-transparent dark:hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer shadow-sm verify-code-btn flex items-center justify-center gap-1.5 ${
+                        (isSendingCode || emailCountdown > 0) ? "opacity-50 cursor-not-allowed" : ""
+                      }`}
                     >
-                      {emailCountdown > 0 ? `${emailCountdown}s` : "获取验证码"}
+                      {isSendingCode ? (
+                        <>
+                          <svg className="animate-spin h-4 w-4 text-indigo-600 dark:text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                          </svg>
+                          发送中
+                        </>
+                      ) : (
+                        emailCountdown > 0 ? `${emailCountdown}s` : "获取验证码"
+                      )}
                     </button>
                   </div>
                 </div>

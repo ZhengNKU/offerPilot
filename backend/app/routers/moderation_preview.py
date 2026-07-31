@@ -43,13 +43,11 @@ async def preview(
     current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):
     """
-    对单段文本做内容审核(同步阻塞,~300-800ms),返回结构化结果。
+    对单段文本做本地敏感词审核,返回结构化结果。
 
     用途:
     - 前端输入框 onBlur hint
     - 运营/客服"先看看"工具
-
-    失败处理:同 moderate_text,服务不可用时按 CONTENT_MODERATION_FAIL_OPEN 决定行为。
     """
     uid = current_user.id if current_user else None
     result = await moderate_text(req.text, uid, scene=req.scene, audit=False)

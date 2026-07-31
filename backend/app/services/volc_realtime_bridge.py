@@ -661,11 +661,6 @@ class VolcRealtimeBridge:
             async for raw_msg in self._ws:
                 if self._closed:
                     break
-                # 调试：每个接收到的帧都打 INFO 日志（诊断 AI 不说话问题）
-                if isinstance(raw_msg, (bytes, bytearray)):
-                    logger.info(f"[volc] 收到 binary 帧 len={len(raw_msg)} header={raw_msg[:4].hex()}")
-                else:
-                    logger.info(f"[volc] 收到 text 帧: {str(raw_msg)[:200]}")
                 # 火山协议所有帧都是 binary（不是 text）；但保险起见做 isinstance
                 if isinstance(raw_msg, str):
                     logger.warning(f"[volc] 收到 text 帧（异常）: {raw_msg[:200]}")
@@ -674,13 +669,8 @@ class VolcRealtimeBridge:
                     logger.warning(f"[volc] 收到异常帧 type={type(raw_msg).__name__} len={len(raw_msg) if hasattr(raw_msg,'__len__') else '?'}")
                     continue
                 parsed = parse_response(raw_msg)
-                logger.info(f"[volc] parsed: msg_type={parsed.get('message_type')} event={parsed.get('event')} "
-                           f"flags={parsed.get('flags')} payload_size={parsed.get('payload_size')} "
-                           f"payload_type={type(parsed.get('payload_msg')).__name__} "
-                           f"payload_full={str(parsed.get('payload_msg'))[:500]!r}")
                 ev = self._convert_event(parsed)
                 if ev is not None:
-                    logger.info(f"[volc] emit event: type={ev.type} audio_len={len(ev.audio) if ev.audio else 0}")
                     try:
                         self._out_q.put_nowait(ev)
                     except asyncio.QueueFull:

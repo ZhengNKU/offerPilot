@@ -104,6 +104,7 @@ async def _call_dashscope_embeddings(
 async def _call_with_retry(
     texts: list[str],
     max_attempts: int = 4,
+    log_tag: str = "batch",
 ) -> list[list[float]]:
     """带指数退避的重试：401 / 429 / 5xx / 网络异常。"""
     last_exc: Optional[Exception] = None
@@ -121,16 +122,16 @@ async def _call_with_retry(
             if attempt < max_attempts - 1:
                 wait = 1.5 * (2 ** attempt)
                 logger.warning(
-                    f"[embedding] 失败 retry {attempt+1}/{max_attempts-1} "
+                    f"[embedding][{log_tag}] 失败 retry {attempt+1}/{max_attempts-1} "
                     f"after {wait:.1f}s: {err_str[:200]}"
                 )
                 await asyncio.sleep(wait)
-        except (httpx.TimeoutException, httpx.ConnectError) as e:
+        except (httpx.TimeoutException, httpx.ConnectError, Exception) as e:
             last_exc = e
             if attempt < max_attempts - 1:
                 wait = 1.5 * (2 ** attempt)
                 logger.warning(
-                    f"[embedding] 网络异常 retry {attempt+1}/{max_attempts-1} "
+                    f"[embedding][{log_tag}] 网络异常 retry {attempt+1}/{max_attempts-1} "
                     f"after {wait:.1f}s: {e!r}"
                 )
                 await asyncio.sleep(wait)
@@ -152,14 +153,14 @@ async def embed_for_storage(texts: list[str]) -> list[list[float]]:
         batch = texts[i:i + settings.EMBEDDING_BATCH_SIZE]
         # 单批重试（如果整批失败，单独重试每条便于定位问题）
         try:
-            vecs = await _call_with_retry(batch)
+            vecs = await _call_with_retry(batch, log_tag=f"batch_len={len(batch)}")
         except Exception as e:
             logger.error(
                 f"[embedding] embed_for_storage 整批失败 (len={len(batch)}),"
                 f"逐条降级重试: {e!r}"
             )
-            for t in batch:
-                v = await _call_with_retry([t])
+            for idx, t in enumerate(batch):
+                v = await _call_with_retry([t], log_tag=f"single_degraded_{idx+1}/{len(batch)}")
                 out.append(v[0])
             continue
         out.extend(vecs)

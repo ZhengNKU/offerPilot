@@ -3,57 +3,84 @@ from app.config import settings
 from tencentcloud.common import credential
 from tencentcloud.common.exception.tencent_cloud_sdk_exception import TencentCloudSDKException
 from tencentcloud.sms.v20210111 import sms_client, models
+from tencentcloud.common.profile.client_profile import ClientProfile
+from tencentcloud.common.profile.http_profile import HttpProfile
 
 logger = logging.getLogger(__name__)
 
 class TencentSMSHelper:
     def __init__(self):
-        self.secret_id = settings.TENCENT_SECRET_ID
-        self.secret_key = settings.TENCENT_SECRET_KEY
-        self.sdk_app_id = settings.TENCENT_SMS_APP_ID
-        self.sign_name = settings.TENCENT_SMS_SIGN_NAME
-        self.template_id = settings.TENCENT_SMS_TEMPLATE_ID
+        pass
 
     def send_verification_code(self, phone: str, code: str) -> bool:
         """
-        发送验证码短信。如果腾讯云配置缺失，则进行本地模拟发送并打印至控制台。
+        根据腾讯云 SMS SDK 3.0 发送验证码短信。
+        若秘钥或参数未配置，自动启用开发模式模拟发送（控制台与日志打印验证码）。
         """
-        if not all([self.secret_id, self.secret_key, self.sdk_app_id, self.sign_name, self.template_id]):
-            # 腾讯云配置不完整时，本地开发进行模拟，打印到日志，避免开发者在没有资质时受阻
-            logger.warning(f"[DEVELOPMENT MODE] 腾讯云配置缺失。模拟发送验证码: 手机号: {phone}, 验证码: {code}")
-            print(f"\n========================================\n[SMS DEV SIMULATION] 手机验证码已发送\n手机号: {phone}\n验证码: {code}\n========================================\n")
+        secret_id = settings.TENCENT_SECRET_ID
+        secret_key = settings.TENCENT_SECRET_KEY
+        sdk_app_id = settings.TENCENT_SMS_APP_ID
+        sign_name = settings.TENCENT_SMS_SIGN_NAME
+        template_id = settings.TENCENT_SMS_TEMPLATE_ID
+        region = settings.TENCENT_SMS_REGION or "ap-guangzhou"
+
+        if not all([secret_id, secret_key, sdk_app_id, sign_name, template_id]):
+            logger.warning(f"[SMS DEV SIMULATION] 腾讯云凭据未在 .env 配置完全。手机号: {phone}, 验证码: {code}")
+            print(f"\n========================================\n[SMS DEV SIMULATION] 验证码短信已模拟发送\n手机号: {phone}\n验证码: {code}\n========================================\n")
             return True
 
         try:
-            cred = credential.Credential(self.secret_id, self.secret_key)
-            client = sms_client.SmsClient(cred, "ap-guangzhou")
+            # 1. 实例化认证对象
+            cred = credential.Credential(secret_id, secret_key)
             
-            req = models.SendSmsRequest()
-            req.SmsSdkAppId = self.sdk_app_id
-            req.SignName = self.sign_name
-            req.TemplateId = self.template_id
-            
-            # 格式化国内/国际手机号码 (E.164标准)
-            formatted_phone = phone if phone.startswith("+") else f"+86{phone}"
-            req.PhoneNumberSet = [formatted_phone]
-            req.TemplateParamSet = [code]
+            # 2. 配置 HTTP 属性
+            httpProfile = HttpProfile()
+            httpProfile.reqMethod = "POST"
+            httpProfile.reqTimeout = 10
+            httpProfile.endpoint = "sms.tencentcloudapi.com"
 
+            # 3. 配置 Client 属性
+            clientProfile = ClientProfile()
+            clientProfile.signMethod = "TC3-HMAC-SHA256"
+            clientProfile.httpProfile = httpProfile
+
+            # 4. 实例化 SmsClient
+            client = sms_client.SmsClient(cred, region, clientProfile)
+
+            # 5. 组装 SendSmsRequest 请求
+            req = models.SendSmsRequest()
+            req.SmsSdkAppId = str(sdk_app_id)
+            req.SignName = str(sign_name)
+            req.TemplateId = str(template_id)
+            
+            # E.164 格式手机号（标准格式 +86138xxxxxxxx）
+            clean_phone = phone.strip()
+            formatted_phone = clean_phone if clean_phone.startswith("+") else f"+86{clean_phone}"
+            req.PhoneNumberSet = [formatted_phone]
+            
+            # 模板变量设置（对应短信正文模板中的 {1} 变量）
+            req.TemplateParamSet = [str(code)]
+
+            # 6. 发起 API 调用
             resp = client.SendSms(req)
             status_set = resp.SendStatusSet
             if not status_set:
-                logger.error("腾讯云短信服务返回了空状态列表。")
+                logger.error("腾讯云短信服务返回了空 SendStatusSet 列表。")
                 return False
-                
+
             send_status = status_set[0]
             if send_status.Code == "Ok":
-                logger.info(f"短信成功发送至 {phone}，RequestId: {resp.RequestId}")
+                logger.info(f"[SMS SUCCESS] 成功发送验证码至 {phone}，RequestId: {resp.RequestId}, SerialNo: {send_status.SerialNo}")
                 return True
             else:
-                logger.error(f"短信发送失败: {send_status.Code} - {send_status.Message}")
+                logger.error(f"[SMS ERROR] 发送失败 Code={send_status.Code}, Message={send_status.Message}, RequestId={resp.RequestId}")
                 return False
 
         except TencentCloudSDKException as err:
-            logger.exception("调用腾讯云短信 SDK 抛出异常")
+            logger.exception(f"调用腾讯云 SMS SDK 抛出异常: {err}")
+            return False
+        except Exception as e:
+            logger.exception(f"发送短信未知异常: {e}")
             return False
 
 sms_helper = TencentSMSHelper()

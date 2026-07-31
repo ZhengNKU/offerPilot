@@ -95,6 +95,21 @@ function getToken(): string {
   return localStorage.getItem("interviewVar_token") || "";
 }
 
+const COUNSELOR_READ_CACHE_TTL_MS = 3000;
+type ReadCacheEntry<T> = {
+  data?: T;
+  expiresAt: number;
+  promise?: Promise<T>;
+};
+
+const sessionsListCache = new Map<string, ReadCacheEntry<{ sessions: SessionListItem[]; total: number }>>();
+let counselorStatsCache: (ReadCacheEntry<CounselorStats> & { token: string }) | null = null;
+
+function clearCounselorReadCaches() {
+  sessionsListCache.clear();
+  counselorStatsCache = null;
+}
+
 export async function* streamCounselor(
   body: { session_id: number | null; message: string },
   signal?: AbortSignal,
@@ -177,11 +192,32 @@ export async function stopSession(sessionId: number): Promise<{ message: string;
 
 export async function listSessions(limit = 10, offset = 0): Promise<{ sessions: SessionListItem[]; total: number }> {
   const token = getToken();
-  const resp = await fetch(`${API_BASE}/api/counselor/sessions?limit=${limit}&offset=${offset}`, {
-    headers: { Authorization: token ? `Bearer ${token}` : "" },
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return resp.json();
+  const cacheKey = `${token}|${limit}|${offset}`;
+  const now = Date.now();
+  const cached = sessionsListCache.get(cacheKey);
+  if (cached?.data && cached.expiresAt > now) return cached.data;
+  if (cached?.promise) return cached.promise;
+
+  const promise = (async () => {
+    const resp = await fetch(`${API_BASE}/api/counselor/sessions?limit=${limit}&offset=${offset}`, {
+      headers: { Authorization: token ? `Bearer ${token}` : "" },
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    sessionsListCache.set(cacheKey, {
+      data,
+      expiresAt: Date.now() + COUNSELOR_READ_CACHE_TTL_MS,
+    });
+    return data;
+  })();
+
+  sessionsListCache.set(cacheKey, { promise, expiresAt: now + COUNSELOR_READ_CACHE_TTL_MS });
+  try {
+    return await promise;
+  } catch (e) {
+    if (sessionsListCache.get(cacheKey)?.promise === promise) sessionsListCache.delete(cacheKey);
+    throw e;
+  }
 }
 
 export async function getSession(sessionId: number): Promise<{ session: SessionDetail }> {
@@ -200,7 +236,9 @@ export async function deleteSession(sessionId: number): Promise<{ message: strin
     headers: { Authorization: token ? `Bearer ${token}` : "" },
   });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return resp.json();
+  const data = await resp.json();
+  clearCounselorReadCaches();
+  return data;
 }
 
 export interface CounselorStats {
@@ -213,11 +251,33 @@ export interface CounselorStats {
 
 export async function getCounselorStats(): Promise<CounselorStats> {
   const token = getToken();
-  const resp = await fetch(`${API_BASE}/api/counselor/stats`, {
-    headers: { Authorization: token ? `Bearer ${token}` : "" },
-  });
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  return resp.json();
+  const now = Date.now();
+  if (counselorStatsCache?.token === token) {
+    if (counselorStatsCache.data && counselorStatsCache.expiresAt > now) return counselorStatsCache.data;
+    if (counselorStatsCache.promise) return counselorStatsCache.promise;
+  }
+
+  const promise = (async () => {
+    const resp = await fetch(`${API_BASE}/api/counselor/stats`, {
+      headers: { Authorization: token ? `Bearer ${token}` : "" },
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    counselorStatsCache = {
+      token,
+      data,
+      expiresAt: Date.now() + COUNSELOR_READ_CACHE_TTL_MS,
+    };
+    return data;
+  })();
+
+  counselorStatsCache = { token, promise, expiresAt: now + COUNSELOR_READ_CACHE_TTL_MS };
+  try {
+    return await promise;
+  } catch (e) {
+    if (counselorStatsCache?.promise === promise) counselorStatsCache = null;
+    throw e;
+  }
 }
 
 export interface CounselorQuota {

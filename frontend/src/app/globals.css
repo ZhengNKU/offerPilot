@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+@variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-surface-container-low: #131b2e;
   --color-primary-container: #8083ff;
@@ -211,6 +214,29 @@ html.light p.text-rose-600,
 html.light .text-red-500,
 html.light p.text-red-500 { color: #e11d48 !important; font-weight: 900 !important; }
 
+/* 浅色模式下全站 modal 标题与侧边栏 Tab 品牌彩色图标保全 */
+html.light .text-amber-400,
+html.light .text-amber-500 { color: #d97706 !important; }
+html.light .text-cyan-400,
+html.light .text-cyan-500 { color: #0891b2 !important; }
+html.light .text-rose-400,
+html.light .text-rose-500 { color: #e11d48 !important; }
+html.light .text-indigo-400,
+html.light .text-indigo-500,
+html.light .text-indigo-600 { color: #4f46e5 !important; }
+html.light .text-purple-400,
+html.light .text-purple-500 { color: #9333ea !important; }
+html.light .text-emerald-400,
+html.light .text-emerald-500 { color: #059669 !important; }
+html.light .text-red-400,
+html.light .text-red-500 { color: #dc2626 !important; }
+
+html.light h2 .material-symbols-outlined,
+html.light h3 .material-symbols-outlined,
+html.light h4 .material-symbols-outlined {
+  color: inherit;
+}
+
 /* 求职目标 Tooltip 提示框白底黑字 & 图标深淡紫背景 */
 html.light .goal-tip-box {
   background-color: #ffffff !important;
@@ -275,6 +301,74 @@ html.light .material-symbols-outlined.text-white\/40,
 html.light .material-symbols-outlined.text-white\/50,
 html.light .material-symbols-outlined.text-white\/60 {
   color: #64748b !important;
+}
+
+/* 面试录音分析页：浅色模式不要让 h1-h6 及 Modal 的 inherit / text-white 规则吞掉品牌色图标 (和深色模式颜色保持一致) */
+html.light .material-symbols-outlined[class*="text-[#00D4FF]"],
+html.light span[class*="text-[#00D4FF]"],
+html.light div[class*="text-[#00D4FF]"],
+html.light h1 .material-symbols-outlined[class*="text-[#00D4FF]"],
+html.light h2 .material-symbols-outlined[class*="text-[#00D4FF]"],
+html.light h3 .material-symbols-outlined[class*="text-[#00D4FF]"],
+html.light h4 .material-symbols-outlined[class*="text-[#00D4FF]"] {
+  color: #00D4FF !important;
+}
+
+html.light .material-symbols-outlined[class*="text-[#AFA7FF]"],
+html.light span[class*="text-[#AFA7FF]"],
+html.light div[class*="text-[#AFA7FF]"],
+html.light h1 .material-symbols-outlined[class*="text-[#AFA7FF]"],
+html.light h2 .material-symbols-outlined[class*="text-[#AFA7FF]"],
+html.light h3 .material-symbols-outlined[class*="text-[#AFA7FF]"],
+html.light h4 .material-symbols-outlined[class*="text-[#AFA7FF]"] {
+  color: #AFA7FF !important;
+}
+
+html.light .material-symbols-outlined[class*="text-[#FF7A95]"],
+html.light span[class*="text-[#FF7A95]"],
+html.light div[class*="text-[#FF7A95]"],
+html.light h1 .material-symbols-outlined[class*="text-[#FF7A95]"],
+html.light h2 .material-symbols-outlined[class*="text-[#FF7A95]"],
+html.light h3 .material-symbols-outlined[class*="text-[#FF7A95]"],
+html.light h4 .material-symbols-outlined[class*="text-[#FF7A95]"] {
+  color: #FF7A95 !important;
+}
+
+html.light .material-symbols-outlined[class*="text-[#5DECCB]"],
+html.light span[class*="text-[#5DECCB]"],
+html.light div[class*="text-[#5DECCB]"],
+html.light h1 .material-symbols-outlined[class*="text-[#5DECCB]"],
+html.light h2 .material-symbols-outlined[class*="text-[#5DECCB]"],
+html.light h3 .material-symbols-outlined[class*="text-[#5DECCB]"],
+html.light h4 .material-symbols-outlined[class*="text-[#5DECCB]"] {
+  color: #5DECCB !important;
+}
+
+html.light .material-symbols-outlined[class*="text-[#FFB2B7]"],
+html.light span[class*="text-[#FFB2B7]"],
+html.light div[class*="text-[#FFB2B7]"],
+html.light h1 .material-symbols-outlined[class*="text-[#FFB2B7]"],
+html.light h2 .material-symbols-outlined[class*="text-[#FFB2B7]"],
+html.light h3 .material-symbols-outlined[class*="text-[#FFB2B7]"],
+html.light h4 .material-symbols-outlined[class*="text-[#FFB2B7]"] {
+  color: #FFB2B7 !important;
+}
+
+html.light .material-symbols-outlined[class*="text-[#FFB020]"],
+html.light span[class*="text-[#FFB020]"],
+html.light div[class*="text-[#FFB020]"],
+html.light h1 .material-symbols-outlined[class*="text-[#FFB020]"],
+html.light h2 .material-symbols-outlined[class*="text-[#FFB020]"],
+html.light h3 .material-symbols-outlined[class*="text-[#FFB020]"],
+html.light h4 .material-symbols-outlined[class*="text-[#FFB020]"] {
+  color: #FFB020 !important;
+}
+
+/* 关键风险点汇总弹窗：紫色底上的时间点与“定位片段”按钮保持白字白图标 */
+html.light .voice-risk-modal-time,
+html.light .voice-risk-modal-btn,
+html.light .voice-risk-modal-btn .material-symbols-outlined {
+  color: #ffffff !important;
 }
 
 /* 退出登录、删除评论图标与删除确认 Modal 顶部的 Icon 强力指定为高亮亮红色 */
@@ -353,10 +447,14 @@ html.light .banner-desc {
 }
 
 /* 职业驾驶舱及全站 Modal 弹窗 Header 标志 Icon 在浅色模式下保全绚丽品牌紫 */
-html.light div[class*="fixed"][class*="z-50"] h3 .material-symbols-outlined,
-html.light div[class*="fixed"][class*="z-50"] h2 .material-symbols-outlined,
-html.light div[class*="fixed"][class*="z-50"] h4 .material-symbols-outlined,
-html.light div[class*="fixed"][class*="z-50"] header .material-symbols-outlined {
+html.light .fixed h3 .material-symbols-outlined,
+html.light .fixed h2 .material-symbols-outlined,
+html.light .fixed h4 .material-symbols-outlined,
+html.light .fixed header .material-symbols-outlined,
+html.light div[class*="fixed"] h3 .material-symbols-outlined,
+html.light div[class*="fixed"] h2 .material-symbols-outlined,
+html.light div[class*="fixed"] h4 .material-symbols-outlined,
+html.light div[class*="fixed"] header .material-symbols-outlined {
   color: #4f46e5 !important;
 }
 
@@ -1415,6 +1513,18 @@ html.light button.voice-risk-modal-btn:hover {
   background-color: #7c3aed !important;
 }
 
+/* 覆盖 line 948 的“全 modal span 变灰”高权重兜底规则：时间点 badge 与定位按钮必须白字白图标 */
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span.voice-risk-modal-time,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) button.voice-risk-modal-btn,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) button.voice-risk-modal-btn span,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) button.voice-risk-modal-btn .material-symbols-outlined,
+html.light span.voice-risk-modal-time,
+html.light button.voice-risk-modal-btn,
+html.light button.voice-risk-modal-btn span,
+html.light button.voice-risk-modal-btn .material-symbols-outlined {
+  color: #ffffff !important;
+}
+
 /* 5. 提交反馈 Modal 按钮在浅色模式下采用淡紫色背景 (#f3f0ff) + 浓郁紫字 (#6d28d9) */
 html.light .voice-feedback-submit-btn,
 html.light button.voice-feedback-submit-btn,
@@ -1451,18 +1561,33 @@ html.light .voice-training-hint-banner span.material-symbols-outlined {
   color: #059669 !important;
 }
 
-/* 7. 全局 Toast 提示在浅色模式下清新淡绿配漆黑/深绿字 */
-html.light .global-app-toast,
-html.light div.global-app-toast {
+/* 7. 全局 Toast 提示在浅色模式下的成功与错误分色显示 */
+html.light .global-app-toast:not(.global-app-toast-error),
+html.light div.global-app-toast:not(.global-app-toast-error) {
   background-color: #ecfdf5 !important;
   border: 1px solid #a7f3d0 !important;
   color: #047857 !important;
   box-shadow: 0 10px 30px rgba(16, 185, 129, 0.15) !important;
 }
 
-html.light .global-app-toast span,
-html.light div.global-app-toast span {
+html.light .global-app-toast:not(.global-app-toast-error) span,
+html.light div.global-app-toast:not(.global-app-toast-error) span {
   color: #047857 !important;
+  font-weight: 900 !important;
+}
+
+/* 浅色模式 Error Toast 醒目淡红底深红字 */
+html.light .global-app-toast-error,
+html.light div.global-app-toast-error {
+  background-color: #fff1f2 !important;
+  border: 1px solid #fecdd3 !important;
+  color: #e11d48 !important;
+  box-shadow: 0 10px 30px rgba(225, 29, 72, 0.15) !important;
+}
+
+html.light .global-app-toast-error span,
+html.light div.global-app-toast-error span {
+  color: #e11d48 !important;
   font-weight: 900 !important;
 }
 
@@ -2084,10 +2209,28 @@ html.light .resume-structure-nav-item.is-active > div:first-child > span:nth-chi
 html.light .register-step1-left-card {
   background-color: #ffffff !important;
   background-image: none !important;
+  border-color: #e2e8f0 !important;
+}
+html.light .register-step1-left-card h1,
+html.light .register-step1-left-card h4 {
+  color: #0f172a !important;
+}
+html.light .register-step1-left-card p {
+  color: #64748b !important;
 }
 html.light .register-step1-right-card {
   background-color: #ffffff !important;
   background-image: none !important;
+  border-color: #e2e8f0 !important;
+}
+html.light .register-step1-right-card h4 {
+  color: #0f172a !important;
+}
+html.light .register-step1-right-card p {
+  color: #64748b !important;
+}
+html.light .register-step1-right-card p.font-black {
+  color: #0f172a !important;
 }
 
 /* 注册页面第一步右侧"为什么要填写这些信息？"卡片 - 列表文字强制深色 */
@@ -2204,7 +2347,20 @@ html.light .record-perspective-icon,
 html.light .record-perspective-arrow,
 html.light span.record-perspective-icon,
 html.light span.record-perspective-arrow {
-  color: #94a3b8 !important;
+  color: #00D4FF !important;
+}
+
+/* 面试记录分析弹窗：覆盖全 modal span 变灰的兜底规则，保持与深色模式一致的亮彩图标 */
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span.record-weakness-modal-icon,
+html.light span.record-weakness-modal-icon {
+  color: #FF7A95 !important;
+}
+
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span.record-perspective-modal-icon,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span.record-perspective-modal-item-icon,
+html.light span.record-perspective-modal-icon,
+html.light span.record-perspective-modal-item-icon {
+  color: #00D4FF !important;
 }
 html.light .voice-ai-tooltip-title-strength,
 html.light span.voice-ai-tooltip-title-strength {

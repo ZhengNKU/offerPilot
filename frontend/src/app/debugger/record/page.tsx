@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { pollTaskUntilDone } from "@/app/utils/pollTask";
+import Footer from "@/components/Footer";
+import { subscribeTaskUntilDone } from "@/app/utils/pollTask";
+import { startSmoothTaskProgress } from "@/app/utils/smoothTaskProgress";
 import { API_BASE } from "@/lib/api";
 import { getQuotaStatus } from "@/lib/quotaClient";
 
@@ -110,6 +112,23 @@ export default function InterviewRecordAnalysisPage() {
       return parseInt(parts[0]) * 60 + parseInt(parts[1]);
     }
     return 0;
+  };
+
+  const mapTranscriptToDialogues = (rawTranscript: any[]): DialogueItem[] => {
+    return rawTranscript.map((utt: any) => {
+      const isInterviewer = utt.speaker === "Interviewer";
+      const text = utt.content || "";
+      const hasWarn = !isInterviewer && text.includes("因为 Redis 性能高");
+      return {
+        sender: isInterviewer ? "interviewer" as const : "user" as const,
+        name: isInterviewer ? "面试官" : "您",
+        time: fmtTime(utt.start_time || 0),
+        text,
+        hasWarning: hasWarn,
+        badgeText: hasWarn ? "回答较简" : undefined,
+        badgeClass: hasWarn ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[10px]" : undefined,
+      };
+    });
   };
 
   const mergeRecordSectionsToMax10 = (secList: any[]): any[] => {
@@ -354,28 +373,67 @@ export default function InterviewRecordAnalysisPage() {
       const headers: Record<string, string> = {};
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      Promise.all([
-        fetch(`${API_BASE}/api/audio/report/${sessionId}`, { headers }),
-        fetch(`${API_BASE}/api/audio/session/${sessionId}/sections`, { headers })
-      ]).then(async ([reportRes, sectionsRes]) => {
-        if (reportRes.ok && sectionsRes.ok) {
+      const applyFallback = () => {
+        if (savedText && savedText.trim().length > 0) {
+          setPasteText(savedText);
+          parseDialogueText(savedText);
+        } else {
+          setPasteText(DEFAULT_TRANSCRIPT);
+          parseDialogueText(DEFAULT_TRANSCRIPT);
+        }
+      };
+
+      const tagColorMap: Record<string, string> = {
+        "良好": "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+        "一般": "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+        "风险": "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+      };
+
+      const buildSectionsFromBackend = (rawTranscript: any[], dbSections: any[]) => {
+        const mappedSections = dbSections.map((sec: any, idx: number) => {
+          const sectionDialogue = rawTranscript.filter((utt: any) => {
+            const t = utt.start_time ?? 0;
+            const isLast = idx === dbSections.length - 1;
+            return isLast
+              ? (sec.start_time - 0.001 <= t) && (t <= sec.end_time + 0.001)
+              : (sec.start_time - 0.001 <= t) && (t < sec.end_time - 0.001);
+          });
+          return {
+            id: sec.id || (idx + 1),
+            dbSectionId: sec.id,
+            title: sec.title || `段落 ${idx + 1}`,
+            start_time: sec.start_time,
+            end_time: sec.end_time,
+            timeRange: `${fmtTime(sec.start_time)} - ${fmtTime(sec.end_time)}`,
+            tag: sec.tag || "一般",
+            tagColor: tagColorMap[sec.tag] || "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
+            optimizationAdvice: sec.optimization_advice || undefined,
+            dialogue: mapTranscriptToDialogues(sectionDialogue)
+          };
+        });
+        return mergeRecordSectionsToMax10(mappedSections);
+      };
+
+      let rawTranscript: any[] = [];
+      let reportLoaded = false;
+      let sectionsLoaded = false;
+
+      const reportPromise = fetch(`${API_BASE}/api/audio/report/${sessionId}`, { headers })
+        .then(async (reportRes) => {
+          reportLoaded = true;
+          if (!reportRes.ok) throw new Error("report failed");
           const report = await reportRes.json();
-          const sectionsData = await sectionsRes.json();
           setReportData(report);
-          
+
           // 2026-07-25+: 后端分析失败时直接报错,不渲染假数据
           if (report.status === "failed") {
             auth.triggerToast(report.error_message || "面试记录分析失败，请重试", "error");
-            setIsLoading(false);
             localStorage.removeItem("interviewVar_session_id");
             return;
           }
-          
+
           if (report.job_description) {
-            setMetadataForm(prev => ({
-              ...prev,
-              jobDescription: report.job_description
-            }));
+            setMetadataForm(prev => ({ ...prev, jobDescription: report.job_description }));
           }
           // 直接用后端结构化字段，不再解析 title
           if (report.company || report.role || report.round || report.date) {
@@ -388,73 +446,43 @@ export default function InterviewRecordAnalysisPage() {
             }));
           }
 
-          const rawTranscript = report.transcript ?? [];
-          const dbSections = sectionsData.sections ?? [];
-
-          const tagColorMap: Record<string, string> = {
-            "良好": "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
-            "一般": "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
-            "风险": "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
-          };
-
-          const mappedSections = dbSections.map((sec: any, idx: number) => {
-            const sectionDialogue = rawTranscript.filter((utt: any) => {
-              const t = utt.start_time ?? 0;
-              const isLast = idx === dbSections.length - 1;
-              if (isLast) {
-                return (sec.start_time - 0.001 <= t) && (t <= sec.end_time + 0.001);
-              } else {
-                return (sec.start_time - 0.001 <= t) && (t < sec.end_time - 0.001);
-              }
-            });
-            return {
-              id: sec.id || (idx + 1),
-              dbSectionId: sec.id,
-              title: sec.title || `段落 ${idx + 1}`,
-              start_time: sec.start_time,
-              end_time: sec.end_time,
-              timeRange: `${fmtTime(sec.start_time)} - ${fmtTime(sec.end_time)}`,
-              tag: sec.tag || "一般",
-              tagColor: tagColorMap[sec.tag] || "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/20",
-              optimizationAdvice: sec.optimization_advice || undefined,
-              dialogue: sectionDialogue.map((utt: any) => ({
-                sender: utt.speaker === "Interviewer" ? "interviewer" as const : "user" as const,
-                name: utt.speaker === "Interviewer" ? "面试官" : "您",
-                time: fmtTime(utt.start_time || 0),
-                text: utt.content,
-                hasWarning: utt.speaker !== "Interviewer" && (utt.content.includes("因为 Redis 性能高") || false),
-              }))
-            };
-          });
-
-          setSections(mergeRecordSectionsToMax10(mappedSections));
-          // Set first dialogue text to pasteText so copy/export still work without timestamps
-          const fullText = rawTranscript.map((utt: any) => `${utt.speaker === "Interviewer" ? "面试官" : "我"}: ${utt.content}`).join("\n");
-          setPasteText(fullText);
-        } else {
-          // fallback if response failed
-          if (savedText && savedText.trim().length > 0) {
-            setPasteText(savedText);
-            parseDialogueText(savedText);
-          } else {
-            setPasteText(DEFAULT_TRANSCRIPT);
-            parseDialogueText(DEFAULT_TRANSCRIPT);
+          rawTranscript = report.transcript ?? [];
+          if (rawTranscript.length > 0) {
+            const dialogueList = mapTranscriptToDialogues(rawTranscript);
+            setDialogues(dialogueList);
+            setSections(groupLocalDialoguesIntoSections(dialogueList));
+            const fullText = rawTranscript.map((utt: any) => `${utt.speaker === "Interviewer" ? "面试官" : "我"}: ${utt.content}`).join("\n");
+            setPasteText(fullText);
           }
-        }
-      }).catch(err => {
-        console.error("Failed to load backend session/sections:", err);
-        // fallback on catch
-        if (savedText && savedText.trim().length > 0) {
-          setPasteText(savedText);
-          parseDialogueText(savedText);
-        } else {
-          setPasteText(DEFAULT_TRANSCRIPT);
-          parseDialogueText(DEFAULT_TRANSCRIPT);
-        }
-      }).finally(() => {
-        setIsLoading(false);
-        localStorage.removeItem("interviewVar_session_id");
-      });
+        });
+
+      const sectionsPromise = reportPromise
+        .then(() => fetch(`${API_BASE}/api/audio/session/${sessionId}/sections`, { headers }))
+        .then(async (sectionsRes) => {
+          sectionsLoaded = true;
+          if (!sectionsRes.ok) throw new Error("sections failed");
+          const sectionsData = await sectionsRes.json();
+          const dbSections = sectionsData.sections ?? [];
+          if (rawTranscript.length > 0 && dbSections.length > 0) {
+            setSections(buildSectionsFromBackend(rawTranscript, dbSections));
+          }
+        });
+
+      Promise.allSettled([reportPromise, sectionsPromise])
+        .then((results) => {
+          const reportRejected = results[0].status === "rejected";
+          if (reportRejected) {
+            applyFallback();
+          }
+        })
+        .catch(err => {
+          console.error("Failed to load backend session/sections:", err);
+          applyFallback();
+        })
+        .finally(() => {
+          setIsLoading(false);
+          localStorage.removeItem("interviewVar_session_id");
+        });
     } else {
       if (savedText && savedText.trim().length > 0) {
         setPasteText(savedText);
@@ -671,6 +699,8 @@ export default function InterviewRecordAnalysisPage() {
       return;
     }
 
+    setTaskStep("文本提取——解析输入面试文字...");
+    setTaskProgress(1);
     setIsAnalyzing(true);
     localStorage.setItem("interviewVar_session_pasteText", pasteText);
     localStorage.setItem("interviewVar_session_company", metadataForm.company);
@@ -725,9 +755,7 @@ export default function InterviewRecordAnalysisPage() {
       const analyzeData = await analyzeRes.json();
       const taskId: string = analyzeData.task_id;
 
-      // Step 3: Poll progress until done — uses shared helper that aborts
-      // the in-flight fetch the moment the server reports a terminal status
-      // (no more trailing polls after success).
+      // Step 3: Subscribe progress until done — one SSE stream replaces repeated polling.
       const token2 = localStorage.getItem("interviewVar_token");
       const STEPS = [
         "文本提取——解析输入面试文字...",
@@ -736,18 +764,23 @@ export default function InterviewRecordAnalysisPage() {
         "AI 话术重构——生成升级建议...",
         "分析完成 — 正在生成报告..."
       ];
+      const smoothProgress = startSmoothTaskProgress({
+        steps: STEPS,
+        setProgress: setTaskProgress,
+        setStep: setTaskStep,
+        initialProgress: 1,
+      });
+
       try {
-        await pollTaskUntilDone(taskId, {
-          intervalMs: 2000,
+        await subscribeTaskUntilDone(taskId, {
           headers: token2 ? { Authorization: `Bearer ${token2}` } : {},
-          onProgress: (pollData) => {
-            const pct = pollData.progress ?? 0;
-            setTaskProgress(pct);
-            const si = Math.min(Math.floor((pct / 100) * STEPS.length), STEPS.length - 1);
-            setTaskStep(STEPS[si]);
+          onProgress: (taskData) => {
+            smoothProgress.setTarget(taskData.progress ?? 0);
           },
         });
+        smoothProgress.complete(STEPS[STEPS.length - 1]);
       } catch (pollErr: any) {
+        smoothProgress.stop();
         throw new Error(pollErr?.message || "分析任务失败，请重试");
       }
 
@@ -1765,12 +1798,12 @@ export default function InterviewRecordAnalysisPage() {
                           className="record-perspective-item flex justify-between items-center py-1.5 px-2 rounded bg-white/[0.01] border border-white/5 hover:border-white/10 hover:text-white cursor-pointer transition-all relative group"
                         >
                           <span className="flex items-center gap-1 text-xs md:text-sm shrink-0 mr-4">
-                            <span className="record-perspective-icon material-symbols-outlined text-xs text-white/30 shrink-0">folder_open</span>
-                            <span className="record-perspective-label font-extrabold text-white">{p.label}</span>
+                            <span className="record-perspective-icon material-symbols-outlined text-xs text-[#00D4FF] shrink-0" style={{ color: "#00D4FF" }}>folder_open</span>
+                            <span className="record-perspective-label font-extrabold text-slate-900 dark:text-white">{p.label}</span>
                           </span>
-                          <span className="record-perspective-val text-white/40 font-semibold flex items-center gap-0.5 text-xs md:text-sm truncate flex-1 justify-end min-w-0">
+                          <span className="record-perspective-val text-slate-500 dark:text-white/40 font-semibold flex items-center gap-0.5 text-xs md:text-sm truncate flex-1 justify-end min-w-0">
                             <span className="truncate">{p.val}</span>
-                            <span className="record-perspective-arrow material-symbols-outlined text-xs shrink-0">chevron_right</span>
+                            <span className="record-perspective-arrow material-symbols-outlined text-xs shrink-0 text-[#00D4FF]" style={{ color: "#00D4FF" }}>chevron_right</span>
                           </span>
                         </div>
                       ));
@@ -1797,15 +1830,15 @@ export default function InterviewRecordAnalysisPage() {
                           }
                         }}
                         onMouseLeave={() => setHoveredPerspective(null)}
-                        className="flex justify-between items-center py-1.5 px-2 rounded bg-white/[0.01] border border-white/5 hover:border-white/10 hover:text-white cursor-pointer transition-all relative group"
+                        className="flex justify-between items-center py-1.5 px-2 rounded bg-slate-50/60 dark:bg-white/[0.01] border border-slate-200 dark:border-white/5 hover:border-slate-300 dark:hover:border-white/10 hover:text-slate-900 dark:hover:text-white cursor-pointer transition-all relative group"
                       >
                         <span className="flex items-center gap-1 text-xs md:text-sm shrink-0 mr-4">
-                          <span className="material-symbols-outlined text-xs text-white/30 shrink-0">folder_open</span>
-                          <span className="font-extrabold text-white">{p.label}</span>
+                          <span className="record-perspective-modal-item-icon material-symbols-outlined text-xs text-[#00D4FF] shrink-0" style={{ color: "#00D4FF" }}>folder_open</span>
+                          <span className="font-extrabold text-slate-900 dark:text-white">{p.label}</span>
                         </span>
-                        <span className="text-white/40 font-semibold flex items-center gap-0.5 text-xs md:text-sm truncate flex-1 justify-end min-w-0">
+                        <span className="text-slate-500 dark:text-white/40 font-semibold flex items-center gap-0.5 text-xs md:text-sm truncate flex-1 justify-end min-w-0">
                           <span className="truncate">{p.val}</span>
-                          <span className="material-symbols-outlined text-xs shrink-0">chevron_right</span>
+                          <span className="material-symbols-outlined text-xs shrink-0 text-[#00D4FF]" style={{ color: "#00D4FF" }}>chevron_right</span>
                         </span>
                       </div>
                     ));
@@ -1822,17 +1855,18 @@ export default function InterviewRecordAnalysisPage() {
                       className="absolute w-72 p-3 rounded-xl bg-[#0b1326] border border-white/15 text-xs text-white leading-relaxed shadow-2xl z-30 pointer-events-none"
                       style={{
                         left: `${hoveredPerspective.left + hoveredPerspective.width / 2}px`,
-                        top: `${hoveredPerspective.top - 8}px`
+                        top: `${hoveredPerspective.top - 8}px`,
+                        color: "#ffffff"
                       }}
                       transition={{ duration: 0.15, ease: "easeOut" }}
                     >
-                      <div className="font-extrabold text-[#00D4FF] mb-1.5 flex items-center gap-1">
-                        <span className="material-symbols-outlined text-xs shrink-0">psychology</span>
-                        {hoveredPerspective.label}
+                      <div className="font-extrabold text-[#00D4FF] mb-1.5 flex items-center gap-1" style={{ color: "#00D4FF" }}>
+                        <span className="material-symbols-outlined text-xs shrink-0" style={{ color: "#00D4FF" }}>psychology</span>
+                        <span style={{ color: "#00D4FF" }}>{hoveredPerspective.label}</span>
                       </div>
-                      <div className="text-white/70 font-semibold bg-white/[0.02] border border-white/5 p-2 rounded-lg">
-                        <span className="text-white/40 block text-[10px] mb-0.5">验证核心能力：</span>
-                        {hoveredPerspective.val}
+                      <div className="font-semibold bg-white/10 border border-white/10 p-2 rounded-lg" style={{ color: "#ffffff" }}>
+                        <span className="block text-[10px] mb-0.5" style={{ color: "rgba(255, 255, 255, 0.7)" }}>验证核心能力：</span>
+                        <span className="leading-relaxed" style={{ color: "#ffffff" }}>{hoveredPerspective.val}</span>
                       </div>
                       <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-[#0b1326]" />
                     </motion.div>
@@ -1967,67 +2001,67 @@ export default function InterviewRecordAnalysisPage() {
           <div id="upgrade-expression" className="glass-panel p-5.5 rounded-2xl border-white/5 grid grid-cols-12 gap-5.5 w-full select-none mt-3.5 scroll-mt-24 items-stretch">
             
             {/* Section 1: 表达升级 title & your answer (4 cols) */}
-            <div className="col-span-12 lg:col-span-4 flex gap-3.5 border-r border-white/5 pr-4 h-full items-start">
+            <div className="col-span-12 lg:col-span-4 flex gap-3.5 border-r border-slate-200 dark:border-white/5 pr-4 h-full items-start">
               <div className="w-9 h-9 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0 text-[#AFA7FF] mt-0.5">
-                <span className="material-symbols-outlined text-lg">auto_awesome</span>
+                <span className="material-symbols-outlined text-lg text-[#AFA7FF]">auto_awesome</span>
               </div>
               <div className="flex flex-col flex-1 text-left h-full justify-between">
                 <div>
-                  <h4 className="text-sm font-black text-white uppercase tracking-wider">表达升级 · 你的回答</h4>
-                  <p className="text-xs text-white/40 leading-normal block mt-1 mb-2 truncate">当前片段：{activeSection?.title || "（暂无）"}</p>
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider">表达升级 · 你的回答</h4>
+                  <p className="text-xs text-slate-500 dark:text-white/40 leading-normal block mt-1 mb-2 truncate">当前片段：{activeSection?.title || "（暂无）"}</p>
                 </div>
-                <div className="bg-white/[0.01] border border-white/5 p-3 rounded-xl text-white/50 font-mono text-xs md:text-sm leading-relaxed flex-1 mt-3 overflow-y-auto max-h-[160px] select-all">
+                <div className="bg-slate-50/80 dark:bg-white/[0.01] border border-slate-200 dark:border-white/5 p-3 rounded-xl text-slate-700 dark:text-white/50 font-mono text-xs md:text-sm leading-relaxed flex-1 mt-3 overflow-y-auto max-h-[160px] select-all">
                   {activeSection?.optimizationAdvice?.original || userDialogueTexts || "（当前片段暂无您的回答记录）"}
                 </div>
               </div>
             </div>
 
             {/* Section 2: 优化后话术 (5 cols) */}
-            <div className="col-span-12 lg:col-span-5 flex gap-3.5 border-r border-white/5 px-2 h-full items-start">
+            <div className="col-span-12 lg:col-span-5 flex gap-3.5 border-r border-slate-200 dark:border-white/5 px-2 h-full items-start">
               <div className="w-9 h-9 rounded-xl bg-[#5DECCB]/10 border border-[#5DECCB]/20 flex items-center justify-center shrink-0 text-[#5DECCB] mt-0.5">
-                <span className="material-symbols-outlined text-lg">verified</span>
+                <span className="material-symbols-outlined text-lg text-[#5DECCB]">verified</span>
               </div>
               <div className="flex flex-col flex-1 text-left h-full justify-between">
                 <div>
-                  <h4 className="text-sm font-black text-[#5DECCB] uppercase tracking-wider flex items-center gap-1">
+                  <h4 className="text-sm font-black text-slate-900 dark:text-[#5DECCB] uppercase tracking-wider flex items-center gap-1">
                     优化后话术
                   </h4>
-                  <p className="text-xs text-white/40 leading-normal block mt-1 mb-2">推荐：AI 专家版</p>
+                  <p className="text-xs text-slate-500 dark:text-white/40 leading-normal block mt-1 mb-2">推荐：AI 专家版</p>
                 </div>
                 
                 {isOptimizing ? (
-                  <div className="bg-slate-950/60 border border-white/5 p-3.5 rounded-xl text-white/40 font-mono text-xs md:text-sm flex-1 mt-3 flex flex-col items-center justify-center gap-3 select-none min-h-[120px]">
+                  <div className="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-white/5 p-3.5 rounded-xl text-slate-500 dark:text-white/40 font-mono text-xs md:text-sm flex-1 mt-3 flex flex-col items-center justify-center gap-3 select-none min-h-[120px] shadow-sm">
                     <div className="w-7 h-7 rounded-full border-2 border-[#5DECCB]/20 border-t-[#5DECCB] animate-spin" />
-                    <span className="text-base text-white/50 font-bold animate-pulse">正在重构优化高分话术...</span>
+                    <span className="text-base text-slate-600 dark:text-white/50 font-bold animate-pulse">正在重构优化高分话术...</span>
                   </div>
                 ) : activeSection?.optimizationAdvice ? (
-                  <div className="bg-slate-950/60 border border-[#5DECCB]/25 p-3.5 rounded-xl font-mono leading-relaxed text-xs md:text-sm flex-1 mt-3 overflow-y-auto max-h-[160px] flex flex-col gap-2.5">
+                  <div className="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-[#5DECCB]/25 p-3.5 rounded-xl font-mono leading-relaxed text-xs md:text-sm flex-1 mt-3 overflow-y-auto max-h-[160px] flex flex-col gap-2.5 shadow-sm">
                     {activeSection?.optimizationAdvice?.conclusion && (
-                      <div className="text-[11px] text-[#FF7A95] bg-[#FF7A95]/5 border border-[#FF7A95]/15 p-2 rounded-lg font-sans font-semibold leading-relaxed">
-                        <span className="font-extrabold block text-xs mb-0.5 text-[#FF7A95]">AI 诊断结论：</span>
+                      <div className="text-[11px] text-rose-700 dark:text-[#FF7A95] bg-rose-50 dark:bg-[#FF7A95]/5 border border-rose-200 dark:border-[#FF7A95]/15 p-2.5 rounded-lg font-sans font-semibold leading-relaxed">
+                        <span className="font-extrabold block text-xs mb-0.5 text-rose-700 dark:text-[#FF7A95]">AI 诊断结论：</span>
                         {activeSection.optimizationAdvice.conclusion}
                       </div>
                     )}
                     <div 
-                      className="text-white text-xs md:text-sm whitespace-pre-wrap leading-relaxed select-all"
+                      className="text-slate-800 dark:text-white text-xs md:text-sm whitespace-pre-wrap leading-relaxed select-all"
                       dangerouslySetInnerHTML={{ __html: activeSection.optimizationAdvice.optimized || "" }}
                     />
                   </div>
                 ) : isInitialPolling ? (
-                  <div className="bg-slate-950/60 border border-white/5 p-3.5 rounded-xl text-white/40 font-mono text-xs md:text-sm flex-1 mt-3 flex flex-col items-center justify-center gap-3 select-none min-h-[120px]">
+                  <div className="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-white/5 p-3.5 rounded-xl text-slate-500 dark:text-white/40 font-mono text-xs md:text-sm flex-1 mt-3 flex flex-col items-center justify-center gap-3 select-none min-h-[120px] shadow-sm">
                     <div className="w-7 h-7 rounded-full border-2 border-[#5DECCB]/20 border-t-[#5DECCB] animate-spin" />
-                    <span className="text-base text-white/50 font-bold animate-pulse">AI 正在重构该片段的高分话术...</span>
+                    <span className="text-base text-slate-600 dark:text-white/50 font-bold animate-pulse">AI 正在重构该片段的高分话术...</span>
                   </div>
                 ) : (
-                  <div className="bg-slate-950/60 border border-white/5 p-3.5 rounded-xl text-white/40 font-mono text-xs md:text-sm flex-1 mt-3 flex flex-col items-center justify-center gap-3 select-none min-h-[120px]">
-                    <span className="text-xs text-white/30 font-semibold">该片段暂未生成 AI 优化建议</span>
+                  <div className="bg-white dark:bg-slate-950/60 border border-slate-200 dark:border-white/5 p-3.5 rounded-xl text-slate-500 dark:text-white/40 font-mono text-xs md:text-sm flex-1 mt-3 flex flex-col items-center justify-center gap-3 select-none min-h-[120px] shadow-sm">
+                    <span className="text-xs text-slate-400 dark:text-white/30 font-semibold">该片段暂未生成 AI 优化建议</span>
                     <button
                       disabled={!hasUserAnswer}
                       onClick={() => handleOptimizeSection(activeSection.id)}
                       className={`px-5 py-2 font-extrabold text-xs rounded-lg flex items-center gap-1.5 transition-all ${
                         !hasUserAnswer 
-                          ? "bg-white/5 border border-white/10 text-white/20 cursor-not-allowed" 
-                          : "bg-[#5DECCB] hover:bg-white text-[#050B1A] cursor-pointer shadow-lg shadow-cyan-500/10"
+                          ? "bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 text-slate-400 dark:text-white/20 cursor-not-allowed" 
+                          : "bg-[#5DECCB] hover:bg-emerald-400 text-[#050B1A] cursor-pointer shadow-lg shadow-cyan-500/10"
                       }`}
                     >
                       <span className="material-symbols-outlined text-sm">bolt</span>
@@ -2041,12 +2075,12 @@ export default function InterviewRecordAnalysisPage() {
             {/* Section 3: Action Buttons (3 cols) */}
             <div className="col-span-12 lg:col-span-3 pl-2 flex gap-3.5 h-full items-start">
               <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0 text-[#FFB020] mt-0.5">
-                <span className="material-symbols-outlined text-lg">touch_app</span>
+                <span className="material-symbols-outlined text-lg text-[#FFB020]">touch_app</span>
               </div>
               <div className="flex flex-col flex-1 text-left justify-start">
                 <div>
-                  <h4 className="text-sm font-black text-white uppercase tracking-wider text-left">下一步操作</h4>
-                  <p className="text-xs text-white/40 leading-normal block mt-1 mb-2">行动建议：复制或保存优化话术</p>
+                  <h4 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wider text-left">下一步操作</h4>
+                  <p className="text-xs text-slate-500 dark:text-white/40 leading-normal block mt-1 mb-2">行动建议：复制或保存优化话术</p>
                 </div>
                 <div className="flex flex-col gap-2 mt-3">
                   {isOptimizing ? (
@@ -2104,16 +2138,16 @@ export default function InterviewRecordAnalysisPage() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-lg glass-panel p-6 rounded-3xl border border-white/10 flex flex-col max-h-[80vh] overflow-hidden"
+              className="w-full max-w-lg bg-white dark:bg-[#0e1626]/95 p-6 rounded-3xl border border-slate-200 dark:border-white/10 flex flex-col max-h-[80vh] overflow-hidden shadow-2xl"
             >
-              <div className="flex justify-between items-center pb-3 border-b border-white/5 shrink-0">
-                <h3 className="text-base font-black text-white flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-sm text-[#FF7A95]">report</span>
+              <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-white/5 shrink-0">
+                <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <span className="record-weakness-modal-icon material-symbols-outlined text-sm text-[#FF7A95]" style={{ color: "#FF7A95" }}>report</span>
                   全部失分点分析
                 </h3>
                 <button
                   onClick={() => setShowAllWeaknesses(false)}
-                  className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-all cursor-pointer flex items-center justify-center"
+                  className="w-8 h-8 rounded-full bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-500 dark:text-white/50 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer flex items-center justify-center"
                 >
                   <span className="material-symbols-outlined text-sm">close</span>
                 </button>
@@ -2132,7 +2166,7 @@ export default function InterviewRecordAnalysisPage() {
                         ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-sm font-black"
                         : "text-amber-500 bg-amber-400/10 border-amber-400/20 text-sm font-black";
                       return (
-                        <div key={idx} className="record-risk-card p-3 rounded-xl bg-[#f3f0ff] dark:bg-[#050B1A]/80 border border-[#e9d5ff] dark:border-white/5 space-y-2 text-left">
+                        <div key={idx} className="record-risk-card p-3 rounded-xl bg-slate-50 dark:bg-[#050B1A]/80 border border-slate-200 dark:border-white/5 space-y-2 text-left">
                           <div className="flex justify-between items-center">
                             <span className="record-risk-title font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
                               <span className="record-risk-rank w-5 h-5 rounded-full bg-slate-200 dark:bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-slate-700 dark:text-white/55">{rank}</span>
@@ -2160,7 +2194,7 @@ export default function InterviewRecordAnalysisPage() {
                         ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black" 
                         : "text-amber-500 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
                       return (
-                        <div key={idx} className="record-risk-card p-3 rounded-xl bg-[#f3f0ff] dark:bg-[#050B1A]/80 border border-[#e9d5ff] dark:border-white/5 space-y-2 text-left">
+                        <div key={idx} className="record-risk-card p-3 rounded-xl bg-slate-50 dark:bg-[#050B1A]/80 border border-slate-200 dark:border-white/5 space-y-2 text-left">
                           <div className="flex justify-between items-center">
                             <span className="record-risk-title font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs md:text-sm truncate mr-2">
                               <span className="record-risk-rank w-5 h-5 rounded-full bg-slate-200 dark:bg-white/5 flex items-center justify-center shrink-0 font-mono text-xs font-black text-slate-700 dark:text-white/55">{idx + 1}</span>
@@ -2186,7 +2220,7 @@ export default function InterviewRecordAnalysisPage() {
                       ? "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20 text-[9px] font-black"
                       : "text-amber-500 bg-amber-400/10 border-amber-400/20 text-[9px] font-black";
                     return (
-                      <div key={idx} className="record-risk-card p-3 rounded-xl bg-[#f3f0ff] dark:bg-[#050B1A]/80 border border-[#e9d5ff] dark:border-white/5 space-y-2 text-left">
+                      <div key={idx} className="record-risk-card p-3 rounded-xl bg-slate-50 dark:bg-[#050B1A]/80 border border-slate-200 dark:border-white/5 space-y-2 text-left">
                         <div className="flex justify-between items-center">
                           <span className="record-risk-title font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5 text-xs md:text-sm">
                             <span className="record-risk-rank w-5 h-5 rounded-full bg-slate-200 dark:bg-white/5 flex items-center justify-center font-mono text-xs font-black text-slate-700 dark:text-white/55">{lose.rank}</span>
@@ -2217,16 +2251,16 @@ export default function InterviewRecordAnalysisPage() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-lg glass-panel p-6 rounded-3xl border border-white/10 flex flex-col max-h-[80vh] overflow-hidden"
+              className="w-full max-w-lg bg-white dark:bg-[#0e1626]/95 p-6 rounded-3xl border border-slate-200 dark:border-white/10 flex flex-col max-h-[80vh] overflow-hidden shadow-2xl"
             >
-              <div className="flex justify-between items-center pb-3 border-b border-white/5 shrink-0">
-                <h3 className="text-base font-black text-white flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-sm text-[#00D4FF]">psychology</span>
+              <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-white/5 shrink-0">
+                <h3 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <span className="record-perspective-modal-icon material-symbols-outlined text-sm text-[#00D4FF]" style={{ color: "#00D4FF" }}>psychology</span>
                   全部面试官视角分析
                 </h3>
                 <button
                   onClick={() => setShowAllPerspectives(false)}
-                  className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-all cursor-pointer flex items-center justify-center"
+                  className="w-8 h-8 rounded-full bg-slate-100 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-500 dark:text-white/50 hover:text-slate-900 dark:hover:text-white transition-all cursor-pointer flex items-center justify-center"
                 >
                   <span className="material-symbols-outlined text-sm">close</span>
                 </button>
@@ -2237,13 +2271,13 @@ export default function InterviewRecordAnalysisPage() {
                   const perspective = reportData?.analysis_result?.interviewer_perspective;
                   if (perspective && perspective.length > 0) {
                     return perspective.map((p: any, i: number) => (
-                      <div key={i} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col gap-1.5 text-left">
-                        <span className="flex items-center gap-1.5 text-xs md:text-sm font-extrabold text-white">
-                          <span className="material-symbols-outlined text-xs text-[#00D4FF] shrink-0">folder_open</span>
+                      <div key={i} className="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-200 dark:border-white/5 flex flex-col gap-1.5 text-left">
+                        <span className="flex items-center gap-1.5 text-xs md:text-sm font-extrabold text-slate-900 dark:text-white">
+                          <span className="record-perspective-modal-item-icon material-symbols-outlined text-xs text-[#00D4FF] shrink-0" style={{ color: "#00D4FF" }}>folder_open</span>
                           {p.label}
                         </span>
-                        <div className="text-xs text-white/50 leading-relaxed font-semibold bg-white/[0.01] border border-white/5 p-2 rounded-lg">
-                          <span className="text-white/40 block text-[10px] mb-0.5">验证核心能力：</span>
+                        <div className="text-xs text-slate-700 dark:text-white/50 leading-relaxed font-semibold bg-white dark:bg-white/[0.01] border border-slate-200 dark:border-white/5 p-2 rounded-lg">
+                          <span className="text-slate-500 dark:text-white/40 block text-[10px] mb-0.5">验证核心能力：</span>
                           {p.val}
                         </div>
                       </div>
@@ -2255,13 +2289,13 @@ export default function InterviewRecordAnalysisPage() {
                     { label: "TCC 与 Saga", val: "验证分布式事务经验" },
                     { label: "项目深度挖", val: "验证真实项目经验" }
                   ].map((p, i) => (
-                    <div key={i} className="p-3 rounded-xl bg-white/[0.02] border border-white/5 flex flex-col gap-1.5 text-left">
-                      <span className="flex items-center gap-1.5 text-xs md:text-sm font-extrabold text-white">
-                        <span className="material-symbols-outlined text-xs text-[#00D4FF] shrink-0">folder_open</span>
+                    <div key={i} className="p-3 rounded-xl bg-slate-50 dark:bg-white/[0.02] border border-slate-200 dark:border-white/5 flex flex-col gap-1.5 text-left">
+                      <span className="flex items-center gap-1.5 text-xs md:text-sm font-extrabold text-slate-900 dark:text-white">
+                        <span className="record-perspective-modal-item-icon material-symbols-outlined text-xs text-[#00D4FF] shrink-0" style={{ color: "#00D4FF" }}>folder_open</span>
                         {p.label}
                       </span>
-                      <div className="text-xs text-white/50 leading-relaxed font-semibold bg-white/[0.01] border border-white/5 p-2 rounded-lg">
-                        <span className="text-white/40 block text-[10px] mb-0.5">验证核心能力：</span>
+                      <div className="text-xs text-slate-700 dark:text-white/50 leading-relaxed font-semibold bg-white dark:bg-white/[0.01] border border-slate-200 dark:border-white/5 p-2 rounded-lg">
+                        <span className="text-slate-500 dark:text-white/40 block text-[10px] mb-0.5">验证核心能力：</span>
                         {p.val}
                       </div>
                     </div>
@@ -2274,6 +2308,8 @@ export default function InterviewRecordAnalysisPage() {
       </AnimatePresence>
 
       </div>
+
+      <Footer />
 
     </div>
   );

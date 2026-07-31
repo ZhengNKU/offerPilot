@@ -7,7 +7,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
-import { pollTaskUntilDone } from "@/app/utils/pollTask";
+import Footer from "@/components/Footer";
+import { subscribeTaskUntilDone } from "@/app/utils/pollTask";
+import { startSmoothTaskProgress } from "@/app/utils/smoothTaskProgress";
 import { API_BASE } from "@/lib/api";
 import { getQuotaStatus, type Feature } from "@/lib/quotaClient";
 import { trackPendingFile, untrackPendingFile } from "@/utils/pendingUploads";
@@ -493,6 +495,8 @@ function NewAnalysisDebuggerContent() {
         localStorage.setItem("interviewVar_task_id", taskId);
 
         // 会话创建且启动分析任务成功 -> 校验通过，此时真正进入进度条全屏页面！
+        setTaskStep("ASR 转写中——提取音频文字...");
+        setTaskProgress(1);
         setIsPreparingAnalysis(false);
         setIsAnalyzing(true);
       } catch (e: any) {
@@ -501,7 +505,7 @@ function NewAnalysisDebuggerContent() {
         return;
       }
 
-      // Step 3: Poll on THIS page until analysis completes, THEN navigate
+      // Step 3: Subscribe on THIS page until analysis completes, THEN navigate
       const STEPS = [
         "ASR 转写中——提取音频文字...",
         "语义分段——判定说话人角色...",
@@ -510,21 +514,25 @@ function NewAnalysisDebuggerContent() {
         "分析完成 — 正在生成报告..."
       ];
 
+      const smoothProgress = startSmoothTaskProgress({
+        steps: STEPS,
+        setProgress: setTaskProgress,
+        setStep: setTaskStep,
+        initialProgress: 1,
+      });
+
       try {
-        const pollResult = await pollTaskUntilDone(taskId, {
-          intervalMs: 2000,
+        const subscribeResult = await subscribeTaskUntilDone(taskId, {
           headers: token ? { Authorization: `Bearer ${token}` } : {},
-          onProgress: (pollData) => {
-            const pct = pollData.progress ?? 0;
-            setTaskProgress(pct);
-            const si = Math.min(Math.floor((pct / 100) * STEPS.length), STEPS.length - 1);
-            setTaskStep(STEPS[si]);
+          onProgress: (taskData) => {
+            smoothProgress.setTarget(taskData.progress ?? 0);
           },
         });
+        smoothProgress.complete(STEPS[STEPS.length - 1]);
 
         // 2026-07-25+: 检查任务是否以 failed 结束,不导航到报告页
-        if (pollResult.finalData.status === "failed") {
-          const errMsg = (pollResult.finalData as any).error_message || "录音分析失败，请重试";
+        if (subscribeResult.finalData.status === "failed") {
+          const errMsg = (subscribeResult.finalData as any).error_message || "录音分析失败，请重试";
           auth.triggerToast(errMsg, "error");
           setIsAnalyzing(false);
           localStorage.removeItem("interviewVar_task_id");
@@ -532,9 +540,11 @@ function NewAnalysisDebuggerContent() {
         }
 
         // Step 4: Navigate to voice analysis report page (data is ready)
+        localStorage.removeItem("interviewVar_task_id");
         await checkRemainingLimit();
         router.push("/debugger/voice");
       } catch (e: any) {
+        smoothProgress.stop();
         auth.triggerToast(e.message || "分析任务异常，请重试！", "error");
         setIsAnalyzing(false);
       }
@@ -605,10 +615,10 @@ function NewAnalysisDebuggerContent() {
         localStorage.setItem("interviewVar_task_id", taskId);
 
         // 校验通过，会话与任务创建成功！关闭按钮加载，真正进入进度条全屏页面！
+        setTaskStep("文本解析中——载入对白记录...");
+        setTaskProgress(1);
         setIsPreparingAnalysis(false);
         setIsAnalyzing(true);
-        setTaskStep("正在发起智能评测分析...");
-        setTaskProgress(15);
       } catch (e: any) {
         auth.triggerToast(e.message || "启动分析失败，请重试！", "error");
         setIsPreparingAnalysis(false);
@@ -623,31 +633,37 @@ function NewAnalysisDebuggerContent() {
         "分析完成 — 正在生成报告..."
       ];
 
-      try {
-        // Step 3: Poll progress until done
-        const pollResult = await pollTaskUntilDone(taskId, {
-          intervalMs: 2000,
-          onProgress: (pollData) => {
-            const pct = pollData.progress || 0;
-            setTaskProgress(pct);
+      const smoothProgress = startSmoothTaskProgress({
+        steps: TEXT_STEPS,
+        setProgress: setTaskProgress,
+        setStep: setTaskStep,
+        initialProgress: 1,
+      });
 
-            const si = Math.min(Math.floor((pct / 100) * TEXT_STEPS.length), TEXT_STEPS.length - 1);
-            setTaskStep(TEXT_STEPS[si]);
+      try {
+        // Step 3: Subscribe progress until done
+        const subscribeResult = await subscribeTaskUntilDone(taskId, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          onProgress: (taskData) => {
+            smoothProgress.setTarget(taskData.progress || 0);
           },
         });
+        smoothProgress.complete(TEXT_STEPS[TEXT_STEPS.length - 1]);
 
         // 2026-07-25+: 检查任务是否以 failed 结束
-        if (pollResult.finalData.status === "failed") {
-          const errMsg = (pollResult.finalData as any).error_message || "面试记录分析失败，请重试";
+        if (subscribeResult.finalData.status === "failed") {
+          const errMsg = (subscribeResult.finalData as any).error_message || "面试记录分析失败，请重试";
           auth.triggerToast(errMsg, "error");
           setIsAnalyzing(false);
           localStorage.removeItem("interviewVar_task_id");
           return;
         }
 
+        localStorage.removeItem("interviewVar_task_id");
         await checkRemainingLimit();
         router.push(`/debugger/record?sessionId=${sessionId}`);
       } catch (e: any) {
+        smoothProgress.stop();
         auth.triggerToast(e.message || "分析任务异常，请重试！", "error");
         setIsAnalyzing(false);
       }
@@ -874,8 +890,8 @@ function NewAnalysisDebuggerContent() {
                         <span className="material-symbols-outlined text-xl">{item.icon}</span>
                       </div>
                       <div>
-                        <h5 className="font-extrabold text-sm md:text-base text-slate-800 dark:text-white">{item.title}</h5>
-                        <p className="text-xs text-slate-500 dark:text-on-surface-variant/60 mt-1 font-medium leading-relaxed">{item.desc}</p>
+                        <h5 className="font-extrabold text-sm md:text-base text-white">{item.title}</h5>
+                        <p className="text-xs text-white/60 mt-1 font-medium leading-relaxed">{item.desc}</p>
                       </div>
                     </div>
                   );
@@ -928,10 +944,10 @@ function NewAnalysisDebuggerContent() {
               {/* Header section */}
               <div className="flex justify-between items-center pb-4 border-b border-white/5">
                 <div>
-                  <span className="text-[10px] font-label-mono tracking-widest text-indigo-600 dark:text-primary font-bold uppercase">
+                  <span className="text-[10px] font-label-mono tracking-widest text-[#AFA7FF] font-bold uppercase">
                     New Analysis Panel
                   </span>
-                  <h2 className="text-2xl font-black text-slate-900 dark:text-white mt-1">
+                  <h2 className="text-2xl font-black text-white mt-1">
                     {activeMode === "audio"
                       ? "面试录音深度分析"
                       : activeMode === "text"
@@ -1084,11 +1100,11 @@ function NewAnalysisDebuggerContent() {
                     {/* Pre-Analysis Form (ALL TEXT INPUTS except Date and IsOnJob) */}
                     {activeMode !== "resume" && (
                       <div className="p-6 rounded-2xl bg-surface-container/50 border border-white/5 space-y-4">
-                        <h4 className="text-xs text-indigo-600 dark:text-primary font-label-mono uppercase tracking-widest font-extrabold mb-3">
+                        <h4 className="text-xs text-[#AFA7FF] font-label-mono uppercase tracking-widest font-extrabold mb-3">
                           分析前填写面试信息 (*必填)
                         </h4>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-slate-700 dark:text-on-surface-variant">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs font-semibold text-white/80">
                           <div>
                             <label className="block mb-2">面试公司名称 *</label>
                             <input
@@ -1260,24 +1276,7 @@ function NewAnalysisDebuggerContent() {
       </div>
 
       {/* Footer */}
-      <footer className="bg-surface-container-lowest border-t border-white/5 w-full block mt-8 relative z-10 shrink-0">
-        <div className="px-gutter py-8 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4 text-left">
-          <span className="text-[10px] text-on-surface-variant/30 font-label-mono font-bold tracking-widest block text-left">
-            © 2026 面试驾到. All rights reserved.
-          </span>
-          <div className="flex gap-8 text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">
-            <span onClick={() => openLegalTerms()} className="hover:text-primary transition-colors cursor-pointer select-none">
-              服务条款
-            </span>
-            <span onClick={() => openLegalPrivacy()} className="hover:text-primary transition-colors cursor-pointer select-none">
-              隐私政策
-            </span>
-            <span onClick={() => openLegalContact()} className="hover:text-primary transition-colors cursor-pointer select-none">
-              联系方式
-            </span>
-          </div>
-        </div>
-      </footer>
+      <Footer />
 
       {/* UNAUTHENTICATED OVERLAY — 参照面试训练场样式：背景模糊 + 居中卡片 */}
       {!auth.isLoggedIn && (

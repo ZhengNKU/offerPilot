@@ -54,11 +54,20 @@ if sys.platform == "win32":
     except Exception:
         pass
 
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+
+# 清理因 uvicorn 热加载 / 模块多次 import 重复添加的 TimedRotatingFileHandler，防止日志重复双打印
+for h in list(root_logger.handlers):
+    if isinstance(h, TimedRotatingFileHandler):
+        root_logger.removeHandler(h)
+
 # 先设置基础配置（控制台输出）
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+if not root_logger.handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
 
 formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
@@ -73,7 +82,7 @@ all_handler = TimedRotatingFileHandler(
 )
 all_handler.namer = _daily_namer
 all_handler.setFormatter(formatter)
-logging.getLogger().addHandler(all_handler)
+root_logger.addHandler(all_handler)
 
 # 错误日志 handler（按天切，只记 ERROR 及以上）
 err_handler = TimedRotatingFileHandler(
@@ -87,7 +96,7 @@ err_handler = TimedRotatingFileHandler(
 err_handler.namer = _daily_namer
 err_handler.setLevel(logging.ERROR)
 err_handler.setFormatter(formatter)
-logging.getLogger().addHandler(err_handler)
+root_logger.addHandler(err_handler)
 
 # 启动时立即轮转一次：把当前 backend.log / backend-error.log 改名为带日期的文件
 # 这样今天的日志会进 backend-YYYY-MM-DD.log，新文件从空开始
@@ -113,21 +122,33 @@ app = FastAPI(
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    """请求日志中间件。
+
+    2026-07-30 改:前端轮询拉得很勤,INFO 风暴真的没用,改成
+      - 任何 4xx/5xx 都打(便于排查报错)
+      - 慢请求(>= 1s)打,标 slow
+      - 其余 200/OK 直接 pass,不打
+    高频心跳/探活路径永远是 200 也不打。
+    """
     start_time = time.time()
     response = await call_next(request)
     duration = time.time() - start_time
-    
-    # 高频心跳/探活/保持登录路径列表：成功 200 时不打刷屏日志，只有 >=400 报错时告警
-    quiet_paths = {"/api/auth/me", "/health", "/api/live/quota"}
+
     path = request.url.path
+    quiet_paths = {"/api/auth/me", "/health", "/api/live/quota"}
     if path in quiet_paths and response.status_code < 400:
+        return response
+
+    is_error = response.status_code >= 400
+    is_slow = duration >= 1.0
+    if not is_error and not is_slow:
         return response
 
     auth_header = request.headers.get("Authorization", "None")
     auth_prefix = auth_header[:15] if auth_header != "None" else "None"
-    
+    tag = "ERR" if is_error else "SLOW"
     logging.info(
-        f"Request: {request.method} {path} | "
+        f"Request[{tag}]: {request.method} {path} | "
         f"Auth: {auth_prefix}... | "
         f"Status: {response.status_code} | "
         f"Duration: {duration:.3f}s"
@@ -168,6 +189,32 @@ if _MEMORY_LOADED and _memory_router is not None:
     logging.info("[main] Memory router registered successfully")
 else:
     logging.warning("[main] Memory router NOT registered (import failed)")
+
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    translated_msgs = []
+    for err in errors:
+        msg = str(err.get("msg", ""))
+        loc = err.get("loc", [])
+        field_name = loc[-1] if loc else "字段"
+        
+        if "value is not a valid email address" in msg or "not within a valid top-level domain" in msg:
+            translated_msgs.append("邮箱地址格式无效，请检查后缀域名（如 .com, .cn）")
+        elif "field required" in msg.lower() or "missing" in msg.lower():
+            translated_msgs.append(f"缺少必填字段: {field_name}")
+        elif "value is not a valid phone" in msg:
+            translated_msgs.append("手机号码格式无效")
+        elif "value is not a valid integer" in msg:
+            translated_msgs.append(f"{field_name} 格式错误，请输入有效数字")
+        else:
+            translated_msgs.append(msg)
+
+    friendly_detail = "；".join(translated_msgs) if translated_msgs else "输入数据格式有误，请检查后重试"
+    return JSONResponse(status_code=422, content={"detail": friendly_detail})
 
 
 @app.on_event("startup")
@@ -350,6 +397,9 @@ if __name__ == "__main__":
         port=8001,
         reload=True,
         reload_includes=["*.env", "*.py"],  # 监听 .env 等非 Python 文件的变更
+        # 关掉 uvicorn 自带的 access log —— 否则每条 200 还是会打
+        # 自己加的 log_requests 中间件已覆盖: 4xx/5xx 必打, ≥1s 慢请求必打
+        access_log=False,
     )
 
 

@@ -78,6 +78,53 @@ def _is_free_user(user: Optional[models.User]) -> bool:
     return True
 
 
+# 允许「知识库题目过期后自动重新生成」的付费档位。
+# PRO/MAX 尚未上线 → 当前无人命中该集合 = 所有用户都走 PG 永久缓存，不再烧 LLM token。
+# PRO/MAX 上线后无需改动业务代码，membership 落到这两个值即自动恢复刷新能力。
+PAID_MEMBERSHIPS = {"pro", "max"}
+
+
+def is_paid_user(user: Optional[models.User]) -> bool:
+    """是否为已生效的付费会员。
+
+    内测（test）不算付费；已过 30 天试用期的 test 更不算。
+    """
+    if user is None:
+        return False
+    plan = (user.membership or "").lower()
+    if plan == "test":
+        return False
+    return plan in PAID_MEMBERSHIPS
+
+
+def can_refresh_knowledge(user: Optional[models.User]) -> bool:
+    """知识库题目是否允许因缓存过期而重新调用 LLM 生成。
+
+    - 免费 / 内测 → False：首次生成后永久复用 PG 里的 knowledge_question_cache，
+      Redis TTL 过期只是回落到 PG 读取，不触发任何 LLM 调用。
+    - 付费（PRO/MAX）→ True：保持「过期后用户点开题谱时静默重生成」的体验。
+
+    注意：这个开关只管「刷新」。首次生成、以及换目标岗位后的重建
+    （trigger_knowledge_generation）不受此限制，所有档位一视同仁。
+    """
+    return is_paid_user(user)
+
+
+async def can_refresh_knowledge_by_id(db: AsyncSession, user_id: int) -> bool:
+    """按 user_id 查库再判定，供只有 user_id 的 service 层（question_generator）调用。
+
+    查不到用户 / 查询异常一律按 False 兜底（宁可不刷新，也不误烧 token）。
+    """
+    try:
+        result = await db.execute(
+            select(models.User).where(models.User.id == user_id)
+        )
+        user = result.scalars().first()
+    except Exception:
+        return False
+    return can_refresh_knowledge(user)
+
+
 def get_quota_for(user: Optional[models.User]) -> dict:
     """根据会员等级返回该用户的功能配额表。
 

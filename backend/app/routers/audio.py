@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 import uuid
 import asyncio
 import time
+import json
 import logging
 
 from app import models, database
@@ -312,6 +314,65 @@ async def create_record_session(
 task_store: Dict[str, Dict[str, Any]] = {}
 
 
+# ── 进程内 SSE pub/sub ────────────────────────────────────────────────────
+# 为什么需要:之前用轮询接口 /api/audio/task/{id},前端 2s 一次不仅慢,
+# 还会因为同 taskId 多 tab / 多页面挂载导致并发 setInterval 把请求量堆到 10+/s。
+# 改 SSE 后:后端在 _set_progress() 时把事件 publish 出去,前端 subscribe 后
+# 收到推送立即更新 UI,完全消除轮询。
+#
+# 单进程内存 channel 够用:BackgroundTasks 跑的分析协程和 HTTP handler 协程
+# 在同一个 asyncio loop。重启进程会丢未完成任务,但 task_store 本身也是内存的,
+# 行为一致。后续要扩多进程时换 Redis Pub/Sub 即可。
+class TaskChannel:
+    """单 taskId 的订阅 channel。每多一个 SSE 连接就多一个 asyncio.Queue。"""
+
+    def __init__(self, task_id: str) -> None:
+        self.task_id = task_id
+        self._subscribers: List[asyncio.Queue] = []
+
+    def subscribe(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=64)
+        self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        try:
+            self._subscribers.remove(q)
+        except ValueError:
+            pass
+
+    async def publish(self, event: Dict[str, Any]) -> None:
+        # 走 put_nowait + 满则丢老消息,避免慢消费者阻塞分析主流程
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                # 队列满说明消费者卡了,丢老事件让客户端重新 pull 最新任务状态即可
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                try:
+                    q.put_nowait(event)
+                except asyncio.QueueFull:
+                    pass
+
+
+task_channels: Dict[str, TaskChannel] = {}
+
+
+def _get_channel(task_id: str) -> TaskChannel:
+    ch = task_channels.get(task_id)
+    if ch is None:
+        ch = TaskChannel(task_id)
+        task_channels[task_id] = ch
+    return ch
+
+
+def _drop_channel(task_id: str) -> None:
+    task_channels.pop(task_id, None)
+
+
 async def run_real_analysis(session_id: int, task_id: str, profile_data: Optional[dict]):
     """
     Real analysis pipeline:
@@ -372,6 +433,21 @@ async def _fail_analysis(
     task_store[task_id]["status"] = "failed"
     task_store[task_id]["error_message"] = user_message
 
+    # SSE 推送失败状态,客户端订阅 reject 后跳转错误页
+    ch = task_channels.get(task_id)
+    if ch is not None:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(
+                ch.publish({
+                    "progress": task_store[task_id]["progress"],
+                    "status": "failed",
+                    "error_message": user_message,
+                })
+            )
+        except RuntimeError:
+            pass
+
     try:
         async with async_session() as db:
             sess_res = await db.execute(
@@ -379,22 +455,58 @@ async def _fail_analysis(
             )
             sess = sess_res.scalars().first()
             if sess:
+                audio_url = sess.audio_url
                 # 2026-07-25+: 同时把标准格式的 error_message 写到 session,
                 # 让前端调 get_session_report 时能直接拿到失败原因
                 sess.status = "failed"
                 sess.error_message = user_message
                 await db.commit()
+
+                # 如果分析失败，且存在上传的音频文件(非 text_mode/live)，自动清理 COS 文件与 DB UploadedFile 记录
+                if audio_url and audio_url not in ("text_mode", "live"):
+                    try:
+                        await delete_session_audio_file(audio_url, db)
+                        logger.info(f"{log_prefix} 分析失败，已自动清理上传的音频文件: {audio_url}")
+                    except Exception as _del_e:
+                        logger.warning(f"{log_prefix} 分析失败清理音频文件异常: {_del_e}")
     except Exception as e:
         logger.error(f"{log_prefix} 写 session.status=failed 失败: {e!r}")
 
 
 async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: Optional[dict]):
+    # 总耗时打点 + 阶段计时器,这样日志一眼能看出哪一段慢
+    t_total = time.monotonic()
+
+    def _stage(name: str) -> None:
+        """打 stage 开始日志,返回一个 callable 用来打结束日志(带耗时)。"""
+        logger.info(f"[task={task_id}] ▶ stage={name}")
+        t0 = time.monotonic()
+        def _end() -> None:
+            logger.info(f"[task={task_id}] ■ stage={name} elapsed={time.monotonic() - t0:.2f}s")
+        return _end
+
     def _set_progress(pct: int, status_str: str = "processing"):
         task_store[task_id]["progress"] = pct
         task_store[task_id]["status"] = status_str
+        # 把进度推给所有 SSE 订阅者。_set_progress 跑在分析协程里,
+        # publish() 不会 await 阻塞→走 create_task 异步派发即可
+        ch = task_channels.get(task_id)
+        if ch is not None:
+            event = {
+                "progress": pct,
+                "status": status_str,
+                "error_message": task_store[task_id].get("error_message"),
+            }
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(ch.publish(event))
+            except RuntimeError:
+                # 极小概率:event loop 已关闭,落空即可,SSE 客户端会读最终状态
+                pass
 
     # ── Step 0: Mark as started ───────────────────────────────────────────
     _set_progress(5)
+    end_fetch = _stage("1/5 fetch_session")
 
     # ── Step 1: Fetch audio URL from DB ──────────────────────────────────
     audio_url: Optional[str] = None
@@ -409,6 +521,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             job_description = sess.job_description
             sess.status = "processing"
             await db.commit()
+    end_fetch()
 
     if not audio_url:
         raise RuntimeError("找不到对应的面试记录")
@@ -418,6 +531,10 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
     # ── Step 2: Real ASR via Volc Engine or load from DB (for text/live mode) ─
     # PR4: 'live' 走与 text_mode 相同分支 —— 实时模式 ASR 在火山端完成，
     #      bridge 已把 transcript 写入 InterviewTranscript.data，直接读出。
+    # ── Step 2: Real ASR via Volc Engine or load from DB (for text/live mode) ─
+    # PR4: 'live' 走与 text_mode 相同分支 —— 实时模式 ASR 在火山端完成，
+    #      bridge 已把 transcript 写入 InterviewTranscript.data，直接读出。
+    end_asr = _stage("2/5 asr")
     raw_segments: List[Dict[str, Any]] = []
     if audio_url in ("text_mode", "live"):
         async with async_session() as db:
@@ -488,6 +605,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             raise RuntimeError("音频无有效语音内容")
 
     _set_progress(45, "processing")
+    end_asr()
 
     # ── Step 2.1: 隐私脱敏处理 (2026-07-20+) ─────────────────────────────────
     if raw_segments:
@@ -553,6 +671,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             f"[task={task_id}] Highlights API returned {len(result)} items "
             f"in {time.monotonic() - t0:.2f}s"
         )
+        _set_progress(50, "processing")
         return result or []
 
     async def _call_sectionize():
@@ -562,6 +681,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             f"[task={task_id}] Sectionize returned {len(result)} sections "
             f"in {time.monotonic() - t0:.2f}s"
         )
+        _set_progress(55, "processing")
         return result or []
 
     async def _call_dialogue_eval():
@@ -573,6 +693,8 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             f"[task={task_id}] analyze_interview_dialogue returned "
             f"in {time.monotonic() - t0:.2f}s"
         )
+        # dialogue_eval 是这 4 个里最重的,占大头,推到 60
+        _set_progress(60, "processing")
         return res or {}
 
     async def _call_extract_mentions():
@@ -583,43 +705,30 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             f"[task={task_id}] extract_mentioned_projects returned "
             f"{len(items)} items in {time.monotonic() - t0:.2f}s"
         )
+        _set_progress(64, "processing")
         return items or []
 
     if raw_segments:
+        end_llm = _stage("3/5 llm_parallel")
         logger.info(
             f"[task={task_id}] Calling 4 LLMs in parallel: "
             f"highlights + sectionize + dialogue_eval + extract_mentions for {len(raw_segments)} segments"
         )
 
-        # ── LLM 是 30-90s 阻塞操作，期间前端看不到中间进度 ──
-        #    同样开 fake_progress 协程模拟（从 45 → 60），gather 完成时取消它。
-        async def _fake_llm_progress():
-            try:
-                curr = 46
-                _set_progress(curr, "processing")
-                while curr < 64:
-                    await asyncio.sleep(1.8)
-                    inc = 2 if curr < 54 else 1
-                    curr = min(64, curr + inc)
-                    _set_progress(curr, "processing")
-            except asyncio.CancelledError:
-                pass
-
-        llm_fake_task = asyncio.create_task(_fake_llm_progress())
+        # gather 任一异常会直接 raise 到外层 _run_real_analysis 走 _fail_analysis
+        # 每个 LLM 完成后回调 _set_progress 往前走,前端就不会卡在 64
         try:
-            # gather 任一异常会直接 raise 到外层 _run_real_analysis 走 _fail_analysis
             highlights, sections, llm_result, mentioned_projects = await asyncio.gather(
                 _call_highlights(),
                 _call_sectionize(),
                 _call_dialogue_eval(),
                 _call_extract_mentions(),
             )
-        finally:
-            llm_fake_task.cancel()
-            try:
-                await llm_fake_task
-            except asyncio.CancelledError:
-                pass
+        except Exception:
+            # 4 个回调已经在协程里跑过 _set_progress(50/55/60/64),
+            # 失败时外层 _run_real_analysis 会再 _set_progress(失败状态) 覆盖,
+            # 这里不需要额外处理
+            raise
 
         logger.info(
             f"[task={task_id}] ⏱️  4-LLM parallel block total = "
@@ -676,6 +785,11 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
                 logger.warning(f"Error merging highlight: {ex}")
 
     _set_progress(65, "processing")
+
+    end_llm()
+
+    _set_progress(65, "processing")
+    end_persist = _stage("4/5 persist")
 
     # 把 transcript/sections 写入 + 配额扣减 + scores 写入放在同一个事务里，
     # 任一步失败都不会有脏数据残留在数据库。
@@ -783,7 +897,10 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
         # ── 统一提交：以上任一步抛异常都不会落库 ──
         await db.commit()
 
+    end_persist()
+
     # ── Step 4.5: 同步项目提及次数（fire-and-forget，失败不影响主流程） ────
+    end_finish = _stage("5/5 finalize")
     async with async_session() as db:
         sess_mention_result = await db.execute(
             select(models.InterviewSession).where(models.InterviewSession.id == session_id)
@@ -830,7 +947,11 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
     # _prefetch_section_optimization 函数保留以备后用。
 
     _set_progress(100, "completed")
-    logger.info(f"[task={task_id}] Analysis complete for session {session_id}")
+    end_finish()
+    logger.info(
+        f"[task={task_id}] ✅ 全部完成 session={session_id} "
+        f"total_elapsed={time.monotonic() - t_total:.2f}s"
+    )
 
     # 异步非阻塞派发：AI 职业顾问行动建议 + 200道题库生成器保留联网（enable_network=True），
     # 但完全独立运行，绝对不占用主任务或阻塞【生成优化建议】与前端 API
@@ -863,6 +984,13 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
                         logger.warning(f"[audio] 异步知识库能力题库匹配失败（不影响主流程）: {ex!r}")
 
                 asyncio.create_task(_safe_bg_knowledge(user_id_val, questions))
+
+    # 任务收尾:5s 后清掉 channel,让最后那条 completed 事件能送达订阅者
+    async def _delayed_drop():
+        await asyncio.sleep(5)
+        _drop_channel(task_id)
+
+    asyncio.create_task(_delayed_drop())
 
 
 
@@ -987,6 +1115,70 @@ async def get_task_status(id: str):
     if id not in task_store:
         raise HTTPException(status_code=404, detail="分析任务不存在")
     return task_store[id]
+
+
+@router.get("/task/{id}/stream")
+async def stream_task_progress(id: str):
+    """
+    SSE 端点:订阅 task_id 的进度事件流,替代前端的 2s 轮询。
+    事件序列:
+      - event: snapshot   (首条一定先发,包含当前 task_store 完整快照)
+      - event: progress   (后续每次 _set_progress 触发一条)
+      - event: heartbeat  (15s 无更新时发,纯 keep-alive)
+    客户端拿到 status=completed / failed 后自行关流。
+    """
+    if id not in task_store:
+        raise HTTPException(status_code=404, detail="分析任务不存在")
+
+    channel = _get_channel(id)
+    queue = channel.subscribe()
+
+    async def event_generator():
+        try:
+            # ── 1. 首条快照:让客户端立刻拿到当前状态,避免 SSE 启动开销期间
+            #        错过前面 _set_progress(5/15/45) 的事件
+            snapshot = {
+                "progress": task_store[id]["progress"],
+                "status": task_store[id]["status"],
+                "error_message": task_store[id].get("error_message"),
+            }
+            yield _format_sse("snapshot", snapshot)
+
+            # 已完成的任务直接发完事件就退出,不要挂起
+            if snapshot["status"] in ("completed", "failed"):
+                return
+
+            # ── 2. 订阅 channel,逐条推送给客户端
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    # keep-alive:代理/CDN 不会因为 idle 切断连接
+                    yield _format_sse("heartbeat", {"ts": time.time()})
+                    continue
+
+                yield _format_sse("progress", event)
+
+                if event.get("status") in ("completed", "failed"):
+                    # 终端态,订阅者会在解析后关流,这里直接退出
+                    return
+        finally:
+            channel.unsubscribe(queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # 关掉 nginx 缓冲,事件立即到客户端
+            "Connection": "keep-alive",
+        },
+    )
+
+
+def _format_sse(event: str, data: Dict[str, Any]) -> str:
+    """标准 SSE 帧:event: <name>\\ndata: <json>\\n\\n"""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 # ── DEBUG: Test ASR directly ────────────────────────────────────────────────

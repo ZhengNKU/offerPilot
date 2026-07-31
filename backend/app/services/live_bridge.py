@@ -114,6 +114,10 @@ class LiveSessionBridge:
         self._pending_messages: list[dict] = []
         # PR6 调试：浏览器 → 后端 上行 audio 帧计数（每 50 帧打一次日志）
         self._audio_frame_count: int = 0
+        # 发言交接模式（auto=自动感应 / manual=手动提交）与手动提交触发标志
+        self.speech_mode: str = "auto"
+        # 初始设为 True，保证首题/AI 开场白顺利发送与发音
+        self._manual_submit_pending: bool = True
 
     # ---------- AI 状态机辅助 ----------
     async def _set_ai_state(self, new_state: str) -> None:
@@ -286,8 +290,13 @@ class LiveSessionBridge:
             # 快捷操作（暂停 / 跳过 / 提示）：持久化 + 必要时注入文本让 AI 知道
             await self._handle_quick_action(data)
             return
+        if mtype == "client.speech_mode":
+            mode = data.get("mode", "auto")
+            self.speech_mode = mode
+            logger.info(f"[bridge] speech_mode changed to {self.speech_mode}")
+            return
         if mtype == "client.text":
-            # 候选人发送文本（备用通道，PR2 echo 用）
+            # 候选人发送文本（如手动提交【回答完毕】）
             text = data.get("content", "")
             logger.info(f"[bridge] candidate text: {text[:50]}...")
             self._seq += 1
@@ -296,11 +305,11 @@ class LiveSessionBridge:
                 "start_time": 0, "end_time": 0, "content": text,
             })
             if self.volc is not None and text.strip():
-                # PR3: 文本注入（用于「举手」按钮把候选内容发送）
                 try:
-                    await self.volc.trigger_response()
+                    self._manual_submit_pending = True
+                    await self.volc.send_chat_text(text)
                 except Exception as e:
-                    logger.warning(f"[bridge] volc.trigger_response 失败: {e}")
+                    logger.warning(f"[bridge] volc.send_chat_text 失败: {e}")
             else:
                 # PR2 echo: 模拟 AI 回应
                 await asyncio.sleep(0.3)
@@ -328,13 +337,16 @@ class LiveSessionBridge:
                 })
             return
         if mtype == "client.stt":
-            # 浏览器 Web Speech API 旁路识别的候选人语音
-            # 火山 realtime 不回推 ASR 文本，所以前端 STT 走这条路上行
+            # 浏览器 Web Speech API 旁路识别
+            # 当接入 volc 时，由 volc 的 asr_partial / asr_final 统一进行单源 ASR 广播与落库，
+            # 避免浏览器旁路 STT 与火山服务端 ASR 双路并行导致记录重复和顺序倒置。
+            if self.volc is not None:
+                return
             text = (data.get("text") or "").strip()
             is_final = bool(data.get("partial") is False)
             if not text:
                 return
-            # 广播给所有客户端（自己也会收到 → UI 实时显示）
+            # 仅在无 volc (echo 模式) 时广播和记录
             await self._send_text_event({
                 "type": "live.transcript",
                 "role": "candidate",
@@ -343,9 +355,7 @@ class LiveSessionBridge:
                 "t0": 0, "t1": 0,
             })
             if not is_final:
-                # partial 不入库，避免产生海量半成品 seq
                 return
-            # final：写入 _transcript + pending（参考 asr_final 的同款处理）
             import time as _time
             self._seq += 1
             end_ts = _time.time()
@@ -366,7 +376,7 @@ class LiveSessionBridge:
                 },
             })
             logger.info(
-                f"[bridge] candidate stt final seq={self._seq} text={text[:50]!r}"
+                f"[bridge] candidate stt final (echo mode) seq={self._seq} text={text[:50]!r}"
             )
             return
         logger.debug(f"[bridge] 未处理 text type={mtype}")
@@ -397,15 +407,33 @@ class LiveSessionBridge:
     async def _handle_volc_event(self, ev) -> None:
         """归一化事件 → 浏览器 WS 消息 + AI 状态机更新。"""
         if ev.type == "tts_segment_start":
-            # 火山 event 350：段起始占位（text=''），仅切换 AI 状态，不推 transcript
+            if self.speech_mode == "manual" and not self._manual_submit_pending:
+                logger.info("[bridge] 手动交接模式下：打断并静音 VAD 自动触发的 AI 追问")
+                if self.volc:
+                    try:
+                        await self.volc.cancel_response()
+                    except Exception:
+                        pass
+                await self._set_ai_state("idle")
+                return
             await self._set_ai_state("speaking")
             return
         if ev.type == "tts_text":
+            if self.speech_mode == "manual" and not self._manual_submit_pending:
+                return
             # AI 流式文本（event 350/351 sentence streaming）
             # 一句话被切碎成 N 个 chunk 推过来，要按 reply_id 攒齐再写库
             await self._handle_tts_text_stream(ev)
             return
         if ev.type == "tts_audio":
+            if self.speech_mode == "manual" and not self._manual_submit_pending:
+                if self.volc:
+                    try:
+                        await self.volc.cancel_response()
+                    except Exception:
+                        pass
+                await self._set_ai_state("idle")
+                return
             # AI 语音片段，推浏览器（二进制）
             if ev.audio:
                 await self._set_ai_state("speaking")
@@ -417,8 +445,9 @@ class LiveSessionBridge:
                     self._closed = True
             return
         if ev.type == "tts_end":
-            # 一段 AI 音频结束 → 切回 idle（等候选人开口或下一段 AI 主动起 segment_start）
+            # 一段 AI 音频结束 → 切回 idle，重置手动提交标志
             self._ai_is_speaking = False
+            self._manual_submit_pending = False
             await self._set_ai_state("idle")
             return
         if ev.type == "asr_partial":
@@ -635,7 +664,7 @@ class LiveSessionBridge:
         import time as _time
         action = data.get("action")
         payload = data.get("payload") or {}
-        if action not in ("pause", "skip", "hint"):
+        if action not in ("pause", "skip", "hint", "complete_turn"):
             logger.warning(f"[bridge] 未识别的 quick_action: {action}")
             return
 
@@ -666,15 +695,25 @@ class LiveSessionBridge:
         if action == "pause":
             duration = int(payload.get("duration", 30))
             await self._apply_pause(duration)
+        elif action == "complete_turn":
+            self._manual_submit_pending = True
+            logger.info(f"[bridge] live_id={self.row.id} 手动交接：收到 complete_turn，触发 AI 提问/追问")
+            try:
+                if self.volc:
+                    await self.volc.send_chat_text("候选人说：【我已回答完毕】。请面试官进行针对性点评或继续提出下一个面试问题。")
+            except Exception as e:
+                logger.warning(f"[bridge] complete_turn 触发 AI 回应失败: {e}")
         elif action == "skip":
-            # 注入文本让 AI 知道要切下一题（按 system_prompt 规则 AI 会自然转移）
+            # 注入文本让 AI 知道要切下一题
+            self._manual_submit_pending = True
             try:
                 await self.volc.send_chat_text(
                     f"候选人说：本题我不太清楚，请直接出下一题。"
                 )
             except Exception as e:
-                logger.warning(f"[bridge] pause→inject text 失败: {e}")
+                logger.warning(f"[bridge] skip→inject text 失败: {e}")
         elif action == "hint":
+            self._manual_submit_pending = True
             try:
                 await self.volc.send_chat_text(
                     "系统提示：候选人在请求提示。请用一句话给一个关键词线索，但不要直接给答案。"

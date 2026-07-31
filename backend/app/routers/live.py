@@ -549,26 +549,34 @@ async def end_live_session(
         else:
             logger.warning(f"[live] live_id={live_id} abandon 等待 ended 超时，强制标 abandoned")
 
-        # 标记 abandoned（不触发 _run_analysis_for_live）
+        # 计算实际消耗秒数（若 DB 中 duration_sec 为 0，靠 started_at 动态补算）
+        start_dt = row.started_at or row.created_at
+        dur_sec = row.duration_sec if (row.duration_sec and row.duration_sec > 0) else (
+            int((datetime.utcnow() - start_dt).total_seconds()) if start_dt else 0
+        )
+        if dur_sec <= 0:
+            dur_sec = 1  # 保底 1 秒
+
+        # 标记 abandoned + 补写 duration_sec（不触发 _run_analysis_for_live）
         await db.execute(
             update(models.InterviewLiveSession)
             .where(models.InterviewLiveSession.id == live_id)
-            .values(status="abandoned")
+            .values(status="abandoned", duration_sec=dur_sec)
         )
         await db.commit()
-        logger.info(f"[live] live_id={live_id} status=abandoned (放弃，不生成报告)")
+        logger.info(f"[live] live_id={live_id} status=abandoned, duration_sec={dur_sec} (放弃，不生成报告)")
 
         # 扣减时长（用户已用，就要扣；与正常完成走同一份 quota 表）
-        if row.user_id and row.duration_sec > 0:
+        if row.user_id and dur_sec > 0:
             try:
                 await upsert_user_live_minutes(
                     db=db,
                     user_id=row.user_id,
-                    added_seconds=row.duration_sec,
+                    added_seconds=dur_sec,
                     ended_at=row.ended_at or datetime.utcnow(),
                 )
                 logger.info(
-                    f"[live] 累计时长 +{row.duration_sec}s to user={row.user_id} (abandon)"
+                    f"[live] 累计时长 +{dur_sec}s to user={row.user_id} (abandon)"
                 )
             except Exception as ex:
                 logger.warning(f"[live] 累计时长失败 user={row.user_id}: {ex}")
@@ -937,6 +945,8 @@ async def list_live_sessions_for_timeline(
             "voice_id": r.voice_id,
             "persona_cn": r.persona_cn,
             "status": r.status,
+            "score": r.ipi_score or 0,
+            "ipi_score": r.ipi_score or 0,
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "started_at": r.started_at.isoformat() if r.started_at else None,
             "ended_at": r.ended_at.isoformat() if r.ended_at else None,
@@ -1169,7 +1179,7 @@ async def get_offer_trend(
             "potential_probability": potential,
         }
 
-    logger.info(
+    logger.debug(
         f"[live] offer-trend user_id={current_user.id} total={len(points)} "
         f"current={current}"
     )

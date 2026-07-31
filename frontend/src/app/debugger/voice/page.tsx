@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { pollTaskUntilDone } from "@/app/utils/pollTask";
+import { subscribeTaskUntilDone } from "@/app/utils/pollTask";
 import { API_BASE } from "@/lib/api";
 
 // =========================================================================
@@ -586,8 +586,7 @@ export default function InterviewVoiceAnalysisPage() {
         // If task_id is still present, wait for it to complete first
         if (taskId) {
           try {
-            await pollTaskUntilDone(taskId, {
-              intervalMs: 2000,
+            await subscribeTaskUntilDone(taskId, {
               headers,
               onProgress: (taskData) => {
                 const pct = taskData.progress ?? 0;
@@ -2198,76 +2197,6 @@ export default function InterviewVoiceAnalysisPage() {
               </div>
 
             </div>
-
-            {/* ========================================================
-                TARGETED IMPROVEMENT SUGGESTIONS CARD
-                点击任意一条建议 → 跳转 AI 职业顾问并自动发送关联本场面试的提问
-               ======================================================== */}
-            {reportData && reportData.suggestions && reportData.suggestions.length > 0 && (
-              <div className="glass-panel p-5.5 rounded-2xl border-white/5 flex flex-col gap-4 w-full select-none mt-1 relative overflow-hidden">
-                {/* 背景光晕 */}
-                <div className="absolute -top-10 -right-10 w-40 h-40 bg-[#AFA7FF]/10 rounded-full blur-3xl pointer-events-none" />
-                <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-[#5DECCB]/10 rounded-full blur-3xl pointer-events-none" />
-
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-white/5 pb-3 relative z-10">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#AFA7FF]/20 to-[#5DECCB]/20 border border-white/10 flex items-center justify-center shrink-0">
-                      <span className="material-symbols-outlined text-xl text-[#AFA7FF]">auto_awesome</span>
-                    </div>
-                    <div>
-                      <h4 className="text-base font-black text-white flex items-center gap-2">
-                        针对性改进建议
-                        <span className="text-[10px] font-label-mono text-on-surface-variant/40 font-bold tracking-wider uppercase">Actionable Suggestions</span>
-                      </h4>
-                      <p className="text-xs text-on-surface-variant/55 font-semibold mt-0.5">
-                        点击任意一条建议，AI 职业顾问将基于本场面试表现与你的个人画像自动生成提升方案
-                      </p>
-                    </div>
-                  </div>
-                  <span className="px-3 py-1 rounded-full bg-[#AFA7FF]/10 border border-[#AFA7FF]/25 text-[#AFA7FF] text-[11px] font-black whitespace-nowrap shrink-0">
-                    {reportData.suggestions.length} 条建议
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 relative z-10">
-                  {reportData.suggestions.map((sug, idx) => {
-                    const colorPalette = [
-                      { border: "border-[#AFA7FF]/25 hover:border-[#AFA7FF]/50", icon: "text-[#AFA7FF] bg-[#AFA7FF]/10 border-[#AFA7FF]/25", arrow: "text-[#AFA7FF] group-hover:translate-x-1" },
-                      { border: "border-[#5DECCB]/25 hover:border-[#5DECCB]/50", icon: "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/25", arrow: "text-[#5DECCB] group-hover:translate-x-1" },
-                      { border: "border-[#FFD66B]/25 hover:border-[#FFD66B]/50", icon: "text-[#FFD66B] bg-[#FFD66B]/10 border-[#FFD66B]/25", arrow: "text-[#FFD66B] group-hover:translate-x-1" },
-                      { border: "border-[#FF7A95]/25 hover:border-[#FF7A95]/50", icon: "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/25", arrow: "text-[#FF7A95] group-hover:translate-x-1" },
-                    ];
-                    const palette = colorPalette[idx % colorPalette.length];
-                    return (
-                      <button
-                        key={idx}
-                        onClick={() => handleConsultAdvisorForSuggestion(sug, idx)}
-                        className={`group p-4 rounded-2xl bg-white/[0.02] border ${palette.border} hover:bg-white/[0.04] active:scale-[0.985] transition-all flex flex-col gap-2.5 text-left cursor-pointer relative overflow-hidden`}
-                      >
-                        <div className="flex items-start gap-2.5">
-                          <div className={`w-7 h-7 rounded-lg ${palette.icon} border flex items-center justify-center shrink-0 mt-0.5`}>
-                            <span className="text-[11px] font-black font-label-mono">{String(idx + 1).padStart(2, "0")}</span>
-                          </div>
-                          <p className="text-[13px] font-bold text-white/85 leading-relaxed flex-1">
-                            {sug}
-                          </p>
-                        </div>
-                        <div className="flex items-center justify-between pt-2 border-t border-white/5">
-                          <span className="text-[10px] font-label-mono text-on-surface-variant/45 font-bold tracking-wider uppercase flex items-center gap-1">
-                            <span className="material-symbols-outlined text-[12px]">support_agent</span>
-                            咨询 AI 顾问
-                          </span>
-                          <span className={`material-symbols-outlined text-base ${palette.arrow} transition-transform`}>
-                            arrow_forward
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
           </motion.div>
       )} {/* end pageStatus === "ready" */}
 

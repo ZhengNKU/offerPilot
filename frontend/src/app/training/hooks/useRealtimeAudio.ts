@@ -38,6 +38,8 @@ export interface UseRealtimeAudioApi {
    * false=AI 停下 → 重新启动 recognition
    */
   setAiSpeaking: (speaking: boolean) => void;
+  /** AI 语音是否正在本地扬声器播放 */
+  isPlaying: boolean;
   /** 播放从服务端收到的 PCM16 音频（火山 TTS 24kHz/mono）。无操作即可丢帧。*/
   play: (pcm16: ArrayBuffer, sampleRate?: number) => void;
 }
@@ -104,6 +106,8 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
   // 播放队列
   const playQueueRef = useRef<ArrayBuffer[]>([]);
   const playingRef = useRef(false);
+
+  const [isPlaying, setIsPlaying] = useState(false);
 
   // 内部辅助：启动 Web Speech API 识别
   const startRecognition = useCallback(() => {
@@ -238,6 +242,7 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
     onFrameRef.current = null;
     playQueueRef.current = [];
     playingRef.current = false;
+    setIsPlaying(false);
     setState((s) => ({ ...s, active: false }));
   }, [stopRecognition]);
 
@@ -265,10 +270,12 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
     const ctx = audioCtxRef.current;
     if (!ctx) {
       playingRef.current = false;
+      setIsPlaying(false);
       return;
     }
     if (playQueueRef.current.length === 0) {
       playingRef.current = false;
+      setIsPlaying(false);
       // 本地音频播放队列清空：如果网络层也已进入非说话态，则立即重新恢复识别
       if (!aiSpeakingRef.current) {
         startRecognition();
@@ -310,6 +317,7 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
       // 收到第一块要播放的音频且扬声器当前闲置时，终止一次识别。避免高频流包（50次/秒）触发重复 abort 重载浏览器。
       stopRecognition();
       playingRef.current = true;
+      setIsPlaying(true);
       playNext();
     }
   }, [playNext, stopRecognition]);
@@ -322,5 +330,5 @@ export function useRealtimeAudio(): UseRealtimeAudioApi {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { state, start, stop, mute, setAiSpeaking, play };
+  return { state, start, stop, mute, setAiSpeaking, play, isPlaying };
 }

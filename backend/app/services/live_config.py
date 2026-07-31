@@ -185,7 +185,7 @@ DIFFICULTY_CONFIG: dict[str, dict] = {
 # O 系列 4 个火山官方已验证 speaker（zh_female_shuangkuai / ICL_* 是别系列，已弃用）
 VOICE_MALE_GENTLE = "zh_male_yunzhou_jupiter_bigtts"          # 温柔专业男声
 VOICE_FEMALE_VV = "zh_female_vv_jupiter_bigtts"               # O 系列默认女声，活泼灵动
-VOICE_MALE_ENTHUSIASTIC = "zh_male_aojiaobing_emo"            # 热情男声
+VOICE_MALE_ENTHUSIASTIC = "zh_male_yunzhou_jupiter_bigtts"     # 热情男声（使用火山官方已验证的 Jupiter 顶级男声）
 VOICE_FEMALE_XIAOHE = "zh_female_xiaohe_jupiter_bigtts"       # O 系列备选女声，甜美活泼（带台湾口音）
 
 # 默认 speaker（兜底用，正常不会被命中）

@@ -291,16 +291,26 @@ async def get_current_user_optional(
 @router.post("/send-code")
 async def send_code(
     req: schemas.SendCodeRequest,
+    db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
-    # 内测版本：拒接手机验证码（仅保留邮箱验证码通道）
-    if req.type == "phone":
+    target = req.target.strip()
+    if not target:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="内测期间暂不支持短信注册，请使用邮箱注册",
+            detail="目标手机号或邮箱不能为空"
         )
 
-    target = req.target
+    # 校验修改场景下该账号/邮箱是否已被绑定
+    if req.scene == "security_update" or req.check_exist:
+        if req.type == "phone":
+            conflict = await db.execute(select(models.User).where(models.User.phone == target))
+            if conflict.scalars().first():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号码已被绑定，无法发送验证码")
+        elif req.type == "email":
+            conflict = await db.execute(select(models.User).where(models.User.email == target))
+            if conflict.scalars().first():
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该邮箱地址已被绑定，无法发送验证码")
 
     # 频率控制: 1分钟限制一次
     limit_key = f"auth:limit:{target}"
@@ -314,9 +324,14 @@ async def send_code(
     # 生成 6 位随机验证码
     code = f"{random.randint(100000, 999999)}"
 
-    # 内测版本：phone 分支已被顶部 raise 拦截，下面只保留 email 分支
-    # 调用邮件发送工具发送真实邮件
-    if req.type == "email":
+    if req.type == "phone":
+        success = sms_helper.send_verification_code(phone=target, code=code)
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="短信验证码发送失败，请稍后重试"
+            )
+    elif req.type == "email":
         success = email_helper.send_verification_code(email=target, code=code)
         if not success:
             raise HTTPException(
@@ -344,13 +359,6 @@ async def register_step1(
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
-    # 内测版本：拒接手机注册（仅保留邮箱注册通道）
-    if req.reg_method == "phone":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="内测期间暂不支持手机号注册，请使用邮箱注册",
-        )
-
     # Check username unique
     result = await db.execute(select(models.User).where(models.User.username == req.username))
     if result.scalars().first():
@@ -359,21 +367,33 @@ async def register_step1(
             detail="用户名已存在"
         )
 
-    # Check email unique and verify code
-    target = str(req.email) if req.email else None
-    if not target:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="邮箱字段不能为空"
-        )
-
-    # Unique check (only email branch left after phone-reject above)
-    email_res = await db.execute(select(models.User).where(models.User.email == target))
-    if email_res.scalars().first():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该邮箱地址已被注册"
-        )
+    target = None
+    if req.reg_method == "phone":
+        target = str(req.phone).strip() if req.phone else None
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="手机号码不能为空"
+            )
+        phone_res = await db.execute(select(models.User).where(models.User.phone == target))
+        if phone_res.scalars().first():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该手机号码已被注册，请检查或直接登录"
+            )
+    else:
+        target = str(req.email).strip() if req.email else None
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="邮箱字段不能为空"
+            )
+        email_res = await db.execute(select(models.User).where(models.User.email == target))
+        if email_res.scalars().first():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该邮箱地址已被注册，请检查或直接登录"
+            )
 
     # Verify code matches Redis value
     saved_code = await redis_client.get(f"auth:code:{target}")
@@ -394,21 +414,24 @@ async def register_complete(
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
-    # 内测版本：拒接手机注册（仅保留邮箱注册通道）
-    if req.account.reg_method == "phone":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="内测期间暂不支持手机号注册，请使用邮箱注册",
-        )
-
-    # Verify code again in transaction context
     acc = req.account
-    target = str(acc.email) if acc.email else None
-    if not target:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="邮箱字段不能为空"
-        )
+    target = None
+    is_phone = acc.reg_method == "phone"
+
+    if is_phone:
+        target = str(acc.phone).strip() if acc.phone else None
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="手机号码不能为空"
+            )
+    else:
+        target = str(acc.email).strip() if acc.email else None
+        if not target:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="邮箱字段不能为空"
+            )
 
     saved_code = await redis_client.get(f"auth:code:{target}")
     if not saved_code or saved_code != acc.verify_code:
@@ -427,13 +450,14 @@ async def register_complete(
     exist_check = await db.execute(
         select(models.User).where(
             (models.User.username == acc.username) |
-            ((models.User.email == str(acc.email)) & (models.User.email.is_not(None)))
+            ((models.User.email == target) & (models.User.email.is_not(None))) |
+            ((models.User.phone == target) & (models.User.phone.is_not(None)))
         )
     )
     if exist_check.scalars().first():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="账户名或邮箱已被占用"
+            detail="账户名、手机号或邮箱已被占用"
         )
 
     # Insert user in transaction
@@ -441,9 +465,10 @@ async def register_complete(
     new_user = models.User(
         username=acc.username,
         password_hash=hashed_pwd,
-        email=str(acc.email) if acc.email else None,
+        phone=target if is_phone else (str(acc.phone) if acc.phone else None),
+        email=target if not is_phone else (str(acc.email) if acc.email else None),
         is_online=True,
-        membership="test",  # 内测版本：所有新注册用户默认 test 档
+        membership="test",
     )
     db.add(new_user)
     await db.flush() # Flush to get new_user.id
@@ -509,18 +534,6 @@ async def register_complete(
     # Generate token
     token = create_access_token(data={"sub": str(new_user.id)})
 
-    # 注意：注册时**不**写单点登录 session 标记。
-    # 原因：新用户 Redis 中按理没有旧 token，但如果在这里写 auth:session:{user_id}，
-    # 用户紧接着再调一次 /api/auth/login（前端常见链路：注册成功 → 自动跳首页 →
-    # useEffect 触发一次 /me 或被 AuthProvider 拉一次 /api/auth/profile 之类），
-    # enforce_single_session 会看到 session:{user_id} 已是刚签发的 token，
-    # "新 token != 旧 token" → 把注册返回的 token 拉黑 → 前端 setInterval 60s 轮询
-    # 打到 401 → 触发"您的账号已在其他设备登录，已自动退出"的误提示。
-    # 修法：把 session 标记的写入推迟到 login() 端点；注册返回的 token 在 24h 内
-    # 仍然有效，用户只要不主动 logout / 不主动重新登录就一直可用。
-    # 豁免名单账号（如 admin）原本就不挤下线，但为保持与 login() 行为一致，这里
-    # 也直接跳过 session 写入——admin 多端登录本来就是预期行为。
-
     # 异步为新注册用户生成基于目标岗位的行业基准建议
     if new_profile and new_profile.target_role:
         generating_insights = {"status": "generating", "target_role": new_profile.target_role, "is_customized": False}
@@ -538,7 +551,6 @@ async def register_complete(
             new_profile.target_role,
         )
 
-        # 异步生成知识库能力卡片
         from app.services.knowledge_ability_service import trigger_knowledge_generation
         background_tasks.add_task(
             trigger_knowledge_generation,
@@ -558,22 +570,22 @@ async def login(
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
-    # 内测版本：拒接验证码登录（保留 password 登录通道）
-    if req.login_type == "code":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="内测期间暂不支持验证码登录，请使用邮箱 + 密码登录",
-        )
-
     user = None
     if req.login_type == "password":
-        # 内测版本：仅支持 username / email 登录（phone 已禁）
+        account = (req.account or "").strip()
+        if not account or not req.password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="请输入账号和密码"
+            )
+
         result = await db.execute(
             select(models.User)
             .options(selectinload(models.User.profile))
             .where(
-                (models.User.username == req.account) |
-                (models.User.email == req.account)
+                (models.User.username == account) |
+                (models.User.email == account) |
+                (models.User.phone == account)
             )
         )
         user = result.scalars().first()
@@ -582,6 +594,38 @@ async def login(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="用户名或密码错误"
             )
+    elif req.login_type in ("sms", "code"):
+        target_phone = (req.phone or req.account or "").strip()
+        code = (req.verify_code or "").strip()
+        if not target_phone or not code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="手机号和验证码不能为空"
+            )
+
+        saved_code = await redis_client.get(f"auth:code:{target_phone}")
+        if not saved_code or saved_code != code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="短信验证码无效或已过期"
+            )
+
+        result = await db.execute(
+            select(models.User)
+            .options(selectinload(models.User.profile))
+            .where(
+                (models.User.phone == target_phone) |
+                (models.User.username == target_phone) |
+                (models.User.email == target_phone)
+            )
+        )
+        user = result.scalars().first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该手机号未注册账号，请确认无误或使用手机号注册"
+            )
+        await redis_client.delete(f"auth:code:{target_phone}")
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -593,8 +637,6 @@ async def login(
 
     token = create_access_token(data={"sub": str(user.id)})
 
-    # 单点登录：挤掉该用户此前还活着的旧会话（其他设备登录被自动踢下线）
-    # 但豁免名单（默认 admin）允许多端同时在线，方便日常后台多端调试
     if not _is_multi_session_exempt(user.username):
         await enforce_single_session(redis_client, user.id, token)
 
@@ -613,12 +655,9 @@ async def logout(
     current_user: models.User = Depends(get_current_user)
 ):
     token = credentials.credentials
-    # 1. 写入 token 黑名单：当前 token 不能继续使用
     await _revoke_token(redis_client, token, reason="logout")
-    # 2. 清除单点登录 session：避免下一次登录时被错误地当成"旧设备"挤下线
     await clear_single_session(redis_client, current_user.id)
 
-    # Set user online status to False
     current_user.is_online = False
     await db.commit()
 
@@ -631,34 +670,46 @@ async def reset_password(
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
-    # 内测版本：拒接手机号找回密码（仅保留邮箱找回）
-    if req.type == "phone":
+    target = req.target.strip()
+    if not target or not req.verify_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="内测期间暂不支持手机号找回密码，请使用邮箱找回密码",
+            detail="账号和验证码不能为空"
         )
 
-    # Verify code
-    saved_code = await redis_client.get(f"auth:code:{req.target}")
+    saved_code = await redis_client.get(f"auth:code:{target}")
     if not saved_code or saved_code != req.verify_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="验证码无效或已过期"
         )
 
-    # Find user by email (phone branch already rejected above)
-    result = await db.execute(select(models.User).where(models.User.email == req.target))
-    user = result.scalars().first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_440_TEMPLATE_MISMATCH,
-            detail="未找到该邮箱关联的账号"
-        )
+    if req.type == "phone":
+        result = await db.execute(select(models.User).where(models.User.phone == target))
+        user = result.scalars().first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="未找到该手机号关联的账号，请检查是否使用了邮箱注册"
+            )
+    else:
+        result = await db.execute(select(models.User).where(models.User.email == target))
+        user = result.scalars().first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="未找到该邮箱关联的账号，请检查是否使用了手机号注册"
+            )
         
-    # Update password
+    if user.password_hash and verify_password(req.new_password.strip(), user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="新密码不能与原密码相同，请输入新的密码"
+        )
+
     user.password_hash = get_password_hash(req.new_password)
     await db.commit()
-    await redis_client.delete(f"auth:code:{req.target}")
+    await redis_client.delete(f"auth:code:{target}")
     
     return {"message": "密码重置成功，请重新登录"}
 
@@ -670,35 +721,48 @@ async def security_update(
     db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis)
 ):
-    # 内测版本：拒接换绑手机号（仅保留换绑邮箱）
-    if req.update_type == "phone":
+    target_value = req.value.strip()
+    if not target_value or not req.verify_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="内测期间暂不支持换绑手机号，请使用邮箱找回密码",
+            detail="目标账号和验证码不能为空"
         )
 
     # Verify code
-    saved_code = await redis_client.get(f"auth:code:{req.value}")
+    saved_code = await redis_client.get(f"auth:code:{target_value}")
     if not saved_code or saved_code != req.verify_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="验证码无效或已过期"
         )
 
-    # Check value conflicts (email only after phone-reject above)
-    conflict = await db.execute(
-        select(models.User).where((models.User.email == req.value) & (models.User.id != current_user.id))
-    )
-    if conflict.scalars().first():
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该邮箱已被其他账号绑定")
-    current_user.email = req.value
+    target_type = req.get_update_type()
+    if target_type == "phone":
+        conflict = await db.execute(
+            select(models.User).where((models.User.phone == target_value) & (models.User.id != current_user.id))
+        )
+        if conflict.scalars().first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该手机号码已被其他账号绑定")
+        current_user.phone = target_value
+    else:
+        conflict = await db.execute(
+            select(models.User).where((models.User.email == target_value) & (models.User.id != current_user.id))
+        )
+        if conflict.scalars().first():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该邮箱地址已被其他账号绑定")
+        current_user.email = target_value
 
     # Update password if provided
-    if req.new_password and len(req.new_password.strip()) >= 8:
-        current_user.password_hash = get_password_hash(req.new_password)
+    if req.new_password and len(req.new_password.strip()) > 0:
+        new_pwd = req.new_password.strip()
+        if len(new_pwd) < 6:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="新密码长度不能少于6位")
+        if current_user.password_hash and verify_password(new_pwd, current_user.password_hash):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="新密码不能与原密码相同，请重新输入")
+        current_user.password_hash = get_password_hash(new_pwd)
 
     await db.commit()
-    await redis_client.delete(f"auth:code:{req.value}")
+    await redis_client.delete(f"auth:code:{target_value}")
 
     return {"message": "账户安全信息已成功更新"}
 

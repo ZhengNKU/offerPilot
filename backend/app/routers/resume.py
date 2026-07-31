@@ -14,7 +14,7 @@ from urllib.parse import quote
 from app import models
 from app.database import get_db
 from app.routers.auth import get_current_user_optional
-from app.routers.file import get_cos_client, bucket
+from app.routers.file import get_cos_client, bucket, delete_file_from_storage
 from app.utils.resume_parser import extract_resume_text, parse_resume_structure
 from app.services.embedding_indexer import schedule_index
 from app.utils.llm import analyze_resume_text
@@ -90,6 +90,7 @@ async def analyze_resume(
             content_bytes = body_stream.read()
     except Exception as e:
         logger.exception(f"[resume] COS 下载失败 file_id={db_file.id}: {e!r}")
+        await delete_file_from_storage(db, db_file)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=format_failure(FEATURE_NAME_RESUME, REASON_COS_DOWNLOAD_FAILED)
@@ -99,19 +100,22 @@ async def analyze_resume(
     try:
         resume_text = extract_resume_text(content_bytes, db_file.filename)
     except ValueError as ve:
-        # 文件格式错误属于用户输入问题,直接显示 ve 信息
+        # 文件格式错误属于用户输入问题,直接显示 ve 信息并清理文件
+        await delete_file_from_storage(db, db_file)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=format_failure(FEATURE_NAME_RESUME, f"文件格式不支持：{ve}")
         )
     except Exception as e:
         logger.exception(f"[resume] 解析失败 file_id={db_file.id}: {e!r}")
+        await delete_file_from_storage(db, db_file)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=format_failure(FEATURE_NAME_RESUME, REASON_FILE_PARSE_FAILED)
         )
 
     if not resume_text.strip():
+        await delete_file_from_storage(db, db_file)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=format_failure(FEATURE_NAME_RESUME, REASON_FILE_EMPTY)
@@ -151,13 +155,14 @@ async def analyze_resume(
         }
 
     # 6. Analyze resume text using LLM（传 parsed_structure 让 LLM 只优化 bullets、保持结构不变）
-    # 2026-07-25+: analyze_resume_text 失败会 raise,这里捕获并把 reason 透出
+    # 2026-07-25+: analyze_resume_text 失败会 raise,这里捕获并把 reason 透出并清理文件
     try:
         analysis_result = await analyze_resume_text(
             resume_text, profile_data, parsed_structure=parsed_structure
         )
     except Exception as e:
         logger.exception(f"[resume] LLM 分析失败 file_id={db_file.id}: {e!r}")
+        await delete_file_from_storage(db, db_file)
         # e 可能是我们自己包的 "AI 返回 JSON 解析失败" 或 "AI 返回为空" 等
         reason = str(e) or "AI 调用失败"
         if len(reason) > 200:
@@ -167,6 +172,7 @@ async def analyze_resume(
             detail=format_failure(FEATURE_NAME_RESUME, reason)
         )
     if not analysis_result:
+        await delete_file_from_storage(db, db_file)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=format_failure(FEATURE_NAME_RESUME, REASON_LLM_EMPTY)
