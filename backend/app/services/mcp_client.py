@@ -63,7 +63,7 @@ class _McpSession:
                     self.url,
                     http_client=http_client,
                     terminate_on_close=True,
-                ) as (read_stream, write_stream, get_sid):
+                ) as (read_stream, write_stream, _get_sid):
                     async with ClientSession(read_stream, write_stream) as session:
                         await session.initialize()
 

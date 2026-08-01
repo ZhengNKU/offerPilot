@@ -28,9 +28,8 @@ websockets>=12.0
 httpx>=0.27
 # pgvector Python 类型映射（Vector(N) 在 SQLAlchemy 中使用）
 pgvector>=0.3
-# 腾讯云 WebSearch MCP 客户端（官方 SDK：sse_client + ClientSession）
-mcp>=1.0
-# MCP SDK 1.28.x 在 import mcp.server.lowlevel 时会直接 import jsonschema
-jsonschema>=4.23
 
-
+# 阿里百炼 WebSearch MCP 客户端（streamable_http + ClientSession）
+# 必须 >=1.10：streamable_http_client 需要返回 3 元组 + 支持 terminate_on_close
+# 锁版本与本地一致，避免 SDK 升级/降级导致 API 不兼容（ValueError: not enough values to unpack）
+mcp==1.27.0
