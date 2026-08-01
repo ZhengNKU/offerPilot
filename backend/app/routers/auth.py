@@ -896,7 +896,8 @@ async def profile_update(
     background_tasks: BackgroundTasks,
     _moderation: None = Depends(moderated("profile", "username", "additional_desc")),
     current_user: models.User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    redis_client: aioredis.Redis = Depends(get_redis)
 ):
     p = current_user.profile
     if not p:
@@ -994,18 +995,35 @@ async def profile_update(
             db.add(insight)
         await db.commit()
 
+        # 目标岗位变更时：先获取生成锁 → 同步删除旧标签+缓存 → 释放锁
+        # 确保前端刷新时不会看到旧数据，也不会与单标签生成竞态
+        from app.services.question_generator import _acquire_gen_lock, _release_gen_lock, _redis_delete, _pg_delete_user_questions
+        if redis_client:
+            await _acquire_gen_lock(redis_client, current_user.id)
+        try:
+            from app.services.knowledge_ability_service import KnowledgeAbilityService
+            await KnowledgeAbilityService.delete_user_abilities(db, current_user.id)
+            await db.commit()
+            if redis_client:
+                await _redis_delete(current_user.id, redis_client)
+            await _pg_delete_user_questions(db, current_user.id)
+            await db.commit()
+            logger.info(f"[profile_update] sync deleted old abilities+cache for user={current_user.id}")
+        finally:
+            if redis_client:
+                await _release_gen_lock(redis_client, current_user.id)
+
+        from app.services.knowledge_ability_service import trigger_knowledge_generation
+        background_tasks.add_task(
+            trigger_knowledge_generation,
+            current_user.id,
+        )
+
         from app.services.advisor_generator import trigger_general_advisor_insights
         background_tasks.add_task(
             trigger_general_advisor_insights,
             current_user.id,
             p.target_role,
-        )
-
-        # 目标岗位变更时，异步重新生成知识库能力卡片
-        from app.services.knowledge_ability_service import trigger_knowledge_generation
-        background_tasks.add_task(
-            trigger_knowledge_generation,
-            current_user.id,
         )
 
     return format_user_profile(current_user)

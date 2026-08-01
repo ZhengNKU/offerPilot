@@ -33,14 +33,50 @@ from app.utils.llm import (
 logger = logging.getLogger(__name__)
 
 # Redis 缓存 TTL：LLM 新生成的数据写入时用。
-# 注意这个 6 小时只对**付费档位**构成「过期即重生成」；免费/内测过期后回落 PG，不触发 LLM。
-REDIS_CACHE_TTL = 6 * 3600  # 6 小时
+# 注意这个 12 小时只对**付费档位**构成「过期即重生成」；免费/内测过期后回落 PG，不触发 LLM。
+REDIS_CACHE_TTL = 12 * 3600  # 12 小时
 
 # 免费/内测用户从 PG 回填 Redis 时的 TTL。纯粹为了省掉重复的 DB 查询，
 # 过期后也只是再查一次 PG，永远不会触发 LLM，所以可以放很长。
 REDIS_CACHE_TTL_STATIC = 7 * 24 * 3600  # 7 天
 
-# 防止同一用户并发重生成（比如 invalidate_and_regenerate 和 get_questions_for_sub_ability 同时触发）
+# ── 生成互斥锁（Redis 分布式锁，跨 worker 安全）─────────────────
+_GEN_LOCK_TTL = 600  # 生成锁 10 分钟超时，防止崩溃导致永久锁
+
+
+async def _acquire_gen_lock(redis_client, user_id: int) -> bool:
+    """获取 Redis 生成锁，返回 True 表示获取成功（可以开始生成）。"""
+    if redis_client is None:
+        return True  # 无 Redis 时降级为放行
+    try:
+        key = f"knowledge:gen:lock:{user_id}"
+        return await redis_client.set(key, "1", nx=True, ex=_GEN_LOCK_TTL)
+    except Exception:
+        return True  # Redis 异常时降级放行，不阻塞业务
+
+
+async def _release_gen_lock(redis_client, user_id: int):
+    """释放 Redis 生成锁。"""
+    if redis_client is None:
+        return
+    try:
+        key = f"knowledge:gen:lock:{user_id}"
+        await redis_client.delete(key)
+    except Exception:
+        pass
+
+
+async def _is_gen_locked(redis_client, user_id: int) -> bool:
+    """检查是否有生成正在进行。"""
+    if redis_client is None:
+        return False  # 无 Redis 时降级为未锁定
+    try:
+        key = f"knowledge:gen:lock:{user_id}"
+        return await redis_client.exists(key) > 0
+    except Exception:
+        return False
+
+# 防止同一用户并发重生成（进程内锁，作为 Redis 锁的补充用于无效化场景）
 _user_regeneration_locks: dict[int, asyncio.Lock] = {}
 
 
@@ -561,6 +597,39 @@ async def _pg_save_batch(
     )
 
 
+async def _pg_save_single(
+    db: AsyncSession, user_id: int, sub_ability_name: str,
+    core_ability_name: str, questions: list[dict],
+):
+    """将单个细化能力的面试题 upsert 到 PG（不删其他行）。
+
+    按 (user_id, sub_ability_name) unique constraint 做 upsert。
+    """
+    # 先查是否存在
+    result = await db.execute(
+        select(models.KnowledgeQuestionCache).where(
+            models.KnowledgeQuestionCache.user_id == user_id,
+            models.KnowledgeQuestionCache.sub_ability_name == sub_ability_name,
+        )
+    )
+    existing = result.scalars().first()
+    if existing:
+        existing.core_ability_name = core_ability_name
+        existing.questions = questions
+    else:
+        db.add(models.KnowledgeQuestionCache(
+            user_id=user_id,
+            sub_ability_name=sub_ability_name,
+            core_ability_name=core_ability_name,
+            questions=questions,
+        ))
+    await db.commit()
+    logger.info(
+        f"[question_generator] PG SAVE SINGLE user={user_id} "
+        f"sub={sub_ability_name!r} questions={len(questions)}"
+    )
+
+
 async def _pg_query_sub(
     db: AsyncSession, user_id: int, sub_ability_name: str
 ) -> list[dict]:
@@ -617,6 +686,234 @@ async def _warm_redis_from_pg(db: AsyncSession, user_id: int, redis_client) -> l
 
 
 # ============================================================================
+# 单标签面试题生成（异步后台任务用）
+# ============================================================================
+
+
+def _build_single_sub_ability_prompt(
+    target_role: str,
+    target_grade: str,
+    experience_years: str,
+    sub_ability_name: str,
+    core_ability_name: str,
+    recalled_text: str,
+    web_context: str = "",
+) -> tuple[str, str]:
+    """构建单标签面试题生成的 system + user prompt。
+
+    仅生成 1 个细化能力的 10 道题，输出格式与批量生成一致但只含 1 个 abilities 元素。
+    返回 (system_prompt, user_content)。
+    """
+    example_json = """{
+  "abilities": [
+    {
+      "sub_ability_name": "缓存穿透",
+      "core_ability_name": "Redis",
+      "questions": [
+        {
+          "title": "如何用布隆过滤器解决缓存穿透？",
+          "freq": 14,
+          "aiAnswer": {
+            "core": "布隆过滤器在缓存层前做第一层拦截，用多个哈希函数判断key是否存在，不存在则直接返回空，避免穿透到DB。",
+            "s": "电商大促时大量请求查询不存在的商品ID，绕过缓存直接打到MySQL，导致DB负载飙升。",
+            "t": "设计一个方案在缓存层前拦截非法key请求，保护下游数据库不被恶意或无效请求击穿。",
+            "a": [
+              "初始化布隆过滤器，将所有合法商品ID预先加载到位数组中",
+              "请求到达时先经过布隆过滤器判断key是否可能存在",
+              "过滤器判定不存在则直接返回空结果，不查询缓存和数据库"
+            ],
+            "r": "缓存穿透率从35%降至0.1%以下，MySQL CPU使用率从90%降至30%。",
+            "keyPoints": ["布隆过滤器","多哈希函数","位数组预加载"],
+            "followUps": ["布隆过滤器误判率如何控制？","如何应对数据新增导致的过滤器更新？"]
+          }
+        }
+      ]
+    }
+  ]
+}"""
+
+    web_block = ""
+    if web_context:
+        web_block = (
+            f"\n真实面经与考点参考（联网检索预取，请据此让题目更贴近当下考察方向）：\n"
+            f"{web_context}\n"
+        )
+
+    system_prompt = (
+        "你是资深AI面试教练。针对以下细化能力知识点，生成10道个性化面试题，"
+        "难度匹配用户职级和年限。\n\n"
+        "【输出格式】严格按照以下JSON结构输出，每个字段都不能省略：\n"
+        f"{example_json}\n\n"
+        "【关键约束】\n"
+        "1. 恰好10道题，每道题总字数200字以内\n"
+        "2. freq从14递减到5（第1题14、第2题13...第10题5）\n"
+        "3. a数组恰好3条，keyPoints恰好2条，followUps恰好2条\n"
+        "4. core字段40-60字概括核心策略\n"
+        "5. sub_ability_name 和 core_ability_name 必须与提供的名称完全一致\n\n"
+        "【JSON语法铁律（违反将导致解析失败）】\n"
+        "- 对象属性之间必须有逗号\n"
+        "- 数组元素之间必须有逗号\n"
+        "- 最后一个元素/属性后面不要加逗号\n"
+        "- 字符串值内如需使用引号请用中文引号「」，严禁用ASCII双引号\n"
+        "- 字符串值内的反斜杠\\必须写成\\\\\n"
+        "- 所有字符串值必须用双引号包裹，不得包含未转义的换行符\n"
+    )
+
+    user_content = (
+        f"目标岗位：{target_role} | 职级：{target_grade} | 经验：{experience_years}\n"
+        f"细化能力：{core_ability_name} → {sub_ability_name}\n"
+        f"上下文参考：\n{recalled_text}\n"
+        f"{web_block}\n"
+        f"请为细化能力「{sub_ability_name}」生成10道紧扣该知识点的面试题。"
+    )
+
+    return system_prompt, user_content
+
+
+async def generate_single_sub_ability_questions(
+    db: AsyncSession,
+    user_id: int,
+    sub_ability_name: str,
+    core_ability_name: str,
+    redis_client=None,
+) -> list[dict]:
+    """为单个细化能力生成 10 道面试题，并合并到 Redis 批量缓存 + 更新 PG。
+
+    流程：
+    1. 读取用户画像
+    2. 向量召回 + 联网预取
+    3. 构建单标签 prompt → 调用 LLM
+    4. 读取 Redis 现有批量缓存，更新/插入对应标签的 10 道题
+    5. 写回 Redis（12h TTL）+ upsert PG 对应行
+
+    返回生成的 10 道题列表。调用方负责先获取 Redis 生成锁。
+    """
+    t0 = asyncio.get_event_loop().time()
+    logger.info(
+        f"[question_generator] SINGLE_GEN START user={user_id} "
+        f"sub={sub_ability_name!r} core={core_ability_name!r}"
+    )
+
+    # 1. 读取用户画像
+    profile_result = await db.execute(
+        select(models.UserProfile).where(models.UserProfile.user_id == user_id)
+    )
+    profile = profile_result.scalars().first()
+    if not profile or not profile.target_role:
+        logger.info(f"[question_generator] SINGLE_GEN user={user_id} no profile, skip")
+        return []
+
+    target_role = profile.target_role or ""
+    target_grade = profile.target_grade or ""
+    experience_years = profile.experience_years or "1-3年"
+
+    # 2. 向量召回 + 联网预取（并行）
+    recall_task = asyncio.create_task(
+        _do_vector_recall(db, user_id, target_role, target_grade, experience_years)
+    )
+    web_task = asyncio.create_task(
+        _prefetch_web_context(target_role, target_grade, experience_years)
+    )
+    recalled_text, web_context = await asyncio.gather(recall_task, web_task)
+    logger.info(
+        f"[question_generator] SINGLE_GEN recall done user={user_id} "
+        f"web_chars={len(web_context)} elapsed={asyncio.get_event_loop().time() - t0:.1f}s"
+    )
+
+    # 3. 构建 prompt + 调用 LLM
+    system_prompt, user_content = _build_single_sub_ability_prompt(
+        target_role, target_grade, experience_years,
+        sub_ability_name, core_ability_name,
+        recalled_text, web_context,
+    )
+
+    payload = {
+        "model": settings.DEEPSEEK_MODEL_FAST,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "response_format": {"type": "json_object"},
+        "temperature": 0.4,
+        "max_tokens": 16000,
+    }
+
+    res_data = await _run_with_optional_tools(
+        payload, False, sync=False, timeout=180.0,
+    )
+    content = res_data["choices"][0]["message"]["content"]
+    elapsed = asyncio.get_event_loop().time() - t0
+    logger.info(
+        f"[question_generator] SINGLE_GEN LLM DONE user={user_id} "
+        f"elapsed={elapsed:.1f}s len={len(content)}"
+    )
+
+    content_clean = _strip_codeblock(content)
+    parsed = _safe_json_parse(content_clean, log_label="question_generator_single")
+
+    if not isinstance(parsed, dict) or "abilities" not in parsed or not parsed["abilities"]:
+        logger.error(
+            f"[question_generator] SINGLE_GEN invalid JSON for user={user_id}: "
+            f"{content_clean[:500]}"
+        )
+        return []
+
+    abilities = parsed["abilities"]
+    ab = abilities[0]
+    questions = _patch_questions(ab.get("questions", []))
+    logger.info(
+        f"[question_generator] SINGLE_GEN parsed user={user_id} "
+        f"sub={sub_ability_name!r} questions={len(questions)}"
+    )
+
+    if not questions:
+        return []
+
+    # 4. 读取 Redis 现有批量缓存，合并更新
+    if redis_client:
+        existing = await _redis_get(user_id, redis_client)
+        if existing and existing.get("abilities"):
+            # 更新对应标签
+            updated = False
+            for ex_ab in existing["abilities"]:
+                if ex_ab.get("sub_ability_name") == sub_ability_name:
+                    ex_ab["core_ability_name"] = core_ability_name
+                    ex_ab["questions"] = questions
+                    updated = True
+                    break
+            if not updated:
+                # 新增标签（理论上不应发生，但做防御处理）
+                existing["abilities"].append({
+                    "sub_ability_name": sub_ability_name,
+                    "core_ability_name": core_ability_name,
+                    "questions": questions,
+                })
+            merged_data = existing
+        else:
+            # 无现有缓存，新建
+            merged_data = {
+                "abilities": [{
+                    "sub_ability_name": sub_ability_name,
+                    "core_ability_name": core_ability_name,
+                    "questions": questions,
+                }],
+                "generated_at": int(asyncio.get_event_loop().time()),
+            }
+        merged_data["from_pg"] = False
+        await _redis_set(user_id, merged_data, redis_client, ttl=REDIS_CACHE_TTL)
+
+    # 5. upsert PG 对应行
+    await _pg_save_single(db, user_id, sub_ability_name, core_ability_name, questions)
+
+    total_elapsed = asyncio.get_event_loop().time() - t0
+    logger.info(
+        f"[question_generator] SINGLE_GEN DONE user={user_id} "
+        f"sub={sub_ability_name!r} total_elapsed={total_elapsed:.1f}s"
+    )
+    return questions
+
+
+# ============================================================================
 # 统一入口：regenerate_and_cache_all_questions
 # ============================================================================
 
@@ -644,91 +941,102 @@ async def regenerate_and_cache_all_questions(
         f"enable_network={enable_network}"
     )
 
-    # 1. 查用户画像
-    profile_result = await db.execute(
-        select(models.UserProfile).where(models.UserProfile.user_id == user_id)
-    )
-    profile = profile_result.scalars().first()
-    if not profile or not profile.target_role:
-        logger.info(f"[question_generator] user={user_id} no profile, skip")
-        return []
-
-    target_role = profile.target_role or ""
-    target_grade = profile.target_grade or ""
-    experience_years = profile.experience_years or "1-3年"
-
-    # 2. 查所有细化能力
-    sub_result = await db.execute(
-        select(models.KnowledgeSubAbility).where(
-            models.KnowledgeSubAbility.user_id == user_id
-        )
-    )
-    sub_abilities = sub_result.scalars().all()
-    if not sub_abilities:
-        logger.info(f"[question_generator] user={user_id} no sub_abilities")
-        return []
-
-    # 查核心能力名映射
-    core_ids = {sa.core_ability_id for sa in sub_abilities}
-    core_result = await db.execute(
-        select(models.KnowledgeCoreAbility).where(
-            models.KnowledgeCoreAbility.id.in_(core_ids)
-        )
-    )
-    core_map = {ca.id: ca.name for ca in core_result.scalars().all()}
-
-    sa_list = [
-        {"core": core_map.get(sa.core_ability_id, ""), "sub": sa.name}
-        for sa in sub_abilities
-    ]
-
-    # 3. 向量召回 + 联网预取（并行执行，合并为 ~4s 而非 ~1.3s + ~4s = ~5.3s）
-    web_context = ""
-    if enable_network:
-        recall_task = asyncio.create_task(
-            _do_vector_recall(db, user_id, target_role, target_grade, experience_years)
-        )
-        web_task = asyncio.create_task(
-            _prefetch_web_context(target_role, target_grade, experience_years)
-        )
-        recalled_text, web_context = await asyncio.gather(recall_task, web_task)
-        recalled_text = recalled_text  # unwrap from gather
+    # 0. 获取 Redis 生成锁（防止与单标签生成并发）
+    if not await _acquire_gen_lock(redis_client, user_id):
         logger.info(
-            f"[question_generator] 联网预取{'命中' if web_context else '空/降级'} "
-            f"user={user_id} chars={len(web_context)}"
+            f"[question_generator] REGENERATE SKIP user={user_id} — "
+            f"generation lock already held by another task"
         )
-    else:
-        recalled_text = await _do_vector_recall(
-            db, user_id, target_role, target_grade, experience_years
-        )
-
-    # 4. 并行 LLM 生成（按核心能力分组）
-    abilities = await _call_llm_batch_parallel(
-        user_id, target_role, target_grade, experience_years, sa_list, recalled_text,
-        enable_network=enable_network, web_context=web_context,
-    )
-
-    if not abilities:
-        logger.error(f"[question_generator] REGENERATE FAILED (empty LLM result) user={user_id}")
         return []
 
-    # 5. 写 Redis
-    cache_data = {
-        "abilities": abilities,
-        "generated_at": int(asyncio.get_event_loop().time()),
-    }
-    if redis_client:
-        await _redis_set(user_id, cache_data, redis_client)
+    try:
+        # 1. 查用户画像
+        profile_result = await db.execute(
+            select(models.UserProfile).where(models.UserProfile.user_id == user_id)
+        )
+        profile = profile_result.scalars().first()
+        if not profile or not profile.target_role:
+            logger.info(f"[question_generator] user={user_id} no profile, skip")
+            return []
 
-    # 6. 写 PG
-    await _pg_save_batch(db, user_id, abilities)
+        target_role = profile.target_role or ""
+        target_grade = profile.target_grade or ""
+        experience_years = profile.experience_years or "1-3年"
 
-    total_elapsed = asyncio.get_event_loop().time() - t0
-    logger.info(
-        f"[question_generator] REGENERATE DONE user={user_id} "
-        f"abilities={len(abilities)} total_elapsed={total_elapsed:.1f}s"
-    )
-    return abilities
+        # 2. 查所有细化能力
+        sub_result = await db.execute(
+            select(models.KnowledgeSubAbility).where(
+                models.KnowledgeSubAbility.user_id == user_id
+            )
+        )
+        sub_abilities = sub_result.scalars().all()
+        if not sub_abilities:
+            logger.info(f"[question_generator] user={user_id} no sub_abilities")
+            return []
+
+        # 查核心能力名映射
+        core_ids = {sa.core_ability_id for sa in sub_abilities}
+        core_result = await db.execute(
+            select(models.KnowledgeCoreAbility).where(
+                models.KnowledgeCoreAbility.id.in_(core_ids)
+            )
+        )
+        core_map = {ca.id: ca.name for ca in core_result.scalars().all()}
+
+        sa_list = [
+            {"core": core_map.get(sa.core_ability_id, ""), "sub": sa.name}
+            for sa in sub_abilities
+        ]
+
+        # 3. 向量召回 + 联网预取（并行执行，合并为 ~4s 而非 ~1.3s + ~4s = ~5.3s）
+        web_context = ""
+        if enable_network:
+            recall_task = asyncio.create_task(
+                _do_vector_recall(db, user_id, target_role, target_grade, experience_years)
+            )
+            web_task = asyncio.create_task(
+                _prefetch_web_context(target_role, target_grade, experience_years)
+            )
+            recalled_text, web_context = await asyncio.gather(recall_task, web_task)
+            recalled_text = recalled_text  # unwrap from gather
+            logger.info(
+                f"[question_generator] 联网预取{'命中' if web_context else '空/降级'} "
+                f"user={user_id} chars={len(web_context)}"
+            )
+        else:
+            recalled_text = await _do_vector_recall(
+                db, user_id, target_role, target_grade, experience_years
+            )
+
+        # 4. 并行 LLM 生成（按核心能力分组）
+        abilities = await _call_llm_batch_parallel(
+            user_id, target_role, target_grade, experience_years, sa_list, recalled_text,
+            enable_network=enable_network, web_context=web_context,
+        )
+
+        if not abilities:
+            logger.error(f"[question_generator] REGENERATE FAILED (empty LLM result) user={user_id}")
+            return []
+
+        # 5. 写 Redis
+        cache_data = {
+            "abilities": abilities,
+            "generated_at": int(asyncio.get_event_loop().time()),
+        }
+        if redis_client:
+            await _redis_set(user_id, cache_data, redis_client)
+
+        # 6. 写 PG
+        await _pg_save_batch(db, user_id, abilities)
+
+        total_elapsed = asyncio.get_event_loop().time() - t0
+        logger.info(
+            f"[question_generator] REGENERATE DONE user={user_id} "
+            f"abilities={len(abilities)} total_elapsed={total_elapsed:.1f}s"
+        )
+        return abilities
+    finally:
+        await _release_gen_lock(redis_client, user_id)
 
 
 async def regenerate_with_retry(
@@ -777,6 +1085,58 @@ async def regenerate_with_retry(
 # ============================================================================
 
 
+def _schedule_single_ability_async_refresh(
+    user_id: int,
+    sub_ability_name: str,
+    core_ability_name: str,
+):
+    """后台异步刷新单个细化能力的面试题。
+
+    用 asyncio.create_task 在后台执行，不阻塞当前请求。
+    自行管理 db session、Redis 锁和异常处理。
+    仅当无其他生成任务持有 Redis 锁时才执行。
+    """
+    async def _run():
+        from app.database import async_session, _get_redis_pool
+
+        redis_client = _get_redis_pool()
+
+        # 再次确认锁未被持有（与 get_questions_for_sub_ability 中的检查形成 double-check）
+        if await _is_gen_locked(redis_client, user_id):
+            logger.info(
+                f"[question_generator] ASYNC_SINGLE SKIP user={user_id} "
+                f"sub={sub_ability_name!r} — gen lock held"
+            )
+            return
+
+        # 获取锁
+        if not await _acquire_gen_lock(redis_client, user_id):
+            logger.info(
+                f"[question_generator] ASYNC_SINGLE SKIP user={user_id} "
+                f"sub={sub_ability_name!r} — failed to acquire lock"
+            )
+            return
+
+        try:
+            async with async_session() as db:
+                await generate_single_sub_ability_questions(
+                    db, user_id, sub_ability_name, core_ability_name, redis_client,
+                )
+        except Exception as e:
+            logger.error(
+                f"[question_generator] ASYNC_SINGLE FAILED user={user_id} "
+                f"sub={sub_ability_name!r}: {e}", exc_info=True
+            )
+        finally:
+            await _release_gen_lock(redis_client, user_id)
+
+    asyncio.create_task(_run())
+    logger.info(
+        f"[question_generator] ASYNC_SINGLE SCHEDULED user={user_id} "
+        f"sub={sub_ability_name!r}"
+    )
+
+
 async def get_questions_for_sub_ability(
     db: AsyncSession,
     user_id: int,
@@ -788,11 +1148,16 @@ async def get_questions_for_sub_ability(
     """查询单个细化能力的面试题。
 
     流程按会员档位分叉：
-    - 免费 / 内测：Redis → (未命中) → PG 永久缓存 + 回填 Redis，**不调用 LLM**。
-      仅当该用户 PG 里一条数据都没有（从未生成 / 首次生成失败）时，才放行一次全量生成。
+    - 免费 / 内测：Redis → (命中)直接返回；
+      (未命中) → PG 永久缓存 + 回填 Redis → 返回 PG 数据，
+      同时后台异步生成仅当前标签的 10 道题（如无生成锁）。
     - 付费（PRO/MAX）：Redis → (过期) → 批量重生成（含 3 次重试） → PG 兜底。
 
-    enable_network: 透传到 regenerate_with_retry；模拟面试推荐默认开启。
+    并发互斥：
+    - 全量生成（注册/改岗位）持有 Redis 锁时，不触发单标签异步生成
+    - 单标签异步生成也获取同一把锁，防止同一用户多个标签同时各自触发生成
+
+    enable_network: 透传到 regenerate_with_retry / generate_single_sub_ability_questions。
     """
     # 1. 尝试 Redis
     if redis_client:
@@ -815,28 +1180,80 @@ async def get_questions_for_sub_ability(
     from app.services.quota import can_refresh_knowledge_by_id
 
     if not await can_refresh_knowledge_by_id(db, user_id):
-        abilities = await _warm_redis_from_pg(db, user_id, redis_client)
-        if abilities:
-            for ab in abilities:
-                if ab.get("sub_ability_name") == sub_ability_name:
-                    logger.debug(
-                        f"[question_generator] PG PERMANENT HIT user={user_id} "
-                        f"sub={sub_ability_name!r} (refresh not allowed for this membership)"
+        # 只查当前标签的 PG 数据（不再用 _warm_redis_from_pg 回填全量，
+        # 避免一个标签的回填导致其他标签失去单标签生成机会）
+        pg_questions = await _pg_query_sub(db, user_id, sub_ability_name)
+        if pg_questions:
+            # 查核心能力名
+            core_name = ""
+            sub_result = await db.execute(
+                select(models.KnowledgeSubAbility).where(
+                    models.KnowledgeSubAbility.user_id == user_id,
+                    models.KnowledgeSubAbility.name == sub_ability_name,
+                )
+            )
+            sub_row = sub_result.scalars().first()
+            if sub_row and sub_row.core_ability_id:
+                core_result = await db.execute(
+                    select(models.KnowledgeCoreAbility).where(
+                        models.KnowledgeCoreAbility.id == sub_row.core_ability_id
                     )
-                    return ab.get("questions", [])[:10]
-            # PG 有该用户的数据，只是没有这个标签（新增标签）→ 不为此重跑全量，返回空
-            logger.debug(
-                f"[question_generator] PG PERMANENT MISS user={user_id} "
-                f"sub={sub_ability_name!r}, no regeneration (membership gated)"
+                )
+                core_row = core_result.scalars().first()
+                if core_row:
+                    core_name = core_row.name
+
+            # Redis 过期但从 PG 拿到了数据 → 返回 PG 数据，同时异步生成单标签新题
+            logger.info(
+                f"[question_generator] PG HIT user={user_id} "
+                f"sub={sub_ability_name!r} — scheduling async single-tag regeneration"
+            )
+            if not await _is_gen_locked(redis_client, user_id):
+                _schedule_single_ability_async_refresh(
+                    user_id, sub_ability_name, core_name or ""
+                )
+            else:
+                logger.info(
+                    f"[question_generator] SKIP async single-gen for user={user_id} "
+                    f"sub={sub_ability_name!r} — gen lock held by full regeneration"
+                )
+            return pg_questions[:10]
+        # PG 完全没有该用户任何数据 → 检查锁后异步生成仅当前标签的面试题
+        # （不再触发全量生成；全量生成仅由注册/修改岗位的 trigger_knowledge_generation 负责）
+        if await _is_gen_locked(redis_client, user_id):
+            logger.info(
+                f"[question_generator] user={user_id} PG empty, but gen lock held → "
+                f"skip single-gen for sub={sub_ability_name!r} (full generation in progress)"
             )
             return []
-        # PG 完全没有该用户任何数据 → 属于「首次生成」，放行（不受会员限制）
-        logger.info(
-            f"[question_generator] user={user_id} has no PG questions at all → "
-            f"allowing first-time generation despite membership gate"
+        # 查核心能力名
+        core_name = ""
+        sub_result = await db.execute(
+            select(models.KnowledgeSubAbility).where(
+                models.KnowledgeSubAbility.user_id == user_id,
+                models.KnowledgeSubAbility.name == sub_ability_name,
+            )
         )
+        sub_row = sub_result.scalars().first()
+        if sub_row and sub_row.core_ability_id:
+            core_result = await db.execute(
+                select(models.KnowledgeCoreAbility).where(
+                    models.KnowledgeCoreAbility.id == sub_row.core_ability_id
+                )
+            )
+            core_row = core_result.scalars().first()
+            if core_row:
+                core_name = core_row.name
+        logger.info(
+            f"[question_generator] user={user_id} PG empty → "
+            f"scheduling async single-gen for sub={sub_ability_name!r}"
+        )
+        _schedule_single_ability_async_refresh(
+            user_id, sub_ability_name, core_name or ""
+        )
+        return []
 
-    # 3. Redis 过期/不存在（付费用户或首次生成）→ 批量重生成 + 写 Redis + PG
+    # 3. Redis 过期/不存在（付费用户）→ 批量重生成 + 写 Redis + PG
     lock = _get_user_lock(user_id)
     if lock.locked():
         # 重生成正在进行中（由 invalidate_and_regenerate 或另一个请求触发）

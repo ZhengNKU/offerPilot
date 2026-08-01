@@ -481,12 +481,12 @@ async def _regen_match_rate_task(profile_pk: int, initial_payload: dict) -> None
     Args:
         profile_pk: UserProfile 的主键值（UserProfile 表的主键是 user_id，不是 id）
     """
-    from app.database import AsyncSessionLocal
+    from app.database import async_session
 
     # LLM 调用的硬超时：比前端轮询 30s 略短，保证如果 LLM 真挂了我们能先 fallback
     LLM_TIMEOUT_S = 25.0
 
-    async with AsyncSessionLocal() as db:
+    async with async_session() as db:
         # 重新读 profile（UserProfile 主键是 user_id）
         from sqlalchemy import select
         from app import models

@@ -809,26 +809,32 @@ class KnowledgeAbilityService:
 
 # ── 后台任务触发器 ─────────────────────────────────────────────
 
-# 防止同一用户并发触发生成
-_inflight_generations: set[int] = set()
-
 
 async def trigger_knowledge_generation(user_id: int):
     """后台任务：生成能力标签 → 生成面试题 → 一起入库。
 
     流程：
-    1. LLM 生成能力标签（不写 DB）
-    2. LLM 批量生成所有标签的面试题
-    3. 面试题成功后 → 能力标签入库 + 面试题写 Redis&PG
+    1. 获取 Redis 生成锁（防止与单标签生成并发）
+    2. LLM 生成能力标签（不写 DB）
+    3. LLM 批量生成所有标签的面试题
+    4. 面试题成功后 → 能力标签入库 + 面试题写 Redis&PG
     失败重试 3 次（指数退避）。
+
+    Redis 锁保证：
+    - 同一用户同时只允许一个生成任务运行（全量或单标签）
+    - 锁在 finally 中释放，崩溃后 TTL 自动过期回收
     """
-    # 防止同一用户并发触发生成（同一用户同时只允许一个生成任务运行）
-    if user_id in _inflight_generations:
+    from app.database import _get_redis_pool
+    from app.services.question_generator import _acquire_gen_lock, _release_gen_lock
+
+    redis_client = _get_redis_pool()
+
+    # 获取 Redis 生成锁
+    if not await _acquire_gen_lock(redis_client, user_id):
         logger.info(
-            f"[trigger_knowledge_generation] user={user_id} already generating, skip duplicate"
+            f"[trigger_knowledge_generation] user={user_id} gen lock held by another task, skip"
         )
         return
-    _inflight_generations.add(user_id)
 
     from app.database import async_session
 
@@ -847,10 +853,6 @@ async def trigger_knowledge_generation(user_id: int):
         experience_years = profile.experience_years or "1-3年"
         target_grade = profile.target_grade or ""
 
-        # 复用全局 Redis 连接池（不再每请求新建连接）
-        from app.database import _get_redis_pool
-        redis_client = _get_redis_pool()
-
         for attempt in range(1, 4):
             try:
                 logger.info(
@@ -868,20 +870,28 @@ async def trigger_knowledge_generation(user_id: int):
                 await db.commit()
                 logger.info(f"[trigger_knowledge_generation] cleared all old data for user={user_id}")
 
-                # ② LLM 生成能力标签（不写 DB）
+                # ② LLM 生成细化标签 → 立即入库
                 abilities_data = await KnowledgeAbilityService.generate_abilities_data(
                     target_role, experience_years, target_grade, user_id
                 )
                 if not abilities_data:
                     raise ValueError("abilities_data is empty")
 
-                # ③ 展开为 question_generator 需要的格式
+                await KnowledgeAbilityService.save_abilities_to_db(
+                    db, user_id, abilities_data,
+                    target_role=target_role,
+                    target_grade=target_grade,
+                    experience_years=experience_years,
+                )
+                await db.commit()
+                logger.info(f"[trigger_knowledge_generation] abilities saved to DB for user={user_id}")
+
+                # ③ 展开为 question_generator 需要的格式 → LLM 批量生成面试题 → Redis(12h) + PG
                 sa_list = []
                 for ca in abilities_data:
                     for sub in ca["subs"]:
                         sa_list.append({"core": ca["core"], "sub": sub})
 
-                # ④ LLM 批量生成面试题
                 from app.services.question_generator import (
                     generate_and_cache_with_abilities,
                 )
@@ -893,15 +903,6 @@ async def trigger_knowledge_generation(user_id: int):
                 )
                 if not result:
                     raise ValueError("question generation returned empty")
-
-                # ⑤ 全部成功后 → 能力标签入库（标签和面试题保持一致）
-                await KnowledgeAbilityService.save_abilities_to_db(
-                    db, user_id, abilities_data,
-                    target_role=target_role,
-                    target_grade=target_grade,
-                    experience_years=experience_years,
-                )
-                await db.commit()
 
                 logger.info(
                     f"[trigger_knowledge_generation] DONE user={user_id} "
@@ -918,7 +919,7 @@ async def trigger_knowledge_generation(user_id: int):
                     delay = 2 ** attempt
                     await asyncio.sleep(delay)
     finally:
-        _inflight_generations.discard(user_id)
+        await _release_gen_lock(redis_client, user_id)
 
 
 async def trigger_knowledge_match(user_id: int, issues: list[dict]):
