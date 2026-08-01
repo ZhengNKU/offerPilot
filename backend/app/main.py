@@ -445,7 +445,192 @@ PRESET_FEATURED_GUIDES_SQL: list[str] = [
         category         = EXCLUDED.category
     -- reads/likes/favorites 保留数据库里用户行为产生的真实计数，不被种子覆盖
     """,
-    # 后续追加：复制上面模板改 id=2, title, url, cover_img 即可
+    # ─────────────────────────────────────────────────────────
+    # 2026-08-01 追加：来自 Obsidian 笔记 saas/ai面试教练/功能/精选内容.md
+    # 平台色：小红书 #FF2442（橙红）｜ 抖音 #FE2C55（粉红）
+    # ─────────────────────────────────────────────────────────
+    # id=2: 艾绒职场实现教练 · 面试缺点回答
+    """
+    INSERT INTO featured_guides (
+        id, title, cover_img, platform, platform_badge_bg,
+        duration, url, author, author_avatar, author_verified,
+        fans_count, category, reads, likes, favorites, created_at
+    ) VALUES (
+        2,
+        '猎头教你：面试被问缺点怎么说❓',
+        '/guide/context/2.jpg',
+        '小红书',
+        'bg-[#FF2442]/20 text-[#FF2442] border-[#FF2442]/30',
+        '2:07',
+        'https://www.xiaohongshu.com/explore/6a61e59e0000000011019ef8?xsec_token=ABGT5QOrwpfEaqZbx3AulZoN3j-MWOwUE-dnWBt4gIzpc=&xsec_source=pc_search',
+        '艾绒职场实现教练',
+        '',
+        TRUE,
+        '0',
+        '推荐',
+        0, 0, 0,
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        title            = EXCLUDED.title,
+        cover_img        = EXCLUDED.cover_img,
+        platform         = EXCLUDED.platform,
+        platform_badge_bg= EXCLUDED.platform_badge_bg,
+        duration         = EXCLUDED.duration,
+        url              = EXCLUDED.url,
+        author           = EXCLUDED.author,
+        author_avatar    = EXCLUDED.author_avatar,
+        author_verified  = EXCLUDED.author_verified,
+        fans_count       = EXCLUDED.fans_count,
+        category         = EXCLUDED.category
+    -- reads/likes/favorites 保留数据库里用户行为产生的真实计数，不被种子覆盖
+    """,
+    # id=3: 艾绒职场实现教练 · 面试薪资
+    """
+    INSERT INTO featured_guides (
+        id, title, cover_img, platform, platform_badge_bg,
+        duration, url, author, author_avatar, author_verified,
+        fans_count, category, reads, likes, favorites, created_at
+    ) VALUES (
+        3,
+        '为什么HR不愿意告诉你面试岗位的薪资❓',
+        '/guide/context/3.jpg',
+        '小红书',
+        'bg-[#FF2442]/20 text-[#FF2442] border-[#FF2442]/30',
+        '2:54',
+        'https://www.xiaohongshu.com/explore/6a43b6a8000000000f0065f3?xsec_token=AB0Nn5upg-Wm-1VbmZ0i_AQUBDEDRB8MUaQPc8BNnoeDI=&xsec_source=pc_search',
+        '艾绒职场实现教练',
+        '',
+        TRUE,
+        '0',
+        '推荐',
+        0, 0, 0,
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        title            = EXCLUDED.title,
+        cover_img        = EXCLUDED.cover_img,
+        platform         = EXCLUDED.platform,
+        platform_badge_bg= EXCLUDED.platform_badge_bg,
+        duration         = EXCLUDED.duration,
+        url              = EXCLUDED.url,
+        author           = EXCLUDED.author,
+        author_avatar    = EXCLUDED.author_avatar,
+        author_verified  = EXCLUDED.author_verified,
+        fans_count       = EXCLUDED.fans_count,
+        category         = EXCLUDED.category
+    -- reads/likes/favorites 保留数据库里用户行为产生的真实计数，不被种子覆盖
+    """,
+    # id=4: 艾绒职场实现教练 · offer 退路
+    """
+    INSERT INTO featured_guides (
+        id, title, cover_img, platform, platform_badge_bg,
+        duration, url, author, author_avatar, author_verified,
+        fans_count, category, reads, likes, favorites, created_at
+    ) VALUES (
+        4,
+        '收到offer后，一定要给自己留退路',
+        '/guide/context/4.jpg',
+        '小红书',
+        'bg-[#FF2442]/20 text-[#FF2442] border-[#FF2442]/30',
+        '2:24',
+        'https://www.xiaohongshu.com/explore/6a48d0a6000000000f01d7a2?xsec_token=ABUIyBoIV_fbgVnwMbWFPDk1k_WgNvSvNpiAkCSDvcwaA=&xsec_source=pc_search',
+        '艾绒职场实现教练',
+        '',
+        TRUE,
+        '0',
+        '推荐',
+        0, 0, 0,
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        title            = EXCLUDED.title,
+        cover_img        = EXCLUDED.cover_img,
+        platform         = EXCLUDED.platform,
+        platform_badge_bg= EXCLUDED.platform_badge_bg,
+        duration         = EXCLUDED.duration,
+        url              = EXCLUDED.url,
+        author           = EXCLUDED.author,
+        author_avatar    = EXCLUDED.author_avatar,
+        author_verified  = EXCLUDED.author_verified,
+        fans_count       = EXCLUDED.fans_count,
+        category         = EXCLUDED.category
+    -- reads/likes/favorites 保留数据库里用户行为产生的真实计数，不被种子覆盖
+    """,
+    # id=5: 面试驾到 · 秋招情报站 Vol.1
+    """
+    INSERT INTO featured_guides (
+        id, title, cover_img, platform, platform_badge_bg,
+        duration, url, author, author_avatar, author_verified,
+        fans_count, category, reads, likes, favorites, created_at
+    ) VALUES (
+        5,
+        '🚨面试驾到·秋招情报站 Vol.1',
+        '/guide/context/5.jpg',
+        '小红书',
+        'bg-[#FF2442]/20 text-[#FF2442] border-[#FF2442]/30',
+        '图文笔记',
+        'https://www.xiaohongshu.com/explore/6a69bd0e000000000c0153d4?xsec_token=ABQLqP1kWTDCv8PZDNV_BhNygtLrcQ5d7M4Fz6NR5FsR4=&xsec_source=pc_user',
+        '面试驾到',
+        '',
+        TRUE,
+        '0',
+        '推荐',
+        0, 0, 0,
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        title            = EXCLUDED.title,
+        cover_img        = EXCLUDED.cover_img,
+        platform         = EXCLUDED.platform,
+        platform_badge_bg= EXCLUDED.platform_badge_bg,
+        duration         = EXCLUDED.duration,
+        url              = EXCLUDED.url,
+        author           = EXCLUDED.author,
+        author_avatar    = EXCLUDED.author_avatar,
+        author_verified  = EXCLUDED.author_verified,
+        fans_count       = EXCLUDED.fans_count,
+        category         = EXCLUDED.category
+    -- reads/likes/favorites 保留数据库里用户行为产生的真实计数，不被种子覆盖
+    """,
+    # id=6: 面试驾到 · 提前批
+    """
+    INSERT INTO featured_guides (
+        id, title, cover_img, platform, platform_badge_bg,
+        duration, url, author, author_avatar, author_verified,
+        fans_count, category, reads, likes, favorites, created_at
+    ) VALUES (
+        6,
+        '现在立刻马上！放下你手里的行测题！提前批看',
+        '/guide/context/6.jpg',
+        '小红书',
+        'bg-[#FF2442]/20 text-[#FF2442] border-[#FF2442]/30',
+        '图文笔记',
+        'https://www.xiaohongshu.com/explore/6a6d69d70000000005020694?xsec_token=ABN2yZVKDlcOI6M6ZlG3BwdsFiXI4aB1KKNwW9d7cy1UQ=&xsec_source=pc_user',
+        '面试驾到',
+        '',
+        TRUE,
+        '0',
+        '推荐',
+        0, 0, 0,
+        NOW()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        title            = EXCLUDED.title,
+        cover_img        = EXCLUDED.cover_img,
+        platform         = EXCLUDED.platform,
+        platform_badge_bg= EXCLUDED.platform_badge_bg,
+        duration         = EXCLUDED.duration,
+        url              = EXCLUDED.url,
+        author           = EXCLUDED.author,
+        author_avatar    = EXCLUDED.author_avatar,
+        author_verified  = EXCLUDED.author_verified,
+        fans_count       = EXCLUDED.fans_count,
+        category         = EXCLUDED.category
+    -- reads/likes/favorites 保留数据库里用户行为产生的真实计数，不被种子覆盖
+    """,
+    # 2026-08-01 临时下架：若不游视频（id=7、8）已删除种子；DB 里现存数据需手动 DELETE FROM featured_guides WHERE id IN (7,8);
+    # 后续追加：复制上面模板改 id=N, title, url, cover_img 即可
 ]
 
 
