@@ -24,6 +24,7 @@ except Exception as _e:
     _MEMORY_LOADED = False
     _memory_router = None
 from app.utils.cleanup import run_periodic_cleanup, run_periodic_log_cleanup, cleanup_old_logs
+from app.utils.cleanup import run_periodic_pending_presign_cleanup
 
 from fastapi import Request
 import time
@@ -108,8 +109,11 @@ try:
 except Exception as _e:
     logging.warning(f"[main] 日志启动轮转失败: {_e}")
 
-# 抑制 watchfiles 的 verbose 日志
+# 抑制高频噪音 logger:watchfiles + httpx(HTTP Request 日志) + httpcore(底层)
+# 这些库默认 INFO 级会把每次 embedding/MCP 调用都打一行,污染日志。
 logging.getLogger("watchfiles").setLevel(logging.WARNING)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # 启动期打印当前日志目录，便于运维核对路径（容器内 /app/logs ↔ 宿主机 /data/logs）
 logging.info("[main] 日志目录 = %s (Docker 部署下此目录对应宿主机 /data/logs)", log_dir)
@@ -129,6 +133,10 @@ async def log_requests(request: Request, call_next):
       - 慢请求(>= 1s)打,标 slow
       - 其余 200/OK 直接 pass,不打
     高频心跳/探活路径永远是 200 也不打。
+
+    2026-08-02 改:已知外部探测 / AI 面试辅助浏览器扩展盲打的路径,
+    当 Authorization 头为空(Auth: None)时静默不打 ERR 日志;
+    合法请求只要带了 token 仍正常记录,不被误伤。
     """
     start_time = time.time()
     response = await call_next(request)
@@ -146,6 +154,25 @@ async def log_requests(request: Request, call_next):
 
     auth_header = request.headers.get("Authorization", "None")
     auth_prefix = auth_header[:15] if auth_header != "None" else "None"
+
+    # 已知外部探测 / AI 面试辅助扩展盲打路径(Authorization 头为空时静默)
+    # 前缀:/api/v1/* —— 项目本身无任何 v1 路由,所有 v1 命中都是外部探测
+    # 精确:与同类 SaaS(Cluely/FinalRoundAI/InterviewCoder)标配路径重名的项目路由
+    _PROBE_PREFIXES = ("/api/v1/",)
+    _PROBE_EXACT = frozenset({
+        "/api/generate",
+        "/api/counselor/advisor-insights",
+        "/api/memory/knowledge/abilities",
+        "/api/counselor/sessions",
+        "/api/memory/projects",
+        "/api/memory/knowledge/questions",
+    })
+    if auth_prefix == "None" and (
+        path in _PROBE_EXACT
+        or any(path.startswith(p) for p in _PROBE_PREFIXES)
+    ):
+        return response
+
     tag = "ERR" if is_error else "SLOW"
     logging.info(
         f"Request[{tag}]: {request.method} {path} | "
@@ -235,6 +262,8 @@ async def startup_event():
 
     # 启动后台定期清理任务
     asyncio.create_task(run_periodic_cleanup())
+    # 2026-08 引入：pending presign 清理(每 6h 跑一次,见 cleanup.py)
+    asyncio.create_task(run_periodic_pending_presign_cleanup())
     # 启动后台定期日志清理任务（LOG_RETENTION_DAYS 之外的旧日志自动清理）
     asyncio.create_task(run_periodic_log_cleanup())
     # 启动时立即异步清理一次历史孤立日志（把 backupCount 调小后目录里残留的旧文件清掉）

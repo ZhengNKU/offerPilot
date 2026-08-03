@@ -276,3 +276,77 @@ async def run_periodic_cleanup():
         except Exception:
             logger.exception("文件清理任务异常")
         await asyncio.sleep(interval_seconds)
+
+
+# ──────────── presign-upload pending 清理（2026-08 引入）────────────
+async def cleanup_pending_presigns() -> int:
+    """清 status='pending' 且超 TTL 的 presign-upload 行。
+
+    目的：用户 presign 拿到 PUT URL 后断网 / 关 tab / finalize 失败,
+          留下一条 'pending' 行指向已上传(或未上传)的 COS 对象。
+          此函数兜底:
+            1) 删 COS 里 cos_key 对应的对象(若存在)
+            2) 删 DB 里的 pending 行
+
+    保护:
+      - 仅 ENVIRONMENT == 'production' 才执行(保护 dev 调试不被自动删)
+      - 沿用 ORPHAN_SKIP_RECENT_SECONDS 跳过最新 N 秒(防 finalize 正在提交时被误删)
+    """
+    if settings.ENVIRONMENT != "production":
+        logger.info(
+            "ENVIRONMENT=%s, 跳过 pending presign 清理（仅 production 执行）",
+            settings.ENVIRONMENT,
+        )
+        return 0
+
+    threshold = datetime.utcnow() - timedelta(
+        minutes=settings.FILE_PRESIGN_PENDING_TTL_MIN
+    )
+
+    deleted = 0
+    client = get_cos_client()
+    async with async_session() as db:
+        res = await db.execute(
+            select(models.UploadedFile).where(
+                models.UploadedFile.status == "pending",
+                models.UploadedFile.created_at < threshold,
+            )
+        )
+        for db_file in res.scalars().all():
+            cos_key = db_file.cos_key
+            # 1) 先删 COS 对象(可能不存在,delete_object 对 NotFound 不报错——SDK 默认行为)
+            try:
+                await asyncio.to_thread(
+                    client.delete_object, Bucket=cos_bucket, Key=cos_key
+                )
+            except Exception:
+                # COS 临时错误:不删 DB 行,等下轮重试。否则会出现"DB 删了但 COS 还在"
+                logger.exception("pending presign 删 COS 失败 file_id=%s key=%s", db_file.id, cos_key)
+                continue
+            # 2) COS 删成功后再清 DB 行
+            try:
+                fid = db_file.id
+                await db.delete(db_file)
+                await db.commit()
+                deleted += 1
+                logger.info("pending presign 超时已清 file_id=%s key=%s", fid, cos_key)
+            except Exception:
+                logger.exception("pending presign DB 行删失败 file_id=%s", db_file.id)
+
+    return deleted
+
+
+async def run_periodic_pending_presign_cleanup():
+    """每 6 小时跑一次 pending presign 清理。
+
+    比 run_periodic_cleanup(24h) 更频繁,因为 pending 文件快速堆积风险更高
+    (用户关 tab / 断网都会立刻留下一行 pending)。
+    """
+    interval = 6 * 3600
+    logger.info("pending presign 清理任务已启动,周期 %sh", interval // 3600)
+    while True:
+        try:
+            await cleanup_pending_presigns()
+        except Exception:
+            logger.exception("pending presign 清理异常")
+        await asyncio.sleep(interval)

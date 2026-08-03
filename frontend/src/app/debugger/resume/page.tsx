@@ -360,6 +360,7 @@ function ResumeAnalysisPageContent() {
   ];
 
   const workExperiences = analysisResult?.work_experiences || DEFAULT_WORK_EXPERIENCES;
+  const personalProjects = analysisResult?.personal_projects || [];
 
   const DEFAULT_RISKS = [
     { title: "核心业绩缺少量化指标", desc: "在字节跳动开发推荐服务时，未明确写出提升了多少吞吐量或降低了多少毫秒耗时。高水平架构师极度看重数据支撑。", severity: "高风险" },
@@ -1155,6 +1156,87 @@ function ResumeAnalysisPageContent() {
                           </div>
                         </div>
                       ))}
+                    </div>
+
+                    {/* ── 个人项目经历（个人项目 / Side Project / 开源 / 毕业设计 等）── */}
+                    <div className="space-y-6 pt-4 mt-2 border-t border-slate-200 dark:border-white/5">
+                      <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-white/5">
+                        <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-base text-rose-600 dark:text-[#FF7A95]">rocket_launch</span>
+                          个人项目经历
+                        </h4>
+                        <span className="text-[10px] text-slate-400 dark:text-white/30 font-bold font-mono">
+                          {personalProjects.length > 0 ? `${personalProjects.length} 个项目` : ""}
+                        </span>
+                      </div>
+
+                      {personalProjects.length === 0 ? (
+                        <div className="text-center py-6 text-slate-400 dark:text-white/30 text-sm font-semibold">
+                          无
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          {personalProjects.map((proj, projIdx) => (
+                            <div key={projIdx} className="space-y-3.5 text-left">
+                              <div className="flex justify-between items-center text-xs font-bold font-mono">
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  <span className="text-sm font-black text-slate-900 dark:text-white">{proj.name}</span>
+                                  {proj.tech_stack && proj.tech_stack.length > 0 && (
+                                    <span className="text-slate-500 dark:text-white/45">
+                                      {proj.tech_stack.join(" · ")}
+                                    </span>
+                                  )}
+                                </div>
+                                {proj.period && (
+                                  <span className="text-slate-400 dark:text-white/30 shrink-0">{proj.period}</span>
+                                )}
+                              </div>
+
+                              <div className="space-y-2.5">
+                                {proj.bullets.map((bullet: any, bullIdx: number) => {
+                                  const isOriginal = viewMode === "original";
+                                  const textContent = isOriginal ? bullet.originalText : bullet.optimizedText;
+                                  const badgeLabel = isOriginal ? bullet.originalTag : bullet.optimizedTag;
+                                  const badgeStyle = (isOriginal ? bullet.originalTagClass : bullet.optimizedTagClass) ||
+                                    (badgeLabel === "风险"
+                                      ? "text-rose-700 bg-rose-50 border-rose-200 dark:text-[#FF7A95] dark:bg-[#FF7A95]/10 dark:border-[#FF7A95]/20"
+                                      : "text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-[#5DECCB] dark:bg-[#5DECCB]/10 dark:border-[#5DECCB]/20");
+                                  const isRisk = isOriginal && bullet.originalTag === "风险";
+
+                                  return (
+                                    <div
+                                      key={bullIdx}
+                                      className={`p-3.5 rounded-xl border text-xs md:text-sm flex flex-col gap-2 relative transition-all duration-300 ${
+                                        isOriginal
+                                          ? isRisk
+                                            ? "bg-rose-50/50 dark:bg-red-950/[0.04] border-rose-200 dark:border-red-500/10 hover:border-rose-300 dark:hover:border-red-500/20"
+                                            : "bg-indigo-50/40 dark:bg-emerald-950/[0.04] border-indigo-100 dark:border-emerald-500/10 hover:border-indigo-200 dark:hover:border-emerald-500/20"
+                                          : "bg-emerald-50/50 dark:bg-emerald-950/[0.08] border-emerald-200 dark:border-emerald-500/15 hover:border-emerald-300 dark:hover:border-emerald-500/30"
+                                      }`}
+                                    >
+                                      <div className="flex justify-between items-start gap-4">
+                                        <p className="text-[13px] md:text-sm leading-relaxed text-slate-800 dark:text-white font-semibold flex-1">
+                                          {textContent}
+                                        </p>
+                                        <span className={`px-2.5 py-0.5 rounded text-xs font-black uppercase border shrink-0 ${badgeStyle}`}>
+                                          {badgeLabel}
+                                        </span>
+                                      </div>
+
+                                      {isOriginal && bullet.originalDesc && (
+                                        <div className="resume-bullet-explain flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400 font-bold border-t border-slate-200 dark:border-white/5 pt-2 mt-1">
+                                          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isRisk ? "bg-amber-500" : "bg-emerald-500"}`} />
+                                          <span>{bullet.originalDesc}</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

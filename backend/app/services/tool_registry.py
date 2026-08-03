@@ -458,5 +458,5 @@ async def dispatch_tool(name: str, args: dict, ctx: ToolCtx) -> tuple[str, str]:
         log.error(f"[tool_registry] {name} handler 异常 after {elapsed_ms}ms: {e!r}")
         return f"（{name} 执行失败：{e!r}）", "error"
     elapsed_ms = int((time.monotonic() - t0) * 1000)
-    log.info(f"[tool_registry] {name} returned {len(result or '')} chars in {elapsed_ms}ms")
+    log.debug(f"[tool_registry] {name} returned {len(result or '')} chars in {elapsed_ms}ms")
     return result or "", "ok"

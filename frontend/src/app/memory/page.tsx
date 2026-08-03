@@ -562,14 +562,14 @@ export default function CareerMemoryDashboard() {
     }
   }, [auth.isLoggedIn]);
 
-  // 当处于 AI 建议生成中状态时，开启每 3 秒一次的自动轮询拉取
+  // 当处于 AI 建议生成中状态时，开启每 5 秒一次的自动轮询拉取
   useEffect(() => {
     if (!advisorInsights || advisorInsights.status !== "generating" || !auth.isLoggedIn) {
       return;
     }
     const timer = setTimeout(() => {
       fetchAdvisorInsights();
-    }, 3000);
+    }, 5000);
     return () => clearTimeout(timer);
   }, [advisorInsights?.status, fetchAdvisorInsights, auth.isLoggedIn]);
 
@@ -776,7 +776,7 @@ export default function CareerMemoryDashboard() {
     // 第一次查询
     const result = await fetchKnowledgeQuestions(cat, name, false);
 
-    // 无数据且无错误 → 后台任务尚未生成完成，启动 2s 轮询
+    // 无数据且无错误 → 后台任务尚未生成完成，启动 7s 轮询
     if (!result.hasData && !result.hasError) {
       setKnowledgeLoading(true);  // 保持 loading 态
       pollTimerRef.current = setInterval(async () => {
@@ -785,7 +785,7 @@ export default function CareerMemoryDashboard() {
           clearInterval(pollTimerRef.current);
           pollTimerRef.current = null;
         }
-      }, 2000);
+      }, 7000);
     }
   }, [fetchKnowledgeQuestions]);
 
@@ -859,7 +859,7 @@ export default function CareerMemoryDashboard() {
 
     const timer = setTimeout(() => {
       fetchKnowledgeAbilities();
-    }, 30000);  // 30s：知识库生成通常 1-2 分钟，30s 一次兼顾响应速度和请求量
+    }, 20000);  // 20s：知识库生成通常 1-2 分钟，20s 一次兼顾响应速度和请求量
     return () => clearTimeout(timer);
   }, [
     activeTab,
@@ -3597,10 +3597,13 @@ export default function CareerMemoryDashboard() {
 
             {knowledgeLoading ? (
               /* Loading view */
-              <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center px-6">
                 <img src="/loading.gif" alt="loading" className="w-10 h-10 object-contain" />
-                <p className="text-sm text-on-surface-variant/70 font-semibold animate-pulse">
+                <p className="text-base text-on-surface-variant/70 font-semibold animate-pulse">
                   AI 正在深度检索该知识点的 Top10 面试高频问题与解析...
+                </p>
+                <p className="text-sm text-on-surface-variant/45 font-semibold leading-relaxed max-w-xs">
+                  新用户注册或目标岗位变更后，系统会为该岗位下所有标签板块全量生成高频面试题，请耐心等待。
                 </p>
               </div>
             ) : knowledgeQuestionsError ? (

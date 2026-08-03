@@ -1012,10 +1012,10 @@ async def upload_audio(
     # Enforce format constraints
     filename = file.filename or ""
     ext = filename.split('.')[-1].lower() if '.' in filename else ""
-    if ext not in ["wav", "mp3"]:
+    if ext not in ["wav", "mp3", "ogg"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="上传失败，录音仅支持 WAV 或 MP3 格式"
+            detail="上传失败，录音仅支持 WAV、MP3 或 OGG 格式"
         )
 
     # Save the session with optional user association

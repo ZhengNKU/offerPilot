@@ -246,6 +246,18 @@ class UploadedFile(Base):
         comment="上传时锁定的保留天数；NULL=老数据/兜底30天"
     )
 
+    # presign-upload 直传方案（2026-08 引入）
+    # status: presign-upload 时 'pending'(等 PUT + finalize), finalize 成功后 'finalized'
+    # presign_token: 最后一次 presign 的一次性 token, finalize 时校验并清空
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="finalized", server_default="finalized",
+        comment="presign 直传状态: 'pending' / 'finalized'",
+    )
+    presign_token: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, default=None,
+        comment="最后一次 presign 的一次性 token, finalize 校验后清空",
+    )
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 

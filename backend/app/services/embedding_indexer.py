@@ -503,7 +503,7 @@ async def _upsert_chunks(
             # 用 bulk insert（不走 ORM 关系，性能更好）
             await db.execute(models.UserAnalysisEmbedding.__table__.insert(), rows)
             await db.commit()
-            logger.info(
+            logger.debug(
                 f"[indexer] indexed user_id={user_id} source={source_type}/{source_id} "
                 f"chunks={len(rows)}"
             )
@@ -709,7 +709,7 @@ async def _upsert_chunks_with_vectors(
             ]
             await db.execute(models.UserAnalysisEmbedding.__table__.insert(), rows)
             await db.commit()
-            logger.info(
+            logger.debug(
                 f"[indexer] indexed user_id={user_id} source={source_type}/{source_id} chunks={len(rows)}"
             )
             return True

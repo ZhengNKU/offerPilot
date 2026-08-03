@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 import uuid
 import asyncio
-import io
+import secrets
 from datetime import datetime
 from typing import Optional
 from qcloud_cos import CosConfig, CosS3Client
@@ -84,122 +84,60 @@ async def delete_file_shared(file_id: int, db: AsyncSession, current_user: Optio
     await delete_file_from_storage(db, db_file)
     return {"message": "文件删除成功"}
 
-@router.post("/upload")
-async def upload_file(
-    file: UploadFile = File(...),
-    file_type: str = Form("audio"), # "audio" or "resume"
+# ───────────── presigned PUT 直传（2026-08 引入）─────────────
+# 流程:
+#   1. 浏览器 POST /api/file/presign-upload → 拿到 {upload_url, cos_key, presign_token}
+#   2. 浏览器 PUT upload_url(直传 COS,不经 FastAPI)
+#   3. 浏览器 POST /api/file/finalize {cos_key, presign_token} → 落 DB,签 1h download URL
+# 替换原 POST /api/file/upload,目标:50MB 文件上传 84s → 5-15s,后端内存 ≈0。
+
+class PresignUploadRequest(BaseModel):
+    file_type: str           # "audio"|"resume"|"screenshot"
+    filename: str            # 原始文件名(只取 basename,sanitized by FastAPI)
+    content_type: str        # MIME,如 "audio/wav" / "application/pdf"
+    content_length: int      # 字节数,>0
+
+
+@router.post("/presign-upload")
+async def presign_upload(
+    req: PresignUploadRequest,
     db: AsyncSession = Depends(get_db),
-    current_user: Optional[models.User] = Depends(get_current_user_optional)
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):
-    # Enforce size limits: 5MB for resume/screenshot, 50MB for audio
-    if file_type in ("resume", "screenshot"):
-        max_size_bytes = 5 * 1024 * 1024
+    """签名 15 分钟 presigned PUT URL,给前端直传 COS。"""
+    # ── 1. content_length 校验(不读 body,纯 metadata 校验)──
+    if req.content_length <= 0:
+        raise HTTPException(400, "content_length 必须 > 0")
+    if req.file_type in ("resume", "screenshot"):
+        max_size = 5 * 1024 * 1024
     else:
-        max_size_bytes = 50 * 1024 * 1024
-    if file.size and file.size > max_size_bytes:
-        limit_desc = "5MB" if file_type in ("resume", "screenshot") else "50MB"
+        max_size = 50 * 1024 * 1024
+    if req.content_length > max_size:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"上传的文件大小不能超过 {limit_desc}"
+            400, f"文件不能超过 {max_size // 1024 // 1024}MB"
         )
 
-    # Validate formats based on file_type
-    filename = file.filename or ""
-    ext = filename.split('.')[-1].lower() if '.' in filename else ""
-    if file_type == "audio":
-        if ext not in ["wav", "mp3"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="录音仅支持 WAV 或 MP3 格式"
-            )
-    elif file_type == "resume":
-        if ext not in ["pdf", "docx"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="简历仅支持 PDF 或 DOCX 格式"
-            )
-    elif file_type == "screenshot":
-        if ext not in ["jpg", "png"]:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="图片仅支持 JPG 或 PNG 格式"
-            )
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="不支持的文件类型"
-        )
+    # ── 2. ext 校验(扩展名白名单,跟旧 upload 同款) ──
+    ext = req.filename.rsplit(".", 1)[-1].lower() if "." in req.filename else ""
+    allowed = {
+        "audio": {"wav", "mp3", "ogg"},
+        "resume": {"pdf", "docx"},
+        "screenshot": {"jpg", "png"},
+    }
+    if ext not in allowed.get(req.file_type, set()):
+        raise HTTPException(400, f"不支持的格式 .{ext}")
 
-    # Generate unique COS Key
-    unique_id = str(uuid.uuid4())
-    cos_key = f"uploads/{unique_id}_{filename}"
-    
-    # Read file content
-    try:
-        content = await file.read()
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"文件读取失败: {str(e)}"
-        )
+    # ── 3. 生成 cos_key + 一次性 presign_token ──
+    #    cos_key 格式与原 upload 一致,方便最终清理脚本兼容
+    cos_key = f"uploads/{uuid.uuid4()}_{req.filename}"
+    presign_token = secrets.token_urlsafe(32)  # 一次性,用完即清
 
-    # 体验反馈截图不再调用腾讯云 IMS 图片审核,仅保留格式/大小校验后上传。
-
-    # Upload to COS via multipart-capable helper (auto-chunks files >= 10MB so a
-    # single stalled chunk does not kill the entire upload on slow links).
-    # ServerSideEncryption='AES256' = SSE-COS（腾讯托管密钥），代码层显式声明，
-    # 不依赖桶配置是否开启默认加密。
-    try:
-        client = get_cos_client()
-        await asyncio.to_thread(
-            client.upload_file_from_buffer,
-            Bucket=bucket,
-            Key=cos_key,
-            Body=io.BytesIO(content),
-            ServerSideEncryption='AES256',
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"上传到腾讯云对象存储失败: {str(e)}"
-        )
-
-    # File URL — DB 永远只存**非签名**的 cos 路径（消除"DB 泄漏 = 1h 签名 URL 即明文"风险）。
-    # 签名 URL 仅在 upload 响应里下发一次（前端立即可播，1h 后失效），后续访问走 /api/file/presign。
-    # Bucket 是私有的，外部没有 SecretKey 无法直接 fetch 非签名 URL，所以安全性有保证。
-    cos_path_url = f"https://{bucket}.cos.{region}.myqcloud.com/{cos_key}"
-
-    # 同事务里给前端下发的"新鲜签名 URL"，仅本次响应有效，1h 后过期。
-    presigned_url: Optional[str] = None
-    try:
-        client = get_cos_client()
-        presigned_url = await asyncio.to_thread(
-            client.get_presigned_download_url,
-            Bucket=bucket,
-            Key=cos_key,
-            Expired=3600,
-        )
-    except Exception as e:
-        # 签名失败也不阻塞上传（DB 记录仍然有非签名 URL；前端可调 /api/file/presign 重试）
-        import logging as _logging
-        _logging.getLogger(__name__).warning(f"presigned URL 生成失败: {e}")
-
-    # Save to database（只存非签名 cos 路径）
-    # retention_days 锁定**上传时**的档位 → 后续用户升降级不影响本文件保留期。
-    #
-    # 语义：
-    #   - 30 = 免费档上传（audio/resume）
-    #   - 60 = 内测档上传（audio/resume）
-    #   - 0  = 访客上传（audio/resume，cleanup 立即删）
-    #   - None = 截图（cleanup 永远不删截图，retention_days 对其无意义，留 NULL）
-    if file_type == "screenshot":
-        # 截图不参与自动清理（cleanup.py WHERE 里 file_type != 'screenshot' 显式排除），
-        # retention_days 字段对截图无意义，留 NULL 避免误导后续读这段代码的人。
-        retention_days = None
+    # ── 4. 写 status='pending' 行(马上能被 track_pending 看到) ──
+    #    retention_days 跟旧 upload 同款四档语义
+    if req.file_type == "screenshot":
+        retention_days = None  # 截图永不参与 cleanup
     elif current_user is None:
-        retention_days = 0   # 访客文件：cleanup 立即删
+        retention_days = 0     # 访客:cleanup 立即删
     elif current_user.membership == "test":
         retention_days = settings.FILE_RETENTION_DAYS_TEST
     else:
@@ -207,27 +145,168 @@ async def upload_file(
 
     db_file = models.UploadedFile(
         user_id=current_user.id if current_user else None,
-        filename=filename,
+        filename=req.filename,
         cos_key=cos_key,
-        file_url=cos_path_url,  # DB 存非签名 URL，**不再是 1h-bomb**
-        file_size=len(content),
-        file_type=file_type,
+        file_url=f"https://{bucket}.cos.{region}.myqcloud.com/{cos_key}",
+        file_size=req.content_length,  # 临时值,finalize 时被 head_object 真实长度覆盖
+        file_type=req.file_type,
         retention_days=retention_days,
+        status="pending",
+        presign_token=presign_token,
     )
     db.add(db_file)
+    await db.commit()
+    await db.refresh(db_file)
+
+    # ── 5. 签 PUT URL ──
+    #    Headers 写进签名:浏览器 PUT 时必须发送同样的 Content-Type/Content-Length
+    #    注:get_presigned_url SDK 不支持 ServerSideEncryption kwarg;
+    #        SSE 由桶层"默认加密"配置或 X-COS-Server-Side-Encryption header 控制
+    #    注:get_presigned_url 返回单字符串,不是 tuple
+    client = get_cos_client()
+    upload_url = await asyncio.to_thread(
+        client.get_presigned_url,
+        Bucket=bucket,
+        Key=cos_key,
+        Method="PUT",
+        Expired=settings.FILE_PRESIGN_UPLOAD_EXPIRED,
+        Headers={
+            "Content-Type": req.content_type,
+            "Content-Length": str(req.content_length),
+        },
+    )
+
+    return {
+        "upload_url": upload_url,
+        "cos_key": cos_key,
+        "presign_token": presign_token,
+        "file_id": db_file.id,  # 给前端 track_pending 用
+        "expires_in": settings.FILE_PRESIGN_UPLOAD_EXPIRED,
+        "max_size": max_size,
+    }
+
+
+class FinalizeRequest(BaseModel):
+    cos_key: str
+    presign_token: str
+    filename: str            # 占位(沿用 presign 时存的,防前端伪造)
+    file_type: str           # 占位
+    file_size: int           # 客户端报告值,被 head_object 真实长度覆盖
+
+
+@router.post("/finalize")
+async def finalize_upload(
+    req: FinalizeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional),
+):
+    """前端 PUT 到 COS 成功后调这里:
+       - head_object 校验对象已落盘(拿真实 Content-Length)
+       - 校验 presign_token(防 A 把 B 的 URL 据为己有)
+       - status='pending' → 'finalized', 清 token
+       - 签 1h download URL 返回
+
+    幂等:已 finalized 的行直接返回现有(防止前端断网重试 create 重复行)。
+    """
+    # ── 1. cos_key 路径白名单(防通过 finalize 访问其他对象) ──
+    if not req.cos_key.startswith("uploads/") or ".." in req.cos_key:
+        raise HTTPException(400, "cos_key 路径非法")
+
+    # ── 2. 查 status='pending' 行(行级锁防并发 finalize) ──
+    stmt = (
+        select(models.UploadedFile)
+        .where(
+            models.UploadedFile.cos_key == req.cos_key,
+            models.UploadedFile.status == "pending",
+            models.UploadedFile.user_id == (current_user.id if current_user else None),
+        )
+        .with_for_update()
+    )
+    result = await db.execute(stmt)
+    db_file = result.scalars().first()
+
+    # ── 2.5 找不到 pending 行:可能是已 finalized(幂等返回)或真不存在 ──
+    if not db_file:
+        # 已 finalized:不报错,直接返回现有 final 状态(允许前端断网重试)
+        finalized_stmt = (
+            select(models.UploadedFile)
+            .where(
+                models.UploadedFile.cos_key == req.cos_key,
+                models.UploadedFile.status == "finalized",
+                models.UploadedFile.user_id == (current_user.id if current_user else None),
+            )
+        )
+        finalized_res = await db.execute(finalized_stmt)
+        existing = finalized_res.scalars().first()
+        if existing:
+            # 重新签 1h URL,不重新写 DB 行
+            client = get_cos_client()
+            presigned = await asyncio.to_thread(
+                client.get_presigned_download_url,
+                Bucket=bucket,
+                Key=existing.cos_key,
+                Expired=3600,
+            )
+            return {
+                "file_id": existing.id,
+                "filename": existing.filename,
+                "file_url": presigned,
+                "cos_path": existing.file_url,
+                "file_size": existing.file_size,
+                "file_type": existing.file_type,
+                "idempotent_replay": True,
+            }
+        # 真不存在(或 presign 已超时被 cleanup 删了)
+        raise HTTPException(
+            404, "找不到待 finalize 的上传任务,可能已超时被清理"
+        )
+
+    # ── 3. 校验 presign_token(防 A 把 B 的 URL 据为己有 + 防旧 token 重放) ──
+    #    使用常量时间比较(secrets.compare_digest)避免 timing attack
+    if not secrets.compare_digest(
+        db_file.presign_token or "",
+        req.presign_token,
+    ):
+        raise HTTPException(403, "presign_token 不匹配")
+
+    # ── 4. head_object 校验 COS 真的落盘 ──
+    #    拿真实 Content-Length 覆盖客户端报告值(防客户端造假)
+    client = get_cos_client()
+    try:
+        meta = await asyncio.to_thread(
+            client.head_object, Bucket=bucket, Key=req.cos_key
+        )
+        actual_size = int(meta.get("Content-Length", req.file_size))
+    except Exception as e:
+        # 4xx NotFound = PUT 没真正成功(CORS 失败 / 网络断),保留 pending 等 cleanup 兜底
+        # 5xx = COS 临时错误,同上
+        raise HTTPException(400, f"文件落盘校验失败: {e}")
+
+    # ── 5. 标 finalized, 清 token ──
+    db_file.status = "finalized"
+    db_file.presign_token = None
+    db_file.file_size = actual_size
+    # filename/file_type 沿用 presign 时存的
+
+    # ── 6. 签 1h download URL ──
+    presigned = await asyncio.to_thread(
+        client.get_presigned_download_url,
+        Bucket=bucket,
+        Key=req.cos_key,
+        Expired=3600,
+    )
+
     await db.commit()
     await db.refresh(db_file)
 
     return {
         "file_id": db_file.id,
         "filename": db_file.filename,
-        # 上传响应里**仍然返回签名 URL**（前端拿到即可播，1h 内有效）
-        # 后续要长期访问请调 /api/file/presign?file_id=... 刷新鲜签名
-        "file_url": presigned_url or cos_path_url,
-        "file_size": db_file.file_size,
+        "file_url": presigned,
+        "cos_path": db_file.file_url,
+        "file_size": actual_size,
         "file_type": db_file.file_type,
-        # 额外字段：DB 里的非签名 cos 路径，前端可存这个 + 调 /api/file/presign 续期
-        "cos_path": cos_path_url,
+        "idempotent_replay": False,
     }
 
 @router.delete("/delete")

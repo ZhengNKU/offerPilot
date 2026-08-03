@@ -10,6 +10,7 @@ import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components
 import Footer from "@/components/Footer";
 import { API_BASE } from "@/lib/api";
 import { trackPendingFile, untrackPendingFile } from "@/utils/pendingUploads";
+import { uploadDirectToCos } from "@/lib/uploadClient";
 
 const buildPageList = (cur: number, total: number): (number | "…")[] => {
   if (total <= 1) return [1];
@@ -351,7 +352,7 @@ export default function FeedbackPage() {
   };
 
   // Real File Upload to Object Storage (COS)
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -385,57 +386,39 @@ export default function FeedbackPage() {
     const customFilename = `${username}-${timeStr}-${feedbackType}.${ext}`;
     const renamedFile = new File([file], customFilename, { type: file.type });
 
-    const formData = new FormData();
-    formData.append("file", renamedFile);
-    formData.append("file_type", "screenshot");
+    // 2026-08: 改走 presigned PUT 直传 COS,5MB 截图虽然不算大但统一走 SDK
+    //   进度回调由 uploadClient 内部 onProgress 触发,直接驱动 setUploadFile
+    try {
+      const fin = await uploadDirectToCos({
+        file: renamedFile,
+        fileType: "screenshot",
+        onProgress: (percent) => {
+          // 新的 SDK 进度条也已经超过 5%,所以保留这个下限
+          setUploadFile((prev) =>
+            prev ? { ...prev, progress: Math.max(5, percent) } : prev,
+          );
+        },
+      });
 
-    const token = typeof window !== "undefined" ? localStorage.getItem("interviewVar_token") : null;
-
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${API_BASE}/api/file/upload`);
-    if (token) {
-      xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-    }
-
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable) {
-        const percentComplete = Math.round((event.loaded / event.total) * 100);
-        setUploadFile(prev => prev ? { ...prev, progress: Math.max(5, percentComplete) } : null);
+      setUploadedFileUrl(fin.file_url);
+      if (fin.file_id) {
+        setUploadedScreenshotFileId(fin.file_id);
+        // track_pending 必须在 finalize 成功后才调 —— 否则 auto-flush DELETE 会打到未提交的行上
+        trackPendingFile(fin.file_id);
       }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status === 200) {
-        try {
-          const response = JSON.parse(xhr.responseText);
-          setUploadedFileUrl(response.file_url);
-          // 2026-07-25+: 跟踪 pending 截图,切屏/刷新会被 AutoCleanupUploads 自动 DELETE
-          if (response.file_id) {
-            setUploadedScreenshotFileId(response.file_id);
-            trackPendingFile(response.file_id);
-          }
-          setUploadFile(prev => prev ? { ...prev, progress: 100 } : null);
-          setIsUploading(false);
-          auth.triggerToast("截图上传成功！");
-        } catch (err) {
-          auth.triggerToast("解析上传响应失败！", "error");
-          setUploadFile(null);
-          setIsUploading(false);
-        }
-      } else {
-        auth.triggerToast("截图上传失败！", "error");
-        setUploadFile(null);
-        setIsUploading(false);
-      }
-    };
-
-    xhr.onerror = () => {
-      auth.triggerToast("网络错误，截图上传失败！", "error");
+      setUploadFile((prev) => (prev ? { ...prev, progress: 100 } : prev));
+      setIsUploading(false);
+      auth.triggerToast("截图上传成功！");
+    } catch (err: any) {
+      auth.triggerToast(
+        err?.message
+          ? `截图上传失败: ${err.message}`
+          : "网络错误，截图上传失败！",
+        "error",
+      );
       setUploadFile(null);
       setIsUploading(false);
-    };
-
-    xhr.send(formData);
+    }
   };
 
   const removeUploadFile = (e: React.MouseEvent) => {
@@ -1063,9 +1046,11 @@ export default function FeedbackPage() {
                 {/* Upload Screenshot */}
                 <div>
                   <label className="text-sm font-bold text-on-surface mb-2 block">上传截图 (可选)</label>
-                  <div 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="border border-dashed border-white/15 hover:border-white/25 transition-all rounded-xl p-5 flex flex-col items-center justify-center bg-white/[0.01] hover:bg-white/[0.02] cursor-pointer relative overflow-hidden"
+                  <div
+                    onClick={uploadFile ? undefined : () => fileInputRef.current?.click()}
+                    className={`border border-dashed transition-all rounded-xl p-5 flex flex-col items-center justify-center bg-white/[0.01] relative overflow-hidden ${
+                      uploadFile ? "border-white/10" : "border-white/15 hover:border-white/25 cursor-pointer hover:bg-white/[0.02]"
+                    }`}
                   >
                     <input
                       type="file"

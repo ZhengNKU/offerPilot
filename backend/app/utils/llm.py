@@ -747,6 +747,7 @@ async def _run_with_optional_tools(
     timeout: float = 300.0,
     ctx: Optional[dict] = None,
     max_iters: int = 2,
+    disable_thinking: bool = False,
 ) -> dict:
     """通用 LLM 调用 wrapper：可选启用 tool calling（web_search 等）。
 
@@ -761,12 +762,22 @@ async def _run_with_optional_tools(
                     其他路径由内部自适应超时（300s）
         ctx:        tool handler 运行时上下文；None 时仅 web_search 可用
         max_iters:  tool calling 最大迭代轮数
+        disable_thinking:  True 时在 payload 注入 thinking.type=disabled，
+                    用于纯结构化抽取任务（sectionize / highlights / extract_mentions），
+                    跳过 V4-flash 默认的推理输出。详见 _disable_thinking_payload。
 
     Returns:
         OpenAI 兼容 dict：`{"choices": [{"message": {"content": str}}]}`
     """
     # lazy import：避免 utils/llm ↔ tool_registry 形成循环 import
     from app.services.tool_registry import all_tools as _all_tools
+
+    # ── 关闭 V4-flash 默认思考模式 ──────────────────────────────────────
+    # deepseek-v4-flash 默认开启 reasoning 输出（耗时 30-100s，对结构化任务浪费）。
+    # 通过 thinking.type=disabled 显式关闭后，响应直接给 content，省 reasoning_content。
+    # V4-flash 官方文档:thinking.type 必须传 "disabled"/"enabled",不能传布尔值。
+    if disable_thinking:
+        payload = _disable_thinking_payload(payload)
 
     if not enable_network:
         clean_payload = dict(payload)
@@ -796,6 +807,22 @@ async def _run_with_optional_tools(
             "finish_reason": finish_capture.get("reason"),
         }]
     }
+
+
+def _disable_thinking_payload(payload: dict) -> dict:
+    """给 V4-flash payload 注入关闭思考模式的字段(2026-08-02+)。
+
+    V4-flash 默认开启 reasoning,纯结构化任务(sectionize/highlights/extract_mentions)
+    关掉思考后耗时从 30-100s 降到 3-15s,质量无可感知损失。
+
+    注意:
+      - payload 不会被原地修改,先 copy 再注入
+      - 调用方传入的 thinking 字段会被覆盖(避免双重设置)
+      - 必须用 {"type": "disabled"} 对象结构,布尔值会触发 400 类型错误
+    """
+    clean = dict(payload)
+    clean["thinking"] = {"type": "disabled"}
+    return clean
 
 
 async def analyze_interview_dialogue(
@@ -1052,7 +1079,8 @@ async def extract_mentioned_projects(
     }
 
     try:
-        res_data = await _run_with_optional_tools(payload, enable_network)
+        # 2026-08-02+:项目提及抽取是简单 JSON 列表,关思考同样省时
+        res_data = await _run_with_optional_tools(payload, enable_network, disable_thinking=True)
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         parsed = _safe_json_parse(content_clean, log_label="mentions")
@@ -1167,8 +1195,13 @@ async def sectionize_transcript(
     raw_sections: List[Dict[str, Any]] = []
     res_data = None
     try:
-        # sync=True 走 call_llm_sync_with_tools 或 call_llm_sync，与原行为等价
-        res_data = await _run_with_optional_tools(payload, enable_network, sync=True)
+        # sync=False 走流式 call_llm_stream(300s 超时 + 4 次重试)：
+        # 长对话(1 万+字) + 推理模型输出 3-8 段 JSON 经常超过 35s，
+        # 原 sync=True 的 call_llm_sync 固定 35s 读超时会导致必现超时返回空。
+        # 2026-08-02+:纯结构化切分任务,关掉 V4-flash 默认思考(100s → 5-15s)
+        res_data = await _run_with_optional_tools(
+            payload, enable_network, sync=False, disable_thinking=True,
+        )
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
         # DEBUG: log raw content to diagnose empty-content returns
@@ -1375,7 +1408,8 @@ async def generate_transcript_highlights(
     }
 
     # 失败直接向上抛,不再静默返回 []
-    res_data = await _run_with_optional_tools(payload, enable_network)
+    # 2026-08-02+:纯结构化高亮抽取,关掉 V4-flash 思考(75s → 8-15s)
+    res_data = await _run_with_optional_tools(payload, enable_network, disable_thinking=True)
     content = res_data["choices"][0]["message"]["content"]
     content_clean = _strip_codeblock(content)
     parsed = _safe_json_parse(content_clean, log_label="highlights")
@@ -1590,7 +1624,9 @@ async def analyze_resume_text(
         "8. 分析关键词覆盖率（keywords_analysis），找出已覆盖的高频词（current_keywords）和推荐补齐的核心行业热点词（recommended_keywords）。\n"
         "9. 提供 ATS 兼容性各项检测指标结果（ats_checks），每一项包括检测名、状态（通过/警告）及具体指标评分情况。\n"
         "\n"
-        "10. **输出简历的完整结构分析地图（structure_analysis）**：把简历按 7 个固定 section 切片，\n"
+        "10. **提取个人项目经历（personal_projects）**：从简历的「个人项目」「Side Project」「开源贡献」「作品集」「毕业设计」「竞赛项目」「技术博客/专栏」「GitHub 个人仓库」等 section 中，识别出所有独立项目。判定标准见下方「个人项目判定阈值」。每条 personal_project 输出 name / period / tech_stack / bullets（结构与 work_experiences.bullets 一致）。**如果简历中没有个人项目，personal_projects 返回空数组 []，禁止编造。**\n"
+        "\n"
+        "11. **输出简历的完整结构分析地图（structure_analysis）**：把简历按 7 个固定 section 切片，\n"
         "    给出每个 section 的健康度诊断和黄金润色范例。\n"
         "    **关键约束**：\n"
         "    - 7 个 section key 严格使用（顺序固定）：education, work_experience, projects, professional_capability, works_portfolio, business_outcomes, management\n"
@@ -1636,6 +1672,24 @@ async def analyze_resume_text(
         "          \"optimizedText\": \"使用STAR原则优化后、包含量化业绩与大厂架构思维的资深表述\",\n"
         "          \"originalTag\": \"风险/亮点\",\n"
         "          \"originalTagClass\": \"如果是风险请填 'text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20'，如果是亮点请填 'text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20'\", \n"
+        "          \"originalDesc\": \"诊断说明说明为什么是风险或亮点\",\n"
+        "          \"optimizedTag\": \"已优化\",\n"
+        "          \"optimizedTagClass\": \"text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20\"\n"
+        "        }\n"
+        "      ]\n"
+        "    }\n"
+        "  ],\n"
+        "  \"personal_projects\": [\n"
+        "    {\n"
+        "      \"name\": \"个人项目名称（如「XX 个人博客」「GitHub stars 1.2k 的 XX 工具」）\",\n"
+        "      \"period\": \"项目时间段，如 2024.03 - 至今（如简历未写可不填）\",\n"
+        "      \"tech_stack\": [\"React\", \"TypeScript\", \"Vercel\"],\n"
+        "      \"bullets\": [\n"
+        "        {\n"
+        "          \"originalText\": \"原始描述句子（来自简历原文 verbatim）\",\n"
+        "          \"optimizedText\": \"使用STAR原则优化后的资深表述（150-300字）\",\n"
+        "          \"originalTag\": \"风险/亮点\",\n"
+        "          \"originalTagClass\": \"如果是风险请填 'text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20'，如果是亮点请填 'text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20'\",\n"
         "          \"originalDesc\": \"诊断说明说明为什么是风险或亮点\",\n"
         "          \"optimizedTag\": \"已优化\",\n"
         "          \"optimizedTagClass\": \"text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20\"\n"
@@ -1831,6 +1885,21 @@ async def extract_project_experiences(
         "- metrics 只提取简历中明确存在的量化数据，不要编造\n"
         "- tech_stack 只列简历中明确提到的技术名词\n"
         "- 如果简历中某段工作经历主要是日常工作维护而非独立项目，可以不提取为项目\n"
+        "\n"
+        "## 扫描范围（强制约束）\n"
+        "**你必须扫描整个简历的每一个 section**，包括「项目经历」「工作经历」「实习经历」「科研经历」「个人项目」「开源贡献」「作品集」等。\n"
+        "不论该条目出现在哪个 section，只要它描述的是一个独立项目，就必须提取为一条 project。\n"
+        "\n"
+        "判定为「独立项目」的宽松阈值（满足以下任一条件即可，候选人的很多项目化工作就放在工作/实习/个人项目 section 里）：\n"
+        "- 有明确的项目名称、代号或作品名（如「XX 系统」「XX App」「GitHub 仓库名」）\n"
+        "- 有清晰的目标/背景/痛点描述（即使只有一句话）\n"
+        "- 有技术栈（≥ 1 个技术名词，如 Spring Boot、React、TensorFlow 等）\n"
+        "- 有量化产出（QPS/用户量/延迟/成本节省/转化率 等具体数字）\n"
+        "- 有明确的起止周期或里程碑\n"
+        "- 描述里有「负责/主导/独立完成/从 0 到 1/重构/迁移/搭建/上线」等 Owner 信号\n"
+        "- 个人项目、Side Project、开源贡献、毕业设计、竞赛项目、博客/技术专栏都算\n"
+        "\n"
+        "仅当同时不满足以上任何条件、且确实是日常维护性工作（如「负责日常需求迭代」「线上问题排查」），才允许跳过。\n"
     )
 
     user_content = (

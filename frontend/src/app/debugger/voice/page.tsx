@@ -1523,20 +1523,13 @@ export default function InterviewVoiceAnalysisPage() {
                           onClick={() => {
                             isManualClickRef.current = true;
                             setActiveSegIdx(idx);
-                            
-                            // 偏移 +0.1 秒，避开上一个片段 secondsEnd 边界与当前片段 secondsStart 重合误判
-                            const targetTime = seg.secondsStart + 0.1;
+
                             setPlaybackTime(seg.secondsStart);
-                            
-                            const audio = audioRef.current;
-                            if (audio) {
-                              audio.currentTime = targetTime;
-                            }
 
                             // 确保当前选中的 section 是展开的
                             setCollapsedSections(prev => ({ ...prev, [seg.id]: false }));
-                            
-                            // 保持 800ms 的手动锁定，绝不给 timeupdate 误弹机会
+
+                            // 800ms 防抖:挡住后续 timeupdate 误判定 activeSegIdx
                             setTimeout(() => { isManualClickRef.current = false; }, 800);
                           }}
                           className={`p-3.5 rounded-xl border text-left cursor-pointer transition-all duration-300 relative flex items-center justify-between gap-3 ${

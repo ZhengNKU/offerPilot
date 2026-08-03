@@ -1,7 +1,6 @@
 """面试题批量生成服务。
 
 核心设计：
-- 一次 LLM 调用生成用户所有细化能力的面试题（批量，而非逐条）
 - Redis 为主缓存（热缓存），PG（knowledge_question_cache）为永久真源
 - 所有生成逻辑统一入口：regenerate_and_cache_all_questions()
 - 无定时任务

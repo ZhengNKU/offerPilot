@@ -13,6 +13,7 @@ import { startSmoothTaskProgress } from "@/app/utils/smoothTaskProgress";
 import { API_BASE } from "@/lib/api";
 import { getQuotaStatus, type Feature } from "@/lib/quotaClient";
 import { trackPendingFile, untrackPendingFile } from "@/utils/pendingUploads";
+import { uploadDirectToCos } from "@/lib/uploadClient";
 
 const getTodayString = () => {
   const d = new Date();
@@ -150,8 +151,8 @@ function NewAnalysisDebuggerContent() {
     // Validate formats
     if (activeMode === "audio") {
       const ext = file.name.split('.').pop()?.toLowerCase();
-      if (ext !== "wav" && ext !== "mp3") {
-        auth.triggerToast("上传失败：录音仅支持 WAV 或 MP3 格式！", "error");
+      if (ext !== "wav" && ext !== "mp3" && ext !== "ogg") {
+        auth.triggerToast("上传失败：仅支持 WAV/MP3/OGG", "error");
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
@@ -183,34 +184,20 @@ function NewAnalysisDebuggerContent() {
     }
 
     setIsUploading(true);
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("file_type", activeMode);
-
-    const token = localStorage.getItem("interviewVar_token");
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
     try {
-      const res = await fetch(`${API_BASE}/api/file/upload`, {
-        method: "POST",
-        headers,
-        body: formData
+      //   presign → PUT COS (经 cos-js-sdk-v5,不经过后端) → finalize
+      // 详见 frontend/src/lib/uploadClient.ts
+      const fin = await uploadDirectToCos({
+        file,
+        fileType: activeMode as "audio" | "resume" | "screenshot",
       });
 
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.detail || "上传失败");
-      }
-
-      const data = await res.json();
-      setUploadedFileId(data.file_id);
+      setUploadedFileId(fin.file_id);
       setSelectedFile(file);
-      localStorage.setItem("interviewVar_session_audio_url", data.file_url);
-      // 2026-07-25+: 跟踪 pending 文件,切屏/刷新会被 AutoCleanupUploads 自动 DELETE
-      trackPendingFile(data.file_id);
+      localStorage.setItem("interviewVar_session_audio_url", fin.file_url);
+      // track_pending 必须在 finalize 成功后才调 —— 否则 auto-flush DELETE 会
+      // 试图清掉已经 finalized 的行,得不偿失
+      trackPendingFile(fin.file_id);
       auth.triggerToast("文件已成功上传！");
     } catch (e: any) {
       auth.triggerToast(e.message || "文件上传失败，请重试！", "error");
@@ -536,6 +523,14 @@ function NewAnalysisDebuggerContent() {
           auth.triggerToast(errMsg, "error");
           setIsAnalyzing(false);
           localStorage.removeItem("interviewVar_task_id");
+          // 2026-08-02+: 后端失败时已自动删 COS 文件 + UploadedFile 记录,
+          // 前端这里必须同步清掉文件状态,否则 UI 仍显示"已选择"文件,
+          // 再次点击删除/分析会打到已不存在的文件上
+          if (uploadedFileId) untrackPendingFile(uploadedFileId);
+          setSelectedFile(null);
+          setUploadedFileId(null);
+          localStorage.removeItem("interviewVar_session_audio_url");
+          if (fileInputRef.current) fileInputRef.current.value = "";
           return;
         }
 
@@ -976,14 +971,14 @@ function NewAnalysisDebuggerContent() {
                   <>
                     {activeMode !== "text" ? (
                       <div
-                        onClick={selectedFile || isQuotaExhausted ? undefined : handleUploadClick}
-                        onDragOver={isQuotaExhausted ? undefined : handleDragOver}
-                        onDragLeave={isQuotaExhausted ? undefined : handleDragLeave}
-                        onDrop={isQuotaExhausted ? undefined : handleDrop}
+                        onClick={selectedFile || isUploading || isQuotaExhausted ? undefined : handleUploadClick}
+                        onDragOver={isUploading || isQuotaExhausted ? undefined : handleDragOver}
+                        onDragLeave={isUploading || isQuotaExhausted ? undefined : handleDragLeave}
+                        onDrop={isUploading || isQuotaExhausted ? undefined : handleDrop}
                         className={`border-2 border-dashed py-20 md:py-28 rounded-2xl flex flex-col items-center justify-center text-center transition-all duration-300 min-h-[380px] group relative ${
-                          selectedFile || isQuotaExhausted ? "cursor-not-allowed opacity-60 bg-white/[0.01]" : "cursor-pointer"
+                          selectedFile || isUploading || isQuotaExhausted ? "cursor-not-allowed opacity-60 bg-white/[0.01]" : "cursor-pointer"
                         } ${
-                          isDragging && !isQuotaExhausted
+                          isDragging && !isUploading && !isQuotaExhausted
                             ? "border-primary bg-primary/10 scale-[1.01] shadow-[0_0_25px_rgba(192,193,255,0.1)]"
                             : "border-white/10 hover:border-primary/50 hover:bg-white/[0.01]"
                         }`}
@@ -993,7 +988,7 @@ function NewAnalysisDebuggerContent() {
                           ref={fileInputRef}
                           onChange={handleFileChange}
                           disabled={isQuotaExhausted}
-                          accept={activeMode === "audio" ? ".wav,.mp3" : ".pdf,.docx"}
+                          accept={activeMode === "audio" ? ".wav,.mp3,.ogg" : ".pdf,.docx"}
                           className="hidden"
                         />
                         {isUploading ? (
@@ -1067,8 +1062,19 @@ function NewAnalysisDebuggerContent() {
                               {activeMode === "audio" ? "拖拽录音文件到此处，或点击浏览上传" : "拖拽简历文档到此处，或点击浏览上传"}
                             </h4>
                             <p className="text-xs md:text-sm text-on-surface-variant/60">
-                              {activeMode === "audio" ? "支持 wav, mp3 格式，最大 50MB (时长限30分钟)" : "支持 PDF, DOCX 格式，最大 5MB"}
+                              {activeMode === "audio" ? (
+                                <>
+                                  支持 wav / mp3 / ogg 格式 · 最大 50MB · 时长建议 30 分钟内
+                                </>
+                              ) : (
+                                "支持 PDF, DOCX 格式，最大 5MB"
+                              )}
                             </p>
+                            {activeMode === "audio" && (
+                              <p className="text-sm md:text-xs text-on-surface-variant/40 mt-1.5">
+                                iPhone / Mac 录音默认 m4a，请先转码为 wav 再上传
+                              </p>
+                            )}
                           </>
                         )}
                       </div>

@@ -128,6 +128,14 @@ class Settings(BaseSettings):
     # 过期文件清理任务运行周期，单位：小时
     FILE_CLEANUP_INTERVAL_HOURS: int = 24
 
+    # ── presign-upload 直传（2026-08 引入）──────────────────────────────────
+    # presigned PUT URL 有效期（秒）。15 分钟对 50MB 文件 + 用户弱网足够。
+    FILE_PRESIGN_UPLOAD_EXPIRED: int = 900
+    # pending 行兜底清理的 TTL（分钟）。过了这个时间还 status='pending' 的
+    # 行会被 cleanup_pending_presigns 删 COS + DB。比 presign URL 有效期多 1 倍,
+    # 给 finalize 重试和 finalize-cos API 网络抖动留余量。
+    FILE_PRESIGN_PENDING_TTL_MIN: int = 60
+
     # 日志保留天数。TimedRotatingFileHandler 的 backupCount 与孤立旧日志清理任务共用此值。
     LOG_RETENTION_DAYS: int = 7
     # 孤立旧日志清理任务运行周期，单位：小时
@@ -149,7 +157,7 @@ class Settings(BaseSettings):
     #   用户删除记录后即可绕过。新实现每次发起分析写一条 UserQuotaUsage，
     #   30 天窗口按 used_at 过滤；删除业务记录不会影响配额计数。
     # feature 字符串与 UserQuotaUsage.feature 字段对齐：
-    #   "audio"   —— 面试录音分析（上传 wav/mp3 后 LLM 分析）
+    #   "audio"   —— 面试录音分析（上传 wav/mp3/ogg 后 LLM 分析）
     #   "record"  —— 面试记录分析（粘贴文本或重跑已有 session）
     #   "resume"  —— 简历分析
     QUOTA_WINDOW_DAYS: int = 30
@@ -162,6 +170,11 @@ class Settings(BaseSettings):
 
     # Aliyun Bailian DASHSCOPE_API_KEY
     DASHSCOPE_API_KEY: str = ""
+    # 阿里百炼业务空间 ID（2026-08-02+ 切换 qwen-audio-3.0-asr-flash-filetrans 时使用）
+    # 不同地域 base_url 不同：
+    #   北京：https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1
+    #   新加坡：https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1
+    DASHSCOPE_WORKSPACE_ID_FOR_ASR: str = ""
 
     @model_validator(mode="after")
     def _check_jwt_secret(self) -> "Settings":

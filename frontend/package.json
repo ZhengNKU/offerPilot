@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "cos-js-sdk-v5": "^1.8.6",
     "framer-motion": "^12.4.0",
     "gsap": "^3.15.0",
     "next": "16.2.6",
