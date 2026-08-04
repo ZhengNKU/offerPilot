@@ -16,6 +16,7 @@ from app.config import settings
 from app.database import async_session
 from app.routers.file import get_cos_client
 from app.routers.file import bucket as cos_bucket
+from app.utils.scheduler import is_scheduler_leader, NON_LEADER_POLL_S, log_once
 
 logger = logging.getLogger(__name__)
 
@@ -108,10 +109,19 @@ def cleanup_old_logs(retention_days: int | None = None) -> int:
 
 
 async def run_periodic_log_cleanup():
-    """每 LOG_CLEANUP_INTERVAL_HOURS 小时清一次旧日志。"""
+    """每 LOG_CLEANUP_INTERVAL_HOURS 小时清一次旧日志。
+
+    多 worker 下仅调度 leader 执行（见 app/utils/scheduler.py），
+    "已启动" 日志只在首次成为 leader 时打一条。
+    """
     interval_seconds = max(60, settings.LOG_CLEANUP_INTERVAL_HOURS * 3600)
-    logger.info("日志清理任务已启动，周期 %s 小时", settings.LOG_CLEANUP_INTERVAL_HOURS)
+    # "已启动" 日志用 log_once 跨 worker 去重:整个集群启动时只打一条,
+    # leader 转移 / 换 worker 不重复打(否则会出现在分析任务中间)
+    log_once("periodic-log-cleanup", f"日志清理任务已启动，周期 {settings.LOG_CLEANUP_INTERVAL_HOURS} 小时")
     while True:
+        if not is_scheduler_leader():
+            await asyncio.sleep(NON_LEADER_POLL_S)
+            continue
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, cleanup_old_logs)
@@ -263,14 +273,113 @@ async def cleanup_expired_files() -> int:
     except Exception:
         logger.exception("孤儿扫描异常")
 
+    # 第三步：TTL 清理"已上传但从未被任何分析/会话/反馈引用"的孤儿文件。
+    # 前端刷新/关闭时 keepalive DELETE 可能被浏览器丢弃,这里后端兜底保证清理。
+    try:
+        if settings.ENVIRONMENT != "production":
+            logger.info(
+                "ENVIRONMENT=%s, 跳过孤儿文件 TTL 清理（仅 production 执行）",
+                settings.ENVIRONMENT,
+            )
+        else:
+            deleted += await cleanup_orphan_finalized_files(ttl_hours=24)
+    except Exception:
+        logger.exception("孤儿文件 TTL 清理异常")
+
+    return deleted
+
+
+def _extract_cos_key(url: str) -> str:
+    """从 audio_url / screenshot_url 抽 cos_key(可能是签名 URL / 非签名路径 / 纯 key)。"""
+    if not url:
+        return ""
+    if "://" in url:
+        from urllib.parse import urlparse, unquote
+        parsed = urlparse(url)
+        return unquote(parsed.path.lstrip("/")) if parsed.path else ""
+    return url.lstrip("/")
+
+
+async def cleanup_orphan_finalized_files(ttl_hours: int = 24) -> int:
+    """清理超过 TTL 仍未被任何分析/会话/反馈引用的孤儿文件(status='finalized')。
+
+    判定"未使用":
+      - 不被 ResumeAnalysis.file_id 引用(FK 精确匹配)
+      - cos_key 不出现在任何 InterviewSession.audio_url / Feedback.screenshot_url 里
+    TTL 只删"上传后长时间未使用"的文件,误删风险低。删 COS + 删 DB 行。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=ttl_hours)
+    deleted = 0
+
+    async with async_session() as db:
+        try:
+            stmt = select(models.UploadedFile).where(
+                models.UploadedFile.status == "finalized",
+                models.UploadedFile.created_at < cutoff,
+            )
+            candidates = list((await db.execute(stmt)).scalars().all())
+            if not candidates:
+                return 0
+
+            # 被引用的 file_id：优先用精确外键(ResumeAnalysis / InterviewSession / Feedback)
+            used_file_ids: set = set()
+            for _rows in (
+                await db.execute(select(models.ResumeAnalysis.file_id)),
+                await db.execute(select(models.InterviewSession.file_id)),
+                await db.execute(select(models.Feedback.file_id)),
+            ):
+                used_file_ids.update(_rows.scalars().all())
+
+            # cos_key 字符串匹配保留作为旧数据兜底(老行 file_id 为 NULL,靠 audio_url/screenshot_url 关联)
+            used_cos: set[str] = set()
+            for url in (await db.execute(select(models.InterviewSession.audio_url))).scalars().all():
+                k = _extract_cos_key(url) if url else ""
+                if k:
+                    used_cos.add(k)
+            for url in (await db.execute(select(models.Feedback.screenshot_url))).scalars().all():
+                k = _extract_cos_key(url) if url else ""
+                if k:
+                    used_cos.add(k)
+
+            orphans = [
+                f for f in candidates
+                if f.id not in used_file_ids and f.cos_key not in used_cos
+            ]
+        except Exception:
+            logger.exception("孤儿文件 TTL 清理查询失败")
+            return 0
+
+        for f in orphans:
+            try:
+                client = get_cos_client()
+                await asyncio.to_thread(
+                    client.delete_object, Bucket=cos_bucket, Key=f.cos_key
+                )
+                await db.delete(f)
+                await db.commit()
+                deleted += 1
+                logger.info("孤儿文件 TTL 清理: file_id=%s cos_key=%s", f.id, f.cos_key)
+            except Exception:
+                logger.exception("孤儿文件 TTL 清理删除失败 file_id=%s", f.id)
+
+    if deleted:
+        logger.info("孤儿文件 TTL 清理: 共删 %d 个(超过 %sh 未被使用)", deleted, ttl_hours)
     return deleted
 
 
 async def run_periodic_cleanup():
-    """每 FILE_CLEANUP_INTERVAL_HOURS 小时跑一次：过期文件 + 孤儿 COS。"""
+    """每 FILE_CLEANUP_INTERVAL_HOURS 小时跑一次：过期文件 + 孤儿 COS。
+
+    多 worker 下仅调度 leader 执行（见 app/utils/scheduler.py）。
+    """
     interval_seconds = max(60, settings.FILE_CLEANUP_INTERVAL_HOURS * 3600)
-    logger.info("文件清理任务已启动，周期 %s 小时", settings.FILE_CLEANUP_INTERVAL_HOURS)
+    log_once("periodic-file-cleanup", f"文件清理任务已启动，周期 {settings.FILE_CLEANUP_INTERVAL_HOURS} 小时")
     while True:
+        if not is_scheduler_leader():
+            await asyncio.sleep(NON_LEADER_POLL_S)
+            continue
         try:
             await cleanup_expired_files()
         except Exception:
@@ -341,10 +450,14 @@ async def run_periodic_pending_presign_cleanup():
 
     比 run_periodic_cleanup(24h) 更频繁,因为 pending 文件快速堆积风险更高
     (用户关 tab / 断网都会立刻留下一行 pending)。
+    多 worker 下仅调度 leader 执行（见 app/utils/scheduler.py）。
     """
     interval = 6 * 3600
-    logger.info("pending presign 清理任务已启动,周期 %sh", interval // 3600)
+    log_once("periodic-pending-presign", f"pending presign 清理任务已启动,周期 {interval // 3600}h")
     while True:
+        if not is_scheduler_leader():
+            await asyncio.sleep(NON_LEADER_POLL_S)
+            continue
         try:
             await cleanup_pending_presigns()
         except Exception:

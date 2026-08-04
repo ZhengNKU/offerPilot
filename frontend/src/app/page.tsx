@@ -645,7 +645,7 @@ export default function Home() {
         <div className="max-w-container-max mx-auto w-full flex flex-col items-center">
           <div className="text-center mb-16 space-y-4 w-full">
             <h2 className="text-on-surface font-black tracking-tight" style={{ fontSize: "52px", fontFamily: "'Hanken Grotesk', sans-serif" }}>他们用 面试驾到 拿到了更好的 Offer</h2>
-            <p className="text-on-surface-variant font-label-mono font-bold tracking-widest uppercase" style={{ fontSize: "14px" }}>500+ 校招求职者的真实反馈</p>
+            <p className="text-on-surface-variant font-label-mono font-bold tracking-widest uppercase" style={{ fontSize: "14px" }}>100+ 校招求职者的真实反馈</p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-8 w-full">

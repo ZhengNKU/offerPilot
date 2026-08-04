@@ -164,6 +164,7 @@ class FeedbackCreate(BaseModel):
     type: str = Field(..., description="反馈类型：问题反馈、功能建议、体验优化、其他")
     module: Optional[str] = Field(None, description="关联功能模块")
     screenshot_url: Optional[str] = Field(None, description="上传截图的 COS 地址")
+    file_id: Optional[int] = Field(None, description="上传截图的 UploadedFile.id（精确外键）")
 
 
 class CommentCreate(BaseModel):

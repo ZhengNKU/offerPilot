@@ -846,6 +846,9 @@ async def analyze_interview_dialogue(
         "如果提供了目标岗位的岗位详情（JD / Job Description），请着重结合该岗位的技能、职责及期望，深入匹配并评估候选人的技术水平、项目契合度以及表达逻辑。\n"
         "你必须以 JSON 格式返回评估结果，无需 any Markdown 标记或其它多余的前后导言，只返回纯 JSON 对象字符串。\n"
         "JSON 结构必须严格符合以下属性格式：\n"
+        "**数量要求**：目录数量按对话实际内容决定，通常 max_lose_points 2-3 项、"
+        "interviewer_perspective / question_deconstruction / followup_paths 各 2-5 项。"
+        "**严禁为了凑数量虚构不存在的考点**——对话内容少就少输出几条，不要编造。\n"
         "\n"
         "{\n"
         "  \"ipi_score\": 75, // 综合素质评分（0-100之间的整数）\n"
@@ -865,20 +868,20 @@ async def analyze_interview_dialogue(
         "    { \"rank\": 1, \"label\": \"失分点标题，如：选型依据不足\", \"tag\": \"高风险\", \"desc\": \"失分具体描述，如：缺少问题背景和选型对比，无法体现技术决策能力\" },\n"
         "    { \"rank\": 2, \"label\": \"失分点标题，如：没有 Trade-off 分析\", \"tag\": \"中风险\", \"desc\": \"失分具体描述，如：回答较表面，缺乏权衡思考和方案对比\" },\n"
         "    { \"rank\": 3, \"label\": \"失分点标题，如：项目贡献模糊\", \"tag\": \"中风险\", \"desc\": \"失分具体描述，如：未突出个人贡献和负责的核心模块\" }\n"
-        "  ], // 最大失分点 TOP 3（固定3项，按风险等级从高到低排序，tag只能为'高风险'或'中风险'）\n"
+        "  ], // 最大失分点 TOP 2-3（按实际失分点，禁止凑数虚构，按风险等级从高到低排序，tag只能为'高风险'或'中风险'）\n"
         "  \"interviewer_perspective\": [\n"
         "    { \"label\": \"考察技术话题，如：Redis 相关问题\", \"val\": \"验证的核心能力，如：验证缓存设计能力\" },\n"
         "    { \"label\": \"考察技术话题，如：一致性问题\", \"val\": \"验证的核心能力，如：验证分布式系统架构能力\" },\n"
         "    { \"label\": \"考察技术话题，如：项目真实度\", \"val\": \"验证的核心能力，如：验证真实项目经验\" }\n"
-        "  ], // 面试官视角：真正验证什么（3-4项，结合对话中的考点提问）\n"
+        "  ], // 面试官视角：真正验证什么（2-5项，结合对话实际考点，禁止凑数虚构）\n"
         "  \"question_deconstruction\": [\n"
         "    { \"stage\": \"第 1 关 · 基础引入\", \"title\": \"考点技术问题，如：为什么使用 Redis？\", \"desc\": \"考查目的细节描述\" },\n"
         "    { \"stage\": \"第 2 关 · 方案对比\", \"title\": \"考点技术问题，如：为什么不用本地缓存？\", \"desc\": \"考查目的细节描述\" }\n"
-        "  ], // 问题拆解（3-4项，梳理面试官层层深入的提问关卡）\n"
+        "  ], // 问题拆解（2-5项，梳理面试官实际提问关卡，禁止凑数虚构）\n"
         "  \"followup_paths\": [\n"
         "    { \"title\": \"阶段问题，如：Q1 自我介绍 · 引导切入\", \"desc\": \"具体的引导或追问描述\", \"tag\": \"良好\" },\n"
         "    { \"title\": \"阶段问题，如：Q3 Redis 选型 · 主动深挖\", \"desc\": \"具体的引导或追问描述\", \"tag\": \"风险\" }\n"
-        "  ] // 追问路径（3-4项，tag只能是'良好'、'一般'或'风险'之一，真实呈现追问轨迹）\n"
+        "  ] // 追问路径（2-5项，tag只能是'良好'、'一般'或'风险'之一，真实呈现追问轨迹，禁止凑数虚构）\n"
         "}"
     )
 
@@ -894,9 +897,12 @@ async def analyze_interview_dialogue(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
         ],
-        "response_format": {"type": "json_object"}
+        "response_format": {"type": "json_object"},
+        # temp=0.1:评分/问题目录这类结构化输出需要可复现,默认 temp=1.0 会导致
+        # 同一份录音/记录每次评分和问题数量都飘(3个/5个)。0.1 接近贪心解码。
+        "temperature": 0.1,
     }
-    
+
     # 不再静默返回 {}——失败直接向上抛,外层 run_real_analysis 会走 _fail_analysis
     # 给出带具体原因的报错文案,而不是"AI 评估返回为空"这种无信息提示
     res_data = await _run_with_optional_tools(
@@ -1588,51 +1594,249 @@ async def call_llm_stream_chunks(payload: dict, timeout: float = 300.0):
     raise last_exc if last_exc else RuntimeError("call_llm_stream_chunks exhausted retries")
 
 
-async def analyze_resume_text(
+async def _call_resume_agent(
+    system_prompt: str,
+    *,
     resume_text: str,
     profile_data: Optional[dict] = None,
     parsed_structure: Optional[dict] = None,
     enable_network: bool = False,
-) -> Dict[str, Any]:
-    """
-    Calls DeepSeek (reasoning model) to analyze the extracted resume text and return structured analysis in JSON.
-    使用流式调用绕开 DeepSeek 网关长 idle timeout，禁用系统代理。
+    log_label: str = "resume-agent",
+    timeout: float = 300.0,
+) -> dict:
+    """简历分析子智能体通用调用：拼 user_content（verbatim 表 + 简历 + 画像）+ 调用 + 解析 JSON。
 
-    parsed_structure: 服务端正则解析出的结构化简历（公司/岗位/时间/bullets 等原文），
-    传给 LLM 仅作为 "verbatim 参照表"，避免 LLM 把 "ByteDance" 改写成 "字节跳动"、
-    改写公司名/时间等原文。LLM 仍可在结构上自由发挥，但所有公司名/岗位/时间/原文 bullet
-    必须 verbatim 等于解析器给出的值。
+    每个子智能体只返回自己负责的 JSON 切片，由 analyze_resume_text 用 asyncio.gather 并行
+    后合并，最终结构与原先单次大调用一致。带 elapsed 打点便于定位哪个子智能体耗时。
     """
-    from datetime import datetime
-    current_date = datetime.now().strftime("%Y-%m-%d")
+    user_content = ""
+    if parsed_structure:
+        user_content += (
+            "\n【verbatim 参照表 - 服务端解析的原文结构】\n"
+            "以下公司名、岗位、时间、bullet 原文是从简历里 verbatim 抽出的，"
+            "你输出里涉及的这些字段必须 1:1 等于下表，"
+            "禁止翻译/规范化/合并/拆分（如 \"ByteDance\" 不得改写为 \"字节跳动\"，"
+            "\"2022.07-2024.06\" 不得改写为 \"2022年7月 - 2024年6月\"）。"
+            "对 bullet 你只需给出诊断/优化版本（optimizedText/originalTag/...），originalText 必须原样照抄。\n"
+            f"{json.dumps(parsed_structure, ensure_ascii=False, indent=2)}\n"
+        )
+    user_content += f"\n简历文本内容：\n{resume_text}\n"
+    if profile_data:
+        user_content += f"\n求职期望画像信息：\n{json.dumps(profile_data, ensure_ascii=False)}\n"
 
+    payload = {
+        "model": settings.DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
+        ],
+        "response_format": {"type": "json_object"},
+    }
+    t0 = time.monotonic()
+    try:
+        res_data = await _run_with_optional_tools(
+            payload, enable_network, sync=False, timeout=timeout
+        )
+        content = res_data["choices"][0]["message"]["content"]
+        content_clean = _strip_codeblock(content)
+        parsed_data = _safe_json_parse(content_clean, log_label=log_label)
+        if parsed_data is None:
+            raise RuntimeError(f"{log_label} JSON 解析失败")
+        if not isinstance(parsed_data, dict) or not parsed_data:
+            raise RuntimeError(f"{log_label} 返回为空")
+        logger.info(
+            f"[resume] sub-agent {log_label} elapsed={time.monotonic() - t0:.2f}s "
+            f"content_len={len(content)}"
+        )
+        return parsed_data
+    except RuntimeError:
+        raise
+    except Exception as e:
+        logger.error(f"Failed {log_label} via DeepSeek: {e}")
+        raise RuntimeError(f"AI 调用失败：{type(e).__name__}") from e
+
+
+async def _resume_agent_diagnostics(
+    resume_text: str,
+    profile_data: Optional[dict],
+    parsed_structure: Optional[dict],
+    enable_network: bool,
+    current_date: str,
+) -> dict:
+    """子智能体 A：诊断与评分（score/profile/risks/match/关键词/ATS/建议）。
+
+    保留 thinking：风险点诊断、评分校准、防虚构都需要推理，不能盲关。
+    """
     system_prompt = (
-        f"【系统时间上下文】当前北京时间是：{current_date}。在提取或计算候选人的工作年限（例如将 '2023.07 - 至今' 或其他时间段与当前时间对比）时，请严格以该时间作为当前的'至今/Present'基准进行逻辑计算，避免算错工作年限。\n"
-        "你是一个专业的 AI 简历分析教练。你的任务是对候选人的简历进行深度雷区检测与优化建议。\n"
-        "你需要根据提取出的简历文本内容，结合候选人的求职期望画像（如果提供了），完成以下工作：\n"
+        f"【系统时间上下文】当前北京时间是：{current_date}。在计算候选人的工作年限时，"
+        "严格以该时间作为'至今/Present'基准进行逻辑计算，避免算错工作年限。\n"
+        "你是一个专业的 AI 简历诊断教练。你的任务是对候选人简历做**诊断与评分**。"
+        "结合求职期望画像（如果提供），完成以下工作：\n"
         "1. 计算简历综合评分（0-100，当前表现）以及优化后预计提升的综合评分（0-100）。\n"
         "2. 计算大厂 ATS 机器可读性通过率百分比（0-100）。\n"
-        "3. 提取候选人基础档案：姓名、求职状态、当前职级职位、工作年限、当前公司、当前岗位、当前薪资；注意：对于当前公司（company）和当前岗位（role），如果用户在画像中没有填或简历中未明确说明当前正式在职公司/岗位（或者候选人为应届生/在校生），严禁将实习经历的公司或岗位提取填充为当前公司/当前岗位，请统一填充为 '-'。\n"
-        "4. 重构并优化工作经历（work_experiences）：\n"
-        "   - 对于工作经历中的每一条核心描述（bullets），同时保留原始描述（originalText）和优化后的描述（optimizedText）。\n"
-        "   - 给出该描述在原始简历中的诊断风险（originalTag 为 '风险'，originalDesc 说明缺失或问题所在；或者 originalTag 为 '亮点'）并赋予对应样式类名。\n"
-        "   - 给出优化后的标签（optimizedTag 为 '已优化'）与样式类名。\n"
-        "   - **【最重要！严禁虚构无关业务场景】**：优化后的描述（optimizedText）必须基于候选人简历原文的**真实项目背景与技术路线**进行表达重构。**严禁凭空捏造与原项目完全无关的高并发/大流量业务场景**（例如：如果原简历不涉及电商、大促、秒杀等，绝对不能在优化版中将其改写或虚构成“大促压测”、“双十一流量洪峰保障”等无中生有的场景；如果原简历没有提到相关技术栈，绝不能虚构其参与了该技术的研发）。所有优化的目标是润色表述和体现技术深度，而非伪造工作背景。\n"
+        "3. 提取候选人基础档案：姓名、求职状态、当前职级职位、工作年限、当前公司、当前岗位、当前薪资；"
+        "注意：对于当前公司（company）和当前岗位（role），如果用户在画像中没有填或简历中未明确说明"
+        "当前正式在职公司/岗位（或者候选人为应届生/在校生），严禁将实习经历的公司或岗位提取填充为"
+        "当前公司/当前岗位，请统一填充为 '-'。\n"
         "5. 诊断并列出简历中的所有风险点（risks），包含风险标题、详细说明、严重程度（高风险/中风险/低风险）。\n"
         "6. 进行目标岗位画像匹配度分析（match_analysis），包括匹配得分、文字说明、具体各维度的覆盖情况（coverages）。\n"
         "7. 输出简历优化的核心AI建议（optimization_suggestions），每条建议包含标题和详细描述。\n"
         "8. 分析关键词覆盖率（keywords_analysis），找出已覆盖的高频词（current_keywords）和推荐补齐的核心行业热点词（recommended_keywords）。\n"
         "9. 提供 ATS 兼容性各项检测指标结果（ats_checks），每一项包括检测名、状态（通过/警告）及具体指标评分情况。\n"
-        "\n"
-        "10. **提取个人项目经历（personal_projects）**：从简历的「个人项目」「Side Project」「开源贡献」「作品集」「毕业设计」「竞赛项目」「技术博客/专栏」「GitHub 个人仓库」等 section 中，识别出所有独立项目。判定标准见下方「个人项目判定阈值」。每条 personal_project 输出 name / period / tech_stack / bullets（结构与 work_experiences.bullets 一致）。\n"
+        "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言，"
+        "只返回纯 JSON 对象，且属性键和值必须使用双引号）：\n"
+        "{\n"
+        "  \"score\": 84,\n"
+        "  \"optimized_score\": 89,\n"
+        "  \"ats_pass_rate\": 92,\n"
+        "  \"profile\": {\n"
+        "    \"name\": \"候选人姓名\",\n"
+        "    \"status\": \"在职/离职/在校生\",\n"
+        "    \"title\": \"当前职位名称\",\n"
+        "    \"years\": \"工作年限\",\n"
+        "    \"company\": \"当前公司名称\",\n"
+        "    \"role\": \"当前岗位名\",\n"
+        "    \"salary\": \"当前薪资，如 30K * 16\",\n"
+        "    \"targetCompany\": \"目标公司，如 字节跳动\",\n"
+        "    \"targetRole\": \"目标岗位名\",\n"
+        "    \"targetGrade\": \"目标职级，如 P7\",\n"
+        "    \"targetSalary\": \"目标期望薪资，如 40K-50K\"\n"
+        "  },\n"
+        "  \"risks\": [\n"
+        "    { \"title\": \"风险标题\", \"desc\": \"详细说明\", \"severity\": \"高风险/中风险/低风险\" }\n"
+        "  ],\n"
+        "  \"match_analysis\": {\n"
+        "    \"match_score\": 83,\n"
+        "    \"match_desc\": \"岗位契合度总体评估描述\",\n"
+        "    \"coverages\": [\n"
+        "      { \"item\": \"匹配评估的技术项/业务项\", \"status\": \"完美覆盖/基础具备/描述较弱\", \"percent\": \"90%\" }\n"
+        "    ]\n"
+        "  },\n"
+        "  \"optimization_suggestions\": [\n"
+        "    { \"title\": \"建议标题\", \"desc\": \"具体建议内容\" }\n"
+        "  ],\n"
+        "  \"keywords_analysis\": {\n"
+        "    \"current_keywords\": [\"已覆盖高频词1\", \"已覆盖高频词2\"],\n"
+        "    \"recommended_keywords\": [\"推荐补齐词1\", \"推荐补齐词2\"]\n"
+        "  },\n"
+        "  \"ats_checks\": [\n"
+        "    { \"name\": \"检查项名称\", \"status\": \"通过/警告\", \"score\": \"诊断简述评分\" }\n"
+        "  ]\n"
+        "}\n"
+    )
+    return await _call_resume_agent(
+        system_prompt,
+        resume_text=resume_text,
+        profile_data=profile_data,
+        parsed_structure=parsed_structure,
+        enable_network=enable_network,
+        log_label="diagnostics",
+    )
+
+
+async def _resume_agent_rewrite(
+    resume_text: str,
+    parsed_structure: Optional[dict],
+    enable_network: bool,
+    current_date: str,
+) -> dict:
+    """子智能体 B：改写（work_experiences + personal_projects 逐条优化）。
+
+    规则明确、纯生成的段落。默认也保留 thinking（防虚构），实测后如需提速可加 disable_thinking。
+    """
+    system_prompt = (
+        f"【系统时间上下文】当前北京时间是：{current_date}。\n"
+        "你是一个专业的 AI 简历改写教练。你的任务是对简历中的工作经历与个人项目做逐条 STAR 优化，"
+        "保留原文并补充量化业绩与技术深度。\n"
+        "4. 重构并优化工作经历（work_experiences）：\n"
+        "   - 对于工作经历中的每一条核心描述（bullets），同时保留原始描述（originalText）和优化后的描述（optimizedText）。\n"
+        "   - 给出该描述在原始简历中的诊断风险（originalTag 为 '风险'，originalDesc 说明缺失或问题所在；或者 originalTag 为 '亮点'）并赋予对应样式类名。\n"
+        "   - 给出优化后的标签（optimizedTag 为 '已优化'）与样式类名。\n"
+        "   - **【最重要！严禁虚构无关业务场景】**：优化后的描述（optimizedText）必须基于候选人简历原文的"
+        "**真实项目背景与技术路线**进行表达重构。**严禁凭空捏造与原项目完全无关的高并发/大流量业务场景**"
+        "（例如：如果原简历不涉及电商、大促、秒杀等，绝对不能在优化版中将其改写或虚构成“大促压测”、"
+        "“双十一流量洪峰保障”等无中生有的场景；如果原简历没有提到相关技术栈，绝不能虚构其参与了该技术的研发）。"
+        "所有优化的目标是润色表述和体现技术深度，而非伪造工作背景。\n"
+        "   - **【字数控制：防止溢出原简历排版】**：optimizedText 必须在 originalText 字数 ±15% 范围内。"
+        "例：originalText 100 字 → optimizedText 控制在 85-115 字。**严禁大幅扩写或缩写**——"
+        "下游要把优化后的文本就地替换回原 DOCX 的同位置，多出来 30% 会撑爆原排版（单页变两页、表格行高溢出）。"
+        "如果原 bullet 已是 STAR 完整描述，只做小幅润色而非重写。\n"
+        "10. **提取个人项目经历（personal_projects）**：从简历的「个人项目」「Side Project」「开源贡献」"
+        "「作品集」「毕业设计」「竞赛项目」「技术博客/专栏」「GitHub 个人仓库」等 section 中，识别出所有独立项目。"
+        "每条 personal_project 输出 name / period / tech_stack / bullets（结构与 work_experiences.bullets 一致）。\n"
         "    - **tech_stack 仅技术岗相关，非技术岗必须返回空数组 []**：\n"
         "      · 技术/研发/工程岗（后端/前端/算法/数据/测试/运维/AI 等）：填写项目中明确使用的技术栈（如 React/Redis/Kafka）。\n"
-        "      · 非技术岗（产品/运营/销售/市场/HR/设计/财务/行政 等）：**tech_stack 必须填 []**，可改在 bullets 中以「负责/使用/输出」等方式描述所用工具（如 Figma/SQL/GA/Excel/PPT/Photoshop 等）；严禁把硬技能/工具/方法论塞进 tech_stack 字段，也严禁为非技术岗编造编程语言或框架。\n"
+        "      · 非技术岗（产品/运营/销售/市场/HR/设计/财务/行政 等）：**tech_stack 必须填 []**，"
+        "可改在 bullets 中以「负责/使用/输出」等方式描述所用工具（如 Figma/SQL/GA/Excel/PPT/Photoshop 等）；"
+        "严禁把硬技能/工具/方法论塞进 tech_stack 字段，也严禁为非技术岗编造编程语言或框架。\n"
         "    - **如果简历中没有个人项目，personal_projects 返回空数组 []，禁止编造。**\n"
-        "\n"
-        "11. **输出简历的完整结构分析地图（structure_analysis）**：把简历按 7 个固定 section 切片，\n"
-        "    给出每个 section 的健康度诊断和黄金润色范例。\n"
-        "    **关键约束**：\n"
+        "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言，"
+        "只返回纯 JSON 对象，且属性键和值必须使用双引号）：\n"
+        "{\n"
+        "  \"work_experiences\": [\n"
+        "    {\n"
+        "      \"company\": \"公司名称\",\n"
+        "      \"role\": \"职位/岗位名\",\n"
+        "      \"period\": \"工作时间段，如 2022.07 - 至今\",\n"
+        "      \"bullets\": [\n"
+        "        {\n"
+        "          \"originalText\": \"原始描述句子\",\n"
+        "          \"optimizedText\": \"使用STAR原则优化后、包含量化业绩与大厂架构思维的资深表述\",\n"
+        "          \"originalTag\": \"风险/亮点\",\n"
+        "          \"originalTagClass\": \"如果是风险请填 'text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20'，如果是亮点请填 'text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20'\",\n"
+        "          \"originalDesc\": \"诊断说明说明为什么是风险或亮点\",\n"
+        "          \"optimizedTag\": \"已优化\",\n"
+        "          \"optimizedTagClass\": \"text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20\"\n"
+        "        }\n"
+        "      ]\n"
+        "    }\n"
+        "  ],\n"
+        "  \"personal_projects\": [\n"
+        "    {\n"
+        "      \"name\": \"个人项目名称\",\n"
+        "      \"period\": \"项目时间段，如 2024.03 - 至今\",\n"
+        "      \"tech_stack\": [\"React\", \"TypeScript\"], // 非技术岗必须为 []\n"
+        "      \"bullets\": [\n"
+        "        {\n"
+        "          \"originalText\": \"原始描述句子（来自简历原文 verbatim）\",\n"
+        "          \"optimizedText\": \"使用STAR原则优化后的资深表述\",\n"
+        "          \"originalTag\": \"风险/亮点\",\n"
+        "          \"originalTagClass\": \"...\",\n"
+        "          \"originalDesc\": \"诊断说明\",\n"
+        "          \"optimizedTag\": \"已优化\",\n"
+        "          \"optimizedTagClass\": \"text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20\"\n"
+        "        }\n"
+        "      ]\n"
+        "    }\n"
+        "  ]\n"
+        "}\n"
+    )
+    return await _call_resume_agent(
+        system_prompt,
+        resume_text=resume_text,
+        parsed_structure=parsed_structure,
+        enable_network=enable_network,
+        log_label="rewrite",
+    )
+
+
+async def _resume_agent_structure(
+    resume_text: str,
+    profile_data: Optional[dict],
+    parsed_structure: Optional[dict],
+    enable_network: bool,
+    current_date: str,
+) -> dict:
+    """子智能体 C：结构地图（structure_analysis 7 段 status/score）。
+
+    前端只消费 status + score；before/after 由前端从 work_experiences 实际 bullets 生成，
+    因此 C 不需要 B 的输出。模板化输出，实测后可加 disable_thinking 提速。
+    """
+    system_prompt = (
+        f"【系统时间上下文】当前北京时间是：{current_date}。\n"
+        "你是一个专业的 AI 简历结构分析师。你的任务是把简历按 7 个固定 section 切片，"
+        "给出每个 section 的健康度诊断（status）与评分（score）。\n"
+        "**关键约束**：\n"
         "    - 7 个 section key 严格使用（顺序固定）：education, work_experience, projects, professional_capability, works_portfolio, business_outcomes, management\n"
         "    - 出于数据脱敏考虑，简历结构地图不再分析「个人信息」section，直接从「教育背景」开始（idx=0）。\n"
         "    - 严禁输出 personal_info 这一 key。\n"
@@ -1647,98 +1851,15 @@ async def analyze_resume_text(
         "      - idx=4（works_portfolio，作品/案例）：技术岗侧重\"开源贡献/GitHub/技术文章/社区参与\"等；非技术岗侧重\"项目交付物/客户案例/公开演讲/行业文章/课程/专利/比赛\"等可展示成果\n"
         "      - idx=6（management，管理/协作经验）：**该 section 是「管理经验」与「团队协作经验」的合集，按候选人资历分档评估，严禁用管理岗标准一刀切**：\n"
         "        · 有带团队/带人经历的社招候选人：按管理维度评估（团队规模、Mentor 带教、OKR 拆解、跨部门统筹、技术规范主导）。\n"
-        "        · 应届生 / 在校生 / 仅有实习经历 / 无任何带人职责的候选人：**改按团队协作维度评估**——课题组与导师/同学的分工协同、社团与学生组织的组织经历、竞赛队伍中的角色与配合、实习中的跨角色对接（产品/测试/运营）、代码评审与文档沉淀等。此时**严禁仅因「没有管理经验」就判定 status 为「缺失」或给出 40 分以下的低分**；只有当简历确实完全不体现任何协作/沟通/组织类信息时才可判「缺失」。advice 也必须给协作向的改写建议，不得要求应届生去补管理职责。\n"
+        "        · 应届生 / 在校生 / 仅有实习经历 / 无任何带人职责的候选人：**改按团队协作维度评估**——"
+        "课题组与导师/同学的分工协同、社团与学生组织的组织经历、竞赛队伍中的角色与配合、实习中的跨角色对接（产品/测试/运营）、"
+        "代码评审与文档沉淀等。此时**严禁仅因「没有管理经验」就判定 status 为「缺失」或给出 40 分以下的低分**；"
+        "只有当简历确实完全不体现任何协作/沟通/组织类信息时才可判「缺失」。advice 也必须给协作向的改写建议，"
+        "不得要求应届生去补管理职责。\n"
         "      其他 4 个通用 section 无差异，按实际简历内容自由优化即可。\n"
-        "\n"
-        "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言，只返回纯 JSON 对象，且属性键和值必须使用双引号）：\n"
+        "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其它前后导言，"
+        "只返回纯 JSON 对象，且属性键和值必须使用双引号）：\n"
         "{\n"
-        "  \"score\": 84, \n"
-        "  \"optimized_score\": 89, \n"
-        "  \"ats_pass_rate\": 92, \n"
-        "  \"profile\": {\n"
-        "    \"name\": \"候选人姓名\",\n"
-        "    \"status\": \"在职/离职/在校生\",\n"
-        "    \"title\": \"当前职位名称\",\n"
-        "    \"years\": \"工作年限\",\n"
-        "    \"company\": \"当前公司名称\",\n"
-        "    \"role\": \"当前岗位名\",\n"
-        "    \"salary\": \"当前薪资，如 30K * 16\",\n"
-        "    \"targetCompany\": \"目标公司，如 字节跳动\",\n"
-        "    \"targetRole\": \"目标岗位名\",\n"
-        "    \"targetGrade\": \"目标职级，如 P7\",\n"
-        "    \"targetSalary\": \"目标期望薪资，如 40K-50K\"\n"
-        "  },\n"
-        "  \"work_experiences\": [\n"
-        "    {\n"
-        "      \"company\": \"公司名称\",\n"
-        "      \"role\": \"职位/岗位名\",\n"
-        "      \"period\": \"工作时间段，如 2022.07 - 至今\",\n"
-        "      \"bullets\": [\n"
-        "        {\n"
-        "          \"originalText\": \"原始描述句子\",\n"
-        "          \"optimizedText\": \"使用STAR原则优化后、包含量化业绩与大厂架构思维的资深表述\",\n"
-        "          \"originalTag\": \"风险/亮点\",\n"
-        "          \"originalTagClass\": \"如果是风险请填 'text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20'，如果是亮点请填 'text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20'\", \n"
-        "          \"originalDesc\": \"诊断说明说明为什么是风险或亮点\",\n"
-        "          \"optimizedTag\": \"已优化\",\n"
-        "          \"optimizedTagClass\": \"text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20\"\n"
-        "        }\n"
-        "      ]\n"
-        "    }\n"
-        "  ],\n"
-        "  \"personal_projects\": [\n"
-        "    {\n"
-        "      \"name\": \"个人项目名称（如「XX 个人博客」「GitHub stars 1.2k 的 XX 工具」）\",\n"
-        "      \"period\": \"项目时间段，如 2024.03 - 至今（如简历未写可不填）\",\n"
-        "      \"tech_stack\": [\"React\", \"TypeScript\", \"Vercel\"], // 非技术岗必须为 []\n"
-        "      \"bullets\": [\n"
-        "        {\n"
-        "          \"originalText\": \"原始描述句子（来自简历原文 verbatim）\",\n"
-        "          \"optimizedText\": \"使用STAR原则优化后的资深表述（150-300字）\",\n"
-        "          \"originalTag\": \"风险/亮点\",\n"
-        "          \"originalTagClass\": \"如果是风险请填 'text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20'，如果是亮点请填 'text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20'\",\n"
-        "          \"originalDesc\": \"诊断说明说明为什么是风险或亮点\",\n"
-        "          \"optimizedTag\": \"已优化\",\n"
-        "          \"optimizedTagClass\": \"text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20\"\n"
-        "        }\n"
-        "      ]\n"
-        "    }\n"
-        "  ],\n"
-        "  \"risks\": [\n"
-        "    {\n"
-        "      \"title\": \"核心业绩缺少量化指标\",\n"
-        "      \"desc\": \"具体风险点详细解析说明...\",\n"
-        "      \"severity\": \"高风险/中风险/低风险\"\n"
-        "    }\n"
-        "  ],\n"
-        "  \"match_analysis\": {\n"
-        "    \"match_score\": 83,\n"
-        "    \"match_desc\": \"岗位契合度总体评估描述...\",\n"
-        "    \"coverages\": [\n"
-        "      {\n"
-        "        \"item\": \"匹配评估的技术项/业务项\",\n"
-        "        \"status\": \"完美覆盖/基础具备/描述较弱\",\n"
-        "        \"percent\": \"90%\"\n"
-        "      }\n"
-        "    ]\n"
-        "  },\n"
-        "  \"optimization_suggestions\": [\n"
-        "    {\n"
-        "      \"title\": \"建议 1：重塑“动作词”，剔除事务型字眼\",\n"
-        "      \"desc\": \"具体建议内容详细阐述...\"\n"
-        "    }\n"
-        "  ],\n"
-        "  \"keywords_analysis\": {\n"
-        "    \"current_keywords\": [\"高频词1\", \"高频词2\"],\n"
-        "    \"recommended_keywords\": [\"推荐补齐词1\", \"推荐补齐词2\"]\n"
-        "  },\n"
-        "  \"ats_checks\": [\n"
-        "    {\n"
-        "      \"name\": \"检查项名称\",\n"
-        "      \"status\": \"通过/警告\",\n"
-        "      \"score\": \"诊断简述评分\"\n"
-        "    }\n"
-        ",\n"
         "  \"structure_analysis\": {\n"
         "      \"education\":               { \"status\": \"优秀\", \"score\": 90, \"desc\": \"...\", \"advice\": [\"...\"], \"before\": \"...\", \"after\": \"...\" },\n"
         "      \"work_experience\":         { \"status\": \"优秀\", \"score\": 90, \"desc\": \"...\", \"advice\": [\"...\"], \"before\": \"...\", \"after\": \"...\" },\n"
@@ -1750,54 +1871,78 @@ async def analyze_resume_text(
         "  }\n"
         "}\n"
     )
+    return await _call_resume_agent(
+        system_prompt,
+        resume_text=resume_text,
+        profile_data=profile_data,
+        parsed_structure=parsed_structure,
+        enable_network=enable_network,
+        log_label="structure",
+    )
 
-    user_content = ""
-    if parsed_structure:
-        user_content += (
-            "\n【verbatim 参照表 - 服务端解析的原文结构】\n"
-            "以下公司名、岗位、时间、bullet 原文是从简历里 verbatim 抽出的，"
-            "你输出的 work_experiences / profile 里所有这些字段必须 1:1 等于下表，"
-            "禁止翻译/规范化/合并/拆分（如 \"ByteDance\" 不得改写为 \"字节跳动\"，"
-            "\"2022.07-2024.06\" 不得改写为 \"2022年7月 - 2024年6月\"）。"
-            "对 bullet 你只需给出诊断/优化版本（optimizedText/originalTag/...），originalText 必须原样照抄。\n"
-            f"{json.dumps(parsed_structure, ensure_ascii=False, indent=2)}\n"
-        )
-    user_content += f"\n简历文本内容：\n{resume_text}\n"
-    if profile_data:
-        user_content += f"\n求职期望画像信息：\n{json.dumps(profile_data, ensure_ascii=False)}\n"
 
-    payload = {
-        "model": settings.DEEPSEEK_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
-        ],
-        "response_format": {"type": "json_object"}
-    }
+async def analyze_resume_text(
+    resume_text: str,
+    profile_data: Optional[dict] = None,
+    parsed_structure: Optional[dict] = None,
+    enable_network: bool = False,
+) -> Dict[str, Any]:
+    """简历分析拆成 3 个并行子智能体（诊断 / 改写 / 结构），最后合并。
 
-    try:
-        logger.info(f"[resume] analyzing resume_text len={len(resume_text)} chars")
-        res_data = await _run_with_optional_tools(
-            payload, enable_network, sync=False, timeout=300.0
-        )
-        content = res_data["choices"][0]["message"]["content"]
-        logger.info(f"[resume] received content len={len(content)} chars")
-        content_clean = _strip_codeblock(content)
-        parsed_data = _safe_json_parse(content_clean, log_label="resume")
-        if parsed_data is None:
-            logger.error("[resume] unable to parse DeepSeek response as JSON after repair")
-            raise RuntimeError("AI 返回 JSON 解析失败")
-        if not isinstance(parsed_data, dict) or not parsed_data:
-            raise RuntimeError("AI 返回为空")
-        return parsed_data
-    except RuntimeError:
-        # 已经是我们自己定义的语义化错误,直接抛
-        raise
-    except Exception as e:
-        logger.error(f"Failed to analyze resume via DeepSeek: {e}")
-        # 把 SDK 原始异常包装成我们的语义化错误
-        raise RuntimeError(f"AI 调用失败：{type(e).__name__}") from e
+    原先是一次超大型 LLM 调用串行产出全部（约 151s），拆成 3 路 asyncio.gather 并行后，
+    墙钟时间 = 最慢的子智能体（约 50-60s）。三个子智能体互不读取对方输出（前端结构地图的
+    before/after 用 work_experiences 实际 bullets 生成，不依赖 structure_analysis 的 before/after）。
 
+    parsed_structure: 服务端正则解析出的结构化简历（公司/岗位/时间/bullets 等原文），
+    传给 LLM 仅作为 "verbatim 参照表"，避免 LLM 把 "ByteDance" 改写成 "字节跳动"、
+    改写公司名/时间等原文。
+    """
+    from datetime import datetime
+    current_date = datetime.now().strftime("%Y-%m-%d")
+
+    async def _run_slice(label: str, coro_factory, fallback: dict):
+        """跑一个子智能体切片；失败重试一次，仍失败用兜底值，不让单个切片拖垮整个分析。"""
+        try:
+            return await coro_factory()
+        except Exception:
+            logger.warning(f"[resume] sub-agent {label} 失败,重试一次")
+            try:
+                return await coro_factory()
+            except Exception as e:
+                logger.warning(f"[resume] sub-agent {label} 重试仍失败,使用兜底值: {e!r}")
+                return fallback
+
+    diagnostics, rewrite, structure = await asyncio.gather(
+        _run_slice(
+            "diagnostics",
+            lambda: _resume_agent_diagnostics(
+                resume_text, profile_data, parsed_structure, enable_network, current_date
+            ),
+            {},  # 诊断兜底:无评分/风险等,分析仍完成但该块缺失
+        ),
+        _run_slice(
+            "rewrite",
+            lambda: _resume_agent_rewrite(
+                resume_text, parsed_structure, enable_network, current_date
+            ),
+            {"work_experiences": [], "personal_projects": []},
+        ),
+        _run_slice(
+            "structure",
+            lambda: _resume_agent_structure(
+                resume_text, profile_data, parsed_structure, enable_network, current_date
+            ),
+            {"structure_analysis": {}},  # 前端有 legacy 兜底,缺失结构地图不致命
+        ),
+    )
+
+    merged: Dict[str, Any] = {}
+    for part in (diagnostics, rewrite, structure):
+        if isinstance(part, dict):
+            merged.update(part)
+    if not merged:
+        raise RuntimeError("AI 返回为空")
+    return merged
 
 async def extract_project_experiences(
     resume_text: str,
@@ -1818,77 +1963,46 @@ async def extract_project_experiences(
         提取出的项目列表；LLM 调用失败时返回空列表 []
     """
     system_prompt = (
-        "你是一个专业的 AI 简历解析与项目分析助手。你的任务是从候选人的简历原文中，提取出所有项目经历的结构化信息。\n"
+        "你是一个 AI 简历项目分析助手。任务：从简历原文中提取所有独立项目经历，写入用户项目记忆库。\n"
         "\n"
         "## 核心要求\n"
-        "1. **逐项目提取**：从简历中识别出每一个独立的项目经历，不要遗漏、不要合并不同项目\n"
-        "2. **精准命名**：project_name 使用简历中实际出现的项目名称，最多 30 个汉字\n"
-        "3. **深度提炼**：summary 基于简历原文提炼，突出项目的核心价值、技术亮点（技术岗）/业务方法论与执行亮点（非技术岗）和业务成果，控制在 150-300 字\n"
-        "4. **准确分类**：根据项目的核心业务属性，从下面的标签体系中选择最匹配的主分类\n"
-        "5. **技术栈/工具栈提取**：\n"
-        "   - **先按简历中的岗位性质判断属于「技术岗」还是「非技术岗」**：技术/研发/工程岗（后端/前端/算法/数据/测试/运维/AI 等）→ tech_stack 填编程语言/框架/中间件/数据库等；产品/运营/销售/市场/HR/设计/财务/行政 等非技术岗 → **tech_stack 必须填 []**，改在 summary/bullets 中以「负责/使用/输出」等方式描述所用工具（如 Figma/SQL/GA/Excel/PPT/Photoshop/Tableau 等）。\n"
-        "   - **严禁为非技术岗编造编程语言或框架**，也严禁把硬技能/工具/方法论塞进 tech_stack 字段。\n"
-        "6. **量化指标**：提取项目中提到的所有可量化数据（QPS、用户量、延迟、成本节省、GMV、留存、转化率等），无量化数据则 metrics 留空对象 {}\n"
+        "1. **逐项目提取**：识别每个独立项目，不遗漏、不合并\n"
+        "2. **精准命名**：project_name 来自简历原文，最多 30 字\n"
+        "3. **summary**：基于原文提炼核心价值+技术亮点/业务方法论+业务成果，150-300 字；**严禁虚构不存在的业务场景和技术**\n"
+        "4. **分类**：从下方标签体系选最匹配的 1 个 category\n"
+        "5. **tech_stack 先判岗位再填**：技术/研发/工程岗填编程语言/框架/中间件/数据库；产品/运营/销售/市场/HR/设计/财务/行政等非技术岗 **tech_stack 必须填 []**，工具在 summary 里以「负责/使用 Figma/SQL/GA 等」描述。**严禁为非技术岗编造编程语言或框架**\n"
+        "6. **量化指标**：metrics 提取简历中明确存在的数字（QPS/用户量/延迟/成本/GMV/留存/转化率 等），无则留 {}\n"
+        "7. **duration 与 role 真实还原**：若简历原文中未写起止时间/项目周期，duration 必须填 null；若未写担任角色，role 必须填 null。**严禁虚构编造时间周期或盲目填充默认角色**\n"
         "\n"
-        "## 标签体系说明\n"
-        "技术岗项目从以下标签选：\n"
-        "| 分类标签 | 适用场景 |\n"
-        "|----------|---------|\n"
-        "| AI工程 | 推荐系统、模型推理、NLP/CV、特征平台、向量检索、大模型应用 |\n"
-        "| 数据工程 | 数仓建设、ETL管道、数据治理、实时/离线计算、OLAP分析 |\n"
-        "| 交易骨干 | 订单系统、支付结算、交易链路、对账系统、资金安全 |\n"
-        "| 基础平台 | 中间件、API网关、Service Mesh、配置中心、可观测性、消息队列 |\n"
-        "| 增长工程 | 营销系统、AB实验、推送通知、广告系统、增长策略 |\n"
-        "| 安全合规 | 风控系统、反欺诈、内容安全、合规审计、权限管理 |\n"
-        "| 公共组件 | SDK开发、通用库、脚手架、开发工具链、代码生成 |\n"
-        "| 运维效能 | CI/CD、容器化、发布系统、容量规划、成本优化 |\n"
+        "## 标签体系（按岗位性质）\n"
+        "技术岗：AI工程 / 数据工程 / 交易骨干 / 基础平台 / 增长工程 / 安全合规 / 公共组件 / 运维效能\n"
+        "非技术岗：产品规划 / 运营增长 / 市场品牌 / 销售商务 / 设计体验 / 人事行政 / 财务法务 / 战略分析\n"
+        "**无法准确判断时不要默认 '基础平台'**，根据项目业务属性选择最接近的标签\n"
         "\n"
-        "非技术岗项目从以下标签选：\n"
-        "| 分类标签 | 适用场景 |\n"
-        "|----------|---------|\n"
-        "| 产品规划 | 需求调研、产品设计、PRD、用户旅程、原型设计、A/B 实验 |\n"
-        "| 运营增长 | 用户运营、活动运营、内容运营、社群运营、留存与拉新 |\n"
-        "| 市场品牌 | 品牌投放、市场推广、PR、内容营销、SEO/SEM |\n"
-        "| 销售商务 | 客户拓展、渠道管理、商务谈判、招投标、KA/SDR |\n"
-        "| 设计体验 | 视觉设计、交互设计、UX 研究、品牌设计、设计系统 |\n"
-        "| 人事行政 | 招聘、HRBP、培训、绩效、组织发展、行政事务 |\n"
-        "| 财务法务 | 财务分析、预算、税务、内审、合规、法务、风控（非技术） |\n"
-        "| 战略分析 | 行业研究、竞品分析、商业分析、战略规划、投资分析 |\n"
+        "## sub_tags（可多选，按需打）\n"
+        "核心项目 / 大流量 / 从0到1 / 跨团队 / 业务增长 / 成本优化 / 技术重构\n"
         "\n"
-        "## 辅助标签（可多选）\n"
-        "从以下标签中为该打的项目打上合适的标签（sub_tags），没有合适的可以不打：\n"
-        "- 核心项目：简历中最重要/最核心的项目\n"
-        "- 大流量：涉及高并发/大流量场景\n"
-        "- 从0到1：从零搭建\n"
-        "- 跨团队：跨部门/跨团队协作\n"
-        "- 业务增长：带来显著业务增长\n"
-        "- 成本优化：大幅降低成本\n"
-        "- 技术重构：大型技术重构/迁移\n"
+        "## role 选项\n"
+        "核心开发 / 技术负责人 / 架构师 / 项目负责人 / 参与开发\n"
         "\n"
-        "## 角色推断\n"
-        "根据简历描述推断候选人在项目中担任的角色（role），选项：核心开发 / 技术负责人 / 架构师 / 项目负责人 / 参与开发\n"
+        "## 评分\n"
+        "- mastery_level（0-100）：描述深度+指标完善度+技术细节+主导程度的综合评估\n"
+        "- importance（0-100）：项目规模+业务价值+技术复杂度+与主流大厂匹配度\n"
         "\n"
-        "## 评分要求\n"
-        "- mastery_level（0-100）：根据简历中对项目的描述深度、指标数据完善度、技术细节丰富度、候选人在项目中的主导程度综合评估\n"
-        "- importance（0-100）：根据项目规模、业务价值、技术复杂度、与主流大厂技术栈匹配度综合评估\n"
+        "## 去重（重要）\n"
+        f"用户已有项目记忆：{json.dumps(existing_projects, ensure_ascii=False)}\n"
+        "若提取的某项目与已有项目是同一实际项目（名称可能略不同），必须输出 is_duplicate: true + matched_existing_id（已有项目ID）。\n"
         "\n"
-        "## 已有的项目记忆\n"
-        "下面列出了用户已有的项目记忆。如果你提取出的某个项目与已有项目实质上是同一个（项目名可能略有不同但描述的是同一实际项目），"
-        "请在输出中标注 is_duplicate: true，并填写 matched_existing_id（对应的已有项目ID）。\n"
-        "已有项目列表：\n"
-        f"{json.dumps(existing_projects, ensure_ascii=False)}\n"
-        "\n"
-        "## 输出格式\n"
-        "你必须返回严格符合以下结构的 JSON 对象（不要返回任何 Markdown 标记或其他前后导言）：\n"
+        "## 输出格式（严格 JSON，无 Markdown）\n"
         "{\n"
         '  "projects": [\n'
         "    {\n"
-        '      "project_name": "项目名称（最多30字）",\n'
-        '      "summary": "项目简介：基于简历原文提炼的核心描述，突出技术价值与业务成果（150-300字）",\n'
-        '      "category": "AI工程/数据工程/交易骨干/基础平台/增长工程/安全合规/公共组件/运维效能（技术岗）；产品规划/运营增长/市场品牌/销售商务/设计体验/人事行政/财务法务/战略分析（非技术岗）",\n'
-        '      "sub_tags": ["核心项目", "大流量"],\n'
-        '      "tech_stack": ["Redis", "Kafka", "Spring Boot", "MySQL"], // 非技术岗必须为 []，工具塞 summary/bullets\n'
-        '      "metrics": {"qps": "10W+", "latency_p99": "50ms", "users": "3000万DAU"},\n'
+        '      "project_name": "项目名（≤30字）",\n'
+        '      "summary": "150-300字项目简介",\n'
+        '      "category": "从标签体系选 1 个",\n'
+        '      "sub_tags": ["核心项目"],\n'
+        '      "tech_stack": ["Redis","Kafka"], // 非技术岗必须 []\n'
+        '      "metrics": {"qps":"10W+","users":"3000万DAU"},\n'
         '      "role": "技术负责人",\n'
         '      "duration": "2022.07 - 至今",\n'
         '      "mastery_level": 85,\n'
@@ -1899,29 +2013,10 @@ async def extract_project_experiences(
         "  ]\n"
         "}\n"
         "\n"
-        "## 重要约束\n"
-        "- project_name 必须来自简历原文，禁止自己编造\n"
-        "- summary 必须基于简历原文提炼，禁止虚构不存在的业务场景和技术\n"
-        "- category 必须从标签体系中选择，如果无法准确判断选 '基础平台'\n"
-        "- mastery_level 和 importance 必须是 0-100 的整数\n"
-        "- metrics 只提取简历中明确存在的量化数据，不要编造\n"
-        "- tech_stack 仅技术岗填写，列简历中明确提到的技术名词；**非技术岗必须填 []，工具/方法论/软技能塞 summary 与 bullets**\n"
-        "- 如果简历中某段工作经历主要是日常工作维护而非独立项目，可以不提取为项目\n"
-        "\n"
-        "## 扫描范围（强制约束）\n"
-        "**你必须扫描整个简历的每一个 section**，包括「项目经历」「工作经历」「实习经历」「科研经历」「个人项目」「开源贡献」「作品集」等。\n"
-        "不论该条目出现在哪个 section，只要它描述的是一个独立项目，就必须提取为一条 project。\n"
-        "\n"
-        "判定为「独立项目」的宽松阈值（满足以下任一条件即可，候选人的很多项目化工作就放在工作/实习/个人项目 section 里）：\n"
-        "- 有明确的项目名称、代号或作品名（如「XX 系统」「XX App」「GitHub 仓库名」）\n"
-        "- 有清晰的目标/背景/痛点描述（即使只有一句话）\n"
-        "- 有技术栈（≥ 1 个技术名词，如 Spring Boot、React、TensorFlow 等）\n"
-        "- 有量化产出（QPS/用户量/延迟/成本节省/转化率 等具体数字）\n"
-        "- 有明确的起止周期或里程碑\n"
-        "- 描述里有「负责/主导/独立完成/从 0 到 1/重构/迁移/搭建/上线」等 Owner 信号\n"
-        "- 个人项目、Side Project、开源贡献、毕业设计、竞赛项目、博客/技术专栏都算\n"
-        "\n"
-        "仅当同时不满足以上任何条件、且确实是日常维护性工作（如「负责日常需求迭代」「线上问题排查」），才允许跳过。\n"
+        "## 扫描范围与判定阈值\n"
+        "扫描简历全部 section（项目/工作/实习/科研/个人项目/开源贡献/作品集 等）。**只要描述的是独立项目就必须提取**。\n"
+        "判定为独立项目（满足任一即可）：有项目名/代号/作品名 | 有目标或痛点 | 有技术栈或工具 | 有量化产出 | 有起止周期 | 含「负责/主导/独立完成/从0到1/重构/迁移/搭建/上线」Owner 信号 | 个人项目/Side Project/开源/毕设/竞赛/博客专栏。\n"
+        "**仅当同时不满足以上所有条件且确实是日常维护工作，才跳过不提取。**\n"
     )
 
     user_content = (
@@ -1945,8 +2040,10 @@ async def extract_project_experiences(
             f"[project_extract] extracting projects from resume len={len(resume_text)} "
             f"existing_projects={len(existing_projects)}"
         )
+        
+        # 主流程 analyze_resume_text 保留 thinking —— 那是真正的推理任务(评分/诊断/STAR 优化),关掉会掉质量
         res_data = await _run_with_optional_tools(
-            payload, enable_network, sync=False, timeout=120.0
+            payload, enable_network, sync=False, timeout=120.0, disable_thinking=True
         )
         content = res_data["choices"][0]["message"]["content"]
         logger.info(f"[project_extract] received content len={len(content)} chars")

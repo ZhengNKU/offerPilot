@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, Suspense } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
@@ -172,7 +173,7 @@ function ResumeAnalysisPageContent() {
     }, 2500);
   };
 
-  const handleDownloadPDF = async () => {
+  const handleDownload = async () => {
     const analysisId = analysisResult?.id;
     if (!analysisId) {
       triggerToast("未找到分析记录，请刷新后重试", "error");
@@ -191,7 +192,7 @@ function ResumeAnalysisPageContent() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       const res = await fetch(
-        `${API_BASE}/api/resume/analyses/${analysisId}/download?view=optimized`,
+        `${API_BASE}/api/resume/analyses/${analysisId}/download`,
         { headers }
       );
 
@@ -1726,45 +1727,11 @@ function ResumeAnalysisPageContent() {
             </div>
 
             {/* Actions panel */}
-            <div className="relative z-10 flex gap-4.5 w-full md:w-auto text-sm font-black">
-              <button
-                onClick={handleDownloadPDF}
-                disabled={downloadState === "loading"}
-                className={`flex-1 md:flex-none px-6 py-3 rounded-xl transition-all shadow-md whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer ${
-                  downloadState === "loading"
-                    ? "bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-white/60 cursor-not-allowed shadow-none"
-                    : downloadState === "success"
-                      ? "bg-[#5DECCB] text-[#050B1A] shadow-[#5DECCB]/30"
-                      : downloadState === "error"
-                        ? "bg-[#FF7A95] text-[#050B1A] shadow-[#FF7A95]/30"
-                        : "bg-gradient-to-r from-[#AFA7FF] to-[#00D4FF] text-[#050B1A] hover:scale-[1.01] active:scale-98 shadow-[#AFA7FF]/25"
-                }`}
-              >
-                {downloadState === "loading" && (
-                  <>
-                    <span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                    正在生成 DOCX…
-                  </>
-                )}
-                {downloadState === "success" && (
-                  <>
-                    <span className="material-symbols-outlined text-sm">check_circle</span>
-                    下载成功
-                  </>
-                )}
-                {downloadState === "error" && (
-                  <>
-                    <span className="material-symbols-outlined text-sm">error</span>
-                    重试下载
-                  </>
-                )}
-                {downloadState === "idle" && (
-                  <>
-                    下载 AI 优化版 DOCX
-                    <span className="material-symbols-outlined text-sm">download</span>
-                  </>
-                )}
-              </button>
+            <div className="relative z-10 flex flex-col items-end gap-2 w-full md:w-auto text-sm font-black">
+              <DownloadButtonWithTooltip
+                downloadState={downloadState}
+                onDownload={() => handleDownload("docx")}
+              />
             </div>
           </div>
 
@@ -2239,6 +2206,148 @@ function ResumeAnalysisPageContent() {
     </div>
   );
 }
+
+
+type DownloadState = "idle" | "loading" | "success" | "error";
+
+function DownloadButtonWithTooltip({
+  downloadState,
+  onDownload,
+}: {
+  downloadState: DownloadState;
+  onDownload: () => void;
+}) {
+  const buttonGroupRef = useRef<HTMLDivElement | null>(null);
+  const helpBtnRef = useRef<HTMLButtonElement | null>(null);
+  const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number } | null>(null);
+  const [tooltipVisible, setTooltipVisible] = useState(false);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const updatePos = () => {
+    const btn = helpBtnRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    // tooltip 320px 宽,右对齐到 help 按钮右边
+    const tooltipWidth = 320;
+    const gap = 8;
+    let left = rect.right - tooltipWidth;
+    // 防止溢出左边界
+    if (left < 8) left = 8;
+    setTooltipPos({ top: rect.bottom + gap, left });
+  };
+
+  const showTooltip = () => {
+    updatePos();
+    setTooltipVisible(true);
+  };
+  const hideTooltip = () => setTooltipVisible(false);
+
+  // 滚动/缩放时重算位置
+  useEffect(() => {
+    if (!tooltipVisible) return;
+    const handler = () => updatePos();
+    window.addEventListener("scroll", handler, true);
+    window.addEventListener("resize", handler);
+    return () => {
+      window.removeEventListener("scroll", handler, true);
+      window.removeEventListener("resize", handler);
+    };
+  }, [tooltipVisible]);
+
+  const tooltip = mounted && tooltipPos && tooltipVisible ? (
+    createPortal(
+      <div
+        role="tooltip"
+        style={{
+          position: "fixed",
+          top: tooltipPos.top,
+          left: tooltipPos.left,
+          width: 320,
+          zIndex: 9999,
+        }}
+        className="docx-tooltip-card bg-[#050B1A] text-white rounded-2xl shadow-2xl p-4 text-xs font-medium leading-relaxed pointer-events-none border border-white/15 relative"
+      >
+        {/* 上箭头：无缝无拼接倒三角 */}
+        <div className="absolute -top-1.5 right-4 w-3 h-3 bg-[#050B1A] border-l border-t border-white/15 rotate-45 z-10" />
+        <div className="space-y-2.5 relative z-20">
+          <div className="flex items-start gap-2">
+            <span className="material-symbols-outlined text-sm text-[#00D4FF] shrink-0 mt-0.5">info</span>
+            <span className="text-white text-xs leading-relaxed font-medium">当前仅支持导出 <b className="text-white font-black">DOCX</b> 格式，PDF 导出我们正在筹备中</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="material-symbols-outlined text-sm text-[#FF7A95] shrink-0 mt-0.5">warning</span>
+            <span className="text-white text-xs leading-relaxed font-medium">若您的简历是 <b className="text-white font-black">PDF 格式</b>，下载时会经 PDF→DOCX 转换，复杂排版（分栏、特殊字体、文本框等）<b className="text-white font-black">会有损失</b>。建议直接上传 <b className="text-white font-black">DOCX 原件</b>，完整保留你的排版</span>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )
+  ) : null;
+
+  return (
+    <div
+      ref={buttonGroupRef}
+      onMouseEnter={showTooltip}
+      onMouseLeave={hideTooltip}
+      onFocus={showTooltip}
+      onBlur={hideTooltip}
+      className="relative flex items-center gap-2 w-full md:w-auto"
+    >
+      <button
+        onClick={onDownload}
+        disabled={downloadState === "loading"}
+        className={`flex-1 md:flex-none px-6 py-3 rounded-xl transition-all shadow-md whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer ${
+          downloadState === "loading"
+            ? "bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-white/60 cursor-not-allowed shadow-none"
+            : downloadState === "success"
+              ? "bg-[#5DECCB] text-[#050B1A] shadow-[#5DECCB]/30"
+              : downloadState === "error"
+                ? "bg-[#FF7A95] text-[#050B1A] shadow-[#FF7A95]/30"
+                : "bg-gradient-to-r from-[#AFA7FF] to-[#00D4FF] text-[#050B1A] hover:scale-[1.01] active:scale-98 shadow-[#AFA7FF]/25"
+        }`}
+      >
+        {downloadState === "loading" && (
+          <>
+            <span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            正在生成 DOCX…
+          </>
+        )}
+        {downloadState === "success" && (
+          <>
+            <span className="material-symbols-outlined text-sm">check_circle</span>
+            下载成功
+          </>
+        )}
+        {downloadState === "error" && (
+          <>
+            <span className="material-symbols-outlined text-sm">error</span>
+            重试下载
+          </>
+        )}
+        {downloadState === "idle" && (
+          <>
+            下载 AI 优化版简历 (DOCX)
+            <span className="material-symbols-outlined text-sm">download</span>
+          </>
+        )}
+      </button>
+      <button
+        ref={helpBtnRef}
+        type="button"
+        aria-label="下载说明"
+        className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 dark:bg-white/5 dark:hover:bg-white/15 flex items-center justify-center transition-colors cursor-help shrink-0"
+      >
+        <span className="material-symbols-outlined text-base text-slate-500 dark:text-white/70">help</span>
+      </button>
+      {tooltip}
+    </div>
+  );
+}
+
 
 export default function ResumeAnalysisPage() {
   return (

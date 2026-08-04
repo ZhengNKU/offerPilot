@@ -369,11 +369,11 @@ function renderHighlightText(
 
     let highlightClass = "";
     if (m.type === "strength") {
-      highlightClass = "voice-hl-strength text-emerald-700 bg-emerald-100 dark:text-[#5DECCB] dark:bg-[#5DECCB]/10 border-b border-emerald-300 dark:border-[#5DECCB]/40 px-1 py-0.5 rounded cursor-help font-black relative group";
+      highlightClass = "voice-hl-strength text-emerald-700 bg-emerald-100 dark:text-[#5DECCB] dark:bg-[#5DECCB]/10 border-b border-emerald-300 dark:border-[#5DECCB]/40 px-1 py-0.5 rounded cursor-help font-black relative group hover:z-[9999]";
     } else if (m.type === "risk") {
-      highlightClass = "voice-hl-risk text-rose-700 bg-rose-100 dark:text-[#FF7A95] dark:bg-[#FF7A95]/15 border-b border-dashed border-rose-300 dark:border-[#FF7A95]/40 px-1 py-0.5 rounded cursor-help font-black relative group";
+      highlightClass = "voice-hl-risk text-rose-700 bg-rose-100 dark:text-[#FF7A95] dark:bg-[#FF7A95]/15 border-b border-dashed border-rose-300 dark:border-[#FF7A95]/40 px-1 py-0.5 rounded cursor-help font-black relative group hover:z-[9999]";
     } else if (m.type === "tech") {
-      highlightClass = "voice-hl-tech text-sky-700 bg-sky-100 dark:text-[#00D4FF] dark:bg-[#00D4FF]/10 border-b border-sky-300 dark:border-[#00D4FF]/40 px-1 py-0.5 rounded cursor-help font-black relative group";
+      highlightClass = "voice-hl-tech text-sky-700 bg-sky-100 dark:text-[#00D4FF] dark:bg-[#00D4FF]/10 border-b border-sky-300 dark:border-[#00D4FF]/40 px-1 py-0.5 rounded cursor-help font-black relative group hover:z-[9999]";
     }
 
     const displayTip = (m.tip || "")
@@ -381,13 +381,16 @@ function renderHighlightText(
       .replace(/与\s*第?\s*\d+\s*段/g, "与之前的表述");
 
     const ratio = m.start / text.length;
-    const tooltipAlignClass = ratio < 0.45 ? "left-0" : "right-0 left-auto";
+    const tooltipAlignClass = ratio < 0.25 ? "left-0" : ratio > 0.75 ? "right-0" : "left-1/2 -translate-x-1/2";
+    const arrowAlignClass = ratio < 0.25 ? "left-4" : ratio > 0.75 ? "right-4" : "left-1/2 -translate-x-1/2";
 
     parts.push(
       <span key={`hl-${idx}`} className={highlightClass}>
         {m.text}
-        <span className={`voice-ai-tooltip invisible group-hover:visible absolute top-full ${tooltipAlignClass} mt-1.5 w-64 p-3.5 bg-white dark:bg-[#050B1A]/95 border border-slate-200 dark:border-white/20 text-slate-900 dark:text-white text-xs rounded-xl shadow-2xl z-50 text-left pointer-events-none transition-all duration-200 select-none backdrop-blur-xl opacity-0 group-hover:opacity-100`}>
-          <span className="flex items-center gap-1.5 font-bold mb-1 select-none">
+        <span className={`voice-ai-tooltip invisible group-hover:visible absolute bottom-full ${tooltipAlignClass} mb-2.5 w-64 p-3.5 bg-white dark:bg-[#050B1A] border border-slate-200 dark:border-white/20 text-slate-900 dark:text-white text-xs rounded-xl shadow-2xl z-[9999] text-left pointer-events-none transition-all duration-200 select-none backdrop-blur-xl opacity-0 group-hover:opacity-100`}>
+          {/* 下指向小箭头 */}
+          <span className={`absolute -bottom-1 ${arrowAlignClass} w-2.5 h-2.5 bg-white dark:bg-[#050B1A] border-r border-b border-slate-200 dark:border-white/20 rotate-45 z-10`} />
+          <span className="flex items-center gap-1.5 font-bold mb-1 select-none relative z-20">
             <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${
               m.type === 'strength' ? 'bg-emerald-500 dark:bg-[#5DECCB]' : m.type === 'risk' ? 'bg-rose-500 dark:bg-[#FF7A95]' : 'bg-sky-400 dark:bg-[#00D4FF]'
             }`} />
@@ -397,7 +400,7 @@ function renderHighlightText(
               {m.type === 'strength' ? 'AI 亮点分析' : m.type === 'risk' ? 'AI 表达风险' : 'AI 技术解析'}
             </span>
           </span>
-          <span className="voice-ai-tip-body text-slate-800 dark:text-white/90 font-semibold leading-relaxed block select-none">
+          <span className="voice-ai-tip-body text-slate-800 dark:text-white/90 font-semibold leading-relaxed block select-none relative z-20">
             {displayTip}
           </span>
         </span>

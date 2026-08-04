@@ -3885,11 +3885,15 @@ export default function CareerMemoryDashboard() {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4.5 rounded-2xl bg-white/[0.01] border border-white/5 text-xs">
                 <div className="space-y-1">
                   <span className="text-on-surface-variant/40 font-bold block">担任角色</span>
-                  <span className="text-white font-extrabold">{selectedProject.role || "核心开发者"}</span>
+                  <span className="text-white font-extrabold">
+                    {(!selectedProject.role || selectedProject.role === "未知" || selectedProject.role === "暂无") ? "-" : selectedProject.role}
+                  </span>
                 </div>
                 <div className="space-y-1">
                   <span className="text-on-surface-variant/40 font-bold block">项目周期</span>
-                  <span className="text-white font-extrabold">{selectedProject.duration || "暂无信息"}</span>
+                  <span className="text-white font-extrabold">
+                    {(!selectedProject.duration || selectedProject.duration === "暂无信息" || selectedProject.duration === "未知") ? "-" : selectedProject.duration}
+                  </span>
                 </div>
                 <div className="space-y-1">
                   <span className="text-on-surface-variant/40 font-bold block">面试提及</span>
@@ -3898,7 +3902,7 @@ export default function CareerMemoryDashboard() {
                 <div className="space-y-1">
                   <span className="text-on-surface-variant/40 font-bold block">最近提及</span>
                   <span className="text-white font-extrabold text-xs leading-tight">
-                    {selectedProject.last_mentioned_summary || "尚未提及"}
+                    {selectedProject.last_mentioned_summary || "-"}
                   </span>
                 </div>
               </div>

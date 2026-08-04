@@ -1,18 +1,21 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 import asyncio
+import json
 import logging
 import re
+import time
+import uuid
 from datetime import datetime
 from pydantic import BaseModel
 from typing import Optional
 from urllib.parse import quote
 
 from app import models
-from app.database import get_db
+from app.database import get_db, async_session, _get_redis_pool
 from app.routers.auth import get_current_user_optional
 from app.routers.file import get_cos_client, bucket, delete_file_from_storage
 from app.utils.resume_parser import extract_resume_text, parse_resume_structure
@@ -38,269 +41,593 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/resume", tags=["Resume Analysis"])
 
+# ============================================================================
+# worker 进程。改为 BackgroundTasks 派发 + task_id + 轮询/SSE。
+# 设计参考 audio.py 的 task_store + Channel 模式。
+# ============================================================================
+import collections
+
+# task_store: task_id -> {file_id, status, progress, analysis_id, error_message}
+# status: "pending" | "processing" | "completed" | "failed"
+# 单进程内存够用:BackgroundTasks 跑的分析协程和 HTTP handler 协程
+# 多 worker(uvicorn --workers 2)下,任务注册在发起 POST /analyze 的 worker 进程内。
+# 为了让轮询在任意 worker 都能拿到真实状态,任务状态双写:
+#   - 内存 _resume_tasks:分析协程所在 worker 的本地状态 + SSE channel 依赖它
+#   - Redis resume:task:{task_id}:跨 worker 共享,status 轮询端点优先读它
+# 内存 dict 也顺带保留原有 LRU 上限,防单 worker 内存暴涨。
+_resume_tasks: dict = {}
+_resume_task_order: "collections.deque[str]" = collections.deque(maxlen=2000)
+# Channel 用于 SSE 推送进度;参考 audio.py 的实现。
+# 这里用 string forward reference 避开 _ResumeTaskChannel 还没定义的顺序问题。
+_resume_task_channels: "dict[str, _ResumeTaskChannel]" = {}
+
+# 任务状态在 Redis 里的保留时间。分析最长约 10min,30min 足够前端轮询完,
+# 之后 TTL 自动清理,不需要额外 GC。
+RESUME_TASK_REDIS_TTL = 30 * 60
+
+
+def _resume_redis_key(task_id: str) -> str:
+    return f"resume:task:{task_id}"
+
+
+async def _resume_persist(task_id: str, info: dict) -> None:
+    """把任务状态写入 Redis(跨 worker 共享)。失败不阻断分析主流程。"""
+    try:
+        redis = _get_redis_pool()
+        await redis.set(
+            _resume_redis_key(task_id),
+            json.dumps(info, ensure_ascii=False),
+            ex=RESUME_TASK_REDIS_TTL,
+        )
+    except Exception:
+        logger.warning(
+            "[resume task=%s] 状态写 Redis 失败,轮询将退化为本 worker 读取",
+            task_id,
+        )
+
+
+async def _resume_read(task_id: str) -> Optional[dict]:
+    """读任务状态:优先 Redis(跨 worker 真实状态),再本地内存兜底。"""
+    try:
+        redis = _get_redis_pool()
+        raw = await redis.get(_resume_redis_key(task_id))
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
+    info = _resume_tasks.get(task_id)
+    return dict(info) if info else None
+
+
+class _ResumeTaskChannel:
+    """简易 in-memory pub/sub,每个 task 一个 channel,支持多个 SSE 订阅者。
+
+    队列设上限防内存爆炸(单个订阅者异常断开时不会清)。
+    """
+
+    def __init__(self) -> None:
+        self._subscribers: list[asyncio.Queue] = []
+
+    def subscribe(self) -> asyncio.Queue:
+        q: asyncio.Queue = asyncio.Queue(maxsize=128)
+        self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: asyncio.Queue) -> None:
+        try:
+            self._subscribers.remove(q)
+        except ValueError:
+            pass
+
+    def publish(self, event: dict) -> None:
+        # 不阻塞:慢订阅者会被丢消息而不是卡住发布者
+        for q in list(self._subscribers):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                # 满了就丢;前端会靠 snapshot/heartbeat 救回
+                pass
+
+
+def _resume_get_channel(task_id: str) -> _ResumeTaskChannel:
+    ch = _resume_task_channels.get(task_id)
+    if ch is None:
+        ch = _ResumeTaskChannel()
+        _resume_task_channels[task_id] = ch
+    return ch
+
+
+async def _resume_set_progress(task_id: str, pct: int, status_str: str = "processing") -> None:
+    """更新任务进度(内存 + Redis),同时 publish 给 SSE 订阅者。"""
+    info = _resume_tasks.get(task_id)
+    if info is None:
+        return
+    info["progress"] = pct
+    info["status"] = status_str
+    await _resume_persist(task_id, info)
+    ch = _resume_task_channels.get(task_id)
+    if ch is not None:
+        # create_task 异步派发,publish 内部已不阻塞
+        asyncio.create_task(_safe_publish(ch, {
+            "progress": pct,
+            "status": status_str,
+            "ts": time.time(),
+        }))
+
+
+async def _resume_mark_failed(task_id: str, error_message: str) -> None:
+    """把任务标记为 failed(内存 + Redis),并 publish 给 SSE 订阅者。"""
+    info = _resume_tasks.get(task_id)
+    if info is None:
+        return
+    info["status"] = "failed"
+    info["error_message"] = error_message
+    await _resume_persist(task_id, info)
+    ch = _resume_task_channels.get(task_id)
+    if ch is not None:
+        asyncio.create_task(_safe_publish(ch, {
+            "progress": info["progress"],
+            "status": "failed",
+            "ts": time.time(),
+        }))
+
+
+async def _safe_publish(ch: _ResumeTaskChannel, event: dict) -> None:
+    """协程化的 publish,便于失败时吞掉异常不污染任务流。"""
+    try:
+        ch.publish(event)
+    except Exception:
+        pass
+
+
+async def _resume_register_task(task_id: str, file_id: int, user_id: Optional[int]) -> None:
+    _resume_tasks[task_id] = {
+        "file_id": file_id,
+        "user_id": user_id,
+        "status": "pending",
+        "progress": 0,
+        "analysis_id": None,
+        "error_message": None,
+        "created_at": time.time(),
+    }
+    await _resume_persist(task_id, _resume_tasks[task_id])
+    _resume_task_order.append(task_id)
+    # 兜底:删旧 task 防内存涨(Redis 里的状态靠 TTL 清理,这里顺手删掉)
+    while len(_resume_tasks) > 1500:
+        old_id = _resume_task_order.popleft()
+        _resume_tasks.pop(old_id, None)
+        ch = _resume_task_channels.pop(old_id, None)
+        if ch is not None:
+            for q in ch._subscribers:
+                try:
+                    q.put_nowait({"status": "expired", "ts": time.time()})
+                except Exception:
+                    pass
+        try:
+            redis = _get_redis_pool()
+            await redis.delete(_resume_redis_key(old_id))
+        except Exception:
+            pass
+
+
 class ResumeAnalyzeRequest(BaseModel):
     file_id: int
 
 @router.post("/analyze")
 async def analyze_resume(
     req: ResumeAnalyzeRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):
-    # 1. Fetch file from DB
+    """简历分析 — 异步派发端点(2026-08-04+重构)。
+
+    老的同步实现:POST 等 ~7min LLM 返回 → 期间卡住整个 worker 线程池,
+    其他用户的下载/API 全排队。改造后:
+      1. 立即做轻量校验(file 存在/类型/权限)
+      2. 分配 task_id,BackgroundTasks 派发到 _run_resume_analysis_impl
+      3. 立即返回 {task_id, file_id, status: "pending"}
+      4. 前端轮询 /api/resume/analyze/status/{task_id} 或订阅 SSE 流
+
+    行为契约:
+      - status: pending → processing → completed | failed
+      - 失败时 error_message 含可读中文原因
+      - 完成后 analysis_id = ResumeAnalysis.id,前端用它 GET /api/resume/analyses/{id}
+    """
+    # 1. 校验 file 存在 / 类型 / 权限
     result = await db.execute(select(models.UploadedFile).where(models.UploadedFile.id == req.file_id))
     db_file = result.scalars().first()
     if not db_file:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="简历文件不存在"
-        )
-
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="简历文件不存在")
     if db_file.file_type != "resume":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="该文件不是简历文件"
-        )
-
-    # 1.5 配额扣减已移到第 6 步 LLM 分析成功之后(2026-07-25+)
-    # 旧代码在入口 check_and_consume,但 COS 下载 / 解析 / LLM 任一失败会
-    # 让用户白扔一次额度。改为"成功才扣":失败统一不扣,成功后才写 user_quota_usage。
-    # 重分析通过"该 file_id 已有 ResumeAnalysis 记录"识别,不重复扣。
-
-    # 2. Permission check: if file belongs to a user, check ownership
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该文件不是简历文件")
     if db_file.user_id is not None:
         if not current_user or current_user.id != db_file.user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="无权访问该简历文件"
-            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该简历文件")
 
-    # 3. Download file from COS
-    try:
-        client = get_cos_client()
-        response = await asyncio.to_thread(
-            client.get_object,
-            Bucket=bucket,
-            Key=db_file.cos_key
-        )
-        body_stream = response['Body']
-        if hasattr(body_stream, 'get_raw_stream'):
-            content_bytes = body_stream.get_raw_stream().read()
-        else:
-            content_bytes = body_stream.read()
-    except Exception as e:
-        logger.exception(f"[resume] COS 下载失败 file_id={db_file.id}: {e!r}")
-        await delete_file_from_storage(db, db_file)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=format_failure(FEATURE_NAME_RESUME, REASON_COS_DOWNLOAD_FAILED)
-        )
+    # 2. 分配 task_id 并注册
+    task_id = str(uuid.uuid4())
+    user_id = current_user.id if current_user else None
+    await _resume_register_task(task_id, req.file_id, user_id)
 
-    # 4. Parse file to text
-    try:
-        resume_text = extract_resume_text(content_bytes, db_file.filename)
-    except ValueError as ve:
-        # 文件格式错误属于用户输入问题,直接显示 ve 信息并清理文件
-        await delete_file_from_storage(db, db_file)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=format_failure(FEATURE_NAME_RESUME, f"文件格式不支持：{ve}")
-        )
-    except Exception as e:
-        logger.exception(f"[resume] 解析失败 file_id={db_file.id}: {e!r}")
-        await delete_file_from_storage(db, db_file)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=format_failure(FEATURE_NAME_RESUME, REASON_FILE_PARSE_FAILED)
-        )
-
-    if not resume_text.strip():
-        await delete_file_from_storage(db, db_file)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=format_failure(FEATURE_NAME_RESUME, REASON_FILE_EMPTY)
-        )
-
-    # 5.5 服务端解析简历结构并进行隐私脱敏处理
-    parsed_structure = parse_resume_structure(resume_text)
-    resume_text = desensitize_text(resume_text)
-    parsed_structure = desensitize_parsed_structure(parsed_structure)
-
-    # ★ 异步项目记忆提取（fire-and-forget，不阻塞主流程，使用已脱敏的 resume_text）
-    if current_user:
-        from app.services.project_memory_agent import _run_project_memory_sub_agent
-        asyncio.create_task(
-            _run_project_memory_sub_agent({
-                "user_id": current_user.id,
-                "file_id": db_file.id,
-                "resume_text": resume_text,
-            })
-        )
-
-    # 5. Extract profile details to supply target expectations to LLM
-    profile_data = None
-    if current_user and current_user.profile:
-        p = current_user.profile
-        profile_data = {
-            "name": current_user.username,
-            "status": "在职" if p.job_status == "active" else "离职" if p.job_status == "resigned" else "应届生" if p.job_status == "fresh_grad" else "在校生",
-            "experience_years": f"{p.experience_years or '在校'}{p.experience_months or '0个月'}",
-            "company_name": p.company_name or "暂无",
-            "role_name": p.role_name or "暂无",
-            "salary": f"{p.salary_min or 0}K - {p.salary_max or 0}K",
-            "target_company": p.target_company or "暂无",
-            "target_role": p.target_role or "暂无",
-            "target_grade": p.target_grade or "暂无",
-            "target_salary": f"{p.target_salary_min or 0}K - {p.target_salary_max or 0}K"
-        }
-
-    # 6. Analyze resume text using LLM（传 parsed_structure 让 LLM 只优化 bullets、保持结构不变）
-    # 2026-07-25+: analyze_resume_text 失败会 raise,这里捕获并把 reason 透出并清理文件
-    try:
-        analysis_result = await analyze_resume_text(
-            resume_text, profile_data, parsed_structure=parsed_structure
-        )
-    except Exception as e:
-        logger.exception(f"[resume] LLM 分析失败 file_id={db_file.id}: {e!r}")
-        await delete_file_from_storage(db, db_file)
-        # e 可能是我们自己包的 "AI 返回 JSON 解析失败" 或 "AI 返回为空" 等
-        reason = str(e) or "AI 调用失败"
-        if len(reason) > 200:
-            reason = reason[:200] + "..."
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=format_failure(FEATURE_NAME_RESUME, reason)
-        )
-    if not analysis_result:
-        await delete_file_from_storage(db, db_file)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=format_failure(FEATURE_NAME_RESUME, REASON_LLM_EMPTY)
-        )
-
-    # 6.5 把服务端解析出的原文结构覆盖回 LLM 输出（LLM 只负责 bullet 诊断，结构必须原文回填）
-    _merge_parsed_structure(analysis_result, parsed_structure)
-
-    # 6.6 用画像标注的公司/岗位/薪资覆盖 LLM 提取值（画像是用户主动维护的真值源；未填写统一展示中划线 '-'）
-    profile_section = analysis_result.get("profile")
-    if isinstance(profile_section, dict):
-        if current_user:
-            # 候选人姓名直接使用账号注册用户名
-            profile_section["name"] = current_user.username
-            if current_user.profile:
-                p = current_user.profile
-                annotated_salary = _format_salary_range(p.salary_min, p.salary_max)
-                if annotated_salary:
-                    profile_section["salary"] = annotated_salary
-
-                # 当前公司：若用户未显式填写，统一显示 '-'，避免 AI 错误抓取实习经历公司
-                if p.company_name and p.company_name.strip() and p.company_name.strip() not in ("暂无", "暂无公司", "-"):
-                    profile_section["company"] = p.company_name.strip()
-                else:
-                    profile_section["company"] = "-"
-
-                # 当前岗位：若用户未显式填写，统一显示 '-'，避免 AI 错误抓取实习经历岗位
-                if p.role_name and p.role_name.strip() and p.role_name.strip() not in ("暂无", "-"):
-                    profile_section["role"] = p.role_name.strip()
-                    profile_section["title"] = p.role_name.strip()
-                else:
-                    profile_section["role"] = "-"
-                    profile_section["title"] = "-"
-        else:
-            # 未登录或无 profile：如果 LLM 给的不是有效公司/岗位（或是暂无），统一降级为 '-'
-            if not profile_section.get("name") or profile_section.get("name") in ("基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料"):
-                profile_section["name"] = "候选人"
-            if not profile_section.get("company") or profile_section.get("company") in ("暂无", "暂无公司", "无", "None", "null", "未填写"):
-                profile_section["company"] = "-"
-            if not profile_section.get("role") or profile_section.get("role") in ("暂无", "无", "None", "null", "未填写"):
-                profile_section["role"] = "-"
-                profile_section["title"] = "-"
-
-    # 6.7 兜底清洗 LLM 给的 structure_analysis（缺字段 / status 拼错 / score 越界 → 占位值）
-    _normalize_structure_analysis(analysis_result)
-
-    # 6.75 兜底清洗 profile 字段：所有 "暂无"/"无"/None 类值统一降级为 '-'（不依赖 LLM 或用户画像）
-    if isinstance(profile_section, dict):
-        for _key in ("company", "role", "title"):
-            _v = profile_section.get(_key)
-            if not _v or str(_v).strip() in ("暂无", "暂无公司", "无", "None", "null", "未填写", ""):
-                profile_section[_key] = "-"
-
-    # 6.8 计算综合评分 5 维度真实分项 + 顶层加权分数（替代前端硬编码的假数据）
-    # 各维度字段溯源：
-    #   - keyword_match         ← match_analysis.match_score（LLM 评估的目标岗位匹配度）
-    #   - experience_value      ← avg(structure_analysis.work_experience.score, projects.score)
-    #   - quantification        ← avg(work_experience, projects, business_outcomes).score
-    #   - resume_completeness   ← ats_pass_rate × 60% + structure_analysis.education.score × 40%
-    #   - expression_quality    ← 100 - 风险扣分（高×15 + 中×8 + 低×3，下限 0）
-    # 顶层 score_breakdown.weighted = 加权平均（30/30/20/10/10），同时覆盖到 analysis_result["score"]
-    # （即前端展示的"简历综合评分"），保证顶层数字也可追溯到 5 维度。
-    breakdown = _compute_score_breakdown(analysis_result)
-    analysis_result["score_breakdown"] = breakdown
-    analysis_result["score"] = breakdown["weighted"]
-    analysis_result["optimized_score"] = min(100, breakdown["weighted"] + 10)  # 优化后预估：当前分 + 10
-
-    # 6.9 计算并补充四大核心指标（总字数、风险点、优化建议数、岗位匹配度）
-    _enrich_metrics(analysis_result, resume_text=resume_text)
-
-    # ── 配额扣减:仅本文件第一次分析成功才扣,重分析免费 ──
-    # 2026-07-25+ 改为"分析成功才扣"模型
-    if current_user and db_file.user_id == current_user.id:
-        from sqlalchemy import func as _func
-        prev_count_res = await db.execute(
-            select(_func.count(models.ResumeAnalysis.id)).where(
-                models.ResumeAnalysis.file_id == db_file.id
-            )
-        )
-        prev_count = prev_count_res.scalar() or 0
-        if prev_count == 0:
-            try:
-                await check_and_consume(db, current_user, FEATURE_RESUME)
-                logger.info(
-                    f"[resume] 简历分析成功,扣额度 user_id={current_user.id} "
-                    f"file_id={db_file.id}"
-                )
-            except HTTPException as quota_exc:
-                # 配额耗尽 — 标 403 让前端展示升级提示
-                raise quota_exc
-        else:
-            logger.info(
-                f"[resume] 简历重分析(file_id={db_file.id} 已有 {prev_count} 条历史),不重复扣"
-            )
-
-    # 7. Persist to DB
-    record = models.ResumeAnalysis(
-        user_id=current_user.id if current_user else None,
-        file_id=db_file.id,
-        score=_safe_int(analysis_result.get("score")),
-        optimized_score=_safe_int(analysis_result.get("optimized_score")),
-        ats_pass_rate=_safe_int(analysis_result.get("ats_pass_rate")),
-        result_json=analysis_result,
+    # 3. 派发到后台(BackgroundTasks 在响应返回后跑,不影响主请求)
+    background_tasks.add_task(
+        _run_resume_analysis_impl, req.file_id, task_id, user_id
     )
-    db.add(record)
-    await db.commit()
-    await db.refresh(record)
-
-    # 触发 AI 职业顾问索引（fire-and-forget；失败不影响主流程）
-    if current_user:
-        schedule_index({
-            "kind": "resume_analysis",
-            "user_id": current_user.id,
-            "resume_analysis_id": record.id,
-        })
-        
-        # 异步触发 AI 职业顾问定制建议建议更新
-        from app.services.advisor_generator import trigger_custom_advisor_insights
-        asyncio.create_task(
-            trigger_custom_advisor_insights(current_user.id)
-        )
 
     return {
-        "id": record.id,
-        "file_id": record.file_id,
-        "created_at": record.created_at.isoformat() if record.created_at else None,
-        **analysis_result,
+        "task_id": task_id,
+        "file_id": req.file_id,
+        "status": "pending",
     }
+
+
+async def _run_resume_analysis_impl(file_id: int, task_id: str, user_id: Optional[int]):
+    """后台跑真实分析逻辑。从原 analyze_resume 路由搬过来,加进度推进 + 失败兜底。
+
+    进度推进节点(给前端显示用):
+      5  → fetch_file ok
+      15 → COS download ok
+      30 → parse ok
+      50 → LLM analyze 开始(大头,等 ~7min)
+      90 → 后处理 + 持久化
+      100 → completed
+
+    任何 step 抛异常都会被外层 try/except 接住,把 task_store.status="failed",
+    前端轮询时拿到 error_message。
+    """
+    try:
+        await _run_resume_analysis_impl_inner(file_id, task_id, user_id)
+    except HTTPException as he:
+        # 配额耗尽等明确错误
+        reason = he.detail if isinstance(he.detail, str) else str(he.detail)
+        await _resume_mark_failed(task_id, reason)
+        logger.warning(f"[resume task={task_id}] failed: {he.detail!r}")
+    except Exception as e:
+        # 兜底:任何未捕获异常 → failed + error_message
+        logger.exception(f"[resume task={task_id}] ❌ 未捕获异常")
+        reason = str(e) or "分析失败"
+        if len(reason) > 200:
+            reason = reason[:200] + "..."
+        await _resume_mark_failed(task_id, format_failure(FEATURE_NAME_RESUME, reason))
+
+
+async def _run_resume_analysis_impl_inner(file_id: int, task_id: str, user_id: Optional[int]):
+    # ── 阶段计时：日志一眼看出哪一段慢(对齐 audio.py 的 _stage 打点) ──
+    t_total = time.monotonic()
+    t_stage = time.monotonic()
+
+    def _log_stage(name: str) -> None:
+        nonlocal t_stage
+        elapsed = time.monotonic() - t_stage
+        logger.info(f"[resume task={task_id}] ▶ stage={name} elapsed={elapsed:.2f}s")
+        t_stage = time.monotonic()
+
+    # ── Step 0: 开自己的 db session,不能复用 Depends 注入的 ──
+    async with async_session() as db:
+        # ── Step 1: 取 file ──
+        await _resume_set_progress(task_id, 5, "processing")
+        result = await db.execute(select(models.UploadedFile).where(models.UploadedFile.id == file_id))
+        db_file = result.scalars().first()
+        if not db_file:
+            raise RuntimeError("简历文件不存在")
+        _log_stage("1_fetch_file")
+
+        # ── Step 2: COS 下载 ──
+        await _resume_set_progress(task_id, 15, "processing")
+        client = get_cos_client()
+        try:
+            response = await asyncio.to_thread(
+                client.get_object,
+                Bucket=bucket,
+                Key=db_file.cos_key
+            )
+            body_stream = response['Body']
+            if hasattr(body_stream, 'get_raw_stream'):
+                content_bytes = body_stream.get_raw_stream().read()
+            else:
+                content_bytes = body_stream.read()
+        except Exception as e:
+            logger.exception(f"[resume task={task_id}] COS 下载失败: {e!r}")
+            await delete_file_from_storage(db, db_file)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=format_failure(FEATURE_NAME_RESUME, REASON_COS_DOWNLOAD_FAILED),
+            )
+        _log_stage("2_cos_download")
+
+        # ── Step 3: 解析为纯文本 ──
+        await _resume_set_progress(task_id, 30, "processing")
+        try:
+            resume_text = extract_resume_text(content_bytes, db_file.filename)
+        except ValueError as ve:
+            await delete_file_from_storage(db, db_file)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=format_failure(FEATURE_NAME_RESUME, f"文件格式不支持：{ve}"),
+            )
+        except Exception as e:
+            logger.exception(f"[resume task={task_id}] 解析失败: {e!r}")
+            await delete_file_from_storage(db, db_file)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=format_failure(FEATURE_NAME_RESUME, REASON_FILE_PARSE_FAILED),
+            )
+        if not resume_text.strip():
+            await delete_file_from_storage(db, db_file)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=format_failure(FEATURE_NAME_RESUME, REASON_FILE_EMPTY),
+            )
+        _log_stage("3_parse")
+
+        # ── Step 4: 服务端正则解析 + 隐私脱敏 ──
+        parsed_structure = parse_resume_structure(resume_text)
+        resume_text = desensitize_text(resume_text)
+        parsed_structure = desensitize_parsed_structure(parsed_structure)
+
+        # ── Step 4.6: 取 profile ──
+        current_user = None
+        profile_data = None
+        if user_id:
+            # eager-load profile: async 模式下 lazy load 会触发 MissingGreenlet
+            current_user = await db.get(
+                models.User,
+                user_id,
+                options=[selectinload(models.User.profile)],
+            )
+        if current_user and current_user.profile:
+            p = current_user.profile
+            profile_data = {
+                "name": current_user.username,
+                "status": "在职" if p.job_status == "active" else "离职" if p.job_status == "resigned" else "应届生" if p.job_status == "fresh_grad" else "在校生",
+                "experience_years": f"{p.experience_years or '在校'}{p.experience_months or '0个月'}",
+                "company_name": p.company_name or "暂无",
+                "role_name": p.role_name or "暂无",
+                "salary": f"{p.salary_min or 0}K - {p.salary_max or 0}K",
+                "target_company": p.target_company or "暂无",
+                "target_role": p.target_role or "暂无",
+                "target_grade": p.target_grade or "暂无",
+                "target_salary": f"{p.target_salary_min or 0}K - {p.target_salary_max or 0}K"
+            }
+        _log_stage("4_prep")
+
+        # ── Step 5: LLM 分析(大头) ──
+        await _resume_set_progress(task_id, 50, "processing")
+
+        # 假进度:LLM 单次调用长且没有子进度,启动一个后台协程把 50→85 平滑推进,
+        # 让前端进度条在 LLM 阶段持续移动,不再卡在 50/95(同 audio.py _fake_asr_progress)。
+        async def _fake_llm_progress():
+            try:
+                pct = 50
+                while pct < 85:
+                    await asyncio.sleep(2.0)
+                    pct = min(85, pct + 1)
+                    # 注意:第一个参数必须是 task_id(漏传会把 pct 当成 task_id,
+                    # _resume_tasks.get(pct) 为 None 直接 return,假进度完全不推进)
+                    await _resume_set_progress(task_id, pct, "processing")
+            except asyncio.CancelledError:
+                pass
+
+        fake_task = asyncio.create_task(_fake_llm_progress())
+        try:
+            analysis_result = await analyze_resume_text(
+                resume_text, profile_data, parsed_structure=parsed_structure
+            )
+        except Exception as e:
+            logger.exception(f"[resume task={task_id}] LLM 分析失败: {e!r}")
+            await delete_file_from_storage(db, db_file)
+            reason = str(e) or "AI 调用失败"
+            if len(reason) > 200:
+                reason = reason[:200] + "..."
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=format_failure(FEATURE_NAME_RESUME, reason),
+            )
+        finally:
+            fake_task.cancel()  # LLM 返回(成功或异常)都停掉假进度,后续走真实 90/100
+        _log_stage("5_llm_analyze")
+
+        if not analysis_result:
+            await delete_file_from_storage(db, db_file)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=format_failure(FEATURE_NAME_RESUME, REASON_LLM_EMPTY),
+            )
+
+        # ── Step 6: 后处理 + 持久化 ──
+        await _resume_set_progress(task_id, 90, "processing")
+        _merge_parsed_structure(analysis_result, parsed_structure)
+
+        profile_section = analysis_result.get("profile")
+        if isinstance(profile_section, dict):
+            if current_user:
+                profile_section["name"] = current_user.username
+                if current_user.profile:
+                    p = current_user.profile
+                    annotated_salary = _format_salary_range(p.salary_min, p.salary_max)
+                    if annotated_salary:
+                        profile_section["salary"] = annotated_salary
+                    if p.company_name and p.company_name.strip() and p.company_name.strip() not in ("暂无", "暂无公司", "-"):
+                        profile_section["company"] = p.company_name.strip()
+                    else:
+                        profile_section["company"] = "-"
+                    if p.role_name and p.role_name.strip() and p.role_name.strip() not in ("暂无", "-"):
+                        profile_section["role"] = p.role_name.strip()
+                        profile_section["title"] = p.role_name.strip()
+                    else:
+                        profile_section["role"] = "-"
+                        profile_section["title"] = "-"
+            else:
+                if not profile_section.get("name") or profile_section.get("name") in ("基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料"):
+                    profile_section["name"] = "候选人"
+                if not profile_section.get("company") or profile_section.get("company") in ("暂无", "暂无公司", "无", "None", "null", "未填写"):
+                    profile_section["company"] = "-"
+                if not profile_section.get("role") or profile_section.get("role") in ("暂无", "无", "None", "null", "未填写"):
+                    profile_section["role"] = "-"
+                    profile_section["title"] = "-"
+
+        _normalize_structure_analysis(analysis_result)
+
+        if isinstance(profile_section, dict):
+            for _key in ("company", "role", "title"):
+                _v = profile_section.get(_key)
+                if not _v or str(_v).strip() in ("暂无", "暂无公司", "无", "None", "null", "未填写", ""):
+                    profile_section[_key] = "-"
+
+        breakdown = _compute_score_breakdown(analysis_result)
+        analysis_result["score_breakdown"] = breakdown
+        analysis_result["score"] = breakdown["weighted"]
+        analysis_result["optimized_score"] = min(100, breakdown["weighted"] + 10)
+
+        _enrich_metrics(analysis_result, resume_text=resume_text)
+
+        # 配额扣减(成功才扣)
+        if current_user and db_file.user_id == current_user.id:
+            from sqlalchemy import func as _func
+            prev_count_res = await db.execute(
+                select(_func.count(models.ResumeAnalysis.id)).where(
+                    models.ResumeAnalysis.file_id == db_file.id
+                )
+            )
+            prev_count = prev_count_res.scalar() or 0
+            if prev_count == 0:
+                await check_and_consume(db, current_user, FEATURE_RESUME)
+                logger.info(
+                    f"[resume task={task_id}] 简历分析成功,扣额度 user_id={current_user.id} "
+                    f"file_id={db_file.id}"
+                )
+            else:
+                logger.info(
+                    f"[resume task={task_id}] 重分析(file_id={db_file.id} 已有 {prev_count} 条历史),不重复扣"
+                )
+
+        # 持久化
+        record = models.ResumeAnalysis(
+            user_id=user_id,
+            file_id=db_file.id,
+            score=_safe_int(analysis_result.get("score")),
+            optimized_score=_safe_int(analysis_result.get("optimized_score")),
+            ats_pass_rate=_safe_int(analysis_result.get("ats_pass_rate")),
+            result_json=analysis_result,
+        )
+        db.add(record)
+        await db.commit()
+        await db.refresh(record)
+
+        if user_id:
+            schedule_index({
+                "kind": "resume_analysis",
+                "user_id": user_id,
+                "resume_analysis_id": record.id,
+            })
+            from app.services.advisor_generator import trigger_custom_advisor_insights
+            asyncio.create_task(trigger_custom_advisor_insights(user_id))
+
+            # 项目记忆提取:放在分析成功持久化之后(fire-and-forget),
+            # 避免分析失败时已入库的项目记忆成为孤儿(事务一致性)
+            from app.services.project_memory_agent import _run_project_memory_sub_agent
+            asyncio.create_task(
+                _run_project_memory_sub_agent({
+                    "user_id": user_id,
+                    "file_id": db_file.id,
+                    "resume_text": resume_text,
+                })
+            )
+
+        _log_stage("6_post_process_persist")
+
+        # ── 完成 ──
+        _resume_tasks[task_id]["status"] = "completed"
+        _resume_tasks[task_id]["progress"] = 100
+        _resume_tasks[task_id]["analysis_id"] = record.id
+        await _resume_set_progress(task_id, 100, "completed")
+        logger.info(
+            f"[resume task={task_id}] ✅ completed analysis_id={record.id} "
+            f"total_elapsed={time.monotonic() - t_total:.2f}s"
+        )
+
+
+@router.get("/analyze/status/{task_id}")
+async def get_resume_analyze_status(task_id: str):
+    """轮询端点。返回 task 完整状态。
+
+    前端每 N 秒(见文档建议)拉一次,拿到 status="completed" 后调用
+    /api/resume/analyses/{analysis_id} 拿结果数据。
+
+    多 worker 行为:任务状态双写内存 + Redis(_resume_persist),这里优先读
+    Redis,因此轮询请求被路由到任何一个 worker 都能拿到真实进度/结果,
+    不会因为落到非持有者 worker 而 404 或看到假 pending。
+    仅当 Redis 里也没有(写入失败且非本 worker / 已过期)时,才返回 pending
+    让前端继续轮询,前端行为与原来一致。
+    """
+    info = await _resume_read(task_id)
+    if info is None:
+        return {
+            "status": "pending",
+            "progress": 0,
+            "detail": "任务状态暂不可读(可能已过期),请继续轮询或重新发起分析",
+        }
+    return info
+
+
+@router.get("/analyze/status/{task_id}/stream")
+async def stream_resume_analyze_status(task_id: str):
+    """SSE 实时进度推送(参考 audio.py 的 stream_task_progress)。
+
+    事件序列:
+      - event: snapshot   首条当前完整快照
+      - event: progress   后续 _set_progress 触发
+      - event: heartbeat  15s 无更新
+
+    客户端拿到 status="completed"/"failed"/"expired" 后关流。
+    """
+    if task_id not in _resume_tasks:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="分析任务不存在")
+
+    ch = _resume_get_channel(task_id)
+    q = ch.subscribe()
+
+    async def event_generator():
+        try:
+            snapshot = {
+                "progress": _resume_tasks[task_id]["progress"],
+                "status": _resume_tasks[task_id]["status"],
+                "analysis_id": _resume_tasks[task_id].get("analysis_id"),
+                "error_message": _resume_tasks[task_id].get("error_message"),
+            }
+            yield _format_sse("snapshot", snapshot)
+            if snapshot["status"] in ("completed", "failed", "expired"):
+                return
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    yield _format_sse("heartbeat", {"ts": time.time()})
+                    continue
+                yield _format_sse("progress", event)
+                if event.get("status") in ("completed", "failed", "expired"):
+                    return
+        finally:
+            ch.unsubscribe(q)
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+def _format_sse(event: str, data: dict) -> str:
+    """拼 SSE 数据行。空 data 会变成单空格(避免某些代理把它当 keepalive)。"""
+    import json
+    payload = json.dumps(data, ensure_ascii=False, default=str)
+    return f"event: {event}\ndata: {payload}\n\n"
 
 
 @router.get("/analyses")
@@ -343,11 +670,14 @@ async def download_resume_analysis(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):
-    """下载简历（DOCX 改写版）。
+    """下载 AI 优化后的简历（DOCX）。
 
     保留原简历的字体/颜色/图标/分栏/表格等所有样式，只把工作经历 bullets 的文字
     就地替换为 LLM 优化后的版本。源文件是 PDF 时先转 DOCX 再改写；
     bullet 识别率 < 80% 时返回 500，请用户检查简历排版后重试。
+
+    2026-08-04+：暂时只输出 DOCX，PDF 导出因 LibreOffice 吃紧（2 核 4G 服务器）
+    暂不支持。简历上传时若用户传 PDF，前端会有提示「PDF 转 DOCX 可能有格式损失」。
     """
     stmt = select(models.ResumeAnalysis).where(models.ResumeAnalysis.id == analysis_id)
     ra = (await db.execute(stmt)).scalars().first()
@@ -489,8 +819,31 @@ async def delete_resume_analysis(
         if not current_user or current_user.id != ra.user_id:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该简历分析记录")
 
+    file_id = ra.file_id
     await db.delete(ra)
     await db.commit()
+
+    # 级联删除原简历文件(独立步骤,失败不影响历史记录删除):
+    # 若没有其他简历分析引用同一文件,则原文件不再需要(生成优化版简历必须读它,记录删光即无用)
+    if file_id is not None:
+        try:
+            async with async_session() as db2:
+                remaining = await db2.execute(
+                    select(models.ResumeAnalysis.id)
+                    .where(models.ResumeAnalysis.file_id == file_id)
+                    .limit(1)
+                )
+                if remaining.scalars().first() is None:
+                    f_res = await db2.execute(
+                        select(models.UploadedFile).where(models.UploadedFile.id == file_id)
+                    )
+                    f = f_res.scalars().first()
+                    if f:
+                        await delete_file_from_storage(db2, f)
+                        logger.info(f"[resume] 删除分析 {analysis_id} 级联删除原文件 file_id={file_id}")
+        except Exception:
+            logger.exception(f"[resume] 删除分析 {analysis_id} 级联删文件失败 file_id={file_id}")
+
     return {"message": "删除成功"}
 
 

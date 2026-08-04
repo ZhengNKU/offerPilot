@@ -82,9 +82,54 @@ export default function FeedbackPage() {
   const [showModuleDropdown, setShowModuleDropdown] = useState(false);
 
   // Upload States
-  const [uploadFile, setUploadFile] = useState<{ name: string; size: string; progress: number } | null>(null);
-  const [uploadedFileUrl, setUploadedFileUrl] = useState("");
-  const [uploadedScreenshotFileId, setUploadedScreenshotFileId] = useState<number | null>(null);
+  const [uploadFile, setUploadFile] = useState<{ name: string; size: string; progress: number } | null>(() => {
+    // 从 sessionStorage 恢复截图预览信息(name/size),切菜单回来能显示
+    try {
+      const raw = sessionStorage.getItem("interviewVar_feedbackScreenshotName");
+      if (!raw) return null;
+      const p = JSON.parse(raw);
+      return p && typeof p.name === "string"
+        ? { name: p.name, size: typeof p.size === "string" ? p.size : "", progress: 100 }
+        : null;
+    } catch {
+      return null;
+    }
+  });
+  // 截图状态持久化到 sessionStorage:切菜单回来能恢复显示;
+  // 刷新时 flushPendingUploads 会删文件并清掉这些 key,前端不再显示已删的截图
+  const [uploadedFileUrl, setUploadedFileUrl] = useState(() => {
+    try {
+      return sessionStorage.getItem("interviewVar_feedbackScreenshotUrl") || "";
+    } catch {
+      return "";
+    }
+  });
+  const [uploadedScreenshotFileId, setUploadedScreenshotFileId] = useState<number | null>(() => {
+    try {
+      const raw = sessionStorage.getItem("interviewVar_feedbackScreenshotFileId");
+      return raw ? Number(raw) : null;
+    } catch {
+      return null;
+    }
+  });
+  const persistFeedbackScreenshot = (fileId: number | null, url: string, name?: string, size?: string) => {
+    try {
+      if (fileId) sessionStorage.setItem("interviewVar_feedbackScreenshotFileId", String(fileId));
+      else sessionStorage.removeItem("interviewVar_feedbackScreenshotFileId");
+      if (url) sessionStorage.setItem("interviewVar_feedbackScreenshotUrl", url);
+      else sessionStorage.removeItem("interviewVar_feedbackScreenshotUrl");
+      if (name) {
+        sessionStorage.setItem(
+          "interviewVar_feedbackScreenshotName",
+          JSON.stringify({ name, size: size || "" }),
+        );
+      } else {
+        sessionStorage.removeItem("interviewVar_feedbackScreenshotName");
+      }
+    } catch {
+      /* sessionStorage 不可用时静默 */
+    }
+  };
   const [isUploading, setIsUploading] = useState(false);
   const uploadTimerRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -313,7 +358,8 @@ export default function FeedbackPage() {
           description: content.trim(),
           type: feedbackType,
           module: targetModule,
-          screenshot_url: uploadedFileUrl || null
+          screenshot_url: uploadedFileUrl || null,
+          file_id: uploadedScreenshotFileId
         })
       });
       if (res.ok) {
@@ -324,6 +370,7 @@ export default function FeedbackPage() {
         if (uploadedScreenshotFileId) {
           untrackPendingFile(uploadedScreenshotFileId);
           setUploadedScreenshotFileId(null);
+          persistFeedbackScreenshot(null, "");
         }
         // Reset Form
         setFeedbackType("");
@@ -405,6 +452,7 @@ export default function FeedbackPage() {
         setUploadedScreenshotFileId(fin.file_id);
         // track_pending 必须在 finalize 成功后才调 —— 否则 auto-flush DELETE 会打到未提交的行上
         trackPendingFile(fin.file_id);
+        persistFeedbackScreenshot(fin.file_id, fin.file_url, file.name, fileSizeStr);
       }
       setUploadFile((prev) => (prev ? { ...prev, progress: 100 } : prev));
       setIsUploading(false);
@@ -427,6 +475,7 @@ export default function FeedbackPage() {
     if (uploadedScreenshotFileId) {
       untrackPendingFile(uploadedScreenshotFileId);
       setUploadedScreenshotFileId(null);
+      persistFeedbackScreenshot(null, "");
     }
     setUploadFile(null);
     setUploadedFileUrl("");

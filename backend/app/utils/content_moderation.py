@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models
 from app.config import settings
+from app.utils.scheduler import is_scheduler_leader, NON_LEADER_POLL_S, log_once
 
 logger = logging.getLogger(__name__)
 
@@ -231,9 +232,13 @@ async def run_periodic_rescan() -> None:
         return
 
     interval_s = max(60, settings.CONTENT_MODERATION_RESCAN_HOURS * 3600)
-    logger.info("[moderation-rescan] 启动,周期=%ss (%.1fh)", interval_s, interval_s / 3600)
-
+    # 多 worker 下仅调度 leader 执行（见 app/utils/scheduler.py）；
+    # "启动" 日志用 log_once 跨 worker 去重，启动时只打一条，leader 转移不重复
+    log_once("periodic-moderation-rescan", f"[moderation-rescan] 启动,周期={interval_s}s ({interval_s / 3600:.1f}h)")
     while True:
+        if not is_scheduler_leader():
+            await asyncio.sleep(NON_LEADER_POLL_S)
+            continue
         try:
             await _rescan_once()
         except Exception:

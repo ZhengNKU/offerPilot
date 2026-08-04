@@ -42,8 +42,56 @@ function NewAnalysisDebuggerContent() {
   const [taskStep, setTaskStep] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFileId, setUploadedFileId] = useState<number | null>(null);
+  // 每个模式保留自己上传的文件元数据(fileId + 名字 + 大小),持久化到 sessionStorage:
+  // 切模式(tab 不卸载)和切菜单(导航回来重新挂载)都能恢复显示,避免孤儿文件。
+  // File 对象无法序列化,用 {name,size} 重建展示对象即可(分析只靠 file_id 调服务端)。
+  const [modeFile, setModeFile] = useState<
+    Record<string, { fileId: number; name: string; size: number } | null>
+  >(() => {
+    try {
+      const raw = sessionStorage.getItem("interviewVar_modeFiles");
+      if (!raw) return {};
+      const saved = JSON.parse(raw);
+      const out: Record<string, { fileId: number; name: string; size: number } | null> = {};
+      for (const [mode, info] of Object.entries(saved)) {
+        const i = info as { fileId?: unknown; name?: unknown; size?: unknown };
+        if (i && typeof i.fileId === "number") {
+          out[mode] = {
+            fileId: i.fileId,
+            name: typeof i.name === "string" ? i.name : "文件",
+            size: typeof i.size === "number" ? i.size : 0,
+          };
+        }
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  });
+  // 把每模式文件元数据写入 sessionStorage(切菜单回来能恢复)
+  const persistModeFiles = (
+    next: Record<string, { fileId: number; name: string; size: number } | null>
+  ) => {
+    try {
+      sessionStorage.setItem("interviewVar_modeFiles", JSON.stringify(next));
+    } catch {
+      /* sessionStorage 不可用时静默 */
+    }
+  };
   const [isUploading, setIsUploading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // 切菜单导航回来重新挂载时,从 sessionStorage 恢复当前模式之前上传的文件(避免孤儿文件)
+  useEffect(() => {
+    if (!uploadedFileId) {
+      const cur = modeFile[activeMode];
+      if (cur) {
+        setUploadedFileId(cur.fileId);
+        setSelectedFile({ name: cur.name, size: cur.size } as unknown as File);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const [remainingCount, setRemainingCount] = useState<number | null>(null);
 
@@ -194,6 +242,13 @@ function NewAnalysisDebuggerContent() {
 
       setUploadedFileId(fin.file_id);
       setSelectedFile(file);
+      // 按当前模式保存元数据,切走/切菜单回来能恢复(避免孤儿文件)
+      const nextModeFile = {
+        ...modeFile,
+        [activeMode]: { fileId: fin.file_id, name: file.name, size: file.size },
+      };
+      setModeFile(nextModeFile);
+      persistModeFiles(nextModeFile);
       localStorage.setItem("interviewVar_session_audio_url", fin.file_url);
       // track_pending 必须在 finalize 成功后才调 —— 否则 auto-flush DELETE 会
       // 试图清掉已经 finalized 的行,得不偿失
@@ -265,6 +320,12 @@ function NewAnalysisDebuggerContent() {
         // 2026-07-25+: 用户手动删除成功 → 从 pending 列表移除
         // (避免 AutoCleanupUploads 再发一次 DELETE)
         untrackPendingFile(uploadedFileId);
+        // 同时清掉该模式保留的文件,避免切走再切回又恢复出一个已删的文件
+        setModeFile(prev => {
+          const next = { ...prev, [activeMode]: null };
+          persistModeFiles(next);
+          return next;
+        });
         auth.triggerToast("文件已删除！");
       } catch (e: any) {
         auth.triggerToast(e.message || "文件删除失败！", "error");
@@ -527,6 +588,11 @@ function NewAnalysisDebuggerContent() {
           // 前端这里必须同步清掉文件状态,否则 UI 仍显示"已选择"文件,
           // 再次点击删除/分析会打到已不存在的文件上
           if (uploadedFileId) untrackPendingFile(uploadedFileId);
+          setModeFile(prev => {
+            const next = { ...prev, [activeMode]: null };
+            persistModeFiles(next);
+            return next;
+          });
           setSelectedFile(null);
           setUploadedFileId(null);
           localStorage.removeItem("interviewVar_session_audio_url");
@@ -536,6 +602,12 @@ function NewAnalysisDebuggerContent() {
 
         // Step 4: Navigate to voice analysis report page (data is ready)
         localStorage.removeItem("interviewVar_task_id");
+        // 分析成功:文件已消费,清掉本模式保留记录,避免返回调试器又恢复显示已用的文件
+        setModeFile(prev => {
+          const next = { ...prev, [activeMode]: null };
+          persistModeFiles(next);
+          return next;
+        });
         await checkRemainingLimit();
         router.push("/debugger/voice");
       } catch (e: any) {
@@ -677,62 +749,158 @@ function NewAnalysisDebuggerContent() {
       if (token) authHeaders["Authorization"] = `Bearer ${token}`;
 
       let progress = 15;
+      let lastRealProgress = 15; // 最近一次后端真实进度(轮询时更新)
       const progressSteps = [
         { limit: 45, step: "正在深度解析简历结构与技术栈..." },
         { limit: 70, step: "正在对比目标岗位画像，评估匹配契合度..." },
         { limit: 88, step: "正在实施大厂 STAR 原则，深度优化工作经历..." },
         { limit: 97, step: "正在诊断简历雷区与 ATS 机器人可读性..." }
       ];
-      
+
       let currentStepIdx = 0;
-      const progressInterval = setInterval(() => {
-        if (progress < 98) {
+      // 同时启动 6s 轮询拿真实进度,完成后跳报告页。
+      // 假进度上限 = 上次真实进度 + 8,绝不虚报到 95——否则会出现
+      // "卡在 95% 实际才跑一半"的假象。后端在 LLM 阶段(50→85)已有平滑真实进度,
+      // 假进度只在两次轮询之间填缝,保证进度条持续移动且不虚高。
+      const fakeProgressInterval = setInterval(() => {
+        const ceiling = Math.min(88, lastRealProgress + 8);
+        if (progress < ceiling) {
           const currentStep = progressSteps[currentStepIdx];
           const inc = progress < 45 ? 1.2 : (progress < 70 ? 0.8 : (progress < 88 ? 0.5 : 0.2));
-          progress = Math.min(98, progress + inc);
+          progress = Math.min(ceiling, progress + inc);
           setTaskProgress(Math.floor(progress));
           setTaskStep(currentStep.step);
-          
+
           if (progress >= currentStep.limit && currentStepIdx < progressSteps.length - 1) {
             currentStepIdx++;
           }
         }
       }, 400);
 
+      let analysisId: number | null = null;
+      let pollingTimer: ReturnType<typeof setInterval> | null = null;
+      let safetyTimer: ReturnType<typeof setTimeout> | null = null;
+      let aborted = false;
+
+      const cleanup = () => {
+        clearInterval(fakeProgressInterval);
+        if (pollingTimer) clearInterval(pollingTimer);
+        if (safetyTimer) clearTimeout(safetyTimer);
+      };
+
       try {
+        // 1. POST 立即拿 task_id(后端 BackgroundTasks 派发真实分析)
         const analyzeRes = await fetch(`${API_BASE}/api/resume/analyze`, {
           method: "POST",
           headers: authHeaders,
           body: JSON.stringify({ file_id: uploadedFileId })
         });
 
-        clearInterval(progressInterval);
-
         if (!analyzeRes.ok) {
+          cleanup();
           const err = await analyzeRes.json();
           throw new Error(err.detail || "简历深度诊断失败");
         }
 
-        setTaskProgress(98);
-        setTaskStep("完成分析 — 正在生成高维诊断报告...");
-        const analysisData = await analyzeRes.json();
+        const { task_id } = await analyzeRes.json();
+        if (!task_id) {
+          cleanup();
+          throw new Error("后端未返回 task_id");
+        }
 
-        // 2026-07-25+: 简历分析请求成功 → 文件已"提交",从 pending 列表移除
-        if (uploadedFileId) untrackPendingFile(uploadedFileId);
+        // 2. 6s 轮询 status,完成后调 /api/resume/analyses/{id} 拿结果
+        // 6000ms 是和后端对齐的关键节拍:进度点 5/15/30/50/90/100,6s 内必能感知
+        const POLL_MS = 6000;
+        // 兜底超时 10 分钟,防 task_id 漏写或后端异常永久轮询
+        const MAX_MS = 10 * 60 * 1000;
 
-        // Cache the analysis data to localStorage
-        localStorage.setItem("interviewVar_resume_analysis_result", JSON.stringify(analysisData));
-        localStorage.setItem("interviewVar_analyzed_resume", "true");
-        await checkRemainingLimit();
-        setTaskProgress(100);
+        const finishWithAnalysis = async (id: number) => {
+          if (aborted) return;
+          aborted = true;
+          cleanup();
 
-        // 跳转带上 id，方便后续从历史列表/分享链接重新进入同一份报告
-        const target = analysisData?.id
-          ? `/debugger/resume?id=${analysisData.id}`
-          : "/debugger/resume";
-        router.push(target);
+          try {
+            // 拉完整 analysis 数据(同原行为)
+            const res = await fetch(`${API_BASE}/api/resume/analyses/${id}`, { headers: authHeaders });
+            if (!res.ok) throw new Error("拉取诊断结果失败");
+            const analysisData = await res.json();
+
+            setTaskProgress(98);
+            setTaskStep("完成分析 — 正在生成高维诊断报告...");
+
+            if (uploadedFileId) untrackPendingFile(uploadedFileId);
+            // 分析成功:文件已消费,清掉本模式保留记录,避免返回调试器又恢复显示已用的文件
+            setModeFile(prev => {
+              const next = { ...prev, [activeMode]: null };
+              persistModeFiles(next);
+              return next;
+            });
+            localStorage.setItem("interviewVar_resume_analysis_result", JSON.stringify(analysisData));
+            localStorage.setItem("interviewVar_analyzed_resume", "true");
+            await checkRemainingLimit();
+            setTaskProgress(100);
+
+            const target = analysisData?.id
+              ? `/debugger/resume?id=${analysisData.id}`
+              : "/debugger/resume";
+            router.push(target);
+          } catch (e: any) {
+            auth.triggerToast(e.message || "拉取诊断结果失败", "error");
+            setIsAnalyzing(false);
+          }
+        };
+
+        const handleFailure = (msg: string) => {
+          if (aborted) return;
+          aborted = true;
+          cleanup();
+          auth.triggerToast(msg || "分析简历失败，请重试！", "error");
+          setIsAnalyzing(false);
+        };
+
+        pollingTimer = setInterval(async () => {
+          if (aborted) return;
+          try {
+            const res = await fetch(`${API_BASE}/api/resume/analyze/status/${task_id}`);
+            if (!res.ok) {
+              // 404 通常是 worker 进程不持有这个 task(跨 worker)
+              // → 继续轮询,直到超时
+              if (res.status !== 404) {
+                handleFailure("查询分析进度失败");
+              }
+              return;
+            }
+            const status = await res.json();
+            // 把真实进度同步到 UI(progress: 5/15/30/50/90/100,LLM 阶段 50→85 平滑)
+            if (typeof status.progress === "number") {
+              const real = status.progress;
+              lastRealProgress = real; // 假进度以此锚定,不超过 real+8
+              if (real > progress) {
+                progress = real;
+                setTaskProgress(real);
+              }
+              // 50% 阶段是 LLM 大头,文案提示用户耐心等
+              if (real >= 50 && real < 90) {
+                setTaskStep("AI 正在深度分析简历内容,请稍候...");
+              }
+            }
+            if (status.status === "completed" && status.analysis_id) {
+              analysisId = status.analysis_id;
+              await finishWithAnalysis(analysisId);
+            } else if (status.status === "failed") {
+              handleFailure(status.error_message || "分析失败");
+            }
+          } catch {
+            // 网络抖动不报错,继续轮询
+          }
+        }, POLL_MS);
+
+        safetyTimer = setTimeout(() => {
+          if (aborted) return;
+          handleFailure("分析超时(>10min),请稍后重试或联系客服");
+        }, MAX_MS);
       } catch (e: any) {
-        clearInterval(progressInterval);
+        cleanup();
         auth.triggerToast(e.message || "分析简历失败，请重试！", "error");
         setIsAnalyzing(false);
       }
@@ -852,22 +1020,14 @@ function NewAnalysisDebuggerContent() {
                   return (
                     <div
                       key={idx}
-                      onClick={async () => {
-                        if (uploadedFileId) {
-                          // Silently delete in background to avoid orphan file
-                          const token = localStorage.getItem("interviewVar_token");
-                          const headers: Record<string, string> = {};
-                          if (token) headers["Authorization"] = `Bearer ${token}`;
-                          fetch(`${API_BASE}/api/file/delete?file_id=${uploadedFileId}`, {
-                            method: "DELETE",
-                            headers
-                          }).catch(() => {});
-                          // 2026-07-25+: 模式切换时显式删除 → 从 pending 移除
-                          untrackPendingFile(uploadedFileId);
-                        }
+                      onClick={() => {
+                        // 切模式不删文件;切回来恢复该模式之前上传的文件(避免孤儿文件)
+                        const next = modeFile[item.mode];
                         setActiveMode(item.mode as any);
-                        setSelectedFile(null);
-                        setUploadedFileId(null);
+                        setSelectedFile(
+                          next ? ({ name: next.name, size: next.size } as unknown as File) : null
+                        );
+                        setUploadedFileId(next?.fileId ?? null);
                         localStorage.removeItem("interviewVar_session_audio_url");
                         if (fileInputRef.current) {
                           fileInputRef.current.value = "";

@@ -17,6 +17,8 @@
 import io
 import logging
 import re
+import unicodedata
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Tuple
 
 from docx import Document
@@ -25,7 +27,22 @@ from docx.oxml.ns import qn
 logger = logging.getLogger(__name__)
 
 # 替换率 < 80% 视为识别失败，触发 PDF 兜底
-MATCH_RATE_THRESHOLD = 0.8
+# 之前 0/12 完全 fail 抛 500 太刚性 — 用户场景是「哪怕只优化 1 个 bullet 也比没有好」。
+# 后续会基于真实数据(desktop dump 拿到 pypdf vs pdf2docx 输出差异)重新调到合理值。
+MATCH_RATE_THRESHOLD = 0.0
+
+# Fuzzy 匹配下限：相似度 >= 该值视为同一 bullet。
+# 低于 0.8 会开始误报（两个不同 bullet 也匹配上），高于 0.9 又会漏掉
+# PDF→DOCX 引入的小差异（smart quote、全角符号等）。
+FUZZY_THRESHOLD = 0.85
+
+# 智能引号 → ASCII 双引号。pypdf 和 pdf2docx 对同一份 PDF 的 smart quote
+# 抽取结果不一致（左/右引号互换），是 bullet 匹配失败的常见原因之一。
+_SMART_QUOTE_DOUBLE_RE = re.compile(r"[“”「」『』]")
+_SMART_QUOTE_SINGLE_RE = re.compile(r"[‘’]")
+# 各种破折号变体 → ASCII hyphen-minus。
+# pypdf 经常把 "—" 输出成 "-" 或丢失，pdf2docx 保留原 Unicode。
+_DASH_RE = re.compile(r"[–—―−]")
 
 # 零宽 / 不可见字符集合——PDF→DOCX（pdf2docx）会在每段段尾追加 ​ 等。
 # bullet 的 originalText 是从 PDF 文本抽取得到的，不带这些字符；
@@ -42,12 +59,20 @@ _LEADING_BULLET_RE = re.compile(r"^[•·●○▪▫■□\-*]+\s*")
 def _norm_text(s: str) -> str:
     """bullet / 段落 文本的归一化：
 
-    - 去掉 PDF→DOCX 转换时插入的零宽字符（U+200B / U+200C / U+200D / U+FEFF）
-    - 把任意多种空白（含换行、全角空格、制表符）折叠成单个半角空格并 strip
-    - 去掉段首常见列表符号（• · ● ○ ■ □ - *）
+    顺序很重要，每一步都建立在前一步已经剥干净的基础上：
+    1. NFKC Unicode 归一化 — 全角→半角、兼容形分解（如 ﬁ → fi）
+    2. 智能引号 → ASCII — " " " " 「 」 『 』 全替成 "
+    3. 破折号变体 → ASCII hyphen — — – − 全替成 -
+    4. 零宽字符清理
+    5. 任意空白 → 单空格
+    6. 段首列表符号剥除
     """
     if not s:
         return ""
+    s = unicodedata.normalize("NFKC", s)
+    s = _SMART_QUOTE_DOUBLE_RE.sub('"', s)
+    s = _SMART_QUOTE_SINGLE_RE.sub("'", s)
+    s = _DASH_RE.sub("-", s)
     s = _INVISIBLE_RE.sub("", s)
     s = _WHITESPACE_RE.sub(" ", s).strip()
     s = _LEADING_BULLET_RE.sub("", s)
@@ -62,6 +87,21 @@ def _strip_ws(s: str) -> str:
     必须"忽略所有空白"，容忍任何位置上的空白差异。
     """
     return re.sub(r"\s+", "", s or "")
+
+
+def _fuzzy_ratio(a: str, b: str) -> float:
+    """两个空白无关字符串的相似度。短串 / 长度差过大特判，长串走 SequenceMatcher。"""
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    la, lb = len(a), len(b)
+    # 短串 SequenceMatcher 不准,长度差过大也不算同一段 — 直接拒,避免误报
+    if min(la, lb) < 4:
+        return 1.0 if a == b else 0.0
+    if max(la, lb) / min(la, lb) > 1.5:
+        return 0.0
+    return SequenceMatcher(None, a, b).ratio()
 
 
 class BulletMatchError(Exception):
@@ -172,6 +212,21 @@ def rewrite_resume_docx(content_bytes: bytes, analysis_data: Dict[str, Any]) -> 
         for i, (orig, opt, key) in enumerate(pending):
             # 1. 尝试单段完全匹配（用 stripped 比较键）
             if para_key == key:
+                _replace_paragraph_text(para, opt)
+                pending.pop(i)
+                replaced_count += 1
+                p_idx += 1
+                matched = True
+                break
+
+            # 1.5 Fuzzy 兜底：strict 匹配失败但相似度 >= FUZZY_THRESHOLD 也算命中。
+            # 场景: pypdf vs pdf2docx 抽取 smart quote / 全角符号不一致,
+            # 严格比较 0% 但 fuzzy 能救回大部分。
+            # 风险: 短串 / 长度差过大容易误报,_fuzzy_ratio 已经特判,这里再确认一次。
+            if (not matched
+                    and min(len(para_key), len(key)) >= 6
+                    and max(len(para_key), len(key)) / min(len(para_key), len(key)) <= 1.3
+                    and _fuzzy_ratio(para_key, key) >= FUZZY_THRESHOLD):
                 _replace_paragraph_text(para, opt)
                 pending.pop(i)
                 replaced_count += 1

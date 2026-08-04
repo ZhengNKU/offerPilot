@@ -12,7 +12,7 @@ import json
 import logging
 
 from app import models, database
-from app.database import get_db, async_session
+from app.database import get_db, async_session, _get_redis_pool
 from app.routers.auth import get_current_user_optional
 from app.utils.llm import analyze_interview_dialogue, sectionize_transcript, generate_transcript_highlights, generate_section_optimization_advice, extract_mentioned_projects
 from app.utils.asr import call_volc_asr
@@ -111,6 +111,7 @@ async def create_session(
     session = models.InterviewSession(
         user_id=current_user.id if current_user else None,
         audio_url=cos_key,  # 存 cos_key 而非签名 URL，**不再有 1h-bomb**
+        file_id=req.file_id,  # 精确外键关联 UploadedFile
         duration=0,
         file_size=req.file_size or 0,
         status="uploaded",
@@ -373,6 +374,58 @@ def _drop_channel(task_id: str) -> None:
     task_channels.pop(task_id, None)
 
 
+# ── 跨 worker 共享：Redis task 状态 + Redis Pub/Sub 推送 ─────────────────
+# uvicorn --workers 2 时,任务注册在发起 POST /analyze 那个 worker 的进程内
+# 内存里,SSE/轮询请求可能被路由到另一个 worker → 404 / 拿不到真实进度。
+# 方案:任务状态双写内存 + Redis,进度事件走 Redis Pub/Sub,任意 worker 都能
+# 读到真实状态、订阅到进度流(见上方 TaskChannel 注释"扩多进程时换 Redis Pub/Sub")。
+# 分析最长约 10 分钟,任务状态 TTL 1 小时足够,之后自动清理。
+AUDIO_TASK_REDIS_TTL = 60 * 60
+
+
+def _task_redis_key(task_id: str) -> str:
+    return f"audio:task:{task_id}"
+
+
+def _task_redis_channel(task_id: str) -> str:
+    return f"audio:task:{task_id}:events"
+
+
+async def _persist_task(task_id: str, info: Dict[str, Any]) -> None:
+    """把任务状态写入 Redis(跨 worker 共享)。失败不阻断分析主流程。"""
+    try:
+        redis = _get_redis_pool()
+        await redis.set(
+            _task_redis_key(task_id),
+            json.dumps(info, ensure_ascii=False),
+            ex=AUDIO_TASK_REDIS_TTL,
+        )
+    except Exception:
+        logger.warning("[task=%s] 状态写 Redis 失败,退化为本 worker 读取", task_id)
+
+
+async def _read_task(task_id: str) -> Optional[Dict[str, Any]]:
+    """读任务状态:优先 Redis(跨 worker 真实状态),再本地内存兜底。"""
+    try:
+        redis = _get_redis_pool()
+        raw = await redis.get(_task_redis_key(task_id))
+        if raw:
+            return json.loads(raw)
+    except Exception:
+        pass
+    info = task_store.get(task_id)
+    return dict(info) if info else None
+
+
+async def _publish_event(task_id: str, event: Dict[str, Any]) -> None:
+    """把进度事件发到 Redis Pub/Sub,供任意 worker 的 SSE 订阅。"""
+    try:
+        redis = _get_redis_pool()
+        await redis.publish(_task_redis_channel(task_id), json.dumps(event, ensure_ascii=False))
+    except Exception:
+        pass
+
+
 async def run_real_analysis(session_id: int, task_id: str, profile_data: Optional[dict]):
     """
     Real analysis pipeline:
@@ -433,7 +486,15 @@ async def _fail_analysis(
     task_store[task_id]["status"] = "failed"
     task_store[task_id]["error_message"] = user_message
 
-    # SSE 推送失败状态,客户端订阅 reject 后跳转错误页
+    # 跨 worker:写 Redis 状态 + 发 Redis Pub/Sub,任意 worker 的 SSE/轮询都能拿到失败
+    await _persist_task(task_id, task_store[task_id])
+    await _publish_event(task_id, {
+        "progress": task_store[task_id]["progress"],
+        "status": "failed",
+        "error_message": user_message,
+    })
+
+    # SSE 推送失败状态,客户端订阅 reject 后跳转错误页(本地 channel,同 worker)
     ch = task_channels.get(task_id)
     if ch is not None:
         try:
@@ -485,18 +546,20 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             logger.info(f"[task={task_id}] ■ stage={name} elapsed={time.monotonic() - t0:.2f}s")
         return _end
 
-    def _set_progress(pct: int, status_str: str = "processing"):
+    async def _set_progress(pct: int, status_str: str = "processing"):
         task_store[task_id]["progress"] = pct
         task_store[task_id]["status"] = status_str
-        # 把进度推给所有 SSE 订阅者。_set_progress 跑在分析协程里,
-        # publish() 不会 await 阻塞→走 create_task 异步派发即可
+        # 状态写 Redis(跨 worker 共享),进度事件发 Redis Pub/Sub(跨 worker SSE)
+        await _persist_task(task_id, task_store[task_id])
+        event = {
+            "progress": pct,
+            "status": status_str,
+            "error_message": task_store[task_id].get("error_message"),
+        }
+        await _publish_event(task_id, event)
+        # 保留本地 channel 推送(同 worker SSE;跨 worker 走 Redis Pub/Sub)
         ch = task_channels.get(task_id)
         if ch is not None:
-            event = {
-                "progress": pct,
-                "status": status_str,
-                "error_message": task_store[task_id].get("error_message"),
-            }
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(ch.publish(event))
@@ -505,7 +568,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
                 pass
 
     # ── Step 0: Mark as started ───────────────────────────────────────────
-    _set_progress(5)
+    await _set_progress(5)
     end_fetch = _stage("1/5 fetch_session")
 
     # ── Step 1: Fetch audio URL from DB ──────────────────────────────────
@@ -526,7 +589,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
     if not audio_url:
         raise RuntimeError("找不到对应的面试记录")
 
-    _set_progress(15, "processing")
+    await _set_progress(15, "processing")
 
     # ── Step 2: Real ASR via Volc Engine or load from DB (for text/live mode) ─
     # PR4: 'live' 走与 text_mode 相同分支 —— 实时模式 ASR 在火山端完成，
@@ -584,7 +647,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
                     await asyncio.sleep(2.5)
                     inc = 3 if curr < 30 else (2 if curr < 40 else 1)
                     curr = min(44, curr + inc)
-                    _set_progress(curr, "processing")
+                    await _set_progress(curr, "processing")
             except asyncio.CancelledError:
                 pass
 
@@ -604,7 +667,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             # ASR 调用本身没抛,但返回空段(典型场景:火山下载成功但音频无语音/损坏)
             raise RuntimeError("音频无有效语音内容")
 
-    _set_progress(45, "processing")
+    await _set_progress(45, "processing")
     end_asr()
 
     # ── Step 2.1: 隐私脱敏处理 (2026-07-20+) ─────────────────────────────────
@@ -671,7 +734,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             f"[task={task_id}] Highlights API returned {len(result)} items "
             f"in {time.monotonic() - t0:.2f}s"
         )
-        _set_progress(50, "processing")
+        await _set_progress(50, "processing")
         return result or []
 
     async def _call_sectionize():
@@ -681,7 +744,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             f"[task={task_id}] Sectionize returned {len(result)} sections "
             f"in {time.monotonic() - t0:.2f}s"
         )
-        _set_progress(55, "processing")
+        await _set_progress(55, "processing")
         return result or []
 
     async def _call_dialogue_eval():
@@ -694,7 +757,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             f"in {time.monotonic() - t0:.2f}s"
         )
         # dialogue_eval 是这 4 个里最重的,占大头,推到 60
-        _set_progress(60, "processing")
+        await _set_progress(60, "processing")
         return res or {}
 
     async def _call_extract_mentions():
@@ -705,7 +768,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             f"[task={task_id}] extract_mentioned_projects returned "
             f"{len(items)} items in {time.monotonic() - t0:.2f}s"
         )
-        _set_progress(64, "processing")
+        await _set_progress(64, "processing")
         return items or []
 
     if raw_segments:
@@ -784,11 +847,11 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
             except Exception as ex:
                 logger.warning(f"Error merging highlight: {ex}")
 
-    _set_progress(65, "processing")
+    await _set_progress(65, "processing")
 
     end_llm()
 
-    _set_progress(65, "processing")
+    await _set_progress(65, "processing")
     end_persist = _stage("4/5 persist")
 
     # 把 transcript/sections 写入 + 配额扣减 + scores 写入放在同一个事务里，
@@ -926,7 +989,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
                 f"[task={task_id}] 项目提及同步失败（不影响主流程）: {e}"
             )
 
-    _set_progress(85, "processing")
+    await _set_progress(85, "processing")
 
     # 触发 AI 职业顾问索引（fire-and-forget；失败不影响主流程）
     if session.user_id:
@@ -946,7 +1009,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
     # 调一次 LLM，避免「点一下全生成」的错觉，也节省 LLM 成本。
     # _prefetch_section_optimization 函数保留以备后用。
 
-    _set_progress(100, "completed")
+    await _set_progress(100, "completed")
     end_finish()
     logger.info(
         f"[task={task_id}] ✅ 全部完成 session={session_id} "
@@ -1063,6 +1126,8 @@ async def analyze_audio(
         "progress": 0,
         "error_message": None
     }
+    # 跨 worker:初始状态就写 Redis,其他 worker 的轮询/SSE 才能立即读到
+    await _persist_task(task_id, task_store[task_id])
     
     # Profile payload preparation - NULL/Empty if guest user (not logged in)
     profile_data = await _extract_profile_data(db, current_user.id if current_user else None)
@@ -1112,35 +1177,40 @@ async def _extract_profile_data(db: AsyncSession, user_id: Optional[int]) -> Opt
 
 @router.get("/task/{id}")
 async def get_task_status(id: str):
-    if id not in task_store:
+    # 优先读 Redis(跨 worker 真实状态),再本地内存兜底;都没有才 404
+    info = await _read_task(id)
+    if info is None:
         raise HTTPException(status_code=404, detail="分析任务不存在")
-    return task_store[id]
+    return info
 
 
 @router.get("/task/{id}/stream")
 async def stream_task_progress(id: str):
     """
     SSE 端点:订阅 task_id 的进度事件流,替代前端的 2s 轮询。
+    多 worker 下走 Redis Pub/Sub,任意 worker 都能订阅到进度事件。
     事件序列:
-      - event: snapshot   (首条一定先发,包含当前 task_store 完整快照)
+      - event: snapshot   (首条一定先发,包含当前任务完整快照)
       - event: progress   (后续每次 _set_progress 触发一条)
       - event: heartbeat  (15s 无更新时发,纯 keep-alive)
     客户端拿到 status=completed / failed 后自行关流。
     """
-    if id not in task_store:
+    if await _read_task(id) is None:
         raise HTTPException(status_code=404, detail="分析任务不存在")
 
-    channel = _get_channel(id)
-    queue = channel.subscribe()
+    redis = _get_redis_pool()
+    ps = redis.pubsub()
+    await ps.subscribe(_task_redis_channel(id))
 
     async def event_generator():
         try:
             # ── 1. 首条快照:让客户端立刻拿到当前状态,避免 SSE 启动开销期间
             #        错过前面 _set_progress(5/15/45) 的事件
+            cur = await _read_task(id) or {}
             snapshot = {
-                "progress": task_store[id]["progress"],
-                "status": task_store[id]["status"],
-                "error_message": task_store[id].get("error_message"),
+                "progress": cur.get("progress", 0),
+                "status": cur.get("status", "pending"),
+                "error_message": cur.get("error_message"),
             }
             yield _format_sse("snapshot", snapshot)
 
@@ -1148,13 +1218,25 @@ async def stream_task_progress(id: str):
             if snapshot["status"] in ("completed", "failed"):
                 return
 
-            # ── 2. 订阅 channel,逐条推送给客户端
+            # ── 2. 订阅 Redis Pub/Sub,逐条推送给客户端(跨 worker 通用)
             while True:
                 try:
-                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
-                except asyncio.TimeoutError:
+                    msg = await ps.get_message(
+                        ignore_subscribe_messages=True, timeout=15.0
+                    )
+                except Exception:
+                    msg = None
+                if msg is None:
                     # keep-alive:代理/CDN 不会因为 idle 切断连接
                     yield _format_sse("heartbeat", {"ts": time.time()})
+                    continue
+                raw = msg.get("data")
+                if isinstance(raw, (bytes, str)):
+                    try:
+                        event = json.loads(raw)
+                    except (TypeError, ValueError):
+                        continue
+                else:
                     continue
 
                 yield _format_sse("progress", event)
@@ -1163,7 +1245,16 @@ async def stream_task_progress(id: str):
                     # 终端态,订阅者会在解析后关流,这里直接退出
                     return
         finally:
-            channel.unsubscribe(queue)
+            try:
+                await ps.unsubscribe(_task_redis_channel(id))
+            except Exception:
+                pass
+            try:
+                # redis 8.x 用 aclose;低版本用 close
+                closer = getattr(ps, "aclose", None) or ps.close
+                await closer()
+            except Exception:
+                pass
 
     return StreamingResponse(
         event_generator(),

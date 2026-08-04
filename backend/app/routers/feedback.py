@@ -164,6 +164,7 @@ async def create_feedback(
         type=req.type,
         module=req.module,
         screenshot_url=req.screenshot_url,
+        file_id=req.file_id,  # 精确外键关联 UploadedFile
         upvotes=0
     )
     db.add(fb)

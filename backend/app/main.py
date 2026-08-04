@@ -30,6 +30,8 @@ except Exception as _e:
     _memory_router = None
 from app.utils.cleanup import run_periodic_cleanup, run_periodic_log_cleanup, cleanup_old_logs
 from app.utils.cleanup import run_periodic_pending_presign_cleanup
+# 启动日志去重：多 worker 下每条启动日志只打一次（见 app/utils/scheduler.py）
+from app.utils.scheduler import log_once
 
 from fastapi import Request
 import time
@@ -121,7 +123,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # 启动期打印当前日志目录，便于运维核对路径（容器内 /app/logs ↔ 宿主机 /data/logs）
-logging.info("[main] 日志目录 = %s (Docker 部署下此目录对应宿主机 /data/logs)", log_dir)
+# 两个 worker 都会 import 本模块，用 log_once 保证只打一条
+log_once("log-dir", f"[main] 日志目录 = {log_dir} (Docker 部署下此目录对应宿主机 /data/logs)")
 
 app = FastAPI(
     title="面试驾到 - Backend Services",
@@ -218,7 +221,7 @@ app.include_router(admin_moderation.router)
 app.include_router(moderation_preview.router)
 if _MEMORY_LOADED and _memory_router is not None:
     app.include_router(_memory_router.router)
-    logging.info("[main] Memory router registered successfully")
+    log_once("memory-router", "[main] Memory router registered successfully")
 else:
     logging.warning("[main] Memory router NOT registered (import failed)")
 
@@ -256,7 +259,8 @@ async def startup_event():
         async with engine.begin() as conn:
             from sqlalchemy import text as _text
             await conn.execute(_text("CREATE EXTENSION IF NOT EXISTS vector"))
-        logging.info("[startup] pgvector extension verified")
+        # 两个 worker 都会跑 CREATE EXTENSION（幂等），日志只打一条
+        log_once("pgvector", "[startup] pgvector extension verified")
     except Exception as _e:
         logging.error(f"[startup] Failed to ensure pgvector extension: {_e}")
         # 不抛出——其他功能可用，仅 counselor 向量检索不可用
@@ -265,25 +269,26 @@ async def startup_event():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # 启动后台定期清理任务
+    # ── 周期任务 + 启动期一次性任务：多 worker 下只让一个进程执行 ──
+    # uvicorn --workers 2 时每个 worker 都会跑 startup_event，若不互斥，
+    # 周期清理 / 种子数据会被两个 worker 各执行一遍、日志打两遍。
+    # 方案：Redis 分布式锁 leader 选举（见 app/utils/scheduler.py）
+    from app.utils.scheduler import start_leader_heartbeat, run_startup_once
+    start_leader_heartbeat()
+
+    # 启动期一次性任务（种子数据 / 孤立日志清理）：整个集群只跑一次（幂等）
+    asyncio.create_task(run_startup_once(_startup_log_cleanup))
+    asyncio.create_task(run_startup_once(_seed_project_tags))
+    asyncio.create_task(run_startup_once(_seed_admin_account))
+    asyncio.create_task(run_startup_once(_seed_featured_guides))
+
+    # 周期任务：循环内部自行判断 leader，非 leader 不执行、不打印
     asyncio.create_task(run_periodic_cleanup())
-    # 2026-08 引入：pending presign 清理(每 6h 跑一次,见 cleanup.py)
     asyncio.create_task(run_periodic_pending_presign_cleanup())
-    # 启动后台定期日志清理任务（LOG_RETENTION_DAYS 之外的旧日志自动清理）
     asyncio.create_task(run_periodic_log_cleanup())
-    # 启动时立即异步清理一次历史孤立日志（把 backupCount 调小后目录里残留的旧文件清掉）
-    asyncio.create_task(_startup_log_cleanup())
-    # 启动标签字典种子数据初始化
-    asyncio.create_task(_seed_project_tags())
-    # 启动管理员账号初始化
-    asyncio.create_task(_seed_admin_account())
-    # 启动精选推荐数据种子（面试指南页固定预置数据，幂等）
-    asyncio.create_task(_seed_featured_guides())
-    # 启动内容审核后台巡检
     from app.utils.content_moderation import run_periodic_rescan
     asyncio.create_task(run_periodic_rescan())
-    logging.info("[main] 内容审核后台巡检已启用 (周期=%sh)",
-                 settings.CONTENT_MODERATION_RESCAN_HOURS)
+    log_once("periodic-registered", "[main] 后台周期任务已注册（Redis leader 选举，多 worker 下仅 leader 执行）")
 
 
 async def _startup_log_cleanup():

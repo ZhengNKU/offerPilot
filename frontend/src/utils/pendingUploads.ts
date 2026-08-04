@@ -91,6 +91,14 @@ export function flushPendingUploads(reason: string = "auto-cleanup") {
   }
 
   const ids = [...pendingIds];
+  try {
+    sessionStorage.removeItem("interviewVar_modeFiles");
+    sessionStorage.removeItem("interviewVar_feedbackScreenshotFileId");
+    sessionStorage.removeItem("interviewVar_feedbackScreenshotUrl");
+    sessionStorage.removeItem("interviewVar_feedbackScreenshotName");
+  } catch {
+    // ignore
+  }
   for (const id of ids) {
     try {
       // keepalive: true 是关键 —— 页面正在 unload 也能送达

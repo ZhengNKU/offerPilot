@@ -976,9 +976,9 @@ html.light div[style*="backgroundImage"] + div[class*="from-[#0b1326]"] {
 }
 
 /* 全站 Modal 弹窗与二次确认框在浅色模式下全量适配为精致纯白与纯黑字 (Modal / Dialog Popup Light Theme Fix) */
-html.light div[class*="fixed"][class*="z-50"] div[class*="rounded-3xl"],
-html.light div[class*="fixed"][class*="z-50"] div[class*="rounded-2xl"],
-html.light div[class*="fixed"][class*="z-50"] div[class*="shadow-2xl"] {
+html.light div[class*="fixed"][class*="z-50"]:not(.docx-tooltip-card) div[class*="rounded-3xl"],
+html.light div[class*="fixed"][class*="z-50"]:not(.docx-tooltip-card) div[class*="rounded-2xl"],
+html.light div[class*="fixed"][class*="z-50"]:not(.docx-tooltip-card) div[class*="shadow-2xl"] {
   background-color: #ffffff !important;
   border: 1px solid rgba(0, 0, 0, 0.12) !important;
   color: #0f172a !important;
@@ -992,9 +992,27 @@ html.light div[class*="fixed"][class*="z-50"] label {
   color: #0f172a !important;
 }
 
-html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) p,
-html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)) span {
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) p,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) span:not(.material-symbols-outlined) {
   color: #334155 !important;
+}
+
+/* 下载 AI 优化版简历按钮旁边的 Tooltip 提示框：浅色模式下依然锁定黑底高亮纯白字 */
+html.light .docx-tooltip-card,
+html.light div.docx-tooltip-card,
+html.light .docx-tooltip-card p,
+html.light .docx-tooltip-card span,
+html.light .docx-tooltip-card b {
+  background-color: #050B1A !important;
+  color: #ffffff !important;
+}
+
+html.light .docx-tooltip-card span[class*="text-[#00D4FF]"] {
+  color: #00D4FF !important;
+}
+
+html.light .docx-tooltip-card span[class*="text-[#FF7A95]"] {
+  color: #FF7A95 !important;
 }
 
 html.light div[class*="fixed"][class*="z-50"] button[class*="bg-white/5"],

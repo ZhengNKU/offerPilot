@@ -67,10 +67,12 @@ async def delete_file_shared(file_id: int, db: AsyncSession, current_user: Optio
     result = await db.execute(select(models.UploadedFile).where(models.UploadedFile.id == file_id))
     db_file = result.scalars().first()
     if not db_file:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="文件未找到"
-        )
+        # 幂等删除:文件不存在视为"已删除",返回成功而非 404。
+        # 前端切模式/刷新/pending 清理(BFCache 恢复后 state 仍持有旧 file_id)
+        # 可能对同一 file_id 重复 DELETE,此时 404 会刷"文件不存在"错误噪音,
+        # 而该文件本来就是要删的清理目标。
+        return {"message": "文件不存在或已删除"}
+
 
     # Permission check: if user is logged in, ensure they own the file.
     # If it is a guest file, allow deleting it.

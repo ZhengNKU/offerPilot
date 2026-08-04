@@ -75,6 +75,9 @@ class InterviewSession(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     audio_url: Mapped[str] = mapped_column(String, nullable=False)
+    file_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     duration: Mapped[int] = mapped_column(Integer, default=0)
     file_size: Mapped[int] = mapped_column(BigInteger, default=0)
     status: Mapped[str] = mapped_column(String(50), default="uploaded") # uploaded, processing, completed, failed
@@ -764,6 +767,9 @@ class Feedback(Base):
     type: Mapped[str] = mapped_column(String(50), nullable=False) # 问题反馈, 功能建议, 体验优化, 其他
     module: Mapped[Optional[str]] = mapped_column(String(100), nullable=True) # 关联功能模块
     screenshot_url: Mapped[Optional[str]] = mapped_column(String, nullable=True) # 上传截图的 COS 地址
+    file_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("files.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     upvotes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())

@@ -88,11 +88,13 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # --no-access-log 关掉 uvicorn 默认 access log(否则每条 200 OK 都被打)。
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "2", "--no-access-log"]
     deploy:
       resources:
         limits:
-          cpus: '1.0'
-          memory: 1200M
+          cpus: '1.5'
+          memory: 2560M
 
   frontend:
     image: offerpilot-frontend:${PROJECT_VERSION:-latest}
@@ -109,7 +111,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.25'
+          cpus: '0.15'
           memory: 384M
 
   nginx:
@@ -130,7 +132,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '0.1'
+          cpus: '0.05'
           memory: 64M
 
 # ── Docker secrets 定义 ──
