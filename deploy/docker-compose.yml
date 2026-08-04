@@ -62,8 +62,23 @@ services:
     volumes:
       - /data/uploads:/app/uploads
       - /data/logs:/app/logs
+    # 非敏感配置走 .env.public(可入仓)
     env_file:
-      - ../backend/.env
+      - path: ./env.public
+        required: true
+    # 敏感第三方 key 走 Docker secrets 挂载,容器内 /run/secrets/<name> 由
+    # backend/app/utils/secrets.py 启动期装载到 os.environ。
+    # deploy/secrets/ 目录不在仓,首次部署需手动 echo 写入。
+    secrets:
+      - deepseek_api_key
+      - dashscope_api_key
+      - dashscope_workspace_id
+      - tencent_secret_id
+      - tencent_secret_key
+      - tencent_sms_app_id
+      - volc_asr_api_key
+      - volc_realtime_api_key
+      - jwt_secret
     environment:
       - PYTHONUNBUFFERED=1
       - TZ=Asia/Shanghai
@@ -117,3 +132,25 @@ services:
         limits:
           cpus: '0.1'
           memory: 64M
+
+# ── Docker secrets 定义 ──
+# file: 路径相对 docker-compose.yml,首次部署需手工创建 ./secrets/<name> 文件
+secrets:
+  deepseek_api_key:
+    file: ./secrets/deepseek_api_key
+  dashscope_api_key:
+    file: ./secrets/dashscope_api_key
+  dashscope_workspace_id:
+    file: ./secrets/dashscope_workspace_id
+  tencent_secret_id:
+    file: ./secrets/tencent_secret_id
+  tencent_secret_key:
+    file: ./secrets/tencent_secret_key
+  tencent_sms_app_id:
+    file: ./secrets/tencent_sms_app_id
+  volc_asr_api_key:
+    file: ./secrets/volc_asr_api_key
+  volc_realtime_api_key:
+    file: ./secrets/volc_realtime_api_key
+  jwt_secret:
+    file: ./secrets/jwt_secret

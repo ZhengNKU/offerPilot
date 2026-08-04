@@ -711,7 +711,8 @@ def _enrich_metrics(analysis_result: dict, resume_text: Optional[str] = None) ->
 
 # 简历结构地图：统一 7 段 section 键名（技术岗/非技术岗分析侧重点由 LLM prompt 区分）。
 # 专业能力=professional_capability（技术岗侧重技术栈，非技术岗侧重工具/方法论），
-# 作品/案例=works_portfolio（技术岗侧重开源贡献，非技术岗侧重案例/演讲/专利）。
+# 作品/案例=works_portfolio（技术岗侧重开源贡献，非技术岗侧重案例/演讲/专利），
+# 管理/协作经验=management（社招按带人/统筹评估，应届生按团队协作/组织经历评估，不因无管理经验判「缺失」）。
 _STRUCTURE_SECTION_KEYS: tuple = (
     "education",
     "work_experience",

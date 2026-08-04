@@ -10,6 +10,11 @@ from logging.handlers import TimedRotatingFileHandler
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
+# Docker secrets 装载器:必须放在 from app.config import settings 之前
+# 服务器部署时从 /run/secrets/ 读敏感 key,本地开发 no-op
+from app.utils.secrets import load_docker_secrets
+load_docker_secrets()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings

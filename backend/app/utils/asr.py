@@ -6,9 +6,6 @@ Paraformer-v2 实测 ~55s,降一个数量级。该模型支持说话人分离
 (diarization_enabled + speaker_count) 和句子级时间戳,与原 Volc 输出字段
 完全兼容。
 
-注意:之前短暂用过 qwen-audio-3.0-asr-flash-filetrans,422 段实测
-全部 speaker_id=null,该模型实际不做说话人分离 —— 已切回 paraformer-v2。
-
 调用姿势 (官方示例):
     from dashscope.audio.asr import Transcription
     resp = Transcription.async_call(
@@ -90,13 +87,12 @@ _ASR_WAIT_TIMEOUT_S = 300            # 硬上限 5 分钟,超时即放弃防卡�
 def _setup_dashscope_for_asr() -> None:
     """配置 dashscope SDK 的 api_key 和 base_url。
 
-    qwen-audio-3.0-asr-flash-filetrans 走 MaaS 接口,
     必须带 WorkspaceId 的地域化 base_url,否则会路由到默认全局域,
     鉴权失败。
     """
     dashscope.api_key = settings.DASHSCOPE_API_KEY or os.getenv("DASHSCOPE_API_KEY", "")
-    workspace_id = settings.DASHSCOPE_WORKSPACE_ID_FOR_ASR or os.getenv(
-        "DASHSCOPE_WORKSPACE_ID_FOR_ASR", ""
+    workspace_id = settings.DASHSCOPE_WORKSPACE_ID or os.getenv(
+        "DASHSCOPE_WORKSPACE_ID", ""
     )
     if workspace_id:
         dashscope.base_http_api_url = _DEFAULT_ASR_BASE_URL_TEMPLATE.format(
@@ -107,15 +103,13 @@ def _setup_dashscope_for_asr() -> None:
         )
     else:
         logger.warning(
-            "[DashScope ASR] DASHSCOPE_WORKSPACE_ID_FOR_ASR 未配置,使用默认全局域,"
+            "[DashScope ASR] DASHSCOPE_WORKSPACE_ID 未配置,使用默认全局域,"
             "若鉴权失败请检查 .env 配置"
         )
 
 
 def call_volc_asr(audio_url: str) -> List[Dict[str, Any]]:
     """
-    调用阿里百炼 qwen-audio-3.0-asr-flash-filetrans 转写音频 URL。
-
     Returns: [{start_time(s), end_time(s), speaker, content}, ...]
         与旧 Volc 实现字段一致,下游 _determine_speaker_mapping / 数据库 schema 不变。
 
@@ -137,8 +131,6 @@ def call_volc_asr(audio_url: str) -> List[Dict[str, Any]]:
     logger.info(f"[DashScope ASR] Submitting task")
 
     # ── Step 1: 提交转写任务 ──────────────────────────────────────────
-    # 模型选择 paraformer-v2 而不是 qwen-audio-3.0-asr-flash-filetrans:
-    #   - qwen-audio-3.0-asr-flash-filetrans 422 段实测全部 speaker_id=null,
     #     实际没做说话人分离,所有段被 fallback 到 Interviewer
     #   - paraformer-v2 支持 diarization_enabled=True (CAM++ 说话人聚类)
     #     和 speaker_count=2 (面试场景固定 2 人),走 DashScope 离线文件转写

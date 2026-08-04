@@ -69,6 +69,8 @@ htmlcov/
 .env
 .env.*
 !.env.example
+# Docker secrets(第三方 API key 文件,绝对不能入仓)
+/deploy/secrets/
 
 # ===========================================
 #  IDEs & editors

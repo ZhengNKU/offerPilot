@@ -1,0 +1,25 @@
+# 强制 LF 换行,避免 Windows 上 Edit/IDE 误存 CRLF 后,
+# Linux 服务器跑脚本时 bash 报 $'\r': command not found
+#
+# 覆盖范围:直接被 Linux shell / Docker / nginx 解释的配置文件
+# 不覆盖:源码文件(.py / .ts / .js 等),Node/Python 对 CRLF 通常容错,
+#        而且强行转 LF 会让 PR diff 噪声很大(全文件每行 +0/-1)
+
+# ── Shell 脚本(最高频翻车点) ──
+*.sh                     text eol=lf
+/.gitignore              text eol=lf
+/.gitattributes          text eol=lf
+
+# ── Docker / 部署编排 ──
+Dockerfile*              text eol=lf
+/docker-compose*.yml     text eol=lf
+/docker-compose*.yaml    text eol=lf
+/docker/Dockerfile*      text eol=lf
+
+# ── Nginx / 代理配置 ──
+/deploy/nginx.conf       text eol=lf
+*.conf                   text eol=lf
+
+# ── YAML / TOML 配置(部署侧,不是源码侧) ──
+/deploy/*.yml            text eol=lf
+/deploy/*.yaml           text eol=lf

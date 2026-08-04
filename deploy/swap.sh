@@ -5,7 +5,9 @@
 #
 #  依赖: /data/offerPilot/packages/ 下的 .tar 镜像包
 # ===========================================
-set -euo pipefail
+set -o errexit
+set -o nounset
+set -o pipefail
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,15 +48,36 @@ if [[ ! -d "$DEPLOY_DIR" ]]; then
 fi
 cd "$DEPLOY_DIR"
 
-# ── 读取项目版本号 ──
-PROJECT_VERSION=$(grep '^PROJECT_VERSION=' ../backend/.env | cut -d'=' -f2)
+# ── 读取项目版本号(env.public 是新的部署配置源,backend/.env 已废弃)──
+if [[ ! -f ./env.public ]]; then
+    echo -e "${RED}错误: 缺少 ./env.public(部署配置入口)${NC}"
+    exit 1
+fi
+PROJECT_VERSION=$(grep '^PROJECT_VERSION=' ./env.public | cut -d'=' -f2)
 if [[ -z "$PROJECT_VERSION" ]]; then
-    echo -e "${RED}错误: 未在 ../backend/.env 中找到 PROJECT_VERSION${NC}"
+    echo -e "${RED}错误: 未在 ./env.public 中找到 PROJECT_VERSION${NC}"
     exit 1
 fi
 export PROJECT_VERSION
 echo -e "${CYAN}项目版本: $PROJECT_VERSION${NC}"
 echo ""
+
+# ── Sanity check:secrets 目录就绪(backend 启动会读,缺 JWT_SECRET 会直接挂)──
+if [[ "$SERVICE" == "backend" || "$SERVICE" == "all" ]]; then
+    if [[ -x ./setup-secrets.sh ]]; then
+        echo -e "${YELLOW}[0/3] 校验 ./secrets 目录...${NC}"
+        if ! ./setup-secrets.sh --check; then
+            echo ""
+            echo -e "${RED}错误: secrets 校验失败,见上方输出${NC}"
+            echo -e "${YELLOW}请运行 ./setup-secrets.sh(交互式)或 ./setup-secrets.sh --only <name> 补齐缺失项后重试${NC}"
+            exit 1
+        fi
+        echo ""
+    else
+        echo -e "${YELLOW}警告: 找不到 ./setup-secrets.sh,跳过 secrets 校验(本地部署?)${NC}"
+        echo ""
+    fi
+fi
 
 # ── 加载并替换 ──
 swap_backend() {

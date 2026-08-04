@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://offerpilot:offerPilot%402026@postgres:5432/offerpilot"
     REDIS_URL: str = "redis://:offerPilot%402026@redis:6379/0"
     
-    JWT_SECRET: str = "super-secret-key-change-me"
+    JWT_SECRET: str = ""
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
 
@@ -174,7 +174,7 @@ class Settings(BaseSettings):
     # 不同地域 base_url 不同：
     #   北京：https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api/v1
     #   新加坡：https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1
-    DASHSCOPE_WORKSPACE_ID_FOR_ASR: str = ""
+    DASHSCOPE_WORKSPACE_ID: str = ""
 
     @model_validator(mode="after")
     def _check_jwt_secret(self) -> "Settings":
@@ -192,7 +192,7 @@ class Settings(BaseSettings):
         }
         if self.JWT_SECRET in unsafe:
             raise ValueError(
-                "JWT_SECRET 未配置或仍为占位符 — 请在 .env 中设置 `openssl rand -hex 64` 的输出（≥32 字节熵）"
+                "JWT_SECRET 未配置或仍为占位符 — 请在 secrets/jwt_secret 或 .env 中设置 `openssl rand -hex 64` 的输出（≥32 字节熵）"
             )
         if len(self.JWT_SECRET) < 32:
             raise ValueError(

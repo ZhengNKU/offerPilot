@@ -832,6 +832,45 @@ export default function InterviewVoiceAnalysisPage() {
   const [optPhase, setOptPhase] = useState("idle");
   const [isHighlightEnabled, setIsHighlightEnabled] = useState(true);
   const [optAdvice, setOptAdvice] = useState<{ conclusion: string; original: string; optimized: string } | null>(null);
+  const [copiedOptScript, setCopiedOptScript] = useState(false);
+
+  const fallbackCopyText = (text: string, onSuccess: () => void) => {
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      document.body.removeChild(textarea);
+      onSuccess();
+    } catch (err) {
+      console.error("复制失败:", err);
+      auth.triggerToast("复制失败，请手动选择复制", "error");
+    }
+  };
+
+  const handleCopyOptScript = () => {
+    if (!optAdvice?.optimized) return;
+    const tempDiv = document.createElement("div");
+    tempDiv.innerHTML = optAdvice.optimized.replace(/<br\s*\/?>/gi, "\n");
+    const cleanText = (tempDiv.textContent || tempDiv.innerText || optAdvice.optimized).trim();
+
+    const notifySuccess = () => {
+      setCopiedOptScript(true);
+      auth.triggerToast("高分话术已成功复制到剪贴板", "success");
+      setTimeout(() => setCopiedOptScript(false), 2200);
+    };
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(cleanText)
+        .then(notifySuccess)
+        .catch(() => fallbackCopyText(cleanText, notifySuccess));
+    } else {
+      fallbackCopyText(cleanText, notifySuccess);
+    }
+  };
 
   // Search state variables
   const [showSearch, setShowSearch] = useState(false);
@@ -2267,10 +2306,17 @@ export default function InterviewVoiceAnalysisPage() {
                       重新生成
                     </button>
                     <button
-                      onClick={() => setShowOptimizer(false)}
-                      className="px-5 py-2.5 bg-[#5DECCB] text-[#050B1A] text-xs font-black rounded-xl transition-all cursor-pointer shadow-lg shadow-cyan-500/20"
+                      onClick={handleCopyOptScript}
+                      className={`px-5 py-2.5 text-xs font-black rounded-xl transition-all cursor-pointer shadow-lg flex items-center gap-1.5 ${
+                        copiedOptScript
+                          ? "bg-emerald-500 text-white shadow-emerald-500/20 scale-[0.98]"
+                          : "bg-[#5DECCB] text-[#050B1A] hover:bg-[#4cdbba] shadow-cyan-500/20 active:scale-[0.98]"
+                      }`}
                     >
-                      确定并应用优化建议
+                      <span className="material-symbols-outlined text-sm font-bold">
+                        {copiedOptScript ? "check_circle" : "content_copy"}
+                      </span>
+                      <span>{copiedOptScript ? "已复制高分话术" : "复制高分话术"}</span>
                     </button>
                   </div>
                 </div>

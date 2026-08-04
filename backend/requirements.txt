@@ -34,6 +34,6 @@ pgvector>=0.3
 # 锁版本与本地一致，避免 SDK 升级/降级导致 API 不兼容（ValueError: not enough values to unpack）
 mcp==1.27.0
 
-# 阿里百炼 ASR SDK（2026-08-02+ 切换 qwen-audio-3.0-asr-flash-filetrans）
+# 阿里百炼 ASR SDK
 # 提供 Transcription.async_call + Transcription.wait 用于长音频文件转写
 dashscope>=1.20.0
