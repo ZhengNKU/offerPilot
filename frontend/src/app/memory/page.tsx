@@ -2011,7 +2011,7 @@ export default function CareerMemoryDashboard() {
                                       </span>
                                     ) : (
                                       <span className="text-xs font-black font-label-mono px-2.5 py-1 rounded-lg whitespace-nowrap bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-white/40 border border-slate-200 dark:border-white/10">
-                                        待评估
+                                        —
                                       </span>
                                     )}
                                   </div>

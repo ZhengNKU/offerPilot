@@ -17,7 +17,7 @@ import logging
 import struct
 import time
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import WebSocket, WebSocketDisconnect
 from sqlalchemy import update
@@ -25,6 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import models
 from app.config import settings
+
+if TYPE_CHECKING:
+    from app.services.volc_realtime_bridge import VolcRealtimeBridge
+    from app.services.volc_streaming_asr import VolcStreamingAsrBridge
 
 logger = logging.getLogger(__name__)
 
@@ -70,18 +74,21 @@ class LiveSessionBridge:
     - volc=VolcRealtimeBridge: 接入火山（PR3）
     """
 
-    # WS ping 超时（秒）
-    PING_TIMEOUT_S = 60
+    PING_TIMEOUT_S = 180
     # 整段最长时长（秒）= 用户配置 + 60s 缓冲
     DURATION_BUFFER_S = 60
+    # AI TTS 静音兜底归零窗口：1.5s 没新 tts_audio 帧视为 AI 整段说完，
+    # 归零 _ai_is_speaking + _manual_submit_pending，让后续用户 ASR 能正常入库。
+    # 1.5s 取值依据：TTS 句内帧间隔 ≤ 200ms，句间停顿 200~500ms，段间停顿通常 ≥ 1s。
+    AI_SILENCE_RESET_S = 1.5
 
     def __init__(
         self,
         ws: WebSocket,
         row: models.InterviewLiveSession,
         db: AsyncSession,
-        volc: Optional["object"] = None,  # PR3 类型 VolcRealtimeBridge, PR2 为 None
-        asr_bridge: Optional["object"] = None,  # PR-N 流式短语音识别 VolcStreamingAsrBridge
+        volc: Optional["VolcRealtimeBridge"] = None,  # PR3 类型 VolcRealtimeBridge, PR2 为 None
+        asr_bridge: Optional["VolcStreamingAsrBridge"] = None,  # PR-N 流式短语音识别 VolcStreamingAsrBridge
         slots: Optional["object"] = None,  # 并发槽位管理器 SlotManager（心跳续期 + 结束释放）
     ):
         self.ws = ws
@@ -91,6 +98,7 @@ class LiveSessionBridge:
         self.asr_bridge = asr_bridge
         self.slots = slots
         self._closed = False
+        self._live_id: int = int(row.id)
         # 候选人累积 transcript（PR2 echo 模式也写，给 PR4 归档备用）
         self._transcript: list[dict] = []
         self._seq = 0
@@ -100,6 +108,8 @@ class LiveSessionBridge:
         # PR3: AI 状态机（idle / listening / thinking / speaking）
         self._ai_state: str = "idle"
         self._ai_is_speaking: bool = False  # 用于打断判断
+        self._last_tts_audio_ts: float = 0.0
+        self._ai_silence_reset_task: Optional[asyncio.Task] = None
         # PR3: volc 事件监听协程
         self._volc_listener_task: Optional[asyncio.Task] = None
         # PR-N: 流式 ASR 事件监听协程 + 候选人 text 缓冲（按 session 内 utterance 累加）
@@ -112,8 +122,6 @@ class LiveSessionBridge:
         # PR5: 消息缓冲——面试过程中不写库，结束时批量 INSERT
         # 每条 dict: {seq, speaker, content_json}
         self._pending_messages: list[dict] = []
-        # PR6 调试：浏览器 → 后端 上行 audio 帧计数（每 50 帧打一次日志）
-        self._audio_frame_count: int = 0
         # 发言交接模式（auto=自动感应 / manual=手动提交）与手动提交触发标志
         self.speech_mode: str = "auto"
         # 初始设为 True，保证首题/AI 开场白顺利发送与发音
@@ -148,7 +156,7 @@ class LiveSessionBridge:
         # 1. 推 server_ready 消息给浏览器
         await self._send_text_event({
             "type": "live.ready",
-            "live_session_id": self.row.id,
+            "live_session_id": self._live_id,
             "sample_rate": 24000,
             "encoding": "pcm16",
             "interview_type": self.row.interview_type,
@@ -163,7 +171,7 @@ class LiveSessionBridge:
             "type": "live.metrics",
             "ai_state": self._ai_state,
         })
-        logger.info(f"[bridge] live_id={self.row.id} ready, mode={'volc' if self.volc else 'echo'}")
+        logger.info(f"[bridge] live_id={self._live_id} ready, mode={'volc' if self.volc else 'echo'}")
 
         # 2. 启动 ping watchdog
         watchdog_task = asyncio.create_task(self._ping_watchdog())
@@ -178,9 +186,9 @@ class LiveSessionBridge:
         if self.asr_bridge is not None:
             try:
                 self._asr_listener_task = asyncio.create_task(self._asr_event_loop())
-                logger.info(f"[bridge] live_id={self.row.id} 流式 ASR listener 启动")
+                logger.info(f"[bridge] live_id={self._live_id} 流式 ASR listener 启动")
             except Exception as e:
-                logger.warning(f"[bridge] live_id={self.row.id} ASR listener 启动失败: {e}")
+                logger.warning(f"[bridge] live_id={self._live_id} ASR listener 启动失败: {e}")
 
         try:
             while not self._closed:
@@ -189,7 +197,7 @@ class LiveSessionBridge:
                 self._last_activity_ts = time.time()
 
                 if msg.get("type") == "websocket.disconnect":
-                    logger.info(f"[bridge] live_id={self.row.id} 浏览器 disconnect")
+                    logger.info(f"[bridge] live_id={self._live_id} 浏览器 disconnect")
                     break
 
                 if "text" in msg:
@@ -199,9 +207,9 @@ class LiveSessionBridge:
                 else:
                     logger.warning(f"[bridge] 未知消息 type={msg.get('type')}")
         except WebSocketDisconnect:
-            logger.info(f"[bridge] live_id={self.row.id} WebSocketDisconnect")
+            logger.info(f"[bridge] live_id={self._live_id} WebSocketDisconnect")
         except Exception as e:
-            logger.exception(f"[bridge] live_id={self.row.id} 主循环异常: {e}")
+            logger.exception(f"[bridge] live_id={self._live_id} 主循环异常: {e}")
         finally:
             watchdog_task.cancel()
             try:
@@ -220,7 +228,7 @@ class LiveSessionBridge:
             # 续期并发槽位 TTL（防止会话被 SlotManager 当作僵尸回收）
             if self.slots is not None:
                 try:
-                    await self.slots.heartbeat(self.row.id)
+                    await self.slots.heartbeat(self._live_id)
                 except Exception as e:
                     logger.debug(f"[bridge] 槽位心跳失败(忽略): {e}")
             # PR4: 监听 status='ending' 信号（end 端点设置）→ 主动关闭
@@ -228,7 +236,7 @@ class LiveSessionBridge:
                 await self.db.refresh(self.row)
                 if self.row.status == "ending":
                     logger.info(
-                        f"[bridge] live_id={self.row.id} 收到 end 信号 (status=ending), 主动关闭"
+                        f"[bridge] live_id={self._live_id} 收到 end 信号 (status=ending), 主动关闭"
                     )
                     self._closed = True
                     try:
@@ -242,7 +250,7 @@ class LiveSessionBridge:
             idle = time.time() - self._last_activity_ts
             if idle > self.PING_TIMEOUT_S:
                 logger.warning(
-                    f"[bridge] live_id={self.row.id} ping 超时 ({idle:.1f}s), 主动关闭"
+                    f"[bridge] live_id={self._live_id} ping 超时 ({idle:.1f}s), 主动关闭"
                 )
                 self._closed = True
                 try:
@@ -256,7 +264,7 @@ class LiveSessionBridge:
             max_sec = self.row.duration_min * 60 + self.DURATION_BUFFER_S
             if elapsed > max_sec:
                 logger.warning(
-                    f"[bridge] live_id={self.row.id} 超 duration_min 限制 ({elapsed:.1f}s), 主动关闭"
+                    f"[bridge] live_id={self._live_id} 超 duration_min 限制 ({elapsed:.1f}s), 主动关闭"
                 )
                 self._closed = True
                 try:
@@ -387,7 +395,7 @@ class LiveSessionBridge:
         """从 volc 消费归一化事件，转发给浏览器；维护 AI 状态机。"""
         if self.volc is None:
             return
-        logger.info(f"[bridge] live_id={self.row.id} volc listener started")
+        logger.info(f"[bridge] live_id={self._live_id} volc listener started")
         try:
             async for ev in self.volc.recv_events():
                 if self._closed:
@@ -395,14 +403,14 @@ class LiveSessionBridge:
                 await self._handle_volc_event(ev)
                 if ev.type == "dialog_finished":
                     # volc WSS 关闭，结束
-                    logger.info(f"[bridge] live_id={self.row.id} volc dialog_finished")
+                    logger.info(f"[bridge] live_id={self._live_id} volc dialog_finished")
                     break
         except asyncio.CancelledError:
             pass
         except Exception as e:
             logger.exception(f"[bridge] volc event loop 异常: {e}")
         finally:
-            logger.info(f"[bridge] live_id={self.row.id} volc listener stopped")
+            logger.info(f"[bridge] live_id={self._live_id} volc listener stopped")
 
     async def _handle_volc_event(self, ev) -> None:
         """归一化事件 → 浏览器 WS 消息 + AI 状态机更新。"""
@@ -426,6 +434,8 @@ class LiveSessionBridge:
             await self._handle_tts_text_stream(ev)
             return
         if ev.type == "tts_audio":
+            self._last_tts_audio_ts = time.time()
+            self._schedule_ai_silence_reset()
             if self.speech_mode == "manual" and not self._manual_submit_pending:
                 if self.volc:
                     try:
@@ -451,6 +461,9 @@ class LiveSessionBridge:
             await self._set_ai_state("idle")
             return
         if ev.type == "asr_partial":
+            if self._ai_is_speaking:
+                logger.debug("[bridge] AI 说话中，丢弃 asr_partial (TTS 回音)")
+                return
             # 候选人 partial 文本
             await self._set_ai_state("thinking")
             await self._send_text_event({
@@ -462,6 +475,9 @@ class LiveSessionBridge:
             })
             return
         if ev.type == "asr_final":
+            if self._ai_is_speaking:
+                logger.debug("[bridge] AI 说话中，丢弃 asr_final (TTS 回音)")
+                return
             # 候选人 final 文本 → 写入 transcript（内存）+ pending 缓冲（结束批量落库）
             self._seq += 1
             content = ev.text or ""
@@ -518,7 +534,7 @@ class LiveSessionBridge:
             # 火山音色 ID 不可用：立刻关闭会话让前端走分析流程，
             # 避免"对牛弹琴 30 秒"。
             logger.error(
-                f"[bridge] live_id={self.row.id} 火山音色无效，主动终止会话 "
+                f"[bridge] live_id={self._live_id} 火山音色无效，主动终止会话 "
                 f"(voice={getattr(self.volc, 'voice', '?')}): {ev.text}"
             )
             await self._send_text_event({
@@ -543,6 +559,44 @@ class LiveSessionBridge:
         # 其他事件忽略
         logger.debug(f"[bridge] 未映射 volc event: {ev.type}")
 
+    # ---------- AI TTS 静音兜底归零 ----------
+
+    def _schedule_ai_silence_reset(self) -> None:
+        """
+        启动/重置一个 1.5s 的兜底 timer：到点后如果 _last_tts_audio_ts 仍未刷新，
+        就归零 _ai_is_speaking + _manual_submit_pending + ai_state=idle，
+        让后续用户 ASR partial/final 能正常入库（不被"TTS 回音"分支丢弃）。
+
+        每次 tts_audio 来都会重新 schedule，自动覆盖旧 timer；旧的 timer 在被覆盖时
+        被 cancel，永远只有一个挂起的 timer。
+        """
+        prev = self._ai_silence_reset_task
+        if prev and not prev.done():
+            prev.cancel()
+
+        async def _reset():
+            try:
+                await asyncio.sleep(self.AI_SILENCE_RESET_S)
+            except asyncio.CancelledError:
+                return
+            if self._closed:
+                return
+            # 距离最后一次音频已 ≥ 阈值 → AI 整段说完
+            if time.time() - self._last_tts_audio_ts >= self.AI_SILENCE_RESET_S - 0.05:
+                if self._ai_is_speaking or self._manual_submit_pending:
+                    logger.info(
+                        f"[bridge] live_id={self._live_id} AI TTS 静音 {self.AI_SILENCE_RESET_S}s，"
+                        f"兜底归零 _ai_is_speaking / _manual_submit_pending"
+                    )
+                    self._ai_is_speaking = False
+                    self._manual_submit_pending = False
+                    try:
+                        await self._set_ai_state("idle")
+                    except Exception:
+                        pass
+
+        self._ai_silence_reset_task = asyncio.create_task(_reset())
+
     # ---------- 流式 ASR 事件监听（PR-N） ----------
 
     async def _asr_event_loop(self) -> None:
@@ -555,10 +609,10 @@ class LiveSessionBridge:
                 if self._closed:
                     break
                 if ev.type == "closed":
-                    logger.info(f"[bridge] live_id={self.row.id} ASR listener 收到 closed")
+                    logger.info(f"[bridge] live_id={self._live_id} ASR listener 收到 closed")
                     break
                 if ev.type == "error":
-                    logger.error(f"[bridge] live_id={self.row.id} ASR error: {ev.detail}")
+                    logger.error(f"[bridge] live_id={self._live_id} ASR error: {ev.detail}")
                     continue
                 if ev.type not in ("partial", "final"):
                     continue
@@ -604,16 +658,16 @@ class LiveSessionBridge:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.exception(f"[bridge] live_id={self.row.id} ASR event loop 异常: {e}")
+            logger.exception(f"[bridge] live_id={self._live_id} ASR event loop 异常: {e}")
         finally:
-            logger.info(f"[bridge] live_id={self.row.id} ASR event loop stopped")
+            logger.info(f"[bridge] live_id={self._live_id} ASR event loop stopped")
 
     async def _on_binary(self, data: bytes) -> None:
         """处理浏览器二进制音频帧（PCM16/24kHz/单声道/20ms）。"""
         if self.volc is not None:
-            # PR3: 转发给火山 realtime dialog（24kHz，volc dialog 内部会处理）
             try:
-                await self.volc.send_audio(data)
+                pcm16k = _downsample_pcm16_24k_to_16k(data)
+                await self.volc.send_audio(pcm16k)
             except Exception as e:
                 logger.warning(f"[bridge] volc.send_audio 失败: {e}")
         else:
@@ -623,22 +677,12 @@ class LiveSessionBridge:
             except Exception as e:
                 logger.warning(f"[bridge] echo 音频失败: {e}")
 
-        # PR-N: 同步推一份到流式 ASR 通道（24kHz → 16kHz 降采样）
-        if self.asr_bridge is not None:
+        if self.asr_bridge is not None and self.volc is None:
             try:
                 pcm16k = _downsample_pcm16_24k_to_16k(data)
                 await self.asr_bridge.send_pcm(pcm16k)
             except Exception as e:
-                # 不刷屏，仅头几次警告
-                if self._audio_frame_count < 200:
-                    logger.warning(f"[bridge] asr.send_pcm 失败: {e}")
-        # PR6 调试：每 50 帧打一次（避免日志刷屏），确认浏览器 → 后端上行链路
-        self._audio_frame_count += 1
-        if self._audio_frame_count % 50 == 1:
-            logger.info(
-                f"[bridge] live_id={self.row.id} 已收到浏览器 audio 帧数={self._audio_frame_count} "
-                f"最近一帧 len={len(data)} bytes"
-            )
+                logger.warning(f"[bridge] asr.send_pcm 失败: {e}")
 
     # ---------- 推消息给浏览器 ----------
 
@@ -697,7 +741,7 @@ class LiveSessionBridge:
             await self._apply_pause(duration)
         elif action == "complete_turn":
             self._manual_submit_pending = True
-            logger.info(f"[bridge] live_id={self.row.id} 手动交接：收到 complete_turn，触发 AI 提问/追问")
+            logger.info(f"[bridge] live_id={self._live_id} 手动交接：收到 complete_turn，触发 AI 提问/追问")
             try:
                 if self.volc:
                     await self.volc.send_chat_text("候选人说：【我已回答完毕】。请面试官进行针对性点评或继续提出下一个面试问题。")
@@ -801,6 +845,13 @@ class LiveSessionBridge:
                 await self._asr_listener_task
             except (asyncio.CancelledError, Exception):
                 pass
+        # 取消 AI TTS 静音兜底 timer（避免会话结束后 timer 触发 _set_ai_state 等副作用）
+        if self._ai_silence_reset_task and not self._ai_silence_reset_task.done():
+            self._ai_silence_reset_task.cancel()
+            try:
+                await self._ai_silence_reset_task
+            except (asyncio.CancelledError, Exception):
+                pass
         if self.asr_bridge is not None:
             try:
                 await self.asr_bridge.close()
@@ -817,7 +868,7 @@ class LiveSessionBridge:
             # 同时更新 status / duration / ended_at
             await self.db.execute(
                 update(models.InterviewLiveSession)
-                .where(models.InterviewLiveSession.id == self.row.id)
+                .where(models.InterviewLiveSession.id == self._live_id)
                 .values(
                     status="ended",
                     duration_sec=self._duration_sec,
@@ -827,7 +878,7 @@ class LiveSessionBridge:
             )
             await self.db.commit()
             logger.info(
-                f"[bridge] live_id={self.row.id} closed, "
+                f"[bridge] live_id={self._live_id} closed, "
                 f"duration={self._duration_sec}s, "
                 f"transcript_msgs={len(transcript_data)} (单条 JSON 写入 transcript JSONB)"
             )
@@ -845,7 +896,7 @@ class LiveSessionBridge:
         # 释放并发槽位（幂等；ws_live 最外层 finally 还会再兜底释放一次）
         if self.slots is not None:
             try:
-                await self.slots.release(self.row.id)
+                await self.slots.release(self._live_id)
             except Exception as e:
                 logger.warning(f"[bridge] 释放槽位失败: {e}")
 

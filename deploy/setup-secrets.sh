@@ -37,8 +37,8 @@ SECRETS=(
     "tencent_secret_id:腾讯云 SecretId (AKID开头)"
     "tencent_secret_key:腾讯云 SecretKey"
     "tencent_sms_app_id:腾讯云短信 AppId (未开通可留空)"
-    "volc_asr_api_key:火山引擎 ASR API Key"
-    "volc_realtime_api_key:火山引擎实时语音 API Key"
+    "volc_streaming_asr_api_key:火山引擎·短语音识别·流式 sauc 的 Access Key（控制台「语音技术→短语音识别」产品下开通获取，UUID 格式；与 volc_realtime_api_key 不是同一把 key，不通用）"
+    "volc_realtime_api_key:火山引擎·实时语音大模型 dialog 的 Access Key（控制台「语音技术→实时语音大模型」产品下开通获取，UUID 格式；与 volc_streaming_asr_api_key 不是同一把 key，不通用）"
     "jwt_secret:JWT 签名密钥 (openssl rand -hex 64 输出,≥32 字节熵)"
 )
 

@@ -26,6 +26,7 @@
   → _make_start_session 的 TTS config 透传到火山引擎
 """
 from __future__ import annotations
+import asyncio
 from typing import Literal, Optional
 import logging
 
@@ -93,6 +94,176 @@ def _resolve_duration_preset(duration_min: int) -> dict[str, int]:
 
 
 # ---------- 5 套面试类型提示词骨架（§7.4） ----------
+
+# 仅技术面走联网动态出题（hr_comprehensive / non_tech 不联网 → 避免诱导回技术栈）
+TECH_INTERVIEW_TYPES = ("tech_8gu", "tech_project", "tech_scenario")
+_LIVE_WEB_CTX_TTL = 12 * 3600  # Redis 缓存 12h
+_LIVE_INTRO_TTL = 12 * 3600
+_LIVE_WEB_FETCH_TIMEOUT_S = 3.0  # 联网检索单次超时
+_LIVE_INTRO_GEN_TIMEOUT_S = 5.0  # LLM 生成开场题超时
+
+
+async def _fetch_live_web_context(
+    target_role: str,
+    target_grade: str,
+    experience_years: str,
+    *,
+    timeout_s: float = _LIVE_WEB_FETCH_TIMEOUT_S,
+) -> str:
+    """
+    联网预取真实面经（仅 tech_* 调用），Redis 缓存 12h。
+    失败 / 超时 / target_role 为空 → 返回 ""，调用方走降级路径（不阻断面试启动）。
+    """
+    if not target_role or not target_role.strip():
+        return ""
+    cache_key = f"live:web_ctx:{target_role}:{target_grade or ''}:{experience_years or ''}"
+    redis = None
+    try:
+        from app.database import _get_redis_pool
+        redis = _get_redis_pool()
+    except Exception:
+        redis = None
+
+    # 1) 命中缓存直接返回
+    if redis is not None:
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                return cached.decode() if isinstance(cached, bytes) else cached
+        except Exception:
+            pass
+
+    # 2) 缓存未命中，调联网（带超时）
+    try:
+        from app.services.question_generator import _prefetch_web_context
+        ctx = await asyncio.wait_for(
+            _prefetch_web_context(target_role, target_grade or "", experience_years or ""),
+            timeout=timeout_s,
+        )
+    except asyncio.TimeoutError:
+        logger.info(f"[live_config] 联网预取超时（{timeout_s}s），降级为无 web_context")
+        ctx = ""
+    except Exception as e:
+        logger.info(f"[live_config] 联网预取失败: {e!r}，降级为无 web_context")
+        ctx = ""
+
+    # 3) 写缓存（仅成功时才写）
+    if ctx and redis is not None:
+        try:
+            await redis.set(cache_key, ctx, ex=_LIVE_WEB_CTX_TTL)
+        except Exception:
+            pass
+    return ctx
+
+
+async def _generate_dynamic_intro_question(
+    interview_type: str,
+    target_role: str,
+    target_grade: str,
+    experience_years: str,
+    web_context: str,
+    candidate_context: str,
+    *,
+    timeout_s: float = _LIVE_INTRO_GEN_TIMEOUT_S,
+) -> str:
+    """
+    用 web_context + candidate_context 让 LLM 出 1 道 role-specific 开场题。
+    Redis 缓存按 (type, role, grade, years) key，TTL 12h。
+    失败 / 超时 / 非 tech_* → 返回 ""。
+
+    web_context 可选：
+      - 有 → prompt 注入「近期行业真实面经」段（首选）
+      - 无 → 只用候选人画像生成（联网失败时的降级，但仍优于硬编码题库）
+    """
+    if interview_type not in TECH_INTERVIEW_TYPES:
+        return ""
+    if not target_role or not target_role.strip():
+        return ""
+
+    cache_key = f"live:intro:{interview_type}:{target_role}:{target_grade or ''}:{experience_years or ''}"
+    redis = None
+    try:
+        from app.database import _get_redis_pool
+        redis = _get_redis_pool()
+    except Exception:
+        redis = None
+
+    if redis is not None:
+        try:
+            cached = await redis.get(cache_key)
+            if cached:
+                return cached.decode() if isinstance(cached, bytes) else cached
+        except Exception:
+            pass
+
+    # LLM 生成（同步调用 + asyncio.to_thread 不阻塞事件循环）
+    type_label = {
+        "tech_8gu": "技术八股",
+        "tech_project": "项目深挖",
+        "tech_scenario": "场景架构",
+    }.get(interview_type, "技术面试")
+    if web_context:
+        web_block = (
+            f"【近期行业真实面经与考点】\n{web_context[:2500]}\n\n"
+            f"请参考面经，让题目与「{target_role}」当下真实高频考点对齐；\n"
+        )
+    else:
+        web_block = "（联网检索未命中 / 已降级，仅依据候选人画像出题）\n\n"
+    user_prompt = (
+        f"你是一名资深{type_label}面试官，正在面试一名应聘【{target_role}】"
+        f"（{target_grade or '不限职级'}，{experience_years or '不限'}经验）的候选人。\n\n"
+        f"{web_block}"
+        f"【候选人背景】\n{candidate_context or '（无）'}\n\n"
+        f"请只输出 1 道开场题，要求：\n"
+        f"1. 紧扣「{target_role}」当下真实高频考点；\n"
+        f"2. 不要用「设计短链生成系统 / 微信扫码 / 分布式配置中心 / TCP 三次握手 / Redis vs MySQL」"
+        f"这类与目标岗位无关的通用题；\n"
+        f"3. 1 句话、≤ 60 字，不要编号、不要 markdown、不要寒暄、不要问候语；\n"
+        f"4. 不要复述候选人背景、不要解释为什么这么问。"
+    )
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": "你只输出 1 道开场题文本，不输出其他任何内容。"},
+            {"role": "user", "content": user_prompt},
+        ],
+        "temperature": 0.6,
+        "max_tokens": 200,
+    }
+
+    try:
+        from app.utils.llm import call_llm_sync
+        result = await asyncio.wait_for(
+            asyncio.to_thread(call_llm_sync, payload),
+            timeout=timeout_s,
+        )
+        text = (
+            (result.get("choices") or [{}])[0]
+            .get("message", {})
+            .get("content", "")
+            or ""
+        ).strip()
+        # 取第一行（防止 LLM 输出多行）
+        text = text.splitlines()[0].strip() if text else ""
+        # 去掉引号包裹
+        text = text.strip('"').strip("'").strip("「").strip("」").strip()
+        # 长度兜底：去掉超长（前缀词等）
+        if len(text) > 120:
+            text = text[:120].rstrip("，。、 ")
+    except asyncio.TimeoutError:
+        logger.info(f"[live_config] 动态开场题生成超时（{timeout_s}s），降级")
+        text = ""
+    except Exception as e:
+        logger.info(f"[live_config] 动态开场题生成失败: {e!r}，降级")
+        text = ""
+
+    if text and redis is not None:
+        try:
+            await redis.set(cache_key, text, ex=_LIVE_INTRO_TTL)
+        except Exception:
+            pass
+    return text
+
 # 设计要点：每类都明确「问什么 / 不問什么 / 提问范式 / 反例边界」，
 # 否则 LLM 在 realtime 长对话里容易偷懒走默认架构题（最常见 bug）。
 # 通用原则：所有题型都必须按【目标岗位 + 岗位详情 JD】自适应出题，
@@ -253,9 +424,13 @@ PROMPT_TEMPLATE = """你是 {company_style} 的 {interviewer_persona_cn}，正�
 {target_role}（{job_level}）。
 
 【本次面试结构】硬性约束
-- 总时长：本场约 {duration_min} 分钟（已按候选人本月剩余配额动态折算，请严格在此时间内完成，超时不再开新题）。
-- 问题数量：控制在 {min_questions}~{max_questions} 题之间。
-- 追问轮数：每道题最多追问 {followup_rounds} 轮后必须切下一题。
+- 总时长：本场约 {duration_min} 分钟（已按候选人本月剩余配额动态折算，请严格在此时间内完成，超时不再开新题）。**时长是硬限制，问题数量是软目标**——下面所有题数都基于「按平均节奏估算」得到，不是硬上限。
+- 问题数量：本场**约** {min_questions}~{max_questions} 题（软目标）。
+  - 候选人回答快、每题耗时短 → **主动多问几道填满时长**，可酌情上浮到 {max_questions}+2 题。
+  - 候选人回答慢、追问多 → **优先保证深度，少问几道也行**，但不能低于 {min_questions}。
+  - 判停标准：**剩余时间 ≥ 2 分钟**则继续出题（破冰 / 主干），**不足 2 分钟**立刻切到反问环节，不要再开新题。
+  - 不允许出现「4 分钟问完 5 题就进反问、剩 6 分钟空耗」的情况。
+- 追问轮数：每道题最多追问 {followup_rounds} 轮后必须切下一题（防止单题拖死整场）。
 - 预计节奏：开场破冰 1 题 → 主干 {min_minus_two}~{max_minus_two} 题 → 反向问答 1 题。
 
 【你的身份与人设】
@@ -268,8 +443,14 @@ PROMPT_TEMPLATE = """你是 {company_style} 的 {interviewer_persona_cn}，正�
 {candidate_context}
 
 【出题方向 - 强约束】
-- 所有问题必须围绕候选人【目标岗位：{target_role}】+【岗位详情 JD】+【候选人背景】三个维度组织。
-- 如果 JD 里有明确的技能 / 经验 / 工具 / 行业关键词，优先围绕 JD 关键词出题（这是出题主轴）。
+- 题型以【你的身份与人设 → 面试类型说明】为准（hr_comprehensive → STAR 软技能 / 动机 / 价值观；
+  non_tech → 业务理解 / 案例 / STAR 行为事件 / 行业洞察；tech_* → 对应技术维度）。
+  不要被目标岗位 / JD / 候选人背景里的技术词诱导到错题型（LLM 长 prompt 易被 recency bias 带跑）。
+- 如果是 hr_comprehensive / non_tech：忽略「围绕技术栈」的出题倾向，专注动机 / 价值观 / STAR /
+  业务理解 / 行业洞察。候选人背景里的技术词只能用作「业务场景背景」提问
+  （如"你做后端时如何与产品 / 运营跨部门协作"），严禁直接考技术能力。
+- 如果是 tech_*：所有问题必须围绕候选人【目标岗位：{target_role}】+【岗位详情 JD】+
+  【候选人背景】三个维度组织；优先围绕 JD 里的技能 / 经验 / 工具关键词出题。
 - 不要套用与目标岗位无关的固定题目（例如：投产品岗不要问 Java 八股，投销售岗不要问系统设计）。
 - 候选人如果对某个技术 / 业务问题不懂，可以顺势切到相关软技能 / 业务理解题。
 
@@ -286,9 +467,13 @@ PROMPT_TEMPLATE = """你是 {company_style} 的 {interviewer_persona_cn}，正�
 - 一次只问一个问题。
 - 超出总题数后立刻进入反问环节，不要再出新题。
 - 不要假设候选人是后端 / Java 工程师，按【目标岗位 + JD】判断该考什么。
+- hr_comprehensive / non_tech 类型严禁问技术八股 / 系统设计 / 代码题
+  （即便候选人背景里有 Redis / Kafka / MySQL 等技术词，也只能用作业务场景背景，不能直接考技术能力）。
 
 【岗位 JD（可选，最重要的出题依据）】
 {job_description}
+
+{web_context_section}
 """
 
 
@@ -302,6 +487,7 @@ def build_system_prompt(
     followup_rounds: int,
     job_description: Optional[str] = None,
     candidate_context: str = "",
+    web_context: str = "",
 ) -> str:
     """
     生成实时面试的 system prompt。组合自：
@@ -309,6 +495,8 @@ def build_system_prompt(
     - 4 档难度的 pressure_ratio / followup_trigger / speech_speed_label
     - LIVE_DURATION_PRESETS 推导的题目数区间
     - candidate_context（候选人背景摘要，从简历/项目记忆/历史面试分析压缩，~500 字）
+    - web_context（仅 tech_* 注入）：阿里百炼联网预取的近 30 天真实面经，
+      用于让题目紧跟当下考察热点。失败/非 tech_* 时为空，section 自动隐藏。
     """
     # 接受任意 duration_min：标准档（10/15/20）走 LIVE_DURATION_PRESETS；
     # effective 折算值（如配额不足时 6 分钟）走 _resolve_duration_preset 插值/外推。
@@ -324,6 +512,18 @@ def build_system_prompt(
     preset = _resolve_duration_preset(duration_min)
     min_q = preset["min_questions"]
     max_q = preset["max_questions"]
+
+    # 仅 tech_* 渲染「近期行业面经」section；hr_*/non_tech 不注入（避免诱导回技术栈）
+    if interview_type in TECH_INTERVIEW_TYPES and web_context:
+        trimmed = web_context[:2000]
+        web_context_section = (
+            "【近期行业面经与考点（联网预取，仅用于对齐当下考察方向）】\n"
+            f"{trimmed}\n"
+            "↑ 以上是联网检索到的近期真实面经摘要。请让题目与高频考点对齐，"
+            "避免使用「设计短链生成系统 / 微信扫码 / 分布式配置中心」这类与目标岗位无关的通用题。"
+        )
+    else:
+        web_context_section = ""
 
     return PROMPT_TEMPLATE.format(
         company_style=company_style or "通用",
@@ -344,6 +544,7 @@ def build_system_prompt(
         interview_type_desc=INTERVIEW_TYPE_PROMPTS[interview_type],
         candidate_context=(candidate_context or "（候选人暂无历史数据，按通用标准考察。）"),
         job_description=(job_description or "（候选人未提供 JD，请按通用标准考察）"),
+        web_context_section=web_context_section,
     )
 
 
@@ -441,53 +642,14 @@ def build_candidate_context(
     return "\n".join(lines)
 
 
-# ---------- 起手题题库（PR-N：基于候选人背景动态选，不再固定 3 题） ----------
+# ---------- 起手题题库（hr_*/non_tech 兜底；tech_* 已删除，由联网 LLM 动态生成取代） ----------
+# 2026-08-07+：tech_8gu / tech_project / tech_scenario 三类原本硬编码的"短链生成 / Redis / TCP 三次握手"题，
+# 全部由 _generate_dynamic_intro_question（联网 + LLM）取代。hr_*/non_tech 因为不联网，仍保留硬编码题库
+# 作为兜底（题目均为软技能 / 业务理解类，与 target_role 弱绑定，长期不过时）。
 # 结构：intreview_type → scenario_bucket → list[templates with placeholders]
-# 挑选优先级：with_top_project（候选人项目记忆里有可指名的项目）
-#           > with_resume（仅有简历分析，无项目记忆）
-#           > generic（无任何背景）
+# 挑选优先级：with_top_project（有项目记忆）> with_resume（仅有简历）> generic
 # 占位符：{project_name} {role} {tech1} {tech2} {company} {grade} {years}
 INTRO_QUESTION_TEMPLATES: dict[str, dict[str, list[str]]] = {
-    "tech_8gu": {
-        "with_top_project": [
-            "我看你简历上有『{project_name}』，里面用到了 {tech1}。能不能讲讲 {tech1} 在这个项目里最关键的某条机制？为什么这么选？",
-            "假设我刚接触『{project_name}』这个项目，能不能用 1 分钟讲清楚 {tech1} 在你那里是干什么的？",
-        ],
-        "with_resume": [
-            "我看了你的简历，能不能挑一个你简历里写过的最熟悉的技术领域，比如 Redis / MySQL / MQ，讲讲你的理解深度？",
-        ],
-        "generic": [
-            "请简单介绍一下你最熟悉的一个技术领域，比如 Redis、MySQL 或 MQ，并说说你对它的理解深度。",
-            "假设面试官是新人，请用 1 分钟讲清楚 TCP 三次握手为什么需要 3 次而不是 2 次。",
-            "在工程里你怎么决定用 MySQL 还是 Redis？讲一个你实际这么选过的场景。",
-        ],
-    },
-    "tech_project": {
-        "with_top_project": [
-            "我看你简历上有『{project_name}』这个项目，能不能用 1 分钟讲讲你的角色和最关键的技术决策？",
-            "如果让你重新做『{project_name}』，你会换掉哪部分方案？为什么？",
-            "在『{project_name}』里，你遇到的最棘手的一个技术权衡是什么？当时怎么选的？",
-        ],
-        "with_resume": [
-            "我看了你的简历，能不能挑一个你简历上最有 Owner 感、最有量化结果的项目，从头讲一遍？",
-            "在你做过的项目里，遇到过的最棘手的技术决策是什么？你是怎么权衡的？",
-        ],
-        "generic": [
-            "请挑一个你最近做过的、你最有 Owner 感的项目，从头讲一遍。",
-            "如果让你重新做这个项目，有哪些地方你会用不同的方案？",
-        ],
-    },
-    "tech_scenario": {
-        "with_resume": [
-            "我看你之前做的是{grade}方向的『{company}』{years}经验，今天应聘{target_role}。先抛一道题：如果让你设计一个支持 10 万 QPS 的短链生成系统，重点讲架构、存储、限流、降级。",
-            "结合你之前的技术背景，先来一道：如何设计一个分布式配置中心？需要支持实时推送、版本回滚、权限隔离。",
-        ],
-        "generic": [
-            "请你设计一个支持 10 万 QPS 的短链生成系统，重点讲架构、存储、限流、降级。",
-            "微信扫一扫的扫码登录流程是怎样的？请从客户端、服务器、数据库三端分别说明。",
-            "如何设计一个分布式配置中心？需要支持实时推送、版本回滚、权限隔离。",
-        ],
-    },
     "hr_comprehensive": {
         "with_resume": [
             "我看了你的简历，{years}的{company}经验，今天应聘{target_role}。能不能用 2 分钟做一个自我介绍，重点说说你最有成就感的一段经历？",
@@ -521,25 +683,48 @@ def _format_template(template: str, ctx: dict) -> str:
         return template
 
 
-def pick_intro_questions(
+def _build_intro_candidate_context(
+    profile: Optional[dict],
+    projects: Optional[list],
+    resume_summary: Optional[dict],
+    target_role: str,
+) -> str:
+    """压缩候选人画像为 1 段短文本，供动态开场题 LLM 用。"""
+    bits: list[str] = []
+    if profile:
+        if profile.get("experience_years"):
+            bits.append(f"{profile['experience_years']}年经验")
+        if profile.get("company_name"):
+            bits.append(f"现 {profile['company_name']}")
+        if profile.get("role_name"):
+            bits.append(profile["role_name"])
+    if projects:
+        top = projects[0] or {}
+        name = top.get("project_name")
+        tech = "、".join((top.get("tech_stack") or [])[:3])
+        if name or tech:
+            seg = name or "未命名项目"
+            if tech:
+                seg += f"（{tech}）"
+            bits.append(seg)
+    if not bits:
+        return f"应聘 {target_role or '目标岗位'}（无更多画像）"
+    return f"应聘 {target_role or '目标岗位'}；" + " / ".join(bits)
+
+
+def _pick_intro_question_from_template(
     interview_type: str,
     profile: Optional[dict] = None,
     projects: Optional[list] = None,
     resume_summary: Optional[dict] = None,
     target_role: str = "",
 ) -> str:
-    """
-    基于候选人背景挑选最合适的起手开场白。返回单题文本。
-    优先级：with_top_project（有项目记忆）> with_resume（仅有简历）> generic。
-    同一 bucket 内多题时按 round-robin 取首题；调用方可自行用 set[int] 维护 used。
-    """
+    """硬编码题库兜底路径（原 pick_intro_questions 逻辑）。"""
     buckets = INTRO_QUESTION_TEMPLATES.get(interview_type)
     if not buckets:
         return "你好，请开始我们的面试。"
 
-    # 拼接模板占位符上下文
     raw_years = (profile or {}).get("experience_years") or ""
-    # DB 存的可能是 "3" / "3年" / "3年5个月" 等；只填纯数字时补 "年"
     if raw_years and raw_years.isdigit():
         years_str = f"{raw_years}年"
     else:
@@ -563,11 +748,9 @@ def pick_intro_questions(
             fmt_ctx["tech1"] = techs[0]
         if len(techs) > 1:
             fmt_ctx["tech2"] = techs[1]
-    # 简历评分 > 0 即视为有简历
     has_resume = bool(resume_summary and (resume_summary.get("score") or 0) > 0)
     has_top_project = bool(fmt_ctx["project_name"])
 
-    # 选 bucket
     if has_top_project and "with_top_project" in buckets:
         candidates = buckets["with_top_project"]
     elif has_resume and "with_resume" in buckets:
@@ -578,6 +761,49 @@ def pick_intro_questions(
     if not candidates:
         return "你好，请开始我们的面试。"
     return _format_template(candidates[0], fmt_ctx)
+
+
+async def pick_intro_questions(
+    interview_type: str,
+    profile: Optional[dict] = None,
+    projects: Optional[list] = None,
+    resume_summary: Optional[dict] = None,
+    target_role: str = "",
+    *,
+    web_context: str = "",
+    target_grade: str = "",
+    experience_years: str = "",
+) -> str:
+    """
+    基于候选人背景挑选最合适的起手开场白。返回单题文本。
+
+    - tech_*：始终先尝试 LLM 动态生成（带 web_context 注入面经；无 web 则仅用候选人画像），
+      失败/超时降级到硬编码题库。tech_* 硬编码题库已于 2026-08-07 删除，
+      极端情况下（web 全挂 + LLM 全挂）会返回 "你好，请开始我们的面试。"。
+    - hr_comprehensive / non_tech：直接走硬编码题库（不联网，避免诱导回技术栈）。
+    """
+    # 1) tech_* 优先走动态生成（无论有没有 web_context）
+    if interview_type in TECH_INTERVIEW_TYPES and target_role:
+        ctx_text = _build_intro_candidate_context(
+            profile, projects, resume_summary, target_role
+        )
+        dynamic = await _generate_dynamic_intro_question(
+            interview_type=interview_type,
+            target_role=target_role,
+            target_grade=target_grade or (profile or {}).get("target_grade", ""),
+            experience_years=experience_years or (profile or {}).get("experience_years", ""),
+            web_context=web_context,  # 可空：空时 LLM 只看候选人画像
+            candidate_context=ctx_text,
+        )
+        if dynamic:
+            return dynamic
+        # 动态失败 → 走通用兜底
+        return "你好，请先简单介绍一下你自己和最近一段最有挑战的工作经历。"
+
+    # 2) hr_comprehensive / non_tech：硬编码题库（保留兜底，题目不依赖联网）
+    return _pick_intro_question_from_template(
+        interview_type, profile, projects, resume_summary, target_role
+    )
 
 
 # 保留旧 API 给可能的旧调用方（fallback），实际不再被使用

@@ -108,7 +108,7 @@ def _setup_dashscope_for_asr() -> None:
         )
 
 
-def call_volc_asr(audio_url: str) -> List[Dict[str, Any]]:
+def call_asr(audio_url: str) -> List[Dict[str, Any]]:
     """
     Returns: [{start_time(s), end_time(s), speaker, content}, ...]
         与旧 Volc 实现字段一致,下游 _determine_speaker_mapping / 数据库 schema 不变。
@@ -119,8 +119,7 @@ def call_volc_asr(audio_url: str) -> List[Dict[str, Any]]:
       3. 遍历 results[],对每个 SUCCEEDED 的 subtask 从 transcription_url 拉 JSON
       4. _parse_qwen_asr_result 把 DashScope 输出归一化成与 Volc 兼容的段列表
 
-    注意:函数名仍叫 call_volc_asr 是历史命名(早期 ASR 接入火山时叫这个名字),
-    下游 routers/audio.py 引用未变,内部已切换到 DashScope。
+    实现是 DashScope / Paraformer-v2(2026-07+ 从早期火山接入迁移过来)。
     """
     _setup_dashscope_for_asr()
 
@@ -432,7 +431,3 @@ def _parse_qwen_asr_result(qdata: dict) -> List[Dict[str, Any]]:
         })
 
     return segments
-
-
-# Backward-compat alias removed: callers now use `call_volc_asr` directly.
-# (历史名称 `call_minimax_asr` 仅是早期 ASR 接入时的命名遗留，函数体内调的是火山引擎。)

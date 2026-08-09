@@ -41,25 +41,18 @@ class EmailHelper:
 
     def send_verification_code(self, email: str, code: str) -> bool:
         """
-        发送验证码邮件。如果 SES 配置缺失，则进行本地模拟发送并打印至控制台。
+        发送验证码邮件。如果 SES 配置缺失，则进行本地模拟发送（仅打日志标记，不打印邮箱/验证码）。
         """
         if not email or not _EMAIL_RE.match(email):
-            logger.warning(f"邮箱格式无效，跳过发送: {email!r}")
+            logger.warning("邮箱格式无效，跳过发送")
             return False
 
         # 判定 SES 是否已就绪：秘钥 + 发件地址 + 模板ID 必须齐全
         if not all([self.secret_id, self.secret_key, self.from_email, self.template_id]):
             logger.warning(
-                f"[DEVELOPMENT MODE] 腾讯云 SES 配置缺失"
-                f"（需要 SECRET_ID / SECRET_KEY / FROM_EMAIL / TEMPLATE_ID）。"
-                f"模拟发送验证码: 邮箱: {email}, 验证码: {code}"
-            )
-            print(
-                f"\n========================================\n"
-                f"[EMAIL DEV SIMULATION] 邮箱验证码已发送\n"
-                f"邮箱: {email}\n"
-                f"验证码: {code}\n"
-                f"========================================\n"
+                "[DEVELOPMENT MODE] 腾讯云 SES 配置缺失"
+                "（需要 SECRET_ID / SECRET_KEY / FROM_EMAIL / TEMPLATE_ID），"
+                "已模拟发送验证码"
             )
             return True
 
@@ -88,8 +81,7 @@ class EmailHelper:
 
             resp = client.SendEmail(req)
             logger.info(
-                f"邮件已通过腾讯云 SES 投递至 {email}, "
-                f"MessageId: {resp.MessageId}, RequestId: {resp.RequestId}"
+                f"邮件已通过腾讯云 SES 投递（MessageId: {resp.MessageId}, RequestId: {resp.RequestId}）"
             )
             return True
 

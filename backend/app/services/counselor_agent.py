@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from datetime import datetime
 from typing import AsyncIterator, Optional
 
@@ -534,6 +535,9 @@ async def stream_chat(
 
     final_status = "stopped"  # 默认；正常完成时改为 "completed"
     debug_ctx: dict = {}
+    llm_started_at: Optional[float] = None
+    first_token_ms: Optional[int] = None
+    token_chunk_count = 0
 
     try:
         # 1. Yield initial metadata event
@@ -550,6 +554,7 @@ async def stream_chat(
         messages, debug_ctx = await build_messages(db, user_id, session_id, user_message)
 
         # 3. 调 LLM 流式（带 tool calling 循环）
+        llm_started_at = time.monotonic()
         payload = {
             "model": COUNSELOR_MODEL,
             "messages": messages,
@@ -632,6 +637,9 @@ async def stream_chat(
                     raise item["error"]
                 elif ev == "token":
                     piece = item["data"]["text"]
+                    token_chunk_count += 1
+                    if first_token_ms is None and llm_started_at is not None:
+                        first_token_ms = int((time.monotonic() - llm_started_at) * 1000)
                     full_text_parts.append(piece)
                     yield item
                 elif ev == "tool_call":

@@ -15,7 +15,7 @@ class TencentSMSHelper:
     def send_verification_code(self, phone: str, code: str) -> bool:
         """
         根据腾讯云 SMS SDK 3.0 发送验证码短信。
-        若秘钥或参数未配置，自动启用开发模式模拟发送（控制台与日志打印验证码）。
+        若秘钥或参数未配置，自动启用开发模式模拟发送（仅打日志标记，不打印手机号/验证码）。
         """
         secret_id = settings.TENCENT_SECRET_ID
         secret_key = settings.TENCENT_SECRET_KEY
@@ -25,8 +25,10 @@ class TencentSMSHelper:
         region = settings.TENCENT_SMS_REGION or "ap-guangzhou"
 
         if not all([secret_id, secret_key, sdk_app_id, sign_name, template_id]):
-            logger.warning(f"[SMS DEV SIMULATION] 腾讯云凭据未在 .env 配置完全。手机号: {phone}, 验证码: {code}")
-            print(f"\n========================================\n[SMS DEV SIMULATION] 验证码短信已模拟发送\n手机号: {phone}\n验证码: {code}\n========================================\n")
+            logger.warning(
+                "[SMS DEV SIMULATION] 腾讯云凭据未在 .env 配置完全，"
+                "已模拟发送验证码（手机号/验证码不写入日志）。"
+            )
             return True
 
         try:
@@ -70,10 +72,10 @@ class TencentSMSHelper:
 
             send_status = status_set[0]
             if send_status.Code == "Ok":
-                logger.info(f"[SMS SUCCESS] 成功发送验证码至 {phone}，RequestId: {resp.RequestId}, SerialNo: {send_status.SerialNo}")
+                logger.info(f"[SMS SUCCESS] 验证码短信已投递（RequestId: {resp.RequestId}, SerialNo: {send_status.SerialNo}）")
                 return True
             else:
-                logger.error(f"[SMS ERROR] 发送失败 Code={send_status.Code}, Message={send_status.Message}, RequestId={resp.RequestId}")
+                logger.error(f"[SMS ERROR] 发送失败 Code={send_status.Code}, Message={send_status.Message}, RequestId: {resp.RequestId}")
                 return False
 
         except TencentCloudSDKException as err:

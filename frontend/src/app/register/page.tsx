@@ -316,20 +316,23 @@ export default function RegisterPage() {
   // -------------------------------------------------------------
   // STEP 2: PROFESSIONAL BACKGROUND STATE
   // -------------------------------------------------------------
-  const [gender, setGender] = useState<"male" | "female" | "other">("male");
-  const [age, setAge] = useState("26");
-  const [jobStatus, setJobStatus] = useState<"active" | "resigned" | "student">("active");
-  const [expYears, setExpYears] = useState("2年");
-  const [expMonths, setExpMonths] = useState("6个月");
-  const [companyName, setCompanyName] = useState("字节跳动");
-  const [roleName, setRoleName] = useState("后端开发工程师");
-  const [salaryMin, setSalaryMin] = useState(2);
-  const [salaryMax, setSalaryMax] = useState(35);
+  const [gender, setGender] = useState<"male" | "female" | "other" | "">("");
+  const [age, setAge] = useState("");
+  const [jobStatus, setJobStatus] = useState<"active" | "resigned" | "student" | "fresh_grad">("student");
+  const [expYears, setExpYears] = useState("");
+  const [expMonths, setExpMonths] = useState("");
+  // 右侧「月数」select 在 求职身份为「在校/应届」时强制锁定为 0 个月
+  // 派生以求职状态为唯一信号,避免「在职但 expYears 仍是在校」导致仍锁定
+  const isStudentLike = jobStatus === "student" || jobStatus === "fresh_grad";
+  const [companyName, setCompanyName] = useState("");
+  const [roleName, setRoleName] = useState("");
+  const [salaryMin, setSalaryMin] = useState<number | null>(null);
+  const [salaryMax, setSalaryMax] = useState<number | null>(null);
   const [isSalaryUnspecified, setIsSalaryUnspecified] = useState(false);
-  const [school, setSchool] = useState("清华大学");
-  const [degree, setDegree] = useState("本科");
-  const [gradYear, setGradYear] = useState("2018");
-  const [hasExp, setHasExp] = useState(true);
+  const [school, setSchool] = useState("");
+  const [degree, setDegree] = useState("");
+  const [gradYear, setGradYear] = useState("");
+  const [hasExp, setHasExp] = useState(false);
 
   // Drag & Crop Avatar State
   const [avatarSrc, setAvatarSrc] = useState<string>("/register.jpg"); // default image
@@ -412,9 +415,9 @@ export default function RegisterPage() {
   const [customCityValue, setCustomCityValue] = useState("");
   const [targetCompany, setTargetCompany] = useState("");
   const [targetRole, setTargetRole] = useState("");
-  const [targetGrade, setTargetGrade] = useState("高级");
-  const [targetSalaryMin, setTargetSalaryMin] = useState(2);
-  const [targetSalaryMax, setTargetSalaryMax] = useState(35);
+  const [targetGrade, setTargetGrade] = useState("");
+  const [targetSalaryMin, setTargetSalaryMin] = useState<number | null>(null);
+  const [targetSalaryMax, setTargetSalaryMax] = useState<number | null>(null);
   const [isTargetSalaryUnspecified, setIsTargetSalaryUnspecified] = useState(false);
   
   // Other Preferences
@@ -1196,7 +1199,7 @@ export default function RegisterPage() {
                               required
                               min="1"
                               max="120"
-                              placeholder="26"
+                              placeholder=""
                               value={age}
                               onChange={(e) => setAge(e.target.value)}
                               className="w-full py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold"
@@ -1217,7 +1220,19 @@ export default function RegisterPage() {
                                 <button
                                   key={item.id}
                                   type="button"
-                                  onClick={() => setJobStatus(item.id as any)}
+                                  onClick={() => {
+                                    setJobStatus(item.id as any);
+                                    // 求职状态 ↔ 工作年限联动
+                                    if (item.id === "student") {
+                                      setExpYears("在校");
+                                    } else if (item.id === "fresh_grad") {
+                                      setExpYears("应届");
+                                    } else {
+                                      // 在职 / 离职:工作年限默认 1年 0个月(用户可手动调整)
+                                      setExpYears("1年");
+                                      setExpMonths("0个月");
+                                    }
+                                  }}
                                   className={`flex-1 py-1.5 rounded-lg text-center transition-all cursor-pointer ${
                                     jobStatus === item.id ? "bg-[#AFA7FF]/15 text-[#AFA7FF] font-black" : "text-white/40"
                                   }`}
@@ -1243,9 +1258,10 @@ export default function RegisterPage() {
                                 ))}
                               </select>
                               <select
-                                value={expMonths}
+                                value={isStudentLike ? "0个月" : expMonths}
                                 onChange={(e) => setExpMonths(e.target.value)}
-                                className="flex-1 py-3 px-3 bg-[#060e20] border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold"
+                                disabled={isStudentLike}
+                                className={`flex-1 py-3 px-3 bg-[#060e20] border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold ${isStudentLike ? "opacity-40 cursor-not-allowed" : ""}`}
                               >
                                 {["0个月", "1个月", "2个月", "3个月", "4个月", "5个月", "6个月", "7个月", "8个月", "9个月", "10个月", "11个月"].map((m) => (
                                   <option key={m} className="bg-[#0e1626] text-white">{m}</option>
@@ -1292,23 +1308,29 @@ export default function RegisterPage() {
                             {!isSalaryUnspecified ? (
                               <>
                                 <div className="flex justify-end text-sm font-mono text-[#AFA7FF] font-black mb-1">
-                                  {salaryMin >= 100 ? "100K+" : salaryMax >= 100 ? `${salaryMin}K - 100K+` : `${salaryMin}K - ${salaryMax}K`}
+                                  {salaryMin === null || salaryMax === null
+                                    ? "K - K"
+                                    : salaryMin >= 100
+                                      ? "100K+"
+                                      : salaryMax >= 100
+                                        ? `${salaryMin}K - 100K+`
+                                        : `${salaryMin}K - ${salaryMax}K`}
                                 </div>
                                 <div className="flex items-center gap-3.5 py-1">
                                   <input
                                     type="range"
                                     min="1"
                                     max="100"
-                                    value={salaryMin}
-                                    onChange={(e) => setSalaryMin(Math.min(salaryMax - 2, parseInt(e.target.value)))}
+                                    value={salaryMin ?? 1}
+                                    onChange={(e) => setSalaryMin(Math.min((salaryMax ?? 100) - 2, parseInt(e.target.value)))}
                                     className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
                                   />
                                   <input
                                     type="range"
                                     min="1"
                                     max="100"
-                                    value={salaryMax}
-                                    onChange={(e) => setSalaryMax(Math.max(salaryMin + 2, parseInt(e.target.value)))}
+                                    value={salaryMax ?? 100}
+                                    onChange={(e) => setSalaryMax(Math.max((salaryMin ?? 1) + 2, parseInt(e.target.value)))}
                                     className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
                                   />
                                 </div>
@@ -1335,8 +1357,9 @@ export default function RegisterPage() {
                                 onChange={(e) => setDegree(e.target.value)}
                                 className="py-3 px-2.5 bg-[#060e20] border border-white/10 rounded-xl text-white focus:outline-none focus:border-[#AFA7FF]/40 text-sm font-semibold shrink-0"
                               >
+                                <option value="" disabled>请选择学历</option>
                                 {["专科", "本科", "硕士", "博士", "其他"].map((d) => (
-                                  <option key={d}>{d}</option>
+                                  <option key={d} value={d}>{d}</option>
                                 ))}
                               </select>
                             </div>
@@ -1602,23 +1625,29 @@ export default function RegisterPage() {
                             {!isTargetSalaryUnspecified ? (
                               <>
                                 <div className="flex justify-end text-sm font-mono text-[#AFA7FF] font-black mb-1">
-                                  {targetSalaryMin >= 100 ? "100K+" : targetSalaryMax >= 100 ? `${targetSalaryMin}K - 100K+` : `${targetSalaryMin}K - ${targetSalaryMax}K`}
+                                  {targetSalaryMin === null || targetSalaryMax === null
+                                    ? "K - K"
+                                    : targetSalaryMin >= 100
+                                      ? "100K+"
+                                      : targetSalaryMax >= 100
+                                        ? `${targetSalaryMin}K - 100K+`
+                                        : `${targetSalaryMin}K - ${targetSalaryMax}K`}
                                 </div>
                                 <div className="flex items-center gap-3.5 py-1.5">
                                   <input
                                     type="range"
                                     min="1"
                                     max="100"
-                                    value={targetSalaryMin}
-                                    onChange={(e) => setTargetSalaryMin(Math.min(targetSalaryMax - 2, parseInt(e.target.value)))}
+                                    value={targetSalaryMin ?? 1}
+                                    onChange={(e) => setTargetSalaryMin(Math.min((targetSalaryMax ?? 100) - 2, parseInt(e.target.value)))}
                                     className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
                                   />
                                   <input
                                     type="range"
                                     min="1"
                                     max="100"
-                                    value={targetSalaryMax}
-                                    onChange={(e) => setTargetSalaryMax(Math.max(targetSalaryMin + 2, parseInt(e.target.value)))}
+                                    value={targetSalaryMax ?? 100}
+                                    onChange={(e) => setTargetSalaryMax(Math.max((targetSalaryMin ?? 1) + 2, parseInt(e.target.value)))}
                                     className="flex-1 accent-[#AFA7FF] h-1 bg-white/5 rounded-lg appearance-none cursor-pointer"
                                   />
                                 </div>

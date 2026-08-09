@@ -76,7 +76,7 @@ services:
       - tencent_secret_id
       - tencent_secret_key
       - tencent_sms_app_id
-      - volc_asr_api_key
+      - volc_streaming_asr_api_key
       - volc_realtime_api_key
       - jwt_secret
     environment:
@@ -150,8 +150,8 @@ secrets:
     file: ./secrets/tencent_secret_key
   tencent_sms_app_id:
     file: ./secrets/tencent_sms_app_id
-  volc_asr_api_key:
-    file: ./secrets/volc_asr_api_key
+  volc_streaming_asr_api_key:
+    file: ./secrets/volc_streaming_asr_api_key
   volc_realtime_api_key:
     file: ./secrets/volc_realtime_api_key
   jwt_secret:

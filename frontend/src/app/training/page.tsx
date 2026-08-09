@@ -208,14 +208,23 @@ function InterviewTrainingPageContent() {
   const isAbandoningRef = useRef(false);
 
   // ---------- 模拟分析进度条 ----------
+  const prevBootStateRef = useRef<string>("idle");
   const [analysisProgress, setAnalysisProgress] = useState(0);
   useEffect(() => {
+    const prevState = prevBootStateRef.current;
+    prevBootStateRef.current = bootState;
+
     const isAnalyzingNow = bootState === "analyzing" || bootState === "ending";
+    const wasAnalyzing = prevState === "analyzing" || prevState === "ending";
+
     if (!isAnalyzingNow) {
       setAnalysisProgress(0);
       return;
     }
-    setAnalysisProgress(5);
+    if (!wasAnalyzing) {
+      setAnalysisProgress(5);
+    }
+
     const interval = setInterval(() => {
       setAnalysisProgress((prev) => {
         if (prev >= 98) return 98;
@@ -675,6 +684,17 @@ function InterviewTrainingPageContent() {
             stopCamera();
             setBootState("ending");
             void runAnalysisFlow(autoLiveId);
+          },
+          // 直接回到 idle 表单，不触发分析流程（abandoned 状态无 transcript 可分析）。
+          onSessionExpired: (expiredLiveId) => {
+            console.warn("[training] 僵尸 session live_id=", expiredLiveId, "已清理，回到表单");
+            audio.stop();
+            stopCamera();
+            setLiveSession(null);
+            localStorage.removeItem("interviewVar_live_id");
+            window.history.replaceState(null, "", "/training");
+            auth.triggerToast("上轮面试因超时已被自动清理，请重新开始", "info");
+            setBootState("idle");
           },
         });
         // PR5: 启动麦克风采集（捕获失败不阻塞 WS）

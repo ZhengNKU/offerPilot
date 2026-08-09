@@ -28,6 +28,7 @@ from app.routers.auth import get_current_user_optional
 from app.utils.moderation_dep import moderated
 from app.utils.ws_auth import get_current_user_from_ws
 from app.services.live_slots import make_slot_manager, estimate_eta_sec
+from app.services.live_config import _fetch_live_web_context
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,76 @@ async def upsert_user_live_minutes(
         except Exception as e:
             await db.rollback()
             logger.warning(f"[live] upsert user_live_minutes 失败 ({period_type}): {e}")
+
+
+async def _cleanup_zombie_session(
+    db: AsyncSession,
+    row: models.InterviewLiveSession,
+    *,
+    slots: Optional["object"] = None,
+    log_prefix: str = "[live]",
+) -> bool:
+    """
+    检测并清理僵尸 live session。返回 True 表示确实清理了，False 表示非僵尸。
+
+    行为：mark abandoned + 补 duration_sec（按 now - created_at 兜底，clamp 到 duration_min*60）
+          + 扣减额度（复用 upsert_user_live_minutes）+ 释放槽位（幂等）。
+
+    调用方需要在清理后自行 db.refresh(row)（如需返回最新 status 给前端）。
+    """
+    if row.status != "live":
+        return False
+    base_dt = row.created_at
+    if base_dt is None:
+        return False
+
+    now = datetime.utcnow()
+    elapsed = (now - base_dt).total_seconds()
+    # 5min 缓冲 = DURATION_BUFFER_S(60) + PING_TIMEOUT_S(180) + 60s slack
+    max_lifetime = row.duration_min * 60 + 300
+    if elapsed <= max_lifetime:
+        return False  # 还在合理生命周期内
+
+    # 兜底时长：clamp 到请求时长，避免因 created_at 太早而扣超
+    dur_sec = min(int(elapsed), row.duration_min * 60)
+    if dur_sec < 1:
+        dur_sec = 1  # 保底 1 秒（与 end_live_session 的 abandon 路径一致）
+
+    try:
+        await db.execute(
+            update(models.InterviewLiveSession)
+            .where(models.InterviewLiveSession.id == row.id)
+            .values(status="abandoned", duration_sec=dur_sec, ended_at=now)
+        )
+        await db.commit()
+        logger.warning(
+            f"{log_prefix} 僵尸 session live_id={row.id} elapsed={int(elapsed)}s "
+            f"> max_lifetime={max_lifetime}s，已 mark abandoned + duration_sec={dur_sec}"
+        )
+    except Exception as ex:
+        logger.warning(f"{log_prefix} 僵尸清理 DB 失败 live_id={row.id}: {ex}")
+        await db.rollback()
+        return False
+
+    # 扣减额度（用户已用就要扣，与正常 abandon 一致）
+    if row.user_id and dur_sec > 0:
+        try:
+            await upsert_user_live_minutes(
+                db=db, user_id=row.user_id,
+                added_seconds=dur_sec, ended_at=now,
+            )
+            logger.info(f"{log_prefix} 僵尸清理 累计时长 +{dur_sec}s to user={row.user_id}")
+        except Exception as ex:
+            logger.warning(f"{log_prefix} 僵尸清理扣减额度失败 user={row.user_id}: {ex}")
+
+    # 释放槽位（如果有；release 幂等）
+    if slots is not None:
+        try:
+            await slots.release(row.id)
+        except Exception as ex:
+            logger.debug(f"{log_prefix} 僵尸清理 release slot 异常(忽略): {ex}")
+
+    return True
 
 
 # ---------- Schemas ----------
@@ -167,22 +238,41 @@ async def create_live_session(
     # 用户显式选择"新建" = 旧会话作废，避免反复 409
     # 注意：不要写 status="error"，那是英文原始值，前端时间轴没有 error 映射会原样显示，
     #       统一用 failed（前端映射"评估失败"）以保持中文文案一致。
+    # 2026-08-07+: 对 status='live' 且超龄的 stale 行走 _cleanup_zombie_session
+    #   → 走 abandon 路径（按 now-created_at 扣额度 + 释放槽），不再是裸标 failed
     if current_user_id is not None:
         try:
-            stale_res = await db.execute(
-                update(models.InterviewLiveSession)
+            stale_q = await db.execute(
+                select(models.InterviewLiveSession)
                 .where(
                     models.InterviewLiveSession.user_id == current_user_id,
                     models.InterviewLiveSession.status.in_(("created", "ws_connecting", "live", "ending")),
                 )
-                .values(status="failed", ended_at=func.now())
-                .returning(models.InterviewLiveSession.id)
             )
-            stale_ids = [r[0] for r in stale_res]
-            if stale_ids:
-                await db.commit()
+            stale_rows = list(stale_q.scalars())
+            if stale_rows:
+                redis_pool = await _get_redis_pool()
+                slots = make_slot_manager(redis_pool)
+                zombie_n = 0
+                for stale_row in stale_rows:
+                    # 走僵尸检测：live 且超龄 → 自动 abandon（扣额度 + 释放槽）
+                    if await _cleanup_zombie_session(db, stale_row, slots=slots, log_prefix="[live/cleanup]"):
+                        zombie_n += 1
+                        continue
+                    # 非僵尸（created/ws_connecting 或短期 live）→ 标 failed
+                    try:
+                        await db.execute(
+                            update(models.InterviewLiveSession)
+                            .where(models.InterviewLiveSession.id == stale_row.id)
+                            .values(status="failed", ended_at=func.now())
+                        )
+                        await db.commit()
+                    except Exception as ex:
+                        logger.warning(f"[live] 标 failed 异常 stale_id={stale_row.id}: {ex}")
+                        await db.rollback()
                 logger.warning(
-                    f"[live] 清理 user={current_user_id} 的 {len(stale_ids)} 个卡住 active session: {stale_ids}"
+                    f"[live] 清理 user={current_user_id} 的 {len(stale_rows)} 个卡住 active session"
+                    f"（{zombie_n} 个走 zombie abandon）：{[r.id for r in stale_rows]}"
                 )
         except Exception as e:
             logger.exception(f"[live] 清理 stale session 失败，继续创建: {e}")
@@ -312,6 +402,8 @@ async def get_live_session(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权查看该实时面试会话",
         )
+    if await _cleanup_zombie_session(db, row, log_prefix="[live/get]"):
+        await db.refresh(row)
     return LiveSessionResponse(
         live_session_id=row.id,
         status=row.status,
@@ -1389,6 +1481,9 @@ async def ws_live(websocket: WebSocket, live_id: int):
         if row.user_id and row.user_id != user.id:
             await websocket.close(code=4403, reason="forbidden")
             return
+        if await _cleanup_zombie_session(db, row, slots=slots, log_prefix="[ws]"):
+            await websocket.close(code=4420, reason="previous session expired, please start new")
+            return
         if row.status not in ("created", "ws_connecting", "live"):
             logger.warning(
                 f"[ws] live_id={live_id} status={row.status} 不允许重连，close 4410"
@@ -1526,6 +1621,8 @@ async def ws_live(websocket: WebSocket, live_id: int):
                 user_profile_dict: dict | None = None
                 projects_list: list[dict] = []
                 resume_summary_dict: dict | None = None
+                # tech_* 走联网预取真实面经（仅用于对齐当下考点，失败/超时降级）
+                web_context = ""
                 if row.user_id is not None:
                     try:
                         (
@@ -1536,17 +1633,38 @@ async def ws_live(websocket: WebSocket, live_id: int):
                         ) = await _fetch_candidate_context_full(
                             db, user_id=row.user_id, target_role=row.target_role or ""
                         )
-                        intro_content = pick_intro_questions(
-                            interview_type=row.interview_type,
-                            profile=user_profile_dict,
-                            projects=projects_list,
-                            resume_summary=resume_summary_dict,
-                            target_role=row.target_role or "",
-                        )
                     except Exception as ctx_err:
                         logger.warning(
                             f"[ws] live_id={live_id} 拉候选人背景失败（不影响继续）: {ctx_err}"
                         )
+
+                # tech_* 联网预取：Redis 缓存命中 < 100ms；首次 miss 走 _prefetch_web_context
+                # 带 3s 超时，失败/非 tech_* 静默降级为 ""，不影响面试启动。
+                if row.interview_type in ("tech_8gu", "tech_project", "tech_scenario") and row.target_role:
+                    try:
+                        web_context = await _fetch_live_web_context(
+                            target_role=row.target_role or "",
+                            target_grade=row.job_level or "",
+                            experience_years=(user_profile_dict or {}).get("experience_years", "") or "",
+                        )
+                    except Exception as web_err:
+                        logger.info(
+                            f"[ws] live_id={live_id} 联网预取异常（不影响继续）: {web_err!r}"
+                        )
+                        web_context = ""
+
+                # pick_intro_questions 现在是 async（tech_* 走 LLM 动态出题，
+                # 失败降级硬编码）；不影响 hr_*/non_tech 行为。
+                intro_content = await pick_intro_questions(
+                    interview_type=row.interview_type,
+                    profile=user_profile_dict,
+                    projects=projects_list,
+                    resume_summary=resume_summary_dict,
+                    target_role=row.target_role or "",
+                    web_context=web_context,
+                    target_grade=row.job_level or "",
+                    experience_years=(user_profile_dict or {}).get("experience_years", "") or "",
+                )
 
                 system_prompt = build_system_prompt(
                     interview_type=row.interview_type,
@@ -1558,6 +1676,7 @@ async def ws_live(websocket: WebSocket, live_id: int):
                     followup_rounds=row.followup_rounds,
                     job_description=row.job_description,
                     candidate_context=candidate_context,
+                    web_context=web_context,
                 )
                 volc_bridge = VolcRealtimeBridge(
                     api_key=settings.VOLC_REALTIME_API_KEY,   # → X-Api-Key (Access Key)
@@ -1569,6 +1688,10 @@ async def ws_live(websocket: WebSocket, live_id: int):
                     bot_name=profile.get("persona_cn", "面试官"),
                     # 语速档位（0.9~1.2）→ 火山 TTS speech_rate；让 Lv1~Lv4 真的听出快慢差异
                     speech_rate=profile.get("speech_speed", 1.0),
+                    # 火山服务端空闲超时：原默认 60s 太短，候选人思考停顿超过 1 分钟
+                    # 会被 DialogAudioIdleTimeoutError(52000042) 强制断连。改成 180s，
+                    # 与本地 watchdog PING_TIMEOUT_S=180 对齐，留 3 分钟思考窗口。
+                    recv_timeout=180,
                 )
                 await volc_bridge.connect()
                 # 触发 AI 开场白（SayHello）：用 pick_intro_questions 选出的「按背景开场白」
@@ -1579,7 +1702,7 @@ async def ws_live(websocket: WebSocket, live_id: int):
 
                 # PR-N: 并行接一条火山流式短语音识别通道，独立于 realtime dialog，
                 # 用于把候选人 mic 文本实时上屏（realtime dialog 不回推 ASR 文本）。
-                # api_key 用 .env 里 VOLC_ASR_API_KEY（短语音识别产品的独立 key），
+                # api_key 用 .env 里 VOLC_STREAMING_ASR_API_KEY（短语音识别产品的独立 key），
                 # app_key 与 realtime dialog 共用 PlgvMymc7f3tQnJ6（火山通用 App Key）。
                 # 由于控制台开通的模型/计费方式不确定，自动 fallback 试 4 种 resource_id，
                 # 第一个握手成功的就用。
@@ -1606,8 +1729,7 @@ async def ws_live(websocket: WebSocket, live_id: int):
                     for rid in ordered:
                         try:
                             cand = VolcStreamingAsrBridge(
-                                api_key=settings.VOLC_ASR_API_KEY,
-                                app_key=settings.VOLC_REALTIME_APP_KEY,
+                                api_key=settings.VOLC_STREAMING_ASR_API_KEY,
                                 resource_id=rid,
                                 wss_url=settings.VOLC_STREAMING_ASR_WSS_URL,
                                 language="zh-CN",

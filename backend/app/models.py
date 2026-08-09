@@ -52,7 +52,7 @@ class UserProfile(Base):
     target_cities: Mapped[List[str]] = mapped_column(ARRAY(String), nullable=False)
     target_company: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     target_role: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    target_grade: Mapped[Optional[str]] = mapped_column(String(50), default="高级", nullable=True)
+    target_grade: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     target_salary_min: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     target_salary_max: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 

@@ -8,11 +8,10 @@
   Resource:  volc.bigasr.sauc.duration / volc.bigasr.sauc.concurrent
              volc.seedasr.sauc.duration / volc.seedasr.sauc.concurrent
 
-  Auth (4 headers only):
-    X-Api-Resource-Id: volc.bigasr.sauc.duration
-    X-Api-Request-Id:  <UUID>
-    X-Api-Access-Key:  <VOLC_ASR_API_KEY>
-    X-Api-App-Key:     <App Key>
+  Auth (新版本控制台 3 headers,文档 P6):
+    X-Api-Key:         <APP Key>              ← VOLC_STREAMING_ASR_API_KEY (UUID 格式)
+    X-Api-Resource-Id: volc.bigasr.sauc.*     ← VOLC_STREAMING_ASR_RESOURCE_ID
+    X-Api-Connect-Id:  <UUID 每连接随机>      ← 排错用,接 InvalidStatus.response.headers["X-Tt-Logid"]
 
   Binary protocol (per frame):
     Header (4B) | Sequence (4B BE int32) | Payload size (4B BE uint32) | Payload (gzip + JSON/raw)
@@ -294,7 +293,7 @@ class VolcStreamingAsrBridge:
     """
     单会话流式短语音识别桥接。
     用法：
-        bridge = VolcStreamingAsrBridge(api_key=..., app_key=..., resource_id=..., wss_url=...)
+        bridge = VolcStreamingAsrBridge(api_key=..., resource_id=..., wss_url=...)
         await bridge.connect()
         async for ev in bridge.recv_events(): ...
         await bridge.send_pcm(chunk)         # 正常包
@@ -309,7 +308,6 @@ class VolcStreamingAsrBridge:
     def __init__(
         self,
         api_key: str,
-        app_key: str,
         resource_id: str,
         wss_url: str,
         language: str = "zh-CN",
@@ -317,12 +315,11 @@ class VolcStreamingAsrBridge:
     ):
         if websockets is None:
             raise ImportError("需要安装 websockets>=12.0")
-        if not all([api_key, app_key, resource_id, wss_url]):
+        if not all([api_key, resource_id, wss_url]):
             raise ValueError(
                 "火山流式 ASR 鉴权字段未配置齐全。请检查 backend/.env。"
             )
         self.api_key = api_key
-        self.app_key = app_key
         self.resource_id = resource_id
         self.wss_url = wss_url
         self.language = language
@@ -339,7 +336,7 @@ class VolcStreamingAsrBridge:
 
     async def connect(self) -> None:
         """
-        WS 握手（带 4 个鉴权头）→ 立即发 StartRecognition（full client request）→ 启 listener。
+        WS 握手（带 3 个鉴权头，新版本控制台）→ 立即发 StartRecognition → 启 listener。
         关键差异：流式 ASR **没有 StartConnection**，WS 连上直接发识别请求。
 
         握手响应头（无论成功失败都要记录）官方推荐抓 X-Tt-Logid：
@@ -348,18 +345,16 @@ class VolcStreamingAsrBridge:
         """
         logger.info(
             f"[volc-asr] connect wss={self.wss_url} resource_id={self.resource_id} "
-            f"request_id={self._request_id}"
+            f"connect_id={self._request_id}"
         )
-        # 鉴权头：与官方 demo 完全对齐——只 4 个
-        # 1. X-Api-Resource-Id
-        # 2. X-Api-Request-Id  (每连接 UUID)
-        # 3. X-Api-Access-Key  (旧版控制台 access token，等价于新版 X-Api-Key)
-        # 4. X-Api-App-Key     (App Key)
+        # 新版本控制台鉴权头（3 件套，文档 P6）：
+        #   X-Api-Key:         <APP Key>           ← 原 self.api_key
+        #   X-Api-Resource-Id: <volc.bigasr.sauc.*> ← self.resource_id (来自 .env)
+        #   X-Api-Connect-Id:  <UUID>              ← 复用 self._request_id (每连接 UUID,用于排错)
         headers = [
+            ("X-Api-Key", self.api_key),
             ("X-Api-Resource-Id", self.resource_id),
-            ("X-Api-Request-Id", self._request_id),
-            ("X-Api-Access-Key", self.api_key),
-            ("X-Api-App-Key", self.app_key),
+            ("X-Api-Connect-Id", self._request_id),
         ]
         try:
             self._ws = await websockets.connect(
@@ -510,7 +505,7 @@ class VolcStreamingAsrBridge:
                 await asyncio.wait_for(self._listener_task, timeout=2.0)
             except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
                 self._listener_task.cancel()
-        if self._ws is not None and not self._ws.closed:
+        if self._ws is not None:
             try:
                 await self._ws.close()
             except Exception:

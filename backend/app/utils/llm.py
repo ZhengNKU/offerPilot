@@ -1,4 +1,5 @@
 import requests
+import httpx
 import logging
 import asyncio
 import json
@@ -471,64 +472,63 @@ async def _stream_one_with_tools(
     retryable_status = {429, 500, 502, 503, 504, 529}
     max_attempts = 4
 
-    def _do_request():
-        return requests.post(
-            url, headers=headers, json=stream_payload, timeout=300.0,
-            proxies={"http": None, "https": None}, stream=True,
-        )
-
     last_exc: Optional[Exception] = None
+    timeout = httpx.Timeout(300.0)
     for attempt in range(max_attempts):
         try:
-            resp = await asyncio.to_thread(_do_request)
-            if resp.status_code in retryable_status:
-                raise requests.HTTPError(
-                    f"{resp.status_code} retryable from DeepSeek upstream",
-                    response=resp,
-                )
-            resp.raise_for_status()
-            for raw in resp.iter_lines(decode_unicode=True):
-                if not raw:
-                    continue
-                line = raw.strip()
-                if not line.startswith("data:"):
-                    continue
-                data = line[len("data:"):].strip()
-                if data == "[DONE]":
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+                async with client.stream(
+                    "POST", url, headers=headers, json=stream_payload
+                ) as resp:
+                    if resp.status_code in retryable_status:
+                        raise httpx.HTTPStatusError(
+                            f"{resp.status_code} retryable from DeepSeek upstream",
+                            request=resp.request,
+                            response=resp,
+                        )
+                    resp.raise_for_status()
+                    async for raw in resp.aiter_lines():
+                        if not raw:
+                            continue
+                        line = raw.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[len("data:"):].strip()
+                        if data == "[DONE]":
+                            return
+                        try:
+                            chunk = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        try:
+                            choice = chunk["choices"][0]
+                            delta = choice.get("delta") or {}
+                            # reasoning piece
+                            reasoning_piece = delta.get("reasoning_content")
+                            if reasoning_piece:
+                                yield {"kind": "reasoning", "piece": reasoning_piece}
+                            # content piece
+                            piece = delta.get("content")
+                            if piece:
+                                yield {"kind": "content", "piece": piece}
+                            # tool_calls 增量（OpenAI 流式协议：每个 chunk 可能给同一 index 的不同字段）
+                            for tc in (delta.get("tool_calls") or []):
+                                yield {
+                                    "kind": "tool_call_delta",
+                                    "index": tc.get("index", 0),
+                                    "delta": tc,
+                                }
+                            # finish
+                            finish = choice.get("finish_reason")
+                            if finish:
+                                yield {"kind": "finish", "reason": finish}
+                                return
+                        except (KeyError, IndexError, TypeError):
+                            continue
                     return
-                try:
-                    chunk = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-                try:
-                    choice = chunk["choices"][0]
-                    delta = choice.get("delta") or {}
-                    # reasoning piece
-                    reasoning_piece = delta.get("reasoning_content")
-                    if reasoning_piece:
-                        yield {"kind": "reasoning", "piece": reasoning_piece}
-                    # content piece
-                    piece = delta.get("content")
-                    if piece:
-                        yield {"kind": "content", "piece": piece}
-                    # tool_calls 增量（OpenAI 流式协议：每个 chunk 可能给同一 index 的不同字段）
-                    for tc in (delta.get("tool_calls") or []):
-                        yield {
-                            "kind": "tool_call_delta",
-                            "index": tc.get("index", 0),
-                            "delta": tc,
-                        }
-                    # finish
-                    finish = choice.get("finish_reason")
-                    if finish:
-                        yield {"kind": "finish", "reason": finish}
-                        return
-                except (KeyError, IndexError, TypeError):
-                    continue
-            return
-        except requests.HTTPError as e:
+        except httpx.HTTPStatusError as e:
             last_exc = e
-            status_code = e.response.status_code if e.response is not None else None
+            status_code = e.response.status_code
             if status_code not in retryable_status or attempt == max_attempts - 1:
                 raise
             wait = 1.5 * (2 ** attempt)
@@ -537,7 +537,7 @@ async def _stream_one_with_tools(
                 f"retry {attempt + 1}/{max_attempts - 1} after {wait:.1f}s"
             )
             await asyncio.sleep(wait)
-        except (requests.ConnectionError, requests.Timeout) as e:
+        except httpx.RequestError as e:
             last_exc = e
             if attempt == max_attempts - 1:
                 raise
@@ -1531,48 +1531,47 @@ async def call_llm_stream_chunks(payload: dict, timeout: float = 300.0):
     retryable_status = {429, 500, 502, 503, 504, 529}
     max_attempts = 4
 
-    def _do_request():
-        return requests.post(
-            url, headers=headers, json=stream_payload, timeout=timeout,
-            proxies={"http": None, "https": None}, stream=True,
-        )
-
     last_exc: Optional[Exception] = None
+    timeout_config = httpx.Timeout(timeout)
     for attempt in range(max_attempts):
         try:
-            resp = await asyncio.to_thread(_do_request)
-            if resp.status_code in retryable_status:
-                raise requests.HTTPError(
-                    f"{resp.status_code} retryable from DeepSeek upstream",
-                    response=resp,
-                )
-            resp.raise_for_status()
+            async with httpx.AsyncClient(timeout=timeout_config, trust_env=False) as client:
+                async with client.stream(
+                    "POST", url, headers=headers, json=stream_payload
+                ) as resp:
+                    if resp.status_code in retryable_status:
+                        raise httpx.HTTPStatusError(
+                            f"{resp.status_code} retryable from DeepSeek upstream",
+                            request=resp.request,
+                            response=resp,
+                        )
+                    resp.raise_for_status()
 
-            for raw in resp.iter_lines(decode_unicode=True):
-                if not raw:
-                    continue
-                line = raw.strip()
-                if not line.startswith("data:"):
-                    continue
-                data = line[len("data:"):].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-                try:
-                    delta = chunk["choices"][0].get("delta") or {}
-                    piece = delta.get("content")
-                    if piece:
-                        yield piece
-                except (KeyError, IndexError, TypeError):
-                    continue
+                    async for raw in resp.aiter_lines():
+                        if not raw:
+                            continue
+                        line = raw.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[len("data:"):].strip()
+                        if data == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data)
+                        except json.JSONDecodeError:
+                            continue
+                        try:
+                            delta = chunk["choices"][0].get("delta") or {}
+                            piece = delta.get("content")
+                            if piece:
+                                yield piece
+                        except (KeyError, IndexError, TypeError):
+                            continue
             # 正常结束，退出重试循环
             return
-        except requests.HTTPError as e:
+        except httpx.HTTPStatusError as e:
             last_exc = e
-            status_code = e.response.status_code if e.response is not None else None
+            status_code = e.response.status_code
             if status_code not in retryable_status or attempt == max_attempts - 1:
                 raise
             wait = 1.5 * (2 ** attempt)
@@ -1581,7 +1580,7 @@ async def call_llm_stream_chunks(payload: dict, timeout: float = 300.0):
                 status_code, attempt + 1, max_attempts - 1, wait,
             )
             await asyncio.sleep(wait)
-        except (requests.ConnectionError, requests.Timeout) as e:
+        except httpx.RequestError as e:
             last_exc = e
             if attempt == max_attempts - 1:
                 raise
@@ -1603,11 +1602,16 @@ async def _call_resume_agent(
     enable_network: bool = False,
     log_label: str = "resume-agent",
     timeout: float = 300.0,
+    disable_thinking: bool = False,
 ) -> dict:
     """简历分析子智能体通用调用：拼 user_content（verbatim 表 + 简历 + 画像）+ 调用 + 解析 JSON。
 
     每个子智能体只返回自己负责的 JSON 切片，由 analyze_resume_text 用 asyncio.gather 并行
     后合并，最终结构与原先单次大调用一致。带 elapsed 打点便于定位哪个子智能体耗时。
+
+    Args:
+        disable_thinking: True 时关闭 V4-flash 默认 thinking 输出，纯结构化任务用。
+            详见 _run_with_optional_tools.disable_thinking / _disable_thinking_payload。
     """
     user_content = ""
     if parsed_structure:
@@ -1635,7 +1639,8 @@ async def _call_resume_agent(
     t0 = time.monotonic()
     try:
         res_data = await _run_with_optional_tools(
-            payload, enable_network, sync=False, timeout=timeout
+            payload, enable_network, sync=False, timeout=timeout,
+            disable_thinking=disable_thinking,
         )
         content = res_data["choices"][0]["message"]["content"]
         content_clean = _strip_codeblock(content)
@@ -1830,7 +1835,11 @@ async def _resume_agent_structure(
     """子智能体 C：结构地图（structure_analysis 7 段 status/score）。
 
     前端只消费 status + score；before/after 由前端从 work_experiences 实际 bullets 生成，
-    因此 C 不需要 B 的输出。模板化输出，实测后可加 disable_thinking 提速。
+    因此 C 不需要 B 的输出。
+
+    模板化输出（7 段固定 schema、status 枚举、score 0-100 整数、advice 短文本），
+    不需要推理。已开启 disable_thinking，V4-flash 默认 thinking 30-100s → 3-15s，
+    实测后无质量损失。
     """
     system_prompt = (
         f"【系统时间上下文】当前北京时间是：{current_date}。\n"
@@ -1878,6 +1887,7 @@ async def _resume_agent_structure(
         parsed_structure=parsed_structure,
         enable_network=enable_network,
         log_label="structure",
+        disable_thinking=True,  # 2026-08-05+: 模板化输出,关 thinking 提速 30-50s
     )
 
 

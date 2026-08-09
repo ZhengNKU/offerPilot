@@ -174,8 +174,8 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
             status="在职",
             salary="0K - 0K",
             targetCompany="大厂公司 (目标)",
-            targetRole="高级工程师",
-            targetGrade="高级",
+            targetRole="",
+            targetGrade="",
             targetSalary="0K - 0K",
             gender="male",
             age="0",
@@ -403,6 +403,11 @@ async def register_step1(
             detail="验证码无效或已过期"
         )
 
+    # 校验通过:消费验证码,改写为「已验证凭证」,给用户 30 分钟填表窗口
+    # complete 阶段只校验该凭证,不再校验 verify_code(避免用户填表超过 5 分钟验证码过期)
+    await redis_client.delete(f"auth:code:{target}")
+    await redis_client.setex(f"auth:verified:{target}", 1800, "1")
+
     return {"message": "第一步验证通过，可进入后续档案填写"}
 
 
@@ -433,12 +438,14 @@ async def register_complete(
                 detail="邮箱字段不能为空"
             )
 
-    saved_code = await redis_client.get(f"auth:code:{target}")
-    if not saved_code or saved_code != acc.verify_code:
+    saved_code = await redis_client.get(f"auth:verified:{target}")
+    if not saved_code:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="注册验证码无效或已过期，请重新验证"
         )
+    # 校验通过:消费凭证,防重放
+    await redis_client.delete(f"auth:verified:{target}")
         
     # Check existence
     if acc.username.lower() == "admin":

@@ -138,6 +138,8 @@ export default function CareerDashboard() {
   const [goalForm, setGoalForm] = useState({ ...careerGoal });
   const [securityForm, setSecurityForm] = useState({ ...accountSecurity });
   const [securityTab, setSecurityTab] = useState<"email">("email");
+  // 「在职状态」为在校/应届时,右侧工作月数强制锁定 0 个月
+  const isStudentLike = profileForm.status === "在校生" || profileForm.status === "应届生";
 
   // Verification states for security edits
   const [emailCountdown, setEmailCountdown] = useState(0);
@@ -1288,7 +1290,22 @@ export default function CareerDashboard() {
                     <label className="text-slate-700 dark:text-white/60 font-bold block">求职状态</label>
                     <select
                       value={profileForm.status}
-                      onChange={(e) => setProfileForm({ ...profileForm, status: e.target.value })}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        // 求职状态 ↔ 工作年限联动
+                        let nextExpYears = profileForm.experienceYears;
+                        let nextExpMonths = profileForm.experienceMonths;
+                        if (v === "在校生") {
+                          nextExpYears = "在校";
+                        } else if (v === "应届生") {
+                          nextExpYears = "应届";
+                        } else {
+                          // 在职 / 离职:工作年限默认 1年 0个月(用户可手动调整)
+                          nextExpYears = "1年";
+                          nextExpMonths = "0个月";
+                        }
+                        setProfileForm({ ...profileForm, status: v, experienceYears: nextExpYears, experienceMonths: nextExpMonths });
+                      }}
                       className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold appearance-none hero-select"
                     >
                       <option className="bg-white dark:bg-[#0e1626] text-slate-900 dark:text-white" value="在职">在职</option>
@@ -1398,9 +1415,10 @@ export default function CareerDashboard() {
                         ))}
                       </select>
                       <select
-                        value={profileForm.experienceMonths}
+                        value={isStudentLike ? "0个月" : profileForm.experienceMonths}
                         onChange={(e) => setProfileForm({ ...profileForm, experienceMonths: e.target.value })}
-                        className="flex-1 px-3 py-2.5 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl text-slate-900 dark:text-white font-bold focus:outline-none focus:border-indigo-600 text-sm appearance-none hero-select"
+                        disabled={isStudentLike}
+                        className={`flex-1 px-3 py-2.5 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl text-slate-900 dark:text-white font-bold focus:outline-none focus:border-indigo-600 text-sm appearance-none hero-select ${isStudentLike ? "opacity-40 cursor-not-allowed" : ""}`}
                       >
                         {["0个月", "1个月", "2个月", "3个月", "4个月", "5个月", "6个月", "7个月", "8个月", "9个月", "10个月", "11个月"].map((m) => (
                           <option key={m} className="bg-[#0e1626] text-white">{m}</option>

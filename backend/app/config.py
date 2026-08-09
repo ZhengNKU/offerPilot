@@ -77,10 +77,6 @@ class Settings(BaseSettings):
     EMBEDDING_TIMEOUT_S: float = 30.0
     EMBEDDING_QPS: int = 100          # DashScope QPS 较宽松，可按实际情况调
 
-    # Volcano Engine (ByteDance Doubao) ASR
-    VOLC_ASR_API_KEY: str = "91b64a7e-bd24-41ba-95e7-b1dbca5cb6b3"
-    VOLC_ASR_RESOURCE_ID: str = "volc.seedasr.auc"
-
     # Volcano Engine Doubao Realtime (实时语音大模型，HTTP/WS 快捷 API 接入)
     # 申请地址：https://www.volcengine.com/product/voice-realtime
     # 仅在后端使用，禁止下发到浏览器
@@ -103,6 +99,14 @@ class Settings(BaseSettings):
     #   endpoint:        wss://openspeech.bytedance.com/api/v3/sauc/bigmodel
     #   resource_id:      volc.seedasr.sauc.duration / volc.bigasr.sauc.duration
     #                     (按控制台开通的模型+计费方式决定：模型1.0/2.0 × 小时版/并发版)
+    # 鉴权头（4 件套，来自官方 sauc_websocket_demo.py）：
+    #   X-Api-Resource-Id: <上方 VOLC_STREAMING_ASR_RESOURCE_ID>
+    #   X-Api-Request-Id:  <UUID 每连接随机>           ← bridge 内自动生成
+    #   X-Api-Access-Key:  <下方 VOLC_STREAMING_ASR_API_KEY>  ← 火山「短语音识别·流式」产品下发的 access key
+    #   X-Api-App-Key:     <App Key>                  ← 控制台应用列表获取
+    # 与实时语音大模型（VOLC_REALTIME_*）的 access key **不通用**，必须在火山控制台
+    # 「语音技术 → 短语音识别」产品下单独开通获取。
+    VOLC_STREAMING_ASR_API_KEY: str = ""
     VOLC_STREAMING_ASR_WSS_URL: str = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel"
     VOLC_STREAMING_ASR_RESOURCE_ID: str = "volc.bigasr.sauc.duration"
 

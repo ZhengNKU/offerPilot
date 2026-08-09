@@ -15,7 +15,7 @@ from app import models, database
 from app.database import get_db, async_session, _get_redis_pool
 from app.routers.auth import get_current_user_optional
 from app.utils.llm import analyze_interview_dialogue, sectionize_transcript, generate_transcript_highlights, generate_section_optimization_advice, extract_mentioned_projects
-from app.utils.asr import call_volc_asr
+from app.utils.asr import call_asr
 from app.services.embedding_indexer import schedule_index
 from app.services.quota import (
     FEATURE_AUDIO,
@@ -654,7 +654,7 @@ async def _run_real_analysis_impl(session_id: int, task_id: str, profile_data: O
         fake_progress_task = asyncio.create_task(_fake_asr_progress())
         try:
             # 失败直接抛出,由外层 _run_real_analysis 走 _fail_analysis
-            raw_segments = await asyncio.to_thread(call_volc_asr, presigned_url)
+            raw_segments = await asyncio.to_thread(call_asr, presigned_url)
             logger.info(f"[task={task_id}] ASR returned {len(raw_segments)} segments")
         finally:
             fake_progress_task.cancel()
@@ -1282,9 +1282,9 @@ async def debug_asr(body: DebugASRRequest):
     Test endpoint: submit an audio URL to Volc ASR and return raw parsed segments.
     Usage: POST /api/audio/debug/asr  {"audio_url": "<COS_URL>"}
     """
-    from app.utils.asr import call_volc_asr
+    from app.utils.asr import call_asr
     try:
-        segments = await asyncio.to_thread(call_volc_asr, body.audio_url)
+        segments = await asyncio.to_thread(call_asr, body.audio_url)
         return {
             "audio_url": body.audio_url,
             "segment_count": len(segments),

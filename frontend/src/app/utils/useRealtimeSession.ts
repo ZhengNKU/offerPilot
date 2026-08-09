@@ -68,6 +68,7 @@ export interface StartOpts {
    * 然后回调此函数，UI 层应切换到"正在分析"流程。
    */
   onAutoEnd?: (liveId: number) => void;
+  onSessionExpired?: (liveId: number) => void;
 }
 
 export interface UseRealtimeSessionApi extends RealtimeState {
@@ -136,14 +137,20 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
 
   const appendTranscript = useCallback((line: TranscriptLine) => {
     setTranscript((prev) => {
-      // 合并策略：
+      // 合并策略（防御后端重复推送）：
       // - partial 进来 → 若最后一条同 role partial，覆盖（打字机效果）
       // - final 进来 → 若最后一条同 role partial，覆盖（覆盖"还在打的最后一个字"，
       //   避免 550 最后一段 partial（含完整句）和 351 final 两条记录都进 transcript 区造成重复）
+      // - final 进来 → 若最后一条同 role final 且文本完全相同，丢弃（防止后端双路 ASR
+      //   或 tts_text 重发导致同一条 final 被 push 多次）
       // - 否则 append
       const last = prev[prev.length - 1];
       if (last && last.partial && last.role === line.role) {
         return [...prev.slice(0, -1), line];
+      }
+      if (!line.partial && last && !last.partial && last.role === line.role
+          && last.text.trim() === line.text.trim()) {
+        return prev;
       }
       return [...prev, line];
     });
@@ -175,6 +182,18 @@ export function useRealtimeSession(): UseRealtimeSessionApi {
     if (code === 4410) {
       setStatus("error");
       setError({ code, message: `会话状态不允许重连 (${reason})` });
+      return;
+    }
+    if (code === 4420) {
+      // 2026-08-07+: 服务端判定僵尸 session（bridge 死了但 _on_close 没跑完），
+      // 已自动走 abandon 路径（mark abandoned + 扣额度 + 释放槽）。
+      // 无 transcript 可分析，不要触发 onAutoEnd；直接通知 training 页回到 idle 表单。
+      shouldReconnectRef.current = false;
+      endInitiatedRef.current = true;
+      setStatus("ended");
+      setError({ code, message: reason || "上轮面试已过期，已自动清理。请重新开始。" });
+      const liveId = optsRef.current?.liveId;
+      if (liveId) optsRef.current?.onSessionExpired?.(liveId);
       return;
     }
     if (code === 4503 || code === 4500) {

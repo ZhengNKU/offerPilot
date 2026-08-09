@@ -423,18 +423,21 @@ class VolcRealtimeBridge:
         config = {
             "asr": {
                 "extra": {
-                    "end_smooth_window_ms": 1500,
+                    # 候选人停顿思考的窗口：原 1500ms 太短，思考/回忆细节常 >2s，
+                    # 会被服务端 VAD 提前切成多个 utterance，导致用户感觉"回答到一半断了"。
+                    # 调到 2000ms 留出思考缓冲；>3000ms 会出现"讲一会儿才上屏"的明显延迟。
+                    "end_smooth_window_ms": 2000,
                 },
             },
             "tts": {
                 "speaker": self.voice,
-                # 火山 TTS 语速字段：speech_rate（推荐 0.5~2.0，1.0 为默认）
-                # 来源于 live_config.LIVE_PROFILES[].speech_speed，按难度档位 0.9~1.2 区分
-                "speech_rate": self.speech_rate,
                 "audio_config": {
                     "channel": 1,
                     "format": "pcm_s16le",
                     "sample_rate": 24000,
+                },
+                "extra": {
+                    "speech_rate": self.speech_rate,
                 },
             },
             "dialog": {
@@ -445,6 +448,7 @@ class VolcRealtimeBridge:
                     "strict_audit": False,
                     "recv_timeout": self.recv_timeout,
                     "input_mod": "audio",
+                    "model": "1.2.1.1",
                 },
             },
         }
@@ -525,7 +529,9 @@ class VolcRealtimeBridge:
             return
         self._closed = True
         # 通知火山结束会话
-        if self._ws is not None and not self._ws.closed:
+        # websockets>=12 已移除 .closed 属性；FINISH_SESSION 在连接已关时也不必发，
+        # close() 本身幂等。下面直接尝试发，send 在 closed 状态会 raise ConnectionClosed。
+        if self._ws is not None:
             try:
                 await self._ws.send(make_full_request(EVT_FINISH_SESSION, self._session_id, {}, JSON, GZIP))
             except Exception:

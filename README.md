@@ -1,17 +1,19 @@
-# 面试VAR · AI 面试教练系统
+# 面试驾到 · OfferPilot
 
-> 落地页技术栈、核心概念、四大子产品的总览参见 [docs/](./docs/)。
-> 视觉规范（配色 / 字体 / 玻璃拟态）参见 [OfferPilot 视觉规范](C:\Users\47181\.claude\projects\D--ai-----offerPilot\memory\offerpilot-visual-style.md)。
+> 落地页技术栈、核心概念、子产品矩阵的总览见 [docs/](./docs/)。
+> 视觉规范（配色 / 字体 / 玻璃拟态）见 [OfferPilot 视觉规范](C:\Users\47181\.claude\projects\D--ai-----offerPilot\memory\offerpilot-visual-style.md)。
+> 服务器侧"Docker 部署 + 密钥注入"全过程见 [docs/部署文档.txt](./docs/部署文档.txt)。
 
-**面试VAR（InterviewVAR）** 是一款 AI 驱动的面试智能分析与职业成长辅助系统。它围绕「真实面试录音 / 简历 / 模拟面试 / 复盘记忆」四个核心场景，串联起 LLM、ASR、对象存储、文档解析、用户画像与会员体系，为求职者提供从投递前到拿 offer 后的全周期陪伴。
+**面试驾到（内部代号 OfferPilot / 前缀 `interviewvar_*`）** 是一款 AI 驱动的面试智能分析与职业成长辅助系统。它围绕**真实面试录音 / 简历 / 模拟面试 / 复盘记忆 / 社区反馈**五个核心场景，串联 DeepSeek 推理、火山引擎双 ASR（流式短语音 + 实时语音大模型）、阿里百炼 Embedding、pgvector RAG、对象存储、文档解析、用户画像与会员体系，为求职者提供从投递前到拿 offer 后的全周期陪伴。
 
-仓库采用 **前后端分离** 的 Monorepo 布局：
+仓库采用 **前后端分离** Monorepo + **Docker 多容器** 生产部署：
 
 ```
 offerPilot/
-├── backend/          # FastAPI 后端服务（Python 3.10+）
-├── frontend/         # Next.js 16 前端应用（React 19 / Tailwind 4）
-├── docs/             # 设计与产品文档（含 nanobanana-ppt 资料）
+├── backend/          # FastAPI 后端（Python 3.10+，uvicorn 2 worker）
+├── frontend/         # Next.js 16 前端（React 19 / Tailwind 4，独立同源部署）
+├── deploy/           # docker-compose · nginx · env.public · setup-secrets.sh · swap.sh · package.ps1
+├── docs/             # 部署文档 + nanobanana-ppt 视觉/运营资料
 └── README.md         # ← 你正在读的文件
 ```
 
@@ -19,29 +21,34 @@ offerPilot/
 
 ## 目录
 
-- [项目亮点](#项目亮点)
-- [四大子产品（产品矩阵）](#四大子产品产品矩阵)
+- [核心特性](#核心特性)
+- [五大子产品矩阵](#五大子产品矩阵)
 - [技术栈一览](#技术栈一览)
 - [项目结构](#项目结构)
-- [快速开始](#快速开始)
+- [本地开发](#本地开发)
   - [环境要求](#环境要求)
   - [启动后端](#启动后端)
   - [启动前端](#启动前端)
 - [后端（backend/）详解](#后端backend详解)
   - [技术栈与依赖](#技术栈与依赖)
-  - [目录与模块划分](#目录与模块划分)
-  - [数据模型（ORM）](#数据模型orm)
+  - [路由层（11 个 router）](#路由层11-个-router)
+  - [服务层（19 个 service）](#服务层19-个-service)
+  - [工具层（utils/）](#工具层utils)
+  - [数据模型（17+ 张 ORM 表）](#数据模型17-张-orm-表)
   - [REST API 一览](#rest-api-一览)
   - [核心业务流程](#核心业务流程)
-  - [配置项（.env）](#配置项env)
-  - [会员等级与文件保留策略](#会员等级与文件保留策略)
+  - [配置项：.env / .env.public](#配置项env--envpublic)
+  - [会员等级 / 文件保留](#会员等级--文件保留)
 - [前端（frontend/）详解](#前端frontend详解)
   - [技术栈与依赖](#技术栈与依赖-1)
-  - [目录与路由](#目录与路由)
-  - [核心页面与组件](#核心页面与组件)
+  - [路由与目录](#路由与目录)
+  - [AuthProvider 全局认证](#authprovider-全局认证)
   - [视觉规范](#视觉规范)
-  - [AuthProvider：全局认证状态](#authprovider全局认证状态)
   - [与后端的接口约定](#与后端的接口约定)
+- [生产部署（Docker + Secrets）](#生产部署docker--secrets)
+  - [一键初始化服务器](#一键初始化服务器)
+  - [9 个第三方密钥注入](#9-个第三方密钥注入)
+  - [打包 / 换包 / 回滚](#打包--换包--回滚)
 - [前后端交互流程图](#前后端交互流程图)
 - [常见问题](#常见问题)
 - [Roadmap](#roadmap)
@@ -49,26 +56,29 @@ offerPilot/
 
 ---
 
-## 项目亮点
+## 核心特性
 
-- **真实录音闭环**：上传 mp3/wav → 调用火山引擎大模型 ASR → DeepSeek (reasoning) 推理评分 → 一键产出 IPI 分数、Offer 概率、风险点、STAR 优化话术、语义分段小评。
-- **简历原文保真改写**：上传 PDF/DOCX → 规则化抽取结构 → LLM 仅优化工作经历 bullets → `python-docx` 原地替换 run 文字，**字体/颜色/分栏/图标全部保留**，bullet 匹配率 < 80% 自动报错。
-- **会员分层 + 文件生命周期管理**：Free / Pro / Max 三档免费 7 / 30 / 120 天保留；后台 `run_periodic_cleanup` 每 24h 清理过期文件与离线用户文件。
-- **多模态视觉体验**：玻璃拟态 + 3D 倾斜卡片 + GSAP / Framer Motion 动效 + Tailwind 4 自定义主题，深色太空感 UI。
-- **安全优先**：bcrypt 加盐 + JWT（HS256，24h 过期）+ Redis 黑名单 + 注册 / 改密 / 改密保全部使用 6 位验证码（短信 / 邮件）+ 跨标签页 localStorage 同步。
+- **真实录音闭环**：上传 mp3/wav → 火山引擎·豆包·流式短语音 ASR → DeepSeek 推理 → IPI 分数 / Offer 概率 / 风险点 / STAR 优化话术 / 语义分段小评。后台 `run_periodic_cleanup` 每 24h 按会员档位清理过期文件。
+- **实时语音模拟面试（Live）**：4 类岗位 × 4 档难度 × 16 套人格/音色组合 → 火山引擎**实时语音大模型 dialog**（与流式 ASR **不是同一把 key**）双向对话。即时统计面试时长，按 (week, month) upsert 到 `user_live_minutes`，免费用户不可用、内测用户 10 分钟/月（注册起 30 天后过期降级为 0）。
+- **简历原文保真改写**：上传 PDF/DOCX → `pdf2docx`（PyMuPDF 后端）兜底转 DOCX → 规则化抽取结构 → DeepSeek 仅优化工作经历 bullets → `python-docx` 原地替换 run 文字，**字体 / 颜色 / 分栏 / 图标全部保留**，bullet 匹配率 < 80% 自动 `BulletMatchError` 抛 500。导出兼容 PDF / DOCX 双格式。
+- **AI 职业顾问（Counselor）RAG**：DeepSeek + 阿里百炼 Qwen3-Embedding v4（**1536 维** + pgvector **HNSW + cosine ops**，对称嵌入），召回历史面试总结 / 简历分析 / 项目记忆 / 实时面试 transcript 等 6 类 `source_type`，SSE 流式输出 + `[cite:TYPE#ID#CHUNK]` 溯源标记。MCP 客户端（`streamable_http_client + terminate_on_close`，**锁 mcp==1.27.0**）对接联网搜索工具，`tool_registry.py` 声明式注册。
+- **精选推荐（Featured Guides）+ 反馈社区（Feedback）**：`featured_guides` 启动期用 `INSERT ... ON CONFLICT (id) DO UPDATE` 幂等写入 6 条预置数据（小红书 / 抖音图文笔记）。`feedbacks / comments / votes` 三表支持置顶、点赞、匿名留存的反馈墙。
+- **内容审核与敏感词过滤**：所有用户文本提交（反馈、评论、文档描述等）过 `moderation_dep` 装饰器；`moderation_audit_logs` 表用 **SHA-256 + 关键词 hash** 存储，**不存原文 / 不存明文**，符合合规要求。
+- **会员分层 + 文件生命周期**：当前档位 `NULL=免费` / `"test"=内测`（PRO/MAX 暂未上线），对应文件保留 `7/30/120` 天；上传时锁定 `files.retention_days`，与后续升降级解耦。rolling 30 天配额改用 `user_quota_usage` 时间戳表，避免「删业务记录却重置配额」的旧 bug。
+- **多模态视觉体验**：玻璃拟态 + 3D 倾斜卡片 + GSAP / Framer Motion 动效 + Tailwind 4 自定义 Material 3 主题，深色太空感 UI。
+- **安全优先**：bcrypt 加盐 + JWT（HS256，24h 过期）+ Redis 黑名单 + 6 位验证码（短信 / SES 邮件）+ 跨标签页 `localStorage` 同步。
 
 ---
 
-## 四大子产品（产品矩阵）
+## 五大子产品矩阵
 
-| 子产品 | 入口 | 核心能力 | 涉及后端模块 |
+| 子产品 | 前端入口 | 后端 Router | 核心能力 |
 | --- | --- | --- | --- |
-| 🎙 **面试录音分析** | `/debugger/record` → `/debugger/report` | 真实面试录音上传 → ASR → LLM 评估 → IPI 分数 / Offer 概率 / 风险点 / 逐段小评 | `routers/audio.py` · `utils/asr.py` · `utils/llm.py` |
-| 📄 **简历诊断与改写** | `/debugger/resume` | 简历 PDF/DOCX 解析 → LLM 评分 + 优化建议 → **保留原样式** 改写为新版 DOCX 下载 | `routers/resume.py` · `utils/resume_parser.py` · `utils/docx_resume_writer.py` · `utils/pdf_to_docx.py` |
-| 🗣 **AI 模拟面试训练** | `/debugger/voice` 与 `/training` | 拟真面试官对话、追问、即时反馈 | `routers/audio.py`（共用 ASR / LLM 通道） |
-| 🧠 **复盘记忆与画像** | `/memory` · `/home` | 历史报告聚合、职业画像编辑、Offer 预测 | `routers/auth.py`（profile CRUD） · `routers/file.py` |
-
-> 上述产品形态与「四大子产品」的概念映射与运营故事见 `docs/nanobanana-ppt/`。
+| 🎙 **面试录音分析** | `/debugger/record` → `/debugger/report` | `audio.py` | 真实录音 → 流式 ASR → DeepSeek → IPI / Offer 概率 / 风险 / STAR 优化 |
+| 📄 **简历诊断与改写** | `/debugger/resume` | `resume.py` | PDF/DOCX 解析 → LLM 评分 → **保留原样式**改写 DOCX；支持 PDF 导出 |
+| 🗣 **AI 模拟面试（Live）** | `/debugger/voice` | `live.py` | WebSocket 接火山实时语音大模型，按 persona + duration 自动对话 |
+| 🧠 **复盘记忆 + AI 职业顾问** | `/memory` + `/home` | `memory.py` · `counselor.py` | 历史报告聚合 / 项目记忆 / 知识能力图谱 / SSE 流式顾问问答 |
+| 🌐 **精选推荐 + 反馈社区** | `/guide` · `/feedback` | `guide.py` · `feedback.py` | 精选文章视频墙 + 用户反馈列表 / 评论 / 点赞 |
 
 ---
 
@@ -80,19 +90,23 @@ offerPilot/
 | 前端样式 | **Tailwind CSS 4** + CSS Variables（Material 3 风格自定义主题） |
 | 前端动效 | **Framer Motion 12** + **GSAP 3.15** |
 | 前端语言 | TypeScript 5（strict） |
-| 后端框架 | **FastAPI**（异步） + **Uvicorn** |
+| 后端框架 | **FastAPI**（异步） + **Uvicorn**（生产 `--workers 2`） |
 | 后端语言 | Python 3.10+ |
-| ORM | **SQLAlchemy 2.x async** + `asyncpg` |
-| 数据库 | **PostgreSQL 14+** |
-| 缓存 | **Redis 6+**（验证码 / 限流 / Token 黑名单） |
+| ORM | **SQLAlchemy 2.x async** + `asyncpg`（Windows 强制 `SelectorEventLoopPolicy`） |
+| 数据库 | **PostgreSQL 14 + pgvector**（镜像 `pgvector/pgvector:pg16`） |
+| 缓存 | **Redis 7**（验证码 / 限流 / Token 黑名单 / 分布式 leader 选举） |
 | 对象存储 | **腾讯云 COS**（`ap-nanjing` · bucket `offer-pilot-1392177347`） |
-| 大模型（文本生成） | **DeepSeek**（`https://api.deepseek.com/v1`，OpenAI-compatible） |
-| ASR | **火山引擎大模型 ASR**（`volc.seedasr.auc`） |
-| 短信 | 腾讯云 SMS（缺省时回退到日志模拟） |
-| 邮件 | SMTP（缺省时回退到日志模拟） |
+| 文本生成 LLM | **DeepSeek**（`https://api.deepseek.com/v1`，OpenAI-compatible） |
+| 实时语音 | **火山引擎·实时语音大模型 dialog**（WebSocket，双向对话） |
+| 流式短语音 ASR | **火山引擎·豆包·流式短语音识别**（submit / query 轮询） |
+| Embedding + RAG | **阿里百炼 Qwen3-Embedding v4**（1536 维 / pgvector HNSW / 对称嵌入） |
+| 联网搜索 | MCP 客户端 `streamable_http_client`（pin `mcp==1.27.0`，与 redis / dashscope 共 key） |
+| 短信 | 腾讯云 SMS（缺省回退日志模拟） |
+| 邮件 | **腾讯云 SES**（`TENCENT_SES_REGION` 等；缺省回退日志模拟）—— 已从原 SMTP 迁移 |
 | 鉴权 | **bcrypt** + **PyJWT**（HS256） |
-| 文档解析 | `pypdf` · `python-docx` · `pdf2docx`（PyMuPDF 后端） |
-| 部署目标 | 前后端各自独立运行：前端 `:3000`、后端 `:8001` |
+| 文档解析 | `pypdf` · `python-docx` · `pdf2docx`（PyMuPDF 后端） · LibreOffice headless（PDF 导出） |
+| 内容审核 | 自研 TF-IDF + 关键词 hash 审计（不依赖第三方云） |
+| 部署 | Docker Compose（5 容器：postgres / redis / backend / frontend / nginx） · `setup-secrets.sh` 注入 9 把密钥 · `package.ps1` + `swap.sh` 一键换包 |
 
 ---
 
@@ -100,155 +114,96 @@ offerPilot/
 
 ```
 offerPilot/
-├── backend/                       # FastAPI 后端
-│   ├── .env                       # 本地环境变量（请勿提交）
+├── backend/
+│   ├── Dockerfile
 │   ├── requirements.txt
-│   ├── uvicorn.log                # 运行日志（开发期）
-│   ├── venv/                      # 本地虚拟环境（已 ignore）
+│   ├── .env                      # 本地开发完整 env（不入仓）
+│   ├── .dockerignore
+│   ├── restart.ps1 / inspect_pid.ps1   # Windows 本地调试
 │   └── app/
-│       ├── __init__.py
-│       ├── main.py                # FastAPI 入口 · CORS · 启动清理任务
-│       ├── config.py              # pydantic-settings 读取 .env
-│       ├── database.py            # async_engine / async_session / get_db / get_redis
-│       ├── models.py              # SQLAlchemy ORM（10 张表）
-│       ├── schemas.py             # Pydantic 入参 / 出参 schema
-│       ├── routers/
-│       │   ├── auth.py            # /api/auth  登录 / 注册 / 档案 CRUD
-│       │   ├── audio.py           # /api/audio  录音会话 / ASR / 报告
-│       │   ├── file.py            # /api/file  上传 / 删除 / COS 桥接
-│       │   └── resume.py          # /api/resume  简历分析 / 改写 / 历史
-│       └── utils/
-│           ├── security.py        # bcrypt 哈希 + JWT 签发与校验
-│           ├── sms.py             # 腾讯云短信 SDK 封装
-│           ├── email.py           # SMTP 邮件 + 模板（CID 内嵌 logo）
-│           ├── asr.py             # 火山引擎 ASR Submit/Query 轮询
-│           ├── llm.py             # DeepSeek Chat 调用与 JSON 鲁棒解析
-│           ├── resume_parser.py   # PDF/DOCX 文本 + 结构抽取（保真）
-│           ├── docx_resume_writer.py  # 原地替换 run 文字，保留样式
-│           ├── pdf_to_docx.py     # PDF → DOCX（pdf2docx + PyMuPDF）
-│           └── cleanup.py         # 过期文件后台清理任务
+│       ├── main.py               # FastAPI 入口 · CORS · Redis leader · 启动期 seed
+│       ├── config.py             # pydantic-settings（partial：env.public + secrets 组合）
+│       ├── database.py           # async_engine / async_session / get_db / get_redis
+│       ├── models.py             # 17+ 张表 ORM（含 pgvector Vector(1536)）
+│       ├── schemas.py            # Pydantic v2 入参 / 出参
+│       ├── routers/              # 11 个路由（详见下表）
+│       ├── services/             # 19 个服务（详见下表）
+│       └── utils/                # 鉴权 / 短信 SES / ASR / LLM / RAG / 文档解析 / 清理 / 调度
 │
-├── frontend/                      # Next.js 16 前端
+├── frontend/
+│   ├── Dockerfile                # 多阶段，output: "standalone"
 │   ├── package.json
 │   ├── next.config.ts
-│   ├── tsconfig.json
-│   ├── eslint.config.mjs
-│   ├── postcss.config.mjs
-│   ├── public/                    # 字体、Logo、背景图
-│   │   ├── fonts/
-│   │   ├── debugger-1.jpg / debugger-2.jpg
-│   │   ├── home-hand.jpg / home-start.jpg
-│   │   ├── register.jpg
-│   │   └── …
-│   └── src/
-│       ├── app/
-│       │   ├── layout.tsx         # 根布局（zh-CN · dark · AuthProvider）
-│       │   ├── globals.css        # Tailwind 4 主题 + 自定义工具类
-│       │   ├── page.tsx           # 落地页（Hero / 产品矩阵 / 3D 倾斜卡片）
-│       │   ├── home/page.tsx      # 「职业驾驶舱」主面板
-│       │   ├── register/page.tsx  # 注册流（验证码 + 三步档案）
-│       │   ├── training/page.tsx  # AI 模拟面试训练
-│       │   ├── memory/page.tsx    # 复盘记忆 / 历史报告
-│       │   └── debugger/
-│       │       ├── page.tsx       # 调试器入口
-│       │       ├── record/page.tsx    # 录音上传 + 实时进度
-│       │       ├── report/page.tsx    # 报告详情（IPI / Offer 概率 / 风险）
-│       │       ├── resume/page.tsx    # 简历上传 + 改写后下载
-│       │       └── voice/page.tsx     # 模拟面试对话
-│       └── components/
-│           └── AuthProvider.tsx   # 全局认证 Context + 弹窗 + Toast
+│   └── src/app/                  # App Router 路由
+│
+├── deploy/
+│   ├── docker-compose.yml        # 5 容器：postgres / redis / backend / frontend / nginx
+│   ├── env.public                # 非敏感配置模板（入库）
+│   ├── setup-secrets.sh          # 9 个敏感 key 注入脚本（交互 / --force / --check / --only）
+│   ├── nginx.conf                # 反代 + WebSocket + Gzip
+│   ├── package.ps1               # 本地 docker save + scp 到 /data/packages
+│   ├── swap.sh                   # 服务器侧 docker load + up -d + image prune
+│   ├── secrets/                  # 9 个敏感 key 文件目录（不入库，gitignore）
+│   ├── ses/                      # SES 凭证（如改回 SMTP 时使用）
+│   ├── ssl/                      # 证书挂载（nginx）
+│   └── packages/                 # 本地打包产物 backend.tar / frontend.tar
 │
 ├── docs/
-│   └── nanobanana-ppt/            # 设计 / 运营资料
+│   ├── 部署文档.txt              # 服务器初始化 → Dockerfile → 打包 → 换包完整流程
+│   ├── cors-setup-checklist.md
+│   └── nanobanana-ppt/           # 产品视觉 / 运营 PPT 资料
 │
-├── .claude.md                     # 智能体协作说明（WebSearch 触发条件）
+├── .claude.md
+├── .gitattributes                # *.sh text eol=lf（防 Linux CRLF 报错）
 ├── .gitignore
-└── README.md                      # ← 本文件
+└── README.md
 ```
 
 ---
 
-## 快速开始
+## 本地开发
 
 ### 环境要求
 
 | 工具 | 版本 |
 | --- | --- |
 | Node.js | ≥ 20 |
-| npm / pnpm / yarn | 任一 |
-| Python | ≥ 3.10 |
-| PostgreSQL | ≥ 14（已建库 `offerpilot`） |
+| Python | ≥ 3.10（Windows 强制 SelectorEventLoop） |
+| PostgreSQL | ≥ 14 + pgvector 扩展（启动期自动 `CREATE EXTENSION IF NOT EXISTS vector`） |
 | Redis | ≥ 6 |
+| （可选）Docker | 仅生产部署需要；本地直接跑 `python -m app.main` 即可 |
 
 ### 启动后端
 
 ```bash
 cd backend
 
-# 1) 创建并激活虚拟环境
 python -m venv venv
-# Windows (Git Bash)
-source venv/Scripts/activate
-# macOS / Linux
-# source venv/bin/activate
-
-# 2) 安装依赖
+source venv/Scripts/activate     # Git Bash / macOS / Linux 各自调整
 pip install -r requirements.txt
 
-# 3) 准备 .env（如已存在请跳过）
-cat > .env <<'ENV'
-DATABASE_URL=postgresql+asyncpg://offerpilot:offerpilot123@localhost:5432/offerpilot
-REDIS_URL=redis://localhost:6379/0
-JWT_SECRET=super-secret-key-change-me-in-production
-JWT_ALGORITHM=HS256
-ACCESS_TOKEN_EXPIRE_MINUTES=1440
+# 把 .env 复制好（找运维拿本地版，**不要 commit**）
+cp .env.example .env             # 或直接编辑 .env
 
-# 腾讯云（按需配置；缺省将回退到日志模拟）
-TENCENT_SECRET_ID=
-TENCENT_SECRET_KEY=
-TENCENT_SMS_APP_ID=
-TENCENT_SMS_SIGN_NAME=
-TENCENT_SMS_TEMPLATE_ID=
-
-# SMTP（按需配置；缺省将回退到日志模拟）
-SMTP_HOST=
-SMTP_PORT=465
-SMTP_USER=
-SMTP_PASSWORD=
-SMTP_SENDER=
-SMTP_USE_SSL=True
-
-# 大模型 & ASR
-# 文本生成 LLM（DeepSeek，OpenAI-compatible）
-DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-DEEPSEEK_MODEL=deepseek-v4-flash
-
-# 求职顾问 RAG 的 Embedding（阿里百炼 Qwen3-Embedding，与联网搜索共用 DASHSCOPE_API_KEY）
-# 可选覆盖 DASHSCOPE_EMBEDDING_BASE_URL / _MODEL / _DIM / _WORKSPACE_ID（一般不需要）
-DASHSCOPE_API_KEY=
-
-VOLC_ASR_API_KEY=
-VOLC_ASR_RESOURCE_ID=volc.seedasr.auc
-
-# 文件保留策略（天）
-FILE_RETENTION_DAYS_FREE=7
-FILE_RETENTION_DAYS_PRO=30
-FILE_RETENTION_DAYS_MAX=120
-FILE_CLEANUP_INTERVAL_HOURS=24
-ENV
-
-# 4) 启动 PostgreSQL & Redis（确保已运行）
-# 5) 启动 FastAPI
+# 启动
 python -m app.main
 # 监听 http://localhost:8001
 # Swagger UI: http://localhost:8001/docs
 ```
 
-启动事件会自动：
+`python -m app.main` 内部等价于：
 
-1. `Base.metadata.create_all` 创建所有 ORM 表（开发期便利，生产请改 Alembic）。
-2. 启动后台协程 `run_periodic_cleanup()`，按 `FILE_CLEANUP_INTERVAL_HOURS` 周期清理过期文件。
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload \
+  --reload-includes "*.env,*.py" --no-access-log
+```
+
+启动期会自动：
+
+1. 装载 Docker secrets（服务器侧生效，本地 no-op —— 由 `app/utils/secrets.py` 提供）。
+2. `CREATE EXTENSION IF NOT EXISTS vector` + `Base.metadata.create_all`（开发期便利，生产建议改 Alembic）。
+3. 启动后台协程：`run_periodic_cleanup`（过期文件清理）、`run_periodic_pending_presign_cleanup`、`run_periodic_log_cleanup`、`run_periodic_rescan`（内容审核定期重扫）。
+4. 通过 **Redis 分布式 leader 选举**（`app/utils/scheduler.py`）确保 `--workers 2` 时每个周期任务 / 启动期一次性任务只跑一次：`_startup_log_cleanup` / `_seed_project_tags` / `_seed_admin_account` / `_seed_featured_guides`。
 
 ### 启动前端
 
@@ -259,9 +214,7 @@ npm run dev
 # 打开 http://localhost:3000
 ```
 
-前端通过 `http://localhost:8001` 直连后端（CORS 已放行 `localhost:3000` 与 `127.0.0.1:3000`）。生产环境建议改为 `NEXT_PUBLIC_API_BASE` 之类的环境变量并通过 `next.config.ts` 重写。
-
-> ⚠️ **开发期 401 处理**：`AuthProvider` 在检测到 `GET /api/auth/me` 返回 401 时会主动清理 `localStorage` 中的 `interviewVar_token`，并广播 `storage` 事件通知其他标签页同步登出。
+前端通过 `http://localhost:8001` 直连后端（CORS 已放行 `localhost:3000` / `127.0.0.1:3000` / `124.223.185.108` / `interviewvar.com`）。生产改为 `NEXT_PUBLIC_API_BASE` + nginx 同源代理。
 
 ---
 
@@ -274,205 +227,285 @@ npm run dev
 | 类别 | 包 |
 | --- | --- |
 | Web | `fastapi` · `uvicorn[standard]` |
-| ORM | `sqlalchemy>=2.0.0` · `asyncpg` |
+| ORM / DB | `sqlalchemy>=2.0` · `asyncpg` · `pgvector`（SQLAlchemy 类型） |
 | 缓存 | `redis` |
 | 鉴权 | `pyjwt` · `bcrypt` |
-| 腾讯云 | `tencentcloud-sdk-python`（短信）· `cos-python-sdk-v5`（对象存储） |
-| 数据 | `pydantic>=2.0.0` · `pydantic-settings` · `python-dotenv` · `python-multipart` |
-| 文档 | `python-docx>=1.0` · `pdf2docx>=0.5` |
+| 腾讯云 | `tencentcloud-sdk-python`（SMS / SES）· `cos-python-sdk-v5`（对象存储） |
+| HTTP 客户端 | `httpx` · `httpcore`（含 MCP 客户端依赖） |
+| LLM / Embedding | OpenAI 兼容 SDK（DeepSeek + 阿里百炼共用） |
+| MCP | `mcp==1.27.0`（**必须锁定**，低版本会触发 `streamable_http_client` 3 元组 + `terminate_on_close` 的 ValueError） |
+| 数据校验 | `pydantic>=2` · `pydantic-settings` · `python-dotenv` · `python-multipart` |
+| 文档解析 | `python-docx>=1.0` · `pdf2docx>=0.5`（PyMuPDF 后端） · `pypdf` |
 
-### 目录与模块划分
+### 路由层（11 个 router）
 
-- **`app/main.py`** — FastAPI 应用对象、CORS、所有 router 挂载、启动 / 关闭事件、请求日志中间件（`log_requests`）。
-- **`app/config.py`** — `pydantic_settings.BaseSettings` 读取 `.env`，暴露全局 `settings`。
-- **`app/database.py`** — 异步引擎 `create_async_engine`、会话工厂 `async_sessionmaker`、依赖注入 `get_db()` / `get_redis()`。
-- **`app/models.py`** — 10 张表的 ORM 模型（详见下一节）。
-- **`app/schemas.py`** — Pydantic v2 入参 / 出参模型，统一前后端契约。
-- **`app/routers/`** — 4 个业务路由：
-  - `auth.py` — 注册 / 登录 / 验证码 / 档案 CRUD。
-  - `audio.py` — 面试会话、ASR、报告、问答 / 风险 / 优化话术。
-  - `file.py` — 通用文件上传（COS 桥接）、删除、预签名下载。
-  - `resume.py` — 简历分析、改写 DOCX 下载、历史列表。
-- **`app/utils/`** — 业务能力原语（详见模块说明）。
+`main.py` 通过 `app.include_router(...)` 注册，并异步尝试加载 `memory.py`（如失败只 warn，不阻塞）：
 
-### 数据模型（ORM）
+| Router | 文件 | 路径前缀 | 一句话 |
+| --- | --- | --- | --- |
+| `auth` | `routers/auth.py` | `/api/auth` | 注册 / 登录 / 验证码 / 档案 / 注销 |
+| `audio` | `routers/audio.py` | `/api/audio` | 录音会话、ASR 编排、报告聚合 |
+| `file` | `routers/file.py` | `/api/file` | COS 桥接 / presign 上传 / 删除 |
+| `resume` | `routers/resume.py` | `/api/resume` | 简历分析 / DOCX/PDF 双格式导出 |
+| **`live`** | `routers/live.py` | `/api/live` | **实时语音面试** WebSocket + quota |
+| **`counselor`** | `routers/counselor.py` | `/api/counselor` | **AI 职业顾问** SSE 流式对话 |
+| **`feedback`** | `routers/feedback.py` | `/api/feedback` | 反馈列表 / 评论 / 点赞 |
+| **`guide`** | `routers/guide.py` | `/api/guide` | 精选推荐 featured_guides CRUD |
+| **`admin_moderation`** | `routers/admin_moderation.py` | `/api/admin/moderation` | 审核日志检索（仅 admin） |
+| **`moderation_preview`** | `routers/moderation_preview.py` | `/api/moderation/preview` | 预演审核结果（调试用） |
+| **`memory`** | `routers/memory.py` | `/api/memory` | 复盘 / 项目记忆 / 知识能力图谱（异步 import） |
 
-`app/models.py` 关键表（全部带 `created_at` / `updated_at` 时间戳）：
+### 服务层（19 个 service）
 
-| 表 | 关键字段 | 说明 |
-| --- | --- | --- |
-| `users` | `username` (unique) · `password_hash` · `phone` · `email` · `is_online` · `membership` (NULL/`pro`/``max`) | 账户主体；删除时级联清理所有关联 |
-| `user_profiles` | `gender` · `age` · `job_status` · `avatar_url` · `experience_years/months` · `company_name` · `role_name` · `salary_min/max` · `school` · `degree` · `has_experience` · `target_cities[]` · `target_company` · `target_role` · `target_grade` · `target_salary_min/max` | 1:1 用户画像（注册时一次性创建） |
-| `interview_sessions` | `user_id` · `title` · `audio_url` · `duration` · `file_size` · `status` (`uploaded`/`processing`/`completed`/`failed`) · `ipi_score` · `offer_probability` · `summary_strengths[]` · `summary_weaknesses[]` · `summary_suggestions[]` · `executive_summary` | 一次录音分析的总览 |
-| `analysis_tasks` | `session_id` · `task_type` (`asr`/`parsing`/`risk`/`final_report`) · `progress` (0-100) · `status` · `error_message` · `started_at` · `finished_at` | 子任务进度追踪 |
-| `interview_transcripts` | `session_id` (PK) · `data` (JSONB) | **整段会话一条记录**，数组元素为 `{start_time, end_time, speaker, content, highlights?}` |
-| `transcript_sections` | `session_id` · `section_index` · `title` (2-6 字) · `category` (`self_intro`/`project`/`tech`/`system_design`/`behavioral`/`other`) · `tag` (`良好`/`一般`/`风险`) · `start_time` · `end_time` · `summary` · `advantages[]` · `shortcomings[]` · `review_points[]` · `optimization_advice` | 语义分段小评 |
-| `interview_questions` | `session_id` · `category` · `difficulty` (`easy/medium/hard`) · `question` · `answer` | QA 抽取 |
-| `interview_risks` | `session_id` · `risk_type` · `severity` (`high/medium/low`) · `title` · `evidence` · `suggestion` · `occurrence_time` | 风险点 |
-| `answer_improvements` | `session_id` · `question_id?` · `original_answer` · `optimized_answer` | STAR 优化话术 |
-| `files`（`uploaded_files`） | `user_id?` · `filename` · `cos_key` · `file_url` · `file_size` · `file_type` (`audio`/`resume`) | 通用文件表 |
-| `resume_analyses` | `user_id?` · `file_id` · `score` · `optimized_score` · `ats_pass_rate` · `result_json` (JSONB) | 简历分析历史；`result_json` 存 LLM 完整输出 |
+`backend/app/services/` 把"协议 / IO / 调度"从 router 抽出来：
+
+| Service | 角色 |
+| --- | --- |
+| `advisor_generator` | 顾问会话的「建议四栏」（focus_areas / interview_trends / recommended_actions / career_suggestions）生成 |
+| `company_tiers` | 公司分级字典（用于简历匹配度打分） |
+| `counselor_agent` | RAG 召回 + SSE 流式生成主入口 |
+| `embedding` | 阿里百炼 Qwen3-Embedding v4 客户端（1536 维，带 retry + 截断） |
+| `embedding_indexer` | 把面试 / 简历 / 项目 / live transcript 切分后写入 `user_analysis_embeddings` |
+| `grade_mapping` | 「职级」标准化（如 P5/P6 ↔ Lv1/Lv2） |
+| `knowledge_ability_service` | 4 核心能力 + 20 细化能力的生成 / 触发 |
+| `live_bridge` | 实时语音面试事件桥（候选人退出 / 中断 / 完成） |
+| `live_config` | 16 套人格 / 音色配置（`LIVE_PROFILES`）；**火山 `speech_rate` 直接透传**，不做后处理 |
+| `live_slots` | 时间段估算 / 并发排队 |
+| `match_scorer` | 简历 ↔ 求职目标匹配度 30–97 分算法 |
+| **`mcp_client`** | **`streamable_http_client + terminate_on_close` 包装，pin `mcp==1.27.0`** |
+| `project_memory_agent` | 项目记忆 LLM 抽取（`project_memories` 写入） |
+| `project_mention_service` | 面试 transcript 反查项目提及次数（`mention_count`/`last_mentioned_at`） |
+| `question_generator` | 高频面试题 LLM 生成（按 4 核心能力 + 20 细化能力，每项 10 道） |
+| `quota` | 试用期判断 / 配额计算（`_is_trial_expired`） |
+| `tool_registry` | 工具声明式注册（agent 函数 ↔ 联网搜索 MCP） |
+| `volc_realtime_bridge` | 火山实时语音大模型 WebSocket 双向桥 |
+| `volc_streaming_asr` | 火山流式短语音 ASR 客户端（submit / query 轮询） |
+
+### 工具层（utils/）
+
+| Utility | 角色 |
+| --- | --- |
+| `security.py` | bcrypt 哈希 + JWT 签发与校验 |
+| `secrets.py` | Docker secrets 装载器（启动期读 `/run/secrets/*` → `os.environ`，本地 no-op） |
+| `scheduler.py` | Redis 分布式 leader 选举 + `log_once`（多 worker 日志去重） |
+| `sms.py` | 腾讯云 SMS（缺省日志模拟） |
+| `email_ses.py` | 腾讯云 SES 邮件（替代原 SMTP） |
+| `asr.py` | 旧 ASR stub（保留兼容；新代码走 `services/volc_streaming_asr.py`） |
+| `llm.py` | DeepSeek Chat 调用 + JSON 鲁棒解析 + 4 次指数退避重试 |
+| `resume_parser.py` | PDF/DOCX 文本 + 结构抽取 |
+| `docx_resume_writer.py` | `python-docx` 原地替换 run 文字；**NFKC + smart quote + fuzzy 兜底**修 0/12 匹配；`BulletMatchError` 阈值 80% |
+| `pdf_to_docx.py` | PDF → DOCX（pdf2docx 线程池） |
+| `cleanup.py` | `run_periodic_cleanup` / `run_periodic_pending_presign_cleanup` / `cleanup_old_logs` |
+| `content_moderation.py` | 内容审核 + 关键词 hash + 周期重扫 |
+| `moderation_dep.py` | `moderated` 装饰器（路由 / 服务的统一入口） |
+| `match_grade.py` | 求职期望匹配度（与 `services/match_scorer.py` 协作） |
+
+### 数据模型（17+ 张 ORM 表）
+
+`app/models.py` 关键表（全部带 `created_at` / `updated_at`）：
+
+| 模块 | 表 | 关键字段 | 备注 |
+| --- | --- | --- | --- |
+| 账户 | `users` | `username/phone/email` 唯一 · `membership` (`NULL`/`test`) · `is_online` | 删除级联 |
+| 账户 | `user_profiles` | 1:1 画像 · `match_rate` (30-97) · `match_rate_pending` · `additional_desc` | 走 RAG 召回 |
+| 录音分析 | `interview_sessions` | `company/role/round/date/grade/salary` 列 · `ipi_score` · `offer_probability` · `quota_charged` · `error_message` | |
+| 录音分析 | `analysis_tasks` | `task_type` (`asr/parsing/risk/final_report`) · `progress` | 子任务进度 |
+| 录音分析 | `interview_transcripts` | `session_id` PK · `data JSONB` | **整段一条 JSONB**，不再一行一句 |
+| 录音分析 | `transcript_sections` | `title` 2-6 字 · `category` (6 类) · `tag` (良好/一般/风险) · `advantages/shortcomings/review_points` | 语义分段小评 |
+| 录音分析 | `interview_questions` / `interview_risks` / `answer_improvements` | `category/difficulty/question/answer` · `risk_type/severity/title/evidence/suggestion` · STAR 改写 | |
+| 文件 | `files` | `cos_key` · `status` (`pending`/`finalized`) · `presign_token` · `retention_days` | presign 直传方案 |
+| 简历 | `resume_analyses` | `score/optimized_score/ats_pass_rate` · `result_json` JSONB | `file_id` 改 `SET NULL`（文件清理不毁报告） |
+| 项目记忆 | `project_memories` | `(user_id, project_name)` 唯一 · `version` · `mention_count` · `last_mentioned_*` | 二次上传触发 version 累进 |
+| 项目记忆 | `project_tags` | 字典表：8 主分类 + 10 辅助标签 | 启动期 `_seed_project_tags` 幂等 |
+| **Live** | `interview_live_sessions` | `interview_type/difficulty/duration_min/followup_rounds` · `voice_id/persona_cn` · 状态机 `created→ws_connecting→live→ending→ended→analyzing→completed\|failed` · partial unique 限流 | **v1.2 设计** |
+| **Live** | `user_live_minutes` | `(user_id, period_type, period_key)` 唯一 · `total_seconds` · `sessions_count` | PR6 限额 |
+| **Counselor** | `user_analysis_embeddings` | `(source_type, source_id, chunk_index)` 唯一 · **`Vector(1536)`** · HNSW index `vector_cosine_ops` | RAG 主索引 |
+| **Counselor** | `counselor_sessions` | `summary` + `summary_upto_msg_id` + `message_count` | 长会话压缩 |
+| **Counselor** | `counselor_messages` | `content` · `citations` · `recalled_chunks` · `stream_completed` | |
+| **Counselor** | `user_advisor_insights` | `insights` JSONB（四栏建议） | |
+| **Counselor** | `knowledge_core_abilities` / `knowledge_sub_abilities` / `knowledge_question_cache` | (user_id, sub_ability_name) 唯一 · `questions` JSONB（每项 10 道永久缓存） | |
+| 配额 | `user_quota_usage` | `(user_id, feature, used_at)` 三元组索引；30 天滚动窗口 | 时间戳天然处理过期 |
+| 反馈 | `feedbacks` / `feedback_comments` / `feedback_votes` | `type/module/screenshot_url` · `is_pinned` · 注销时 `user_id SET NULL` 保留匿名 | |
+| 精选 | `featured_guides` | `platform/platform_badge_bg/fans_count`（**NOT NULL varchar**） | `_seed_featured_guides()` 幂等 |
+| 审核 | `moderation_audit_logs` | `content_hash` (SHA-256) · `keywords_hash` JSONB · `is_fallback` | **不存原文 / 不存明文** |
 
 ### REST API 一览
 
 > BaseURL：`http://localhost:8001`
 > 所有受保护接口在 Header 中携带 `Authorization: Bearer <token>`。
 
-#### `/api/auth`（`routers/auth.py`）
+#### `/api/auth`（注册 / 登录 / 档案）
 
-| 方法 | 路径 | 鉴权 | 说明 |
-| --- | --- | --- | --- |
-| POST | `/send-code` | 公开 | 发送 6 位验证码（短信 / 邮件），1 分钟限流，5 分钟有效 |
-| POST | `/register/step1` | 公开 | 校验用户名 / 手机 / 邮箱唯一性 + 验证码，返回可继续第二步 |
-| POST | `/register/complete` | 公开 | 完成三步注册（账户 + 画像 + 求职期望），返回 JWT |
-| POST | `/login` | 公开 | 密码 / 验证码双模式登录 |
-| POST | `/logout` | Bearer | 当前 token 加入 Redis 黑名单（24h） |
-| POST | `/reset-password` | 公开 | 验证码 + 新密码重置 |
-| PUT | `/security/update` | Bearer | 修改绑定手机 / 邮箱 / 密码 |
-| DELETE | `/delete-account` | Bearer | 注销账号（级联删除所有数据） |
-| GET | `/me` | Bearer | 获取当前用户档案 |
-| PUT | `/profile/update` | Bearer | 更新用户档案 / 期望字段 |
-
-#### `/api/file`（`routers/file.py`）
-
-| 方法 | 路径 | 说明 |
+| Method | Path | 说明 |
 | --- | --- | --- |
-| POST | `/upload` | multipart：上传音频（≤ 20MB · mp3/wav）或简历（≤ 5MB · pdf/docx），返回 `file_id` / `file_url`（预签名 1h） |
-| DELETE | `/delete` | query `file_id` 删除（COS + DB） |
-| POST | `/delete` | body `{file_id}` 形式删除 |
+| POST | `/send-code` | 发送 6 位验证码（短信 / SES 邮件），1 分钟限流，5 分钟有效 |
+| POST | `/register/step1` | 校验用户名 / 手机 / 邮箱唯一性 + 验证码 |
+| POST | `/register/complete` | 三步注册写库 + 发 JWT (24h) |
+| POST | `/login` | 密码 / 验证码双模式 |
+| POST | `/logout` | token 入 Redis 黑名单（24h） |
+| POST | `/reset-password` | 验证码 + 新密码重置 |
+| PUT | `/security/update` | 改绑定手机 / 邮箱 / 密码 |
+| DELETE | `/delete-account` | 注销账号（级联删业务数据，feedback/vote 改匿名） |
+| GET/PUT | `/me` · `/profile/update` | 当前用户档案读 / 改 |
 
-#### `/api/audio`（`routers/audio.py`）
+#### `/api/file` · `/api/audio` · `/api/resume`
 
-| 方法 | 路径 | 说明 |
+见后端 router 章节顶部的「核心业务」流程图，主要是 multipart 上传 → presign 直传 → 后台 ASR+LLM 编排 → 报告聚合。
+
+#### `/api/live`（**实时语音面试**）
+
+| Method | Path | 说明 |
 | --- | --- | --- |
-| GET | `/check_limit` | 免费用户是否还有 1 次体验机会 |
-| POST | `/create_session` | 基于已上传 COS URL 创建一个面试会话（不再二次上传） |
-| POST | `/start_analysis` | 启动后台分析：ASR → DeepSeek 推理 → 写库 |
-| GET | `/task_progress/{task_id}` | 轮询任务进度（in-memory `task_store`） |
-| GET | `/session/{session_id}/report` | 取报告汇总 |
-| GET | `/session/{session_id}/transcript` | 取转写（含 highlights） |
-| GET | `/session/{session_id}/sections` | 取语义分段 |
-| GET | `/session/{session_id}/questions` | 取问题清单 |
-| GET | `/session/{session_id}/risks` | 取风险点 |
-| GET | `/session/{session_id}/improvements` | 取 STAR 优化话术 |
-| GET | `/sessions` | 当前用户历史会话列表 |
-| DELETE | `/session/{session_id}` | 删除会话 |
+| POST | `/sessions` | 创建 live 会话（落 `interview_live_sessions`） |
+| GET | `/sessions/{id}` | 查会话详情 |
+| POST | `/sessions/{id}/start` | 标记 `started_at`，进入 `ws_connecting` |
+| WS | `/ws/{session_id}` | 候选人 ↔ 火山实时语音大模型（双向音频 / 文本事件） |
+| POST | `/sessions/{id}/end` | 关闭 session · 触发分析 · 写 `user_live_minutes` |
+| GET | `/sessions/{id}/report` | 实时面试报告（IPI / Offer 概率 / 优劣 / executive_summary） |
+| GET | `/quota` | 查询当月实时面试剩余时长（**免费=0 / test=10 分钟/月**） |
+| GET | `/history` | 历史 live 列表 |
 
-#### `/api/resume`（`routers/resume.py`）
+#### `/api/counselor`（**AI 职业顾问**）
 
-| 方法 | 路径 | 说明 |
+| Method | Path | 说明 |
 | --- | --- | --- |
-| POST | `/analyze` | body `{file_id}`：解析 + LLM 诊断 + 落库 `resume_analyses` |
-| GET | `/analyses` | 当前用户历史概要列表 |
-| GET | `/analyses/{id}` | 取单次完整分析 JSON |
-| GET | `/analyses/{id}/download` | 下载 **保留原样式** 的改写 DOCX（PDF 源先转 DOCX，bullet 匹配 < 80% 抛 500） |
-| DELETE | `/analyses/{id}` | 删除分析记录 |
+| POST | `/chat` | **SSE 流式**对话；带 `session_id` 时续写，否则新开会话 |
+| GET | `/sessions` | 会话列表（含 `summary` / `message_count`） |
+| GET | `/sessions/{id}` | 会话详情（含 messages + recalled_chunks） |
+| DELETE | `/sessions/{id}` | 删除会话 |
+
+#### `/api/guide` · `/api/feedback` · `/api/memory` · `/api/admin/moderation`
+
+文档已在 router 文件中以 `tags` 标注；`/api/memory/projects` `/api/memory/knowledge/abilities` 等端点支撑 `/home` 与 `/memory` 页数据；`/api/admin/moderation` 仅 admin（admin / offerPilot@2026）可读审核日志。
 
 ### 核心业务流程
 
-#### 1. 注册 → 画像 → 求职期望（三步注册）
+#### A. 注册 → 画像 → 求职期望
 
 ```
-[Step 1] POST /api/auth/register/step1
-  → 校验 username / phone / email 唯一性 + 验证码
-[Step 2] 前端在 /register 收集 profile（性别 / 年龄 / 经验 / 公司 / 岗位 / 学历 / 薪资）
-[Step 3] POST /api/auth/register/complete
-  → 一次性写入 users + user_profiles
-  → 发 JWT (24h)
-  → 返回 UserProfileResponse
+POST /api/auth/register/step1   →  username / phone / email 唯一性 + 验证码
+          ↓
+前端 /register 收 profile + 期望
+          ↓
+POST /api/auth/register/complete →  写 users + user_profiles → JWT(24h)
 ```
 
-#### 2. 面试录音分析（最重链路）
+#### B. 录音分析（最重链路，2026-08-04 性能优化版）
 
 ```
 [Frontend] /debugger/record
-   │  1) POST /api/file/upload (multipart)  →  COS 上传 + presigned URL
-   │  2) POST /api/audio/check_limit        →  免费用户配额校验
-   │  3) POST /api/audio/create_session     →  DB 记录 session (status=uploaded)
-   │  4) POST /api/audio/start_analysis     →  后台协程 run_real_analysis()
-   │     │
-   │     ├─ ASR (utils/asr.py)
-   │     │   submit → 轮询 query → {start_time, end_time, speaker, content}[]
-   │     │
-   │     ├─ LLM (utils/llm.py)
-   │     │   generate_transcript_highlights()  → 句子级高亮
-   │     │   sectionize_transcript()           → 语义分段
-   │     │   analyze_interview_dialogue()      → IPI / Offer 概率 / 优劣势
-   │     │
-   │     └─ 落库
-   │         - interview_transcripts (JSONB)
-   │         - transcript_sections
-   │         - interview_questions / risks / improvements
-   │         - interview_sessions (汇总字段)
-   │
-   │  5) GET /api/audio/task_progress/{task_id} 轮询
-   │  6) GET /api/audio/session/{id}/report       →  /debugger/report
+  1) POST /api/file/upload       →  COS upload + presigned URL（multipart / presign 二选一）
+  2) POST /api/audio/check_limit →  30 天滚动窗口配额校验（user_quota_usage）
+  3) POST /api/audio/create_session   →  interview_sessions row
+  4) POST /api/audio/start_analysis   →  后台协程 run_real_analysis()
+       ├─ ASR   (utils/asr → services/volc_streaming_asr)      submit → query 轮询
+       ├─ LLM   (utils/llm)
+       │     ├─ generate_transcript_highlights()   句子级高亮
+       │     ├─ sectionize_transcript()            语义分段
+       │     └─ analyze_interview_dialogue()       IPI / Offer 概率 / 优劣势
+       └─ 落库   interview_transcripts · sections · questions · risks · improvements · sessions
+  5) GET  /api/audio/task_progress/{task_id}       轮询
+  6) GET  /api/audio/session/{id}/report           /debugger/report
 ```
 
-#### 3. 简历分析 + 改写
+#### C. 实时语音面试 Live（PR1+）
+
+```
+[Frontend] /debugger/voice 选 4×4×duration  →  POST /api/live/sessions
+                                          ↓
+           ws_connecting → live 双向对话（volc_realtime_bridge）
+                                          ↓
+           候选人结束 → POST /api/live/sessions/{id}/end
+                                          ↓
+           analyzing → 火山 ASR 流式结果转写 + DeepSeek 评测
+                                          ↓
+           写 user_live_minutes 当周 + 当月 upsert
+```
+
+#### D. AI 职业顾问 Counselor
+
+```
+[Frontend] /memory + /home 弹窗
+  POST /api/counselor/chat {session_id?, message}  →  SSE 流
+       ├─ RAG：把 message 喂 Embedding → pgvector HNSW cosine 召回 top-k
+       │        source_type ∈ {面试总结, 语义分段, 简历分析, 项目记忆, live interview, live transcript}
+       ├─ tool_registry 触发联网搜索 MCP（如需要）
+       ├─ counselor_agent 流式生成，[cite:TYPE#ID#CHUNK] 标记引用
+       └─ 落 counselor_messages（含 citations + recalled_chunks）
+```
+
+#### E. 简历分析 + 改写（DOCX + PDF 双格式导出）
 
 ```
 [Frontend] /debugger/resume
-   │  1) POST /api/file/upload (file_type=resume)
-   │  2) POST /api/resume/analyze {file_id}
-   │     ├─ extract_resume_text()               PDF / DOCX → 纯文本
-   │     ├─ parse_resume_structure()            规则化（保真）抽取
-   │     ├─ analyze_resume_text()               DeepSeek 综合评分
-   │     ├─ 用画像薪资覆盖 LLM 提取值
-   │     └─ 落库 resume_analyses
-   │
-   │  3) GET /api/resume/analyses               历史概要
-   │  4) GET /api/resume/analyses/{id}          详情
-   │  5) GET /api/resume/analyses/{id}/download DOCX 改写版
-   │     ├─ PDF 源：convert_pdf_to_docx()（pdf2docx 线程池）
-   │     └─ rewrite_resume_docx() 就地替换 run 文字
+  POST /api/file/upload (file_type=resume)
+  POST /api/resume/analyze {file_id}
+     ├─ extract_resume_text()               PDF / DOCX → 纯文本
+     ├─ parse_resume_structure()            规则化（保真）抽取
+     ├─ analyze_resume_text()               DeepSeek 综合评分（保留 thinking，主流程不能盲关）
+     ├─ 用画像薪资覆盖 LLM 提取值
+     └─ 落库 resume_analyses（result_json 全量）
+
+  GET  /api/resume/analyses/{id}/download?format=docx|pdf
+     ├─ PDF 源：convert_pdf_to_docx()（pdf2docx 线程池）
+     ├─ DOCX 改写：rewrite_resume_docx()  原地替换 run 文字
+     │             NFKC + smart quote + fuzzy 兜底修 0/12 匹配
+     │             bullet 匹配 < 80% 抛 BulletMatchError(500)
+     └─ Prompt 加 ±15% 字数限制防溢出
+  PDF 导出（如选 PDF）：LibreOffice headless 把改写后 DOCX 转 PDF
 ```
 
-#### 4. 文件生命周期
+#### F. 文件生命周期（`app/utils/cleanup.py`）
 
-`app/utils/cleanup.py` 每 24h 执行一次，按以下规则判定过期：
+每 24h（`FILE_CLEANUP_INTERVAL_HOURS`）跑一次按以下规则判定过期：
 
-- 访客文件（`user_id IS NULL`）→ **立即删除**。
-- 用户不在线（`is_online = False`）→ **立即删除**。
-- 在线用户：按 `membership` 取对应保留天数（Free 7 / Pro 30 / Max 120）。
+| 场景 | 删除策略 |
+| --- | --- |
+| 访客文件（`user_id IS NULL`） | 立即删除 |
+| 用户不在线（`is_online = False`） | 立即删除 |
+| 在线用户按 `membership` | `NULL`=Free 7d / `"test"`=30d / `"pro"`=30d / `"max"`=120d |
 
-删除走 `delete_file_from_storage` — 先 `client.delete_object(COS)` 再 `db.delete(file)`；COS 失败也继续清库，避免孤儿。
+删除走 `delete_file_from_storage` —— 先 `client.delete_object(COS)` 再 `db.delete(file)`；COS 失败也继续清库，避免孤儿。`files.retention_days` 在上传时锁定，与后续升降级解耦。
 
-### 配置项（.env）
+### 配置项：.env / .env.public
 
-| Key | 默认 | 说明 |
+> **生产部署**：所有第三方 API key 由 `setup-secrets.sh` 写进 `deploy/secrets/<name>` 文件，Docker secrets 挂载进容器，由 `app/utils/secrets.py` 装载到 `os.environ`。
+
+| Key | 默认（开发） | 说明 |
 | --- | --- | --- |
-| `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/offerpilot` | 异步 PG 连接串 |
-| `REDIS_URL` | `redis://localhost:6379/0` | 验证码 / 限流 / 黑名单 |
-| `JWT_SECRET` | `super-secret-key-change-me` | **生产必须修改** |
+| `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/offerpilot` | 异步 PG；生产换 `postgres:5432` |
+| `REDIS_URL` | `redis://localhost:6379/0` | 生产换 `redis:6379` + 密码 |
+| `JWT_SECRET` | `super-secret-key-change-me` | **生产必须 `openssl rand -hex 64`** |
 | `JWT_ALGORITHM` | `HS256` | |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `1440` | 24h |
-| `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` | — | 短信 / COS 共用 |
-| `TENCENT_SMS_APP_ID` / `_SIGN_NAME` / `_TEMPLATE_ID` | — | 缺省时回退日志模拟 |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_SENDER` / `SMTP_USE_SSL` | — | 缺省时回退日志模拟 |
-| `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | `https://api.deepseek.com/v1` / `deepseek-v4-flash` | 文本生成 LLM（DeepSeek，OpenAI-compatible） |
-| `DASHSCOPE_API_KEY` / `DASHSCOPE_EMBEDDING_BASE_URL` / `_MODEL` / `_DIM` / `_WORKSPACE_ID` | `https://dashscope.aliyuncs.com/compatible-mode/v1` / `text-embedding-v4` / `1536` | AI 职业顾问 RAG 的 Embedding + 联网搜索 MCP 同 key |
-| `VOLC_ASR_API_KEY` / `VOLC_ASR_RESOURCE_ID` | `volc.seedasr.auc` | 火山引擎大模型 ASR |
-| `FILE_RETENTION_DAYS_FREE` / `_PRO` / `_MAX` | `7` / `30` / `120` | 文件保留 |
-| `FILE_CLEANUP_INTERVAL_HOURS` | `24` | 清理周期 |
+| `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY` | — | 短信 / SES / COS 共用 |
+| `TENCENT_SES_REGION` / `TENCENT_SES_FROM_EMAIL` / `TENCENT_SES_FROM_NAME` / `TENCENT_SES_REPLY_TO` / `TENCENT_SES_TEMPLATE_ID` | `ap-guangzhou` / `noreply@interviewvar.com` | **新引入，替代原 SMTP** |
+| `TENCENT_SMS_APP_ID` / `_SIGN_NAME` / `_TEMPLATE_ID` | — | 短信 |
+| `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL` | `https://api.deepseek.com/v1` / `deepseek-v4-flash` | |
+| `DASHSCOPE_API_KEY` / `DASHSCOPE_EMBEDDING_BASE_URL` / `_MODEL` / `_DIM` / `_WORKSPACE_ID` | `https://dashscope.aliyuncs.com/compatible-mode/v1` / `text-embedding-v4` / `1536` | **联网搜索 MCP 与 Embedding 共 key** |
+| `VOLC_STREAMING_ASR_API_KEY` | — | **流式短语音** ASR（与实时语音不是同一把 key） |
+| `VOLC_REALTIME_API_KEY` | — | **实时语音大模型** dialog（与流式 ASR 不是同一把 key） |
+| `VOLC_REALTIME_APP_KEY` / `VOLC_REALTIME_RESOURCE_ID` / `VOLC_REALTIME_WSS_URL` | `PlgvMymc7f3tQnJ6` / `volc.speech.dialog` / `wss://openspeech.bytedance.com/api/v3/realtime/dialogue` | realtime 固定资源 ID |
+| `FILE_RETENTION_DAYS_FREE` / `_TEST` / `_PRO` / `_MAX` | `7` / `30` / `30` / `120` | |
+| `FILE_CLEANUP_INTERVAL_HOURS` | `24` | |
+| `LOG_RETENTION_DAYS` | `30` | backend.log 按天切块保留 |
 
-### 会员等级与文件保留策略
+### 会员等级 / 文件保留
 
-| 等级 | 字段值 | 文件保留 |
-| --- | --- | --- |
-| 免费（未登录或未付费） | `membership IS NULL` | 7 天 |
-| Pro | `"pro"` | 30 天 |
-| Max | `"max"` | 120 天 |
+| 等级 | `users.membership` | 文件保留 | 实时面试（`user_live_minutes` 月度上限） | 顾问 |
+| --- | --- | --- | --- | --- |
+| 免费 | `NULL` | 7 天 | 0 分钟（不可用） | 终身累计 30 次 |
+| 内测 | `"test"`（**注册起 30 天过期**） | 30 天 | 10 分钟 / 月 | 30 次 / 天 |
+| Pro（未上线） | `"pro"` | 30 天 | 60 分钟 / 月 | — |
+| Max（未上线） | `"max"` | 120 天 | 不限 | — |
 
-> 免费用户额外限制：**只能创建 1 个面试会话**。`/api/audio/check_limit` 与 `/api/audio/create_session` 都会校验。
+> 内测档位由 `services/quota.py:_is_trial_expired` 判断，过期后自动降级为 `NULL`（=free）。
 
 ---
 
 ## 前端（frontend/）详解
 
 ### 技术栈与依赖
-
-来自 `frontend/package.json`：
 
 | 类别 | 包 |
 | --- | --- |
@@ -481,37 +514,44 @@ npm run dev
 | 工具链 | `typescript@^5` · `eslint@^9` · `eslint-config-next@16.2.6` · `tailwindcss@^4` · `@tailwindcss/postcss@^4` |
 | 类型 | `@types/node` · `@types/react@^19` · `@types/react-dom@^19` |
 
-### 目录与路由
+### 路由与目录
 
-`frontend/src/app/` 使用 Next.js **App Router**：
+`frontend/src/app/`（Next.js App Router）：
 
 | 路由 | 文件 | 角色 |
 | --- | --- | --- |
-| `/` | `page.tsx` | 落地页：Hero / 三大产品卡片 / 3D 倾斜卡 / 用户证言 / 行动召唤 |
-| `/home` | `home/page.tsx` | 「职业驾驶舱」主面板：档案、目标、历史报告、订阅管理 |
-| `/register` | `register/page.tsx` | 注册流：验证码 → 档案 → 求职期望，并展示用户协议 / 隐私政策 |
-| `/training` | `training/page.tsx` | AI 模拟面试训练 |
-| `/memory` | `memory/page.tsx` | 复盘记忆：跨会话聚合、时间线、关键词回溯 |
-| `/debugger` | `debugger/page.tsx` | 调试器入口（4 个子模块导航） |
-| `/debugger/record` | `record/page.tsx` | 录音上传 + 实时分析进度 |
-| `/debugger/report` | `report/page.tsx` | 报告详情：IPI / Offer 概率 / 风险 / STAR 优化 |
-| `/debugger/resume` | `resume/page.tsx` | 简历上传 / 改写 / 下载 |
-| `/debugger/voice` | `voice/page.tsx` | 拟真面试官对话 |
+| `/` | `app/page.tsx` | 落地页：Hero / 5 大产品卡片 / 3D 倾斜卡 / 用户证言 |
+| `/home` | `app/home/page.tsx` | 职业驾驶舱：档案 / 目标 / 历史报告 / 顾问入口 |
+| `/register` | `app/register/page.tsx` | 三步注册流（验证码 → 画像 → 期望） |
+| `/training` | `app/training/page.tsx` | 训练营模式（原调试器入口改造） |
+| `/memory` | `app/memory/page.tsx` | 复盘聚合 / 项目记忆时间线 |
+| `/guide` | `app/guide/page.tsx` | **精选推荐墙**：featured guides + 点赞 / 收藏 / 阅读 |
+| `/feedback` | `app/feedback/` | 反馈社区：列表 / 评论 / 点赞 / 置顶 |
+| `/debugger` | `app/debugger/page.tsx` | 调试器导航 |
+| `/debugger/record` | `app/debugger/record/` | 录音上传 + 实时进度 |
+| `/debugger/report` | `app/debugger/report/` | 报告详情（IPI / Offer 概率 / 风险 / STAR 优化） |
+| `/debugger/resume` | `app/debugger/resume/` | 简历上传 / 改写 / **DOCX+PDF 双格式下载** |
+| `/debugger/voice` | `app/debugger/voice/` | **Live 实时语音模拟面试** |
+| `/api` | `app/api/` | Next.js BFF/代理层（与 FastAPI 同源） |
+| `/helper` `/utils` | `app/helper/` `app/utils/` | 工具函数 / 类型 |
 
-### 核心页面与组件
+### AuthProvider 全局认证
 
-- **`app/layout.tsx`** — 根布局，`lang="zh-CN"`，`dark h-full antialiased`，注入 `AuthProvider`，加载本地字体 `/fonts/fonts.css`。
-- **`app/globals.css`** — Tailwind 4 主题（Material 3 风格的自定义 token）+ 工具类 fallback（`max-w-container-max` · `px-gutter` · `py-section-padding` · `gap-stack-gap`）。
-- **`app/page.tsx`** — 落地页：交互式 3D 倾斜卡（鼠标 spotlight 跟踪）+ IntersectionObserver 触发的 `StatCounter` + 滚动动效，CTA 全部跳到 `/debugger`。
-- **`components/AuthProvider.tsx`** — 单一全局 React Context：
-  - 状态：`isLoggedIn` · `user` · `showLogin/showLogout/showDelete` · `toastMsg`。
-  - 行为：`login()` · `logout()` · `deleteAccount()` · `updateUser()` · `triggerToast()`。
-  - 副作用：监听 `storage` 事件实现跨标签页同步；启动时用 `localStorage.interviewVar_token` 调 `GET /api/auth/me` 拉取最新档案；401 自动清空本地凭据。
-  - 全局弹窗：`AuthModals` 内部组件（登录 / 退出 / 注销二次确认）+ 顶部 `AnimatePresence` Toast。
+```ts
+// 关键 localStorage key
+interviewVar_token       // JWT
+interviewVar_isLoggedIn  // "true" | "false"
+interviewVar_user        // JSON 序列化的 UserProfile
+```
+
+- 启动时若存在 `token`，自动 `GET /api/auth/me` 合并最新档案。
+- 401 → 主动清空凭据 + 广播 `storage` 事件 + 回退默认 `defaultUser`。
+- `updateUser()` 本地立即生效写 `localStorage`，再异步 `PUT /api/auth/profile/update`。
+- 全局弹窗 `AuthModals`（登录 / 退出 / 注销二次确认）+ `AnimatePresence` Toast。
 
 ### 视觉规范
 
-设计风格：深色太空感 + 玻璃拟态（glassmorphism）+ 微光渐变（`#c0c1ff` → `#ffb2b7`）。
+深色太空感 + 玻璃拟态（glassmorphism）+ 微光渐变（`#c0c1ff` → `#ffb2b7`）。
 
 | 角色 | Token / 值 |
 | --- | --- |
@@ -521,121 +561,225 @@ npm run dev
 | 次色 | `--color-secondary: #ffb2b7` |
 | 第三色 | `--color-tertiary: #4edea3` |
 | 文字 | `--color-on-surface: #dae2fd` |
-| 字体（body） | Inter · `--font-body-md` |
-| 字体（标题/展示） | Hanken Grotesk · `--font-headline-lg` / `--font-display-xl` |
-| 字体（标签/等宽） | Geist Mono · `--font-label-mono` |
+| 字体 | Inter (body) · Hanken Grotesk (title) · Geist Mono (label/mono) |
 
-> 完整规范：[OfferPilot 视觉规范](C:\Users\47181\.claude\projects\D--ai-----offerPilot\memory\offerpilot-visual-style.md)
-
-### AuthProvider：全局认证状态
-
-```ts
-// 关键 localStorage key
-interviewVar_token       // JWT
-interviewVar_isLoggedIn  // "true" | "false"
-interviewVar_user        // JSON 序列化的 UserProfile
-```
-
-- 启动时若存在 `token`，自动 `GET /api/auth/me` 合并最新档案（手机 / 邮箱等本地不存的字段）。
-- 401 → 主动清空凭据 + 广播 `storage` 事件 + 回退默认 `defaultUser`。
-- `updateUser()` 在本地立即生效并写入 `localStorage`，随后 `PUT /api/auth/profile/update` 异步同步后端（不阻塞 UI）。
-- `logout()` / `deleteAccount()` 均先走后端，再清本地。
+完整规范：[OfferPilot 视觉规范](C:\Users\47181\.claude\projects\D--ai-----offerPilot\memory\offerpilot-visual-style.md)。
 
 ### 与后端的接口约定
 
-- BaseURL：**开发期硬编码**为 `http://localhost:8001`，CORS 已放行。
-- 所有受保护请求：`Authorization: Bearer <token>`。
-- 跨域：`credentials` 显式启用。
-- 错误处理：FastAPI `HTTPException(detail=...)` 在前端通过 `res.json().detail` 弹 Toast / 表单内联错误。
-- 文件上传：`multipart/form-data`，字段名 `file` + 业务字段 `file_type=audio|resume`。
-- 文件下载：简历改写后端直接 `Response(content=docx_bytes, media_type=application/vnd.openxmlformats-...)` 并使用 RFC 5987 `filename*=UTF-8''...` 携带中文文件名。
+- BaseURL：开发期硬编码 `http://localhost:8001`，CORS 已放行。
+- 受保护请求：`Authorization: Bearer <token>`；`credentials` 启用。
+- 错误处理：FastAPI `HTTPException(detail=...)` → 前端 `res.json().detail` → Toast / 表单内联。
+- 文件上传：`multipart/form-data`，业务字段 `file_type=audio|resume`；或 `presign-upload` 直传 COS。
+- 文件下载：`Response(content=..., media_type=...)` + RFC 5987 `filename*=UTF-8''...` 携带中文文件名。
+
+---
+
+## 生产部署（Docker + Secrets）
+
+> 服务器初始化 → Dockerfile → 打包 → 换包完整步骤见 [docs/部署文档.txt](./docs/部署文档.txt)。
+
+### 一键初始化服务器
+
+```bash
+# 1. SSH 登入服务器（Ubuntu 22.04+ / 腾讯云 CVM）
+ssh ubuntu@<your-ip>
+
+# 2. 挂载数据盘到 /data
+sudo umount /dev/vdb 2>/dev/null || true
+sudo mkfs.ext4 /dev/vdb
+sudo mkdir -p /data && sudo mount /dev/vdb /data
+sudo sed -i 's|/dev/vdb /mnt/datadisk0 ext4 defaults,nofail 0 0|/dev/vdb /data ext4 defaults 0 0|' /etc/fstab
+
+# 3. 建子目录 + 4GB swap
+sudo mkdir -p /data/{postgres,redis,uploads,logs,backups,scripts,packages}
+sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# 4. Docker（阿里云镜像源）
+curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.aliyun.com/docker-ce/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list
+sudo apt update && sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo usermod -aG docker ubuntu && newgrp docker
+
+# 5. 数据目录移到 /data
+sudo systemctl stop docker && sudo mkdir -p /data/docker && sudo mv /var/lib/docker/* /data/docker/ 2>/dev/null || true
+sudo tee /etc/docker/daemon.json <<'EOF' >/dev/null
+{
+  "data-root": "/data/docker",
+  "registry-mirrors": [
+    "https://mirror.ccs.tencentyun.com",
+    "https://docker.1panel.live"
+  ]
+}
+EOF
+sudo systemctl restart docker
+
+# 6. 时区
+sudo timedatectl set-timezone Asia/Shanghai
+```
+
+### 9 个第三方密钥注入
+
+**永远不要把 API key commit 进 git。** 通过 `deploy/setup-secrets.sh` 把每个 key 写到 `deploy/secrets/<name>` 单文件，由 docker-compose 的 `secrets:` 块挂载进容器，运行时由 `app/utils/secrets.py` 装载到环境变量。
+
+```bash
+cd /data/offerPilot/deploy
+
+# 1) 列出全部 9 个 key 的文件名（交接 / 审计用）
+./setup-secrets.sh --show-names
+
+# 2) 检查哪些已写入、哪些缺失
+./setup-secrets.sh --check
+
+# 3) 交互式写入（缺啥写啥；既有值跳过）
+./setup-secrets.sh
+
+# 4) 只想补 / 改单个 key
+./setup-secrets.sh --only volc_realtime_api_key
+
+# 5) 全部强制重写（轮换 key 时）
+./setup-secrets.sh --force
+```
+
+`setup-secrets.sh` 会写入的 9 个 key 文件：
+
+| 文件名 | 用途 |
+| --- | --- |
+| `deepseek_api_key` | DeepSeek `sk-` 开头 |
+| `dashscope_api_key` | 阿里百炼 `sk-` 开头（Embedding + 联网搜索 MCP） |
+| `dashscope_workspace_id` | 阿里百炼 WorkspaceId `ws-` 开头 |
+| `tencent_secret_id` | 腾讯云 SecretId `AKID` 开头 |
+| `tencent_secret_key` | 腾讯云 SecretKey |
+| `tencent_sms_app_id` | 腾讯云短信 AppId |
+| `volc_streaming_asr_api_key` | **流式短语音** ASR（与 realtime 不是同一把 key） |
+| `volc_realtime_api_key` | **实时语音大模型** dialog（与 ASR 不是同一把 key） |
+| `jwt_secret` | JWT 签名（`openssl rand -hex 64` ≥32 字节熵） |
+
+### 打包 / 换包 / 回滚
+
+```powershell
+# 本地 (Windows · PowerShell)
+.\deploy\package.ps1 -Service frontend   # 只打前端
+.\deploy\package.ps1 -Service backend    # 只打后端
+.\deploy\package.ps1 -Service all        # 一起打
+# 产物: deploy\packages\{frontend,backend}.tar
+```
+
+```bash
+# 服务器
+scp deploy/packages/*.tar ubuntu@<ip>:/data/packages/
+
+cd /data/offerPilot
+bash deploy/swap.sh frontend   # 只换前端
+bash deploy/swap.sh backend    # 只换后端
+bash deploy/swap.sh all        # 前后端都换（含 docker image prune -f）
+```
+
+### 启动 / 健康检查
+
+```bash
+cd /data/offerPilot/deploy
+docker compose up -d                 # 5 容器：postgres / redis / backend / frontend / nginx
+docker compose ps                    # 状态
+docker logs -f offerpilot-backend    # 实时后端日志（自动按天切到 /data/logs）
+```
+
+资源上限（`deploy/docker-compose.yml` 中 `deploy.resources.limits`）：
+
+| 容器 | CPU | Memory |
+| --- | --- | --- |
+| postgres (含 pgvector) | 0.5 | 384M |
+| redis | 0.15 | 128M |
+| **backend**（uvicorn `--workers 2`） | 1.5 | 2560M |
+| frontend (Next.js standalone) | 0.15 | 384M |
+| nginx | 0.05 | 64M |
 
 ---
 
 ## 前后端交互流程图
 
 ```
-┌──────────────────────┐  HTTPS/JSON  ┌────────────────────────┐
-│   Next.js (3000)     │ ───────────▶ │  FastAPI (8001)         │
-│  ────────────────    │              │  ─────────────────────  │
-│  • 落地页 (/)        │              │  • /api/auth   鉴权      │
-│  • 职业驾驶舱(/home) │ ◀─────────── │  • /api/file   COS 桥接  │
-│  • 注册流(/register) │              │  • /api/audio  录音分析  │
-│  • 调试器(/debugger) │              │  • /api/resume 简历诊断  │
-│  • 复盘(/memory)     │              │                        │
-│  • 训练(/training)   │              │  ┌──────────────────┐  │
-│  • AuthProvider 全局 │              │  │ PostgreSQL (ORM) │  │
-│    状态 + 弹窗 + Toast│             │  └──────────────────┘  │
-└──────────────────────┘              │  ┌──────────────────┐  │
-         │                            │  │  Redis           │  │
-         │ localStorage 同步          │  │  · 验证码        │  │
-         ▼                            │  │  · 限流          │  │
-   interviewVar_token                │  │  · Token 黑名单  │  │
-   interviewVar_user                  │  └──────────────────┘  │
-                                      │  ┌──────────────────┐  │
-                                      │  │ 腾讯云 COS       │  │
-                                      │  │ ap-nanjing       │  │
-                                      │  └──────────────────┘  │
-                                      │  ┌──────────────────┐  │
-                                      │  │ 外部能力          │  │
-                                      │  │ · DeepSeek        │  │
-                                      │  │ · 火山引擎 ASR   │  │
-                                      │  │ · 腾讯云 SMS     │  │
-                                      │  │ · SMTP 邮件      │  │
-                                      │  └──────────────────┘  │
-                                      └────────────────────────┘
+┌──────────────────────┐  HTTPS / JSON  ┌──────────────────────────────────┐
+│   Next.js (:3000)    │ ──────────────▶│  FastAPI (uvicorn --workers 2)    │
+│  ──────────────────  │                │  ────────────────────────────────  │
+│  • /                 │                │  • /api/auth        注册 / 登录   │
+│  • /home (职业驾驶舱)│ ◀──── SSE ──── │  • /api/file        presign COS  │
+│  • /register         │                │  • /api/audio       录音分析      │
+│  • /debugger/*       │                │  • /api/resume      简历诊断      │
+│  • /memory           │                │  • /api/live        实时语音 WS   │
+│  • /guide            │                │  • /api/counselor   SSE RAG 对话 │
+│  • /feedback         │                │  • /api/guide / feedback / memory │
+│  • AuthProvider 全局 │                │  • /api/admin/moderation          │
+│    状态 + 弹窗 + Toast│               │                                    │
+└──────────────────────┘                │  ┌──────────────────────────────┐  │
+        │ storage 事件                  │  │ PostgreSQL + pgvector        │  │
+        ▼                               │  │ (HNSW / cosine / 1536D)       │  │
+   interviewVar_token                   │  └──────────────────────────────┘  │
+   interviewVar_user                    │  ┌──────────────────────────────┐  │
+                                        │  │ Redis                        │  │
+                                        │  │ · 验证码 / 限流 / 黑名单      │  │
+                                        │  │ · 分布式 leader 选举          │  │
+                                        │  └──────────────────────────────┘  │
+                                        │  ┌──────────────────────────────┐  │
+                                        │  │ 腾讯云 COS（ap-nanjing）     │  │
+                                        │  └──────────────────────────────┘  │
+                                        │  ┌──────────────────────────────┐  │
+                                        │  │ 外部能力                      │  │
+                                        │  │ · DeepSeek                    │  │
+                                        │  │ · 火山 ASR + 实时语音大模型     │  │
+                                        │  │ · 阿里百炼 Embedding + 联网   │  │
+                                        │  │ · 腾讯云 SMS / SES            │  │
+                                        │  └──────────────────────────────┘  │
+                                        └──────────────────────────────────┘
 ```
 
 ---
 
 ## 常见问题
 
-**Q1. 启动时提示「Redis 连接失败」/「PG 拒绝连接」？**
-- 确认本地已启动 PostgreSQL（监听 5432）和 Redis（监听 6379）。
-- `DATABASE_URL` 中账密与 `postgres` 用户匹配；`psql` 手动 `CREATE DATABASE offerpilot;` 建库。
+**Q1. 启动报 `pgvector extension` 错误？**
+- 镜像必须用 `pgvector/pgvector:pg16`；启动期会自动 `CREATE EXTENSION IF NOT EXISTS vector`，失败仅警告，**仅 counselor 向量检索不可用**，其他功能照常。
 
-**Q2. 上传文件后报「腾讯云对象存储未配置」？**
-- 在 `backend/.env` 填入 `TENCENT_SECRET_ID` / `TENCENT_SECRET_KEY`；COS 客户端会按需懒加载。
+**Q2. `mcp` 包启动报 `streamable_http_client` 3 元组 ValueError？**
+- `requirements.txt` 必须锁 `mcp==1.27.0`。低版本没有 `terminate_on_close` 参数。
+- Docker 镜像层缓存也会复用旧依赖；`swap.sh` 内 `docker image prune -f` 务必保留。
 
-**Q3. ASR 一直 pending / LLM 调用超时？**
-- 检查 `VOLC_ASR_API_KEY` 和 `DEEPSEEK_API_KEY` 是否有效；
-- `llm.py` 已对 SSL / 连接抖动做了 4 次指数退避重试（`Retry(total=4, ...)`）；
-- 长转写（>80 句）默认 120s 超时；如仍不够请在 `call_llm_sync` 调大 `timeout`。
-- Embedding 失败单独排查：`DASHSCOPE_API_KEY` 是否有效；服务端日志看 `[embedding] 失败 retry` 提示。
+**Q3. 多 worker 下启动期日志打两遍？**
+- 由 `app/utils/scheduler.py` 的 Redis leader 选举 + `log_once(key)` 去重；新启动期任务必须包 `run_startup_once(fn)` 让 leader 独占执行。
 
-**Q4. 简历改写下载失败：`简历排版与诊断结果不匹配`？**
-- 这是 `docx_resume_writer.BulletMatchError`：bullet 匹配率 < 80%。
-- 解决：源简历使用「工作经历」section 标题 + 标准 `• / - / *` 缩进；扫描型 PDF 请先 OCR 后再上传。
+**Q4. 简历改写下载 500：`BulletMatchError`？**
+- bullet 匹配 < 80%：`docx_resume_writer` 已加 NFKC + smart quote + fuzzy 兜底但仍失败。
+- 源简历使用「工作经历」section 标题 + 标准 `• / - / *` 缩进；扫描型 PDF 请先 OCR 后再上传。
 
-**Q5. 验证码没收到？**
-- 未配置腾讯云 SMS / SMTP 时，`utils/sms.py` / `utils/email.py` 会**回退到日志模拟**，并把验证码打印到后端控制台（`[SMS DEV SIMULATION]` / `[EMAIL DEV SIMULATION]`）。
+**Q5. 实时语音面试连不上？**
+- `volc_realtime_api_key`（不是 `volc_streaming_asr_api_key`）必须配置；WebSocket URL `wss://openspeech.bytedance.com/api/v3/realtime/dialogue` 与 ResourceId `volc.speech.dialog` 必须固定。
+- 免费用户（`membership=NULL`）调 `/api/live/sessions` 会直接 403；需要先把 `membership` 升到 `test`。
 
-**Q6. 注册后报「用户名已存在」但我确实没注册过？**
-- 默认 `defaultUser`（"Dame Zheng"）在前端 `localStorage.interviewVar_user` 中预置；如果直接清理 `localStorage` 后访问受保护页面，`AuthProvider` 也会用占位数据，需要通过后端真实登录替换。
+**Q6. 验证码没收到？**
+- 未配腾讯云 SMS / SES 时，`utils/sms.py` / `utils/email_ses.py` 会**回退日志模拟**，验证码打印到 `backend-YYYY-MM-DD.log`。
 
-**Q7. 数据库表结构变更怎么办？**
-- 当前 `main.py` 的 `Base.metadata.create_all` 仅在开发期便利，不会执行 `ALTER`。
-- 生产建议改用 Alembic 管理 schema migration。
+**Q7. `Edit/Write` 在 Windows 上改了 .sh，Linux 服务器 `$'\r': command not found`？**
+- 仓库根 `.gitattributes` 已写 `*.sh text eol=lf`；新文件记得加。
+
+**Q8. 数据库表结构变更怎么办？**
+- `main.startup_event` 第 2 步 `Base.metadata.create_all` 只创建缺失表，不 ALTER。生产建议改 Alembic。
 
 ---
 
 ## Roadmap
 
-- [ ] 接入 Stripe / 微信支付打通 Pro / Max 会员开通
-- [ ] 引入 LangGraph 把"ASR → 分段 → 评分 → 风险 → STAR 改写"串成可观测 pipeline
-- [ ] 视频面试支持（多模态表情 / 语气分析）
-- [ ] Offer 概率模型的校准数据集（公开题库 + 用户反馈闭环）
-- [ ] WebSocket 流式输出报告（目前为轮询 `task_progress`）
+- [ ] PRO / MAX 会员档位定价落地（文件保留 + 实时面试时长 + 顾问限额分级）
+- [ ] 视频面试多模态（表情 / 语气分析）
 - [ ] OpenAPI 客户端代码自动生成到 `frontend/src/lib/api.ts`
+- [ ] WebSocket 流式输出报告（替代当前 `/api/audio/task_progress` 轮询）
 - [ ] i18n（英文版）支持
+- [ ] Offer 概率模型校准（公开题库 + 用户反馈闭环）
 
 ---
 
 ## License
 
 本仓库目前为 **Private / All Rights Reserved**。
-如需对外发布 / 二次分发，请先与作者联系并补充合适的开源协议。
-
----
-
-###TASK_COMPLETED###
+对外发布 / 二次分发前请联系作者并补充合适的开源协议。
