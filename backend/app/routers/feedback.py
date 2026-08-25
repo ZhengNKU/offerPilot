@@ -39,6 +39,46 @@ def truncate_name(name: str) -> str:
     return name
 
 
+def sign_cos_url_dynamic(url_or_key: Optional[str], expired: int = 3600) -> Optional[str]:
+    if not url_or_key:
+        return None
+    import urllib.parse
+    raw = url_or_key.split("?")[0]
+    try:
+        from app.routers.file import get_cos_client, bucket
+        client = get_cos_client()
+        cos_key = raw
+        if "myqcloud.com/" in raw:
+            cos_key = raw.split("myqcloud.com/")[-1].lstrip("/")
+        elif raw.startswith("/"):
+            cos_key = raw.lstrip("/")
+
+        # 彻底递归 unquote 规整化，防多重 URI 转义 (%25E9 -> %E9 -> 中文)
+        prev = None
+        while prev != cos_key:
+            prev = cos_key
+            cos_key = urllib.parse.unquote(cos_key)
+
+        ext = cos_key.rsplit(".", 1)[-1].lower() if "." in cos_key else "jpg"
+        mime_type = "image/jpeg"
+        if ext in ("png", "gif", "webp", "jpeg"):
+            mime_type = f"image/{ext}"
+
+        return client.get_presigned_url(
+            Bucket=bucket,
+            Key=cos_key,
+            Method="GET",
+            Expired=expired,
+            Params={
+                "response-content-disposition": "inline",
+                "response-content-type": mime_type,
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Failed to sign COS URL for {url_or_key}: {e}")
+        return raw
+
+
 @router.get("", response_model=schemas.FeedbackListResponse)
 async def list_feedbacks(
     type: Optional[str] = None,
@@ -131,7 +171,7 @@ async def list_feedbacks(
                 author=fb.author_name,
                 type=fb.type,
                 module=fb.module,
-                screenshot_url=fb.screenshot_url,
+                screenshot_url=sign_cos_url_dynamic(fb.screenshot_url),
                 upvotes=fb.upvotes,
                 time=get_relative_time_str(fb.created_at),
                 commentsCount=len(fb.comments),
@@ -155,7 +195,9 @@ async def create_feedback(
     current_user: models.User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    # 内容审核由 @moderated Depends 完成(违规 raise 400 + 自动写审计);这里直接进入业务
+    # 清洗掉链接尾部的临时签名参数，数据库只保存纯干净路径
+    clean_screenshot_url = req.screenshot_url.split("?")[0] if req.screenshot_url else None
+
     fb = models.Feedback(
         title=req.title,
         description=req.description,
@@ -163,7 +205,7 @@ async def create_feedback(
         author_name=current_user.username,
         type=req.type,
         module=req.module,
-        screenshot_url=req.screenshot_url,
+        screenshot_url=clean_screenshot_url,
         file_id=req.file_id,  # 精确外键关联 UploadedFile
         upvotes=0
     )

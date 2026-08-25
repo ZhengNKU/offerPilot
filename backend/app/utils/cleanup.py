@@ -463,3 +463,52 @@ async def run_periodic_pending_presign_cleanup():
         except Exception:
             logger.exception("pending presign 清理异常")
         await asyncio.sleep(interval)
+
+
+async def cleanup_expired_online_users() -> int:
+    """检查 PostgreSQL 中所有 is_online == True 的用户。
+
+    如果用户的 Redis 单点登录 Session (auth:session:{user_id}) 已经失效（超过 24h 未活动或已主动退出），
+    则自动将该用户的 is_online 更改为 False 并提交数据库。
+    """
+    import redis.asyncio as aioredis
+    async with async_session() as db:
+        res = await db.execute(select(models.User).where(models.User.is_online == True))
+        online_users = res.scalars().all()
+        if not online_users:
+            return 0
+        
+        redis_client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        updated = 0
+        try:
+            for u in online_users:
+                session_key = f"auth:session:{u.id}"
+                has_session = await redis_client.exists(session_key)
+                if not has_session:
+                    u.is_online = False
+                    updated += 1
+            if updated > 0:
+                await db.commit()
+                logger.info(f"[cleanup] 成功将 {updated} 位 24h 会话自动过期的用户修正为 is_online=False")
+        finally:
+            await redis_client.aclose()
+        return updated
+
+
+async def run_periodic_online_status_cleanup():
+    """每 120 秒后台运行一次，自动将 Session 已到期或已断开的用户标记为 is_online=False。
+
+    多 worker 下仅调度 leader 执行（见 app/utils/scheduler.py）。
+    """
+    interval = 120
+    log_once("periodic-online-status", "在线状态（is_online）自动离线定时任务已启动, 周期 30s")
+    while True:
+        if not is_scheduler_leader():
+            await asyncio.sleep(NON_LEADER_POLL_S)
+            continue
+        try:
+            await cleanup_expired_online_users()
+        except Exception:
+            logger.exception("在线状态 (is_online) 自动离线清理任务异常")
+        await asyncio.sleep(interval)
+

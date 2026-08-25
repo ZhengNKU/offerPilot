@@ -131,7 +131,9 @@ async def presign_upload(
 
     # ── 3. 生成 cos_key + 一次性 presign_token ──
     #    cos_key 格式与原 upload 一致,方便最终清理脚本兼容
-    cos_key = f"uploads/{uuid.uuid4()}_{req.filename}"
+    import urllib.parse
+    clean_name = urllib.parse.unquote(req.filename)
+    cos_key = f"uploads/{uuid.uuid4()}_{clean_name}"
     presign_token = secrets.token_urlsafe(32)  # 一次性,用完即清
 
     # ── 4. 写 status='pending' 行(马上能被 track_pending 看到) ──
@@ -290,12 +292,22 @@ async def finalize_upload(
     db_file.file_size = actual_size
     # filename/file_type 沿用 presign 时存的
 
-    # ── 6. 签 1h download URL ──
+    # ── 6. 签 1h URL ──
+    ext = req.cos_key.rsplit(".", 1)[-1].lower() if "." in req.cos_key else "jpg"
+    mime_type = "image/jpeg"
+    if ext in ("png", "gif", "webp", "jpeg"):
+        mime_type = f"image/{ext}"
+
     presigned = await asyncio.to_thread(
-        client.get_presigned_download_url,
+        client.get_presigned_url,
         Bucket=bucket,
         Key=req.cos_key,
+        Method="GET",
         Expired=3600,
+        Params={
+            "response-content-disposition": "inline",
+            "response-content-type": mime_type,
+        }
     )
 
     await db.commit()

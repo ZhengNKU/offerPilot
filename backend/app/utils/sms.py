@@ -60,8 +60,8 @@ class TencentSMSHelper:
             formatted_phone = clean_phone if clean_phone.startswith("+") else f"+86{clean_phone}"
             req.PhoneNumberSet = [formatted_phone]
             
-            # 模板变量设置（对应短信正文模板中的 {1} 变量）
-            req.TemplateParamSet = [str(code)]
+            # 模板变量设置（对应模板中的 {1} 验证码 和 {2} 有效期 5 分钟）
+            req.TemplateParamSet = [str(code), "5"]
 
             # 6. 发起 API 调用
             resp = client.SendSms(req)

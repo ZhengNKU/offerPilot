@@ -1520,10 +1520,47 @@ export default function FeedbackPage() {
                   </div>
                   {selectedFeedback.screenshot_url && selectedFeedback.screenshot_url.trim() !== "" && (
                     <div className="mt-4 pt-4 border-t border-white/5">
-                      <h4 className="text-xs font-bold text-on-surface-variant/40 mb-2">相关截图</h4>
-                      <a href={selectedFeedback.screenshot_url} target="_blank" rel="noreferrer" className="inline-block max-w-full overflow-hidden rounded-xl border border-white/10 hover:border-primary/30 transition-colors">
-                        <img src={selectedFeedback.screenshot_url} alt="Screenshot" className="max-h-[180px] w-auto max-w-full object-contain mx-auto" />
-                      </a>
+                      <div className="flex items-center justify-between mb-2">
+                        <h4 className="text-xs font-bold text-on-surface-variant/40">相关截图</h4>
+                        <span className="text-[11px] text-primary/70 font-medium">点击图片可新窗口查看原图 ↗</span>
+                      </div>
+                      <div
+                        onClick={() => {
+                          const imgUrl = selectedFeedback.screenshot_url;
+                          const win = window.open("", "_blank");
+                          if (win) {
+                            win.document.write(`
+                              <!DOCTYPE html>
+                              <html>
+                                <head>
+                                  <meta charset="utf-8" />
+                                  <title>查看反馈截图原图</title>
+                                  <style>
+                                    body { margin: 0; background: #090d16; display: flex; align-items: center; justify-content: center; min-height: 100vh; font-family: system-ui, sans-serif; }
+                                    img { max-width: 95vw; max-height: 95vh; object-fit: contain; box-shadow: 0 25px 60px rgba(0,0,0,0.8); border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); margin: auto; }
+                                  </style>
+                                </head>
+                                <body>
+                                  <img src="${imgUrl}" alt="反馈截图原图" />
+                                </body>
+                              </html>
+                            `);
+                            win.document.close();
+                          }
+                        }}
+                        className="group relative inline-block max-w-full overflow-hidden rounded-xl border border-white/10 hover:border-primary/50 transition-all cursor-pointer shadow-lg"
+                        title="点击查看大图"
+                      >
+                        <img
+                          src={selectedFeedback.screenshot_url}
+                          alt="反馈截图"
+                          className="max-h-[220px] w-auto max-w-full object-contain mx-auto transition-transform duration-200 group-hover:scale-[1.02]"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-xs font-bold gap-1 backdrop-blur-[1px]">
+                          <span className="material-symbols-outlined text-sm">open_in_new</span>
+                          <span>点击查看大图</span>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>

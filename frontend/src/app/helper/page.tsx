@@ -447,7 +447,7 @@ export default function HelperPage() {
       <footer className="border-t border-white/5 py-8 relative z-10 text-center bg-[#070c17]/50 mt-12">
         <div className="max-w-container-max mx-auto px-gutter flex items-center justify-center">
           <span className="text-xs text-on-surface-variant/40 font-semibold">
-            © 2026 面试驾到 · Built with AI · 面试驾到，Offer来到
+            © 2026 面试驾到 · 面试驾到，Offer来到
           </span>
         </div>
       </footer>

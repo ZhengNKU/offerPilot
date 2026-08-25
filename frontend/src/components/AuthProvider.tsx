@@ -617,7 +617,7 @@ function AuthModals() {
       const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "phone", target: smsPhone })
+        body: JSON.stringify({ type: "phone", target: smsPhone, scene: "login" })
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));

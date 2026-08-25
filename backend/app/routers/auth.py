@@ -172,11 +172,11 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
             company="暂无公司",
             years="应届0个月",
             status="在职",
-            salary="0K - 0K",
+            salary="",
             targetCompany="大厂公司 (目标)",
             targetRole="",
             targetGrade="",
-            targetSalary="0K - 0K",
+            targetSalary="",
             gender="male",
             age="0",
             school="暂无学校",
@@ -300,6 +300,15 @@ async def send_code(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="目标手机号或邮箱不能为空"
         )
+
+    # 短信登录场景：校验手机号是否已注册
+    if req.scene == "login" and req.type == "phone":
+        res = await db.execute(select(models.User).where(models.User.phone == target))
+        if not res.scalars().first():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="该手机号尚未注册，请先注册账号"
+            )
 
     # 校验修改场景下该账号/邮箱是否已被绑定
     if req.scene == "security_update" or req.check_exist:

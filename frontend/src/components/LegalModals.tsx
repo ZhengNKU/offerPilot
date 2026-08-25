@@ -111,6 +111,7 @@ const EVT_CONTACT = "legal:open-contact";
 export const openLegalTerms = () => window.dispatchEvent(new Event(EVT_TERMS));
 export const openLegalPrivacy = () => window.dispatchEvent(new Event(EVT_PRIVACY));
 export const openLegalContact = () => window.dispatchEvent(new Event(EVT_CONTACT));
+export const openBusinessLicense = () => window.open("/license", "_blank", "noopener,noreferrer");
 
 // ─── 组件本体 ──────────────────────────────────────────────────────────────
 

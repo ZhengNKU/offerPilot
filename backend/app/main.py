@@ -29,7 +29,7 @@ except Exception as _e:
     _MEMORY_LOADED = False
     _memory_router = None
 from app.utils.cleanup import run_periodic_cleanup, run_periodic_log_cleanup, cleanup_old_logs
-from app.utils.cleanup import run_periodic_pending_presign_cleanup
+from app.utils.cleanup import run_periodic_pending_presign_cleanup, run_periodic_online_status_cleanup
 # 启动日志去重：多 worker 下每条启动日志只打一次（见 app/utils/scheduler.py）
 from app.utils.scheduler import log_once
 
@@ -286,6 +286,7 @@ async def startup_event():
     asyncio.create_task(run_periodic_cleanup())
     asyncio.create_task(run_periodic_pending_presign_cleanup())
     asyncio.create_task(run_periodic_log_cleanup())
+    asyncio.create_task(run_periodic_online_status_cleanup())
     from app.utils.content_moderation import run_periodic_rescan
     asyncio.create_task(run_periodic_rescan())
     log_once("periodic-registered", "[main] 后台周期任务已注册（Redis leader 选举，多 worker 下仅 leader 执行）")

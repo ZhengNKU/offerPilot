@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useRef, useState } from "react";
 import gsap from "gsap";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
@@ -559,26 +560,35 @@ export default function Home() {
           
           <div className="grid grid-cols-2 md:grid-cols-6 gap-4 md:gap-6 w-full">
             {[
-              { icon: "description", color: "text-primary", bg: "bg-primary/10", title: "简历分析", desc: "发现简历风险点", stagger: "stagger-1" },
-              { icon: "graphic_eq", color: "text-secondary", bg: "bg-secondary/10", title: "录音转写", desc: "精准语音转文字", stagger: "stagger-2" },
-              { icon: "psychology", color: "text-tertiary", bg: "bg-tertiary/10", title: "智能分析", desc: "定位失信时刻", stagger: "stagger-3" },
-              { icon: "record_voice_over", color: "text-secondary", bg: "bg-secondary/10", title: "表达重构", desc: "高阶话术升级", stagger: "stagger-4" },
-              { icon: "interpreter_mode", color: "text-primary", bg: "bg-primary/10", title: "模拟面试", desc: "AI 拟真实战对练", stagger: "stagger-5" },
-              { icon: "workspace_premium", color: "text-tertiary", bg: "bg-tertiary/10", title: "获得 Offer", desc: "AI 助你斩获 Offer", stagger: "stagger-6" }
-            ].map((feature, i) => (
-              <div
-                key={i}
-                className={`engine-card ${feature.stagger} glass-panel p-8 rounded-2xl border-white/5 flex flex-col items-center text-center group hover:bg-white/5 transition-all duration-300`}
-              >
-                <div className={`w-14 h-14 rounded-xl ${feature.bg} flex items-center justify-center mb-5 ${feature.color} animate-float group-hover:scale-110 transition-transform`} style={{ animationDelay: `${i * 0.25}s` }}>
-                  <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>
-                    {feature.icon}
-                  </span>
+              { icon: "description", color: "text-primary", bg: "bg-primary/10", title: "简历分析", desc: "发现简历风险点", stagger: "stagger-1", href: "/resume" },
+              { icon: "graphic_eq", color: "text-secondary", bg: "bg-secondary/10", title: "录音转写", desc: "精准语音转文字", stagger: "stagger-2", href: undefined },
+              { icon: "psychology", color: "text-tertiary", bg: "bg-tertiary/10", title: "智能分析", desc: "定位失信时刻", stagger: "stagger-3", href: undefined },
+              { icon: "record_voice_over", color: "text-secondary", bg: "bg-secondary/10", title: "表达重构", desc: "高阶话术升级", stagger: "stagger-4", href: undefined },
+              { icon: "interpreter_mode", color: "text-primary", bg: "bg-primary/10", title: "模拟面试", desc: "AI 拟真实战对练", stagger: "stagger-5", href: "/training" },
+              { icon: "workspace_premium", color: "text-tertiary", bg: "bg-tertiary/10", title: "获得 Offer", desc: "AI 助你斩获 Offer", stagger: "stagger-6", href: undefined }
+            ].map((feature, i) => {
+              const cardClass = `engine-card ${feature.stagger} glass-panel p-8 rounded-2xl border-white/5 flex flex-col items-center text-center group hover:bg-white/5 transition-all duration-300`;
+              const inner = (
+                <>
+                  <div className={`w-14 h-14 rounded-xl ${feature.bg} flex items-center justify-center mb-5 ${feature.color} animate-float group-hover:scale-110 transition-transform`} style={{ animationDelay: `${i * 0.25}s` }}>
+                    <span className="material-symbols-outlined text-[28px]" style={{ fontVariationSettings: "'FILL' 1" }}>
+                      {feature.icon}
+                    </span>
+                  </div>
+                  <h3 className="font-bold mb-2 text-white" style={{ fontSize: "20px" }}>{feature.title}</h3>
+                  <p className="text-on-surface-variant text-sm leading-relaxed font-medium">{feature.desc}</p>
+                </>
+              );
+              return feature.href ? (
+                <Link key={i} href={feature.href} className={cardClass}>
+                  {inner}
+                </Link>
+              ) : (
+                <div key={i} className={cardClass}>
+                  {inner}
                 </div>
-                <h3 className="font-bold mb-2 text-white" style={{ fontSize: "20px" }}>{feature.title}</h3>
-                <p className="text-on-surface-variant text-sm leading-relaxed font-medium">{feature.desc}</p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </section>
@@ -879,11 +889,33 @@ export default function Home() {
           </div>
         </div>
         
-        <div className="px-gutter py-8 border-t border-white/5 max-w-container-max mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="text-left space-y-1">
-            <p className="text-xs text-on-surface-variant font-label-mono font-bold tracking-widest">© 2026 面试驾到</p>
-            <p className="text-[10px] text-on-surface-variant/40 font-label-mono font-bold tracking-widest">Built with AI · 面试驾到，Offer来到</p>
-          </div>
+        {/* Kimi 风格单行底栏 */}
+        <div className="px-gutter py-5 border-t border-white/5 max-w-container-max mx-auto flex flex-col sm:flex-row items-center justify-center gap-x-6 gap-y-2 text-[11px] text-on-surface-variant/40 font-medium text-center">
+          <a 
+            href="/license" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="hover:text-white transition-colors select-none"
+            title="点击在新窗口查看营业执照"
+          >
+            © 2026 南京澜之其境科技有限公司
+          </a>
+          <a 
+            href="https://beian.miit.gov.cn/" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="hover:text-white transition-colors"
+          >
+            苏ICP备2026058226号
+          </a>
+          {/* <a 
+            href="https://beian.mps.gov.cn/#/query/webSearch" 
+            target="_blank" 
+            rel="noopener noreferrer" 
+            className="hover:text-white transition-colors"
+          >
+            联网备案号
+          </a> */}
         </div>
       </footer>
     </div>
