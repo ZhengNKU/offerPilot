@@ -46,8 +46,60 @@ export default function HelperPage() {
     return `${mins}:${secs < 10 ? "0" : ""}${secs}`;
   };
 
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "面试录音分析功能怎么使用？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "在【面试调试器】中选择【面试录音分析】，上传 MP3 或 WAV 录音文件，AI 将自动进行语音转文字、问答拆解、面试表现打分并给出 STAR 法则改写建议。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "面试记录分析功能怎么使用？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "在【面试调试器】中选择【面试记录分析】，粘贴面试对话文本，AI 将自动分析问答逻辑、提炼核心风险点并提供改写示范。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "简历深度分析功能怎么使用？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "上传 PDF 或 Word 简历文件，AI 将深度解析项目经历、亮点与能力短板，并生成针对性的优化建议与高频面试预判题。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "AI 模拟面试功能怎么使用？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "进入【AI 模拟面试】根据目标岗位、公司及层级自由配置面试场景，AI 面试官将开启实时对话追问训练，帮助您克服实战紧张感。"
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "AI 职业顾问与职业驾驶舱是什么？",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "在【职业驾驶舱】中管理您的求职目标、能力积累与历史分析记录，结合【AI 职业顾问】沉淀的个人职业知识库，打造属于您的通用求职智能助理。"
+        }
+      }
+    ]
+  };
+
   return (
     <div className="min-h-screen bg-[#0b1326] relative overflow-hidden select-none text-on-surface text-left">
+      {/* Search Engine JSON-LD Structured Data */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       
       {/* Background Image (Semi-transparent) */}
       <div className="absolute inset-0 bg-[url('/helper.jpg')] bg-cover bg-center opacity-30 pointer-events-none z-0" />

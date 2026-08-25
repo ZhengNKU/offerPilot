@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "面试指南",
+  title: "面试指南 - 真实面试经验与高频面试题技巧 | 面试驾到",
   description:
-    "面试驾到精选面试指南：自我介绍、离职原因、职业规划、期望薪资等高频面试问题的高分话术与避坑技巧。",
+    "面试驾到精选面试指南：收录来自小红书、抖音博主的真实求职复盘与精选面试经验，提供自我介绍、离职原因、职业规划及期望薪资等高频面试问题的高分答题模板与避坑技巧。",
   alternates: { canonical: "/guide" },
 };
 

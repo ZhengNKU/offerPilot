@@ -311,7 +311,9 @@ export default function Home() {
           <div className="flex flex-wrap justify-center gap-6 pt-4 w-full">
             <button onClick={() => router.push("/debugger")} className="px-10 py-4 bg-primary text-on-primary text-lg font-extrabold rounded-xl shadow-xl hover:translate-y-[-2px] active:scale-95 transition-all flex items-center gap-2 cursor-pointer">
               开始免费分析
-              <span className="material-symbols-outlined" aria-hidden="true" data-nosnippet>arrow_forward</span>
+              <svg className="w-5 h-5 fill-current shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z" />
+              </svg>
             </button>
             <button onClick={() => window.open("/helper", "_blank")} className="px-10 py-4 glass-panel text-on-surface text-lg font-extrabold rounded-xl border-white/10 hover:bg-white/5 active:scale-95 transition-all cursor-pointer">
               观看真实案例

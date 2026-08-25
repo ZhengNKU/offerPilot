@@ -33,7 +33,7 @@ const jsonLd = [
     operatingSystem: "Web",
     url: SITE_URL,
     description:
-      "面试驾到是一款 AI 驱动的面试智能分析与职业成长辅助系统，提供简历深度分析、面试录音/记录分析、AI 模拟面试训练与 Offer 概率预测。",
+      "面试驾到是一款 AI 驱动的面试智能分析与职业成长辅助系统，提供简历深度分析、面试录音/记录分析、AI 模拟面试训练、专属 AI 职业顾问与 Offer 概率预测。",
     offers: { "@type": "Offer", price: "0", priceCurrency: "CNY" },
   },
   {
@@ -45,7 +45,7 @@ const jsonLd = [
         name: "面试驾到能分析哪些内容？",
         acceptedAnswer: {
           "@type": "Answer",
-          text: "面试驾到支持面试录音分析、面试记录（文字对白）分析、简历深度分析，以及 AI 模拟面试训练，帮助定位面试失分点并优化表达。",
+          text: "面试驾到支持面试录音分析、面试记录（文字对白）分析、简历深度分析、专属 AI 职业顾问问答，以及 AI 模拟面试训练，帮助定位面试失分点并优化表达。",
         },
       },
       {
@@ -53,7 +53,7 @@ const jsonLd = [
         name: "面试驾到适合哪些求职者？",
         acceptedAnswer: {
           "@type": "Answer",
-          text: "面试驾到面向正在准备求职、跳槽、校招的求职者，尤其适合需要复盘面试表现、优化简历、进行模拟面试演练的技术与非技术岗位候选人。",
+          text: "面试驾到面向正在准备求职、跳槽、校招的求职者，尤其适合需要复盘面试表现、优化简历、进行模拟面试演练及通过专属 AI 职业顾问答疑的技术与非技术岗位候选人。",
         },
       },
       {
@@ -71,18 +71,29 @@ const jsonLd = [
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
-    default: "面试驾到 - AI 面试分析专家",
+    default: "面试驾到 - AI面试分析专家，面试复盘与AI模拟面试求职平台",
     template: "%s | 面试驾到",
   },
   description:
-    "面试驾到 — 分析真实面试录音，定位关键信任时刻，揭示面试官真实想法，帮你成功斩获心仪 Offer。",
+    "面试驾到是专业的 AI 面试分析与求职提升平台，支持真实面试录音与记录复盘、简历深度解析、AI 沉浸式模拟面试训练、专属 AI 职业顾问及 Offer 概率预测。基于大语言模型精准定位面试扣分项，提供 STAR 法则改写示范与大厂面试预判题，助你高效斩获心仪 Offer。",
+  keywords: [
+    "面试驾到",
+    "AI面试分析",
+    "专属AI职业顾问",
+    "AI模拟面试平台",
+    "面试录音复盘",
+    "大厂面试练习",
+    "简历深度分析",
+    "Offer概率预测",
+    "STAR法则修改",
+  ],
   alternates: {
     canonical: "/",
   },
   openGraph: {
-    title: "面试驾到 - AI 面试分析专家",
+    title: "面试驾到 - AI面试分析专家，面试复盘与AI模拟面试平台",
     description:
-      "分析真实面试录音，定位关键信任时刻，揭示面试官真实想法，帮你成功斩获心仪 Offer。",
+      "面试驾到是专业的 AI 面试分析与职业成长平台，支持真实面试录音与记录复盘、简历深度解析、AI 沉浸式模拟面试训练及 Offer 概率预测。",
     url: SITE_URL,
     siteName: "面试驾到",
     type: "website",
@@ -91,9 +102,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "面试驾到 - AI 面试分析专家",
+    title: "面试驾到 - AI面试分析专家，面试复盘与AI模拟面试平台",
     description:
-      "分析真实面试录音，定位关键信任时刻，揭示面试官真实想法，帮你成功斩获心仪 Offer。",
+      "面试驾到是专业的 AI 面试分析与职业成长平台，支持真实面试录音与记录复盘、简历深度解析、AI 沉浸式模拟面试训练及 Offer 概率预测。",
     images: [`${SITE_URL}/logo/logo_icon.png`],
   },
   icons: {
