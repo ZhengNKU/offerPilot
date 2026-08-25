@@ -16,7 +16,7 @@ const jsonLd = [
     name: "南京澜之其境科技有限公司",
     brand: { "@type": "Brand", name: "面试驾到" },
     url: SITE_URL,
-    logo: `${SITE_URL}/logo/logo.png`,
+    logo: `${SITE_URL}/logo/logo_icon.png`,
   },
   {
     "@context": "https://schema.org",
@@ -87,17 +87,23 @@ export const metadata: Metadata = {
     siteName: "面试驾到",
     type: "website",
     locale: "zh_CN",
-    images: [{ url: `${SITE_URL}/logo/logo.png` }],
+    images: [{ url: `${SITE_URL}/logo/logo_icon.png` }],
   },
   twitter: {
     card: "summary_large_image",
     title: "面试驾到 - AI 面试分析专家",
     description:
       "分析真实面试录音，定位关键信任时刻，揭示面试官真实想法，帮你成功斩获心仪 Offer。",
-    images: [`${SITE_URL}/logo/logo.png`],
+    images: [`${SITE_URL}/logo/logo_icon.png`],
   },
   icons: {
-    icon: "/logo/logo_icon.svg",
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/logo/logo_icon.png", type: "image/png", sizes: "192x192" },
+      { url: "/logo/logo_icon.svg", type: "image/svg+xml" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
   },
 };
 
@@ -117,7 +123,11 @@ export default function RootLayout({
           href="/fonts/fonts.css"
           rel="stylesheet"
         />
+        <link rel="shortcut icon" href="/favicon.ico" />
+        <link rel="icon" href="/favicon.ico" sizes="any" />
+        <link rel="icon" href="/logo/logo_icon.png" type="image/png" sizes="192x192" />
         <link rel="icon" href="/logo/logo_icon.svg" type="image/svg+xml" />
+        <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
         {jsonLd.map((obj, i) => (
           <script
             key={`jsonld-${i}`}

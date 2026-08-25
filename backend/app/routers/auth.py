@@ -310,6 +310,23 @@ async def send_code(
                 detail="该手机号尚未注册，请先注册账号"
             )
 
+    # 注册场景：校验手机号/邮箱是否已被注册
+    if req.scene == "register":
+        if req.type == "phone":
+            conflict = await db.execute(select(models.User).where(models.User.phone == target))
+            if conflict.scalars().first():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="该手机号已被注册，请检查或直接登录"
+                )
+        elif req.type == "email":
+            conflict = await db.execute(select(models.User).where(models.User.email == target))
+            if conflict.scalars().first():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="该邮箱地址已被注册，请检查或直接登录"
+                )
+
     # 校验修改场景下该账号/邮箱是否已被绑定
     if req.scene == "security_update" or req.check_exist:
         if req.type == "phone":

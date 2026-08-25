@@ -562,16 +562,26 @@ function AuthModals() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isSendingSmsCode, setIsSendingSmsCode] = useState(false);
 
-  // Forgot Password State
+  // Forgot Password State (Independent Phone & Email states)
   const [showForgot, setShowForgot] = useState(false);
   const [resetTab, setResetTab] = useState<"phone" | "email">("phone");
-  const [forgotTarget, setForgotTarget] = useState("");
-  const [forgotCode, setForgotCode] = useState("");
-  const [forgotCountdown, setForgotCountdown] = useState(0);
-  const [forgotPassword, setForgotPassword] = useState("");
-  const [forgotConfirmPassword, setForgotConfirmPassword] = useState("");
+  const [forgotPhoneTarget, setForgotPhoneTarget] = useState("");
+  const [forgotPhoneCode, setForgotPhoneCode] = useState("");
+  const [forgotPhoneCountdown, setForgotPhoneCountdown] = useState(0);
+  const [isSendingForgotPhoneCode, setIsSendingForgotPhoneCode] = useState(false);
+
+  const [forgotEmailTarget, setForgotEmailTarget] = useState("");
+  const [forgotEmailCode, setForgotEmailCode] = useState("");
+  const [forgotEmailCountdown, setForgotEmailCountdown] = useState(0);
+  const [isSendingForgotEmailCode, setIsSendingForgotEmailCode] = useState(false);
+
+  const [forgotPhonePassword, setForgotPhonePassword] = useState("");
+  const [forgotPhoneConfirmPassword, setForgotPhoneConfirmPassword] = useState("");
+
+  const [forgotEmailPassword, setForgotEmailPassword] = useState("");
+  const [forgotEmailConfirmPassword, setForgotEmailConfirmPassword] = useState("");
+
   const [showForgotPwd, setShowForgotPwd] = useState(false);
-  const [isSendingForgotCode, setIsSendingForgotCode] = useState(false);
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
@@ -583,20 +593,34 @@ function AuthModals() {
 
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (forgotCountdown > 0) {
-      timer = setTimeout(() => setForgotCountdown(forgotCountdown - 1), 1000);
+    if (forgotPhoneCountdown > 0) {
+      timer = setTimeout(() => setForgotPhoneCountdown(forgotPhoneCountdown - 1), 1000);
     }
     return () => clearTimeout(timer);
-  }, [forgotCountdown]);
+  }, [forgotPhoneCountdown]);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (forgotEmailCountdown > 0) {
+      timer = setTimeout(() => setForgotEmailCountdown(forgotEmailCountdown - 1), 1000);
+    }
+    return () => clearTimeout(timer);
+  }, [forgotEmailCountdown]);
 
   // Reset forgot password state when recovery panel is closed or switched away
   useEffect(() => {
     if (!auth.showLogin || !showForgot) {
-      setForgotTarget("");
-      setForgotCode("");
-      setForgotPassword("");
-      setForgotConfirmPassword("");
-      setForgotCountdown(0);
+      setForgotPhoneTarget("");
+      setForgotPhoneCode("");
+      setForgotPhoneCountdown(0);
+      setForgotPhonePassword("");
+      setForgotPhoneConfirmPassword("");
+
+      setForgotEmailTarget("");
+      setForgotEmailCode("");
+      setForgotEmailCountdown(0);
+      setForgotEmailPassword("");
+      setForgotEmailConfirmPassword("");
     }
   }, [auth.showLogin, showForgot]);
 
@@ -698,7 +722,11 @@ function AuthModals() {
 
   const handleForgotGetCode = async () => {
     const isPhone = resetTab === "phone";
-    const target = forgotTarget.strip ? forgotTarget.strip() : forgotTarget;
+    const target = (isPhone ? forgotPhoneTarget : forgotEmailTarget).trim();
+    const isSending = isPhone ? isSendingForgotPhoneCode : isSendingForgotEmailCode;
+    const countdown = isPhone ? forgotPhoneCountdown : forgotEmailCountdown;
+    if (isSending || countdown > 0) return;
+
     if (!target) {
       auth.triggerToast(`请输入绑定的${isPhone ? "手机号码" : "邮箱地址"}！`, "error");
       return;
@@ -718,31 +746,38 @@ function AuthModals() {
       }
     }
 
-    setIsSendingForgotCode(true);
+    if (isPhone) setIsSendingForgotPhoneCode(true);
+    else setIsSendingForgotEmailCode(true);
+
     try {
       const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
+        body: JSON.stringify({ type: isPhone ? "phone" : "email", target, scene: "recovery" })
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         auth.triggerToast(errData.detail || "发送验证码失败！", "error");
         return;
       }
-      setForgotCountdown(60);
+      if (isPhone) setForgotPhoneCountdown(60);
+      else setForgotEmailCountdown(60);
       auth.triggerToast("验证码已发送，请查收！");
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！", "error");
     } finally {
-      setIsSendingForgotCode(false);
+      if (isPhone) setIsSendingForgotPhoneCode(false);
+      else setIsSendingForgotEmailCode(false);
     }
   };
 
   const handleForgotSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const isPhone = resetTab === "phone";
-    const target = forgotTarget;
+    const target = (isPhone ? forgotPhoneTarget : forgotEmailTarget).trim();
+    const verify_code = (isPhone ? forgotPhoneCode : forgotEmailCode).trim();
+    const passwordVal = isPhone ? forgotPhonePassword : forgotEmailPassword;
+    const confirmPasswordVal = isPhone ? forgotPhoneConfirmPassword : forgotEmailConfirmPassword;
 
     if (isPhone) {
       const phoneRegex = /^1[3-9]\d{9}$/;
@@ -758,20 +793,20 @@ function AuthModals() {
       }
     }
 
-    if (!forgotCode) {
+    if (!verify_code) {
       auth.triggerToast("请输入验证码！", "error");
       return;
     }
 
-    const hasUppercase = /[A-Z]/.test(forgotPassword);
-    const hasLowercase = /[a-z]/.test(forgotPassword);
-    const hasNumber = /\d/.test(forgotPassword);
-    if (forgotPassword.length < 8 || !hasUppercase || !hasLowercase || !hasNumber) {
+    const hasUppercase = /[A-Z]/.test(passwordVal);
+    const hasLowercase = /[a-z]/.test(passwordVal);
+    const hasNumber = /\d/.test(passwordVal);
+    if (passwordVal.length < 8 || !hasUppercase || !hasLowercase || !hasNumber) {
       auth.triggerToast("新密码长度不能少于8位，且必须包含大小写字母和数字！", "error");
       return;
     }
 
-    if (forgotPassword !== forgotConfirmPassword) {
+    if (passwordVal !== confirmPasswordVal) {
       auth.triggerToast("两次输入的密码不一致！", "error");
       return;
     }
@@ -783,8 +818,8 @@ function AuthModals() {
         body: JSON.stringify({
           type: isPhone ? "phone" : "email",
           target,
-          verify_code: forgotCode,
-          new_password: forgotPassword
+          verify_code,
+          new_password: passwordVal
         })
       });
 
@@ -796,11 +831,17 @@ function AuthModals() {
 
       auth.triggerToast("密码重置成功，请使用新密码登录！");
       setShowForgot(false);
-      setForgotTarget("");
-      setForgotCode("");
-      setForgotPassword("");
-      setForgotConfirmPassword("");
-      setForgotCountdown(0);
+      setForgotPhoneTarget("");
+      setForgotPhoneCode("");
+      setForgotPhoneCountdown(0);
+      setForgotPhonePassword("");
+      setForgotPhoneConfirmPassword("");
+
+      setForgotEmailTarget("");
+      setForgotEmailCode("");
+      setForgotEmailCountdown(0);
+      setForgotEmailPassword("");
+      setForgotEmailConfirmPassword("");
     } catch (err) {
       auth.triggerToast("无法连接到后端服务！", "error");
     }
@@ -1019,7 +1060,7 @@ function AuthModals() {
                 <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 text-sm font-black">
                   <button
                     type="button"
-                    onClick={() => { setResetTab("phone"); setForgotTarget(""); }}
+                    onClick={() => setResetTab("phone")}
                     className={`flex-1 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                       resetTab === "phone"
                         ? "bg-[#AFA7FF] text-[#050B1A] shadow-md"
@@ -1033,7 +1074,7 @@ function AuthModals() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => { setResetTab("email"); setForgotTarget(""); }}
+                    onClick={() => setResetTab("email")}
                     className={`flex-1 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                       resetTab === "email"
                         ? "bg-[#AFA7FF] text-[#050B1A] shadow-md"
@@ -1062,8 +1103,8 @@ function AuthModals() {
                       maxLength={resetTab === "phone" ? 11 : undefined}
                       required
                       placeholder={resetTab === "phone" ? "请输入手机号码" : "请输入绑定的邮箱地址"}
-                      value={forgotTarget}
-                      onChange={(e) => setForgotTarget(e.target.value)}
+                      value={resetTab === "phone" ? forgotPhoneTarget : forgotEmailTarget}
+                      onChange={(e) => resetTab === "phone" ? setForgotPhoneTarget(e.target.value) : setForgotEmailTarget(e.target.value)}
                       className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
                     />
                   </div>
@@ -1075,25 +1116,25 @@ function AuthModals() {
                         type="text"
                         required
                         placeholder="输入 6 位验证码"
-                        value={forgotCode}
-                        onChange={(e) => setForgotCode(e.target.value)}
+                        value={resetTab === "phone" ? forgotPhoneCode : forgotEmailCode}
+                        onChange={(e) => resetTab === "phone" ? setForgotPhoneCode(e.target.value) : setForgotEmailCode(e.target.value)}
                         className="flex-1 py-3 px-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
                       />
                       <button
                         type="button"
                         onClick={handleForgotGetCode}
-                        disabled={forgotCountdown > 0 || isSendingForgotCode}
+                        disabled={(resetTab === "phone" ? forgotPhoneCountdown > 0 || isSendingForgotPhoneCode : forgotEmailCountdown > 0 || isSendingForgotEmailCode)}
                         className={`px-4 py-3 rounded-xl border border-[#AFA7FF]/20 text-[#AFA7FF] font-black text-sm hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer flex items-center justify-center gap-1.5 ${
-                          forgotCountdown > 0 || isSendingForgotCode ? "opacity-50 cursor-not-allowed" : ""
+                          (resetTab === "phone" ? forgotPhoneCountdown > 0 || isSendingForgotPhoneCode : forgotEmailCountdown > 0 || isSendingForgotEmailCode) ? "opacity-50 cursor-not-allowed" : ""
                         }`}
                       >
-                        {isSendingForgotCode ? (
+                        {(resetTab === "phone" ? isSendingForgotPhoneCode : isSendingForgotEmailCode) ? (
                           <span className="flex items-center gap-1.5">
                             <span className="w-3.5 h-3.5 border-2 border-[#AFA7FF] border-t-transparent rounded-full animate-spin" />
                             发送中...
                           </span>
-                        ) : forgotCountdown > 0 ? (
-                          `${forgotCountdown}s`
+                        ) : (resetTab === "phone" ? forgotPhoneCountdown > 0 : forgotEmailCountdown > 0) ? (
+                          `${resetTab === "phone" ? forgotPhoneCountdown : forgotEmailCountdown}s`
                         ) : (
                           "获取验证码"
                         )}
@@ -1108,8 +1149,8 @@ function AuthModals() {
                         type={showForgotPwd ? "text" : "password"}
                         required
                         placeholder="包含大小写与数字，不少于8位"
-                        value={forgotPassword}
-                        onChange={(e) => setForgotPassword(e.target.value)}
+                        value={resetTab === "phone" ? forgotPhonePassword : forgotEmailPassword}
+                        onChange={(e) => resetTab === "phone" ? setForgotPhonePassword(e.target.value) : setForgotEmailPassword(e.target.value)}
                         className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 pr-10 text-sm md:text-base font-semibold"
                       />
                       <button
@@ -1130,8 +1171,8 @@ function AuthModals() {
                       type={showForgotPwd ? "text" : "password"}
                       required
                       placeholder="请再次确认密码"
-                      value={forgotConfirmPassword}
-                      onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                      value={resetTab === "phone" ? forgotPhoneConfirmPassword : forgotEmailConfirmPassword}
+                      onChange={(e) => resetTab === "phone" ? setForgotPhoneConfirmPassword(e.target.value) : setForgotEmailConfirmPassword(e.target.value)}
                       className="w-full py-3 px-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-white/20 focus:outline-none focus:border-[#AFA7FF]/40 text-sm md:text-base font-semibold"
                     />
                   </div>

@@ -137,11 +137,15 @@ export default function CareerDashboard() {
   const [profileForm, setProfileForm] = useState({ ...profile, tagsString: profile.tags.join(", ") });
   const [goalForm, setGoalForm] = useState({ ...careerGoal });
   const [securityForm, setSecurityForm] = useState({ ...accountSecurity });
-  const [securityTab, setSecurityTab] = useState<"email">("email");
+  const [securityTab, setSecurityTab] = useState<"phone" | "email">("phone");
   // 「在职状态」为在校/应届时,右侧工作月数强制锁定 0 个月
   const isStudentLike = profileForm.status === "在校生" || profileForm.status === "应届生";
 
-  // Verification states for security edits
+  // Verification states for security edits (phone & email)
+  const [phoneCountdown, setPhoneCountdown] = useState(0);
+  const [phoneCode, setPhoneCode] = useState("");
+  const [isSendingPhoneCode, setIsSendingPhoneCode] = useState(false);
+
   const [emailCountdown, setEmailCountdown] = useState(0);
   const [emailCode, setEmailCode] = useState("");
   const [isSendingCode, setIsSendingCode] = useState(false);
@@ -176,20 +180,41 @@ export default function CareerDashboard() {
   };
 
   const handleOpenSecurityModal = () => {
-    setSecurityForm({ ...accountSecurity });
+    const rawPhone = accountSecurity.phone || auth.user?.phone || "";
+    const rawEmail = accountSecurity.email || auth.user?.email || "";
+    setSecurityForm({
+      ...accountSecurity,
+      phone: rawPhone === "未绑定" ? "" : rawPhone,
+      email: rawEmail === "未绑定" ? "" : rawEmail,
+      password: ""
+    });
+    setPhoneCode("");
     setEmailCode("");
+    setPhoneCountdown(0);
     setEmailCountdown(0);
-    setSecurityTab("email");
+    setSecurityTab("phone");
     setShowEditSecurityModal(true);
   };
 
   const handleCloseSecurityModal = () => {
+    setPhoneCode("");
     setEmailCode("");
+    setPhoneCountdown(0);
     setEmailCountdown(0);
     setShowEditSecurityModal(false);
   };
 
   // ── Countdown timers ──
+  useEffect(() => {
+    let interval: any;
+    if (phoneCountdown > 0) {
+      interval = setInterval(() => {
+        setPhoneCountdown(prev => prev - 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [phoneCountdown]);
+
   useEffect(() => {
     let interval: any;
     if (emailCountdown > 0) {
@@ -229,17 +254,13 @@ export default function CareerDashboard() {
         return;
       }
     }
+
     if (!verify_code) {
       auth.triggerToast("请输入验证码！", "error");
       return;
     }
     setIsSavingSecurity(true);
     try {
-      const token = localStorage.getItem("interviewVar_token");
-      if (!token) {
-        auth.triggerToast("未登录或会话已过期，请重新登录！", "error");
-        return;
-      }
       const body = {
         update_type: isEmail ? "email" : "phone",
         type: isEmail ? "email" : "phone",
@@ -590,6 +611,48 @@ export default function CareerDashboard() {
       // 保持在弹窗界面，不做任何修改
     } finally {
       setIsSavingGoal(false);
+    }
+  };
+
+  const handleGetSecurityPhoneCode = async () => {
+    if (isSendingPhoneCode || phoneCountdown > 0) return;
+
+    const targetPhone = securityForm.phone ? securityForm.phone.trim() : "";
+    if (!targetPhone) {
+      auth.triggerToast("请输入手机号码！", "error");
+      return;
+    }
+
+    const currentBoundPhone = (accountSecurity.phone || auth.user?.phone || "").trim();
+    if (currentBoundPhone && targetPhone === currentBoundPhone) {
+      auth.triggerToast("新手机号码与原绑定手机号码相同，无需修改！", "error");
+      return;
+    }
+
+    const phoneRegex = /^1[3-9]\d{9}$/;
+    if (!phoneRegex.test(targetPhone)) {
+      auth.triggerToast("手机号码格式无效，请输入正确的11位手机号码！", "error");
+      return;
+    }
+
+    setIsSendingPhoneCode(true);
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/send-code`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "phone", target: targetPhone, scene: "security_update" })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        auth.triggerToast(errData.detail || "发送短信验证码失败！", "error");
+        return;
+      }
+      setPhoneCountdown(60);
+      auth.triggerToast("短信验证码已发送，请查收！");
+    } catch (e) {
+      auth.triggerToast("无法连接到后端服务！", "error");
+    } finally {
+      setIsSendingPhoneCode(false);
     }
   };
 
@@ -1629,107 +1692,214 @@ export default function CareerDashboard() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={handleCloseSecurityModal}
-              className="absolute inset-0 bg-surface/60 backdrop-blur-md"
+              className="absolute inset-0 bg-slate-900/60 dark:bg-[#050B1A]/80 backdrop-blur-md transition-opacity"
             />
 
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-surface-container-high border border-white/10 rounded-3xl p-8 max-w-md w-full text-left relative z-10 space-y-6 shadow-2xl"
+              className="bg-white dark:bg-[#0e1626]/95 border border-slate-200 dark:border-white/10 rounded-3xl p-6 sm:p-8 max-w-md w-full text-left relative z-10 space-y-5 shadow-2xl transition-all"
             >
-              <div className="flex justify-between items-center pb-3.5 border-b border-slate-100 dark:border-white/5">
-                <h3 className="font-extrabold text-slate-900 dark:text-white text-base flex items-center gap-2">
-                  <span className="material-symbols-outlined text-indigo-600 dark:text-primary">security</span>
-                  修改账号与安全设置
+              <div className="flex justify-between items-center pb-3 border-b border-slate-100 dark:border-white/5">
+                <h3 className="font-extrabold text-slate-900 dark:text-white text-base sm:text-lg flex items-center gap-2">
+                  <span className="material-symbols-outlined text-indigo-600 dark:text-[#AFA7FF]" aria-hidden="true" data-nosnippet>security</span>
+                  账号与安全设置
                 </h3>
                 <button
                   onClick={handleCloseSecurityModal}
-                  className="text-slate-500 dark:text-on-surface-variant hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer flex items-center justify-center w-7 h-7 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5"
+                  className="text-slate-400 dark:text-white/40 hover:text-slate-900 dark:hover:text-white transition-colors cursor-pointer flex items-center justify-center w-8 h-8 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5"
                 >
-                  <span className="material-symbols-outlined text-base">close</span>
+                  <span className="material-symbols-outlined text-lg" aria-hidden="true" data-nosnippet>close</span>
                 </button>
               </div>
 
+              {/* Tab Switcher (Matching Login Modal design, compatible with Light/Dark mode) */}
+              <div className="flex bg-slate-100 dark:bg-white/5 p-1 rounded-2xl border border-slate-200 dark:border-white/10 text-xs sm:text-sm font-black">
+                <button
+                  type="button"
+                  onClick={() => setSecurityTab("phone")}
+                  className={`flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    securityTab === "phone"
+                      ? "bg-white text-indigo-600 dark:bg-[#AFA7FF] dark:text-[#050B1A] shadow-md font-black"
+                      : "text-slate-600 dark:text-white/60 hover:text-slate-900 dark:hover:text-white font-bold"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-base" aria-hidden="true" data-nosnippet>smartphone</span>
+                  绑定/修改手机号
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSecurityTab("email")}
+                  className={`flex-1 py-2.5 rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    securityTab === "email"
+                      ? "bg-white text-indigo-600 dark:bg-[#AFA7FF] dark:text-[#050B1A] shadow-md font-black"
+                      : "text-slate-600 dark:text-white/60 hover:text-slate-900 dark:hover:text-white font-bold"
+                  }`}
+                >
+                  <span className="material-symbols-outlined text-base" aria-hidden="true" data-nosnippet>mail</span>
+                  绑定/修改邮箱
+                </button>
+              </div>
+
+              {/* Current Bound Status Banner */}
+              <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-white/[0.03] border border-indigo-100 dark:border-white/5 space-y-1 text-xs">
+                <div className="flex items-center justify-between text-slate-700 dark:text-white/80 font-bold">
+                  <span>当前{securityTab === "phone" ? "绑定手机" : "绑定邮箱"}：</span>
+                  <span className="font-mono text-indigo-600 dark:text-[#AFA7FF]">
+                    {securityTab === "phone"
+                      ? (accountSecurity.phone || auth.user?.phone || "未绑定")
+                      : (accountSecurity.email || auth.user?.email || "未绑定")}
+                  </span>
+                </div>
+                <p className="text-slate-500 dark:text-white/40 leading-relaxed">
+                  {securityTab === "phone"
+                    ? "绑定手机号后，后续可通过手机号+验证码快捷登录与安全验证。"
+                    : "绑定邮箱后，后续可通过邮箱密码快捷登录。"}
+                </p>
+              </div>
+
               <form onSubmit={handleSaveSecurity} className="space-y-4 text-sm font-semibold text-slate-900 dark:text-white">
+                {securityTab === "phone" ? (
+                  <>
+                    <div className="space-y-1.5">
+                      <label className="text-slate-700 dark:text-white/60 font-bold block">
+                        手机号码 <span className="text-[#FF7A95]">*</span>
+                      </label>
+                      <input
+                        type="tel"
+                        required
+                        maxLength={11}
+                        placeholder="请输入手机号码"
+                        value={securityForm.phone === "未绑定" ? "" : securityForm.phone}
+                        onChange={(e) => setSecurityForm({ ...securityForm, phone: e.target.value })}
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 dark:focus:border-[#AFA7FF] text-sm text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20 transition-colors"
+                      />
+                    </div>
 
-                <div className="space-y-1.5">
-                  <label className="text-slate-700 dark:text-white/60 font-bold block">邮箱地址 <span className="text-[#FF7A95]">*</span></label>
-                  <input
-                    type="email"
-                    required
-                    value={securityForm.email}
-                    onChange={(e) => setSecurityForm({ ...securityForm, email: e.target.value })}
-                    className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20"
-                  />
-                </div>
+                    <div className="space-y-1.5">
+                      <label className="text-slate-700 dark:text-white/60 font-bold block">
+                        短信验证码 <span className="text-[#FF7A95]">*</span>
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          required
+                          maxLength={6}
+                          placeholder="输入 6 位验证码"
+                          value={phoneCode}
+                          onChange={(e) => setPhoneCode(e.target.value)}
+                          className="flex-1 py-3 px-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-600 dark:focus:border-[#AFA7FF] text-sm transition-colors"
+                        />
+                        <button
+                          type="button"
+                          disabled={isSendingPhoneCode || phoneCountdown > 0}
+                          onClick={handleGetSecurityPhoneCode}
+                          className={`px-4 py-3 rounded-xl border border-indigo-200 dark:border-[#AFA7FF]/20 text-indigo-600 dark:text-[#AFA7FF] font-black text-sm bg-indigo-50 hover:bg-indigo-100 dark:bg-transparent dark:hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer shadow-sm flex items-center justify-center gap-1.5 ${
+                            (isSendingPhoneCode || phoneCountdown > 0) ? "opacity-50 cursor-not-allowed" : ""
+                          }`}
+                        >
+                          {isSendingPhoneCode ? (
+                            <>
+                              <svg className="animate-spin h-4 w-4 text-indigo-600 dark:text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                              发送中
+                            </>
+                          ) : (
+                            phoneCountdown > 0 ? `${phoneCountdown}s` : "获取验证码"
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="space-y-1.5">
+                      <label className="text-slate-700 dark:text-white/60 font-bold block">
+                        邮箱地址 <span className="text-[#FF7A95]">*</span>
+                      </label>
+                      <input
+                        type="email"
+                        required
+                        placeholder="请输入邮箱地址（如 user@example.com）"
+                        value={securityForm.email === "未绑定" ? "" : securityForm.email}
+                        onChange={(e) => setSecurityForm({ ...securityForm, email: e.target.value })}
+                        className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 dark:focus:border-[#AFA7FF] text-sm text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20 transition-colors"
+                      />
+                    </div>
 
-                <div className="space-y-1.5 animate-fade-in">
-                  <label className="text-slate-700 dark:text-white/60 font-bold block">验证码 <span className="text-[#FF7A95]">*</span></label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      required
-                      maxLength={6}
-                      placeholder="输入 6 位验证码"
-                      value={emailCode}
-                      onChange={(e) => setEmailCode(e.target.value)}
-                      className="flex-1 py-3 px-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-600 text-sm"
-                    />
-                    <button
-                      type="button"
-                      disabled={isSendingCode || emailCountdown > 0}
-                      onClick={handleGetSecurityEmailCode}
-                      className={`px-4 py-3 rounded-xl border border-indigo-200 dark:border-[#AFA7FF]/20 text-indigo-600 dark:text-[#AFA7FF] font-black text-sm bg-indigo-50 hover:bg-indigo-100 dark:bg-transparent dark:hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer shadow-sm verify-code-btn flex items-center justify-center gap-1.5 ${
-                        (isSendingCode || emailCountdown > 0) ? "opacity-50 cursor-not-allowed" : ""
-                      }`}
-                    >
-                      {isSendingCode ? (
-                        <>
-                          <svg className="animate-spin h-4 w-4 text-indigo-600 dark:text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                          </svg>
-                          发送中
-                        </>
-                      ) : (
-                        emailCountdown > 0 ? `${emailCountdown}s` : "获取验证码"
-                      )}
-                    </button>
-                  </div>
-                </div>
+                    <div className="space-y-1.5">
+                      <label className="text-slate-700 dark:text-white/60 font-bold block">
+                        邮件验证码 <span className="text-[#FF7A95]">*</span>
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          required
+                          maxLength={6}
+                          placeholder="输入 6 位验证码"
+                          value={emailCode}
+                          onChange={(e) => setEmailCode(e.target.value)}
+                          className="flex-1 py-3 px-4 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20 focus:outline-none focus:border-indigo-600 dark:focus:border-[#AFA7FF] text-sm transition-colors"
+                        />
+                        <button
+                          type="button"
+                          disabled={isSendingCode || emailCountdown > 0}
+                          onClick={handleGetSecurityEmailCode}
+                          className={`px-4 py-3 rounded-xl border border-indigo-200 dark:border-[#AFA7FF]/20 text-indigo-600 dark:text-[#AFA7FF] font-black text-sm bg-indigo-50 hover:bg-indigo-100 dark:bg-transparent dark:hover:bg-[#AFA7FF]/5 active:scale-95 transition-all select-none whitespace-nowrap cursor-pointer shadow-sm flex items-center justify-center gap-1.5 ${
+                            (isSendingCode || emailCountdown > 0) ? "opacity-50 cursor-not-allowed" : ""
+                          }`}
+                        >
+                          {isSendingCode ? (
+                            <>
+                              <svg className="animate-spin h-4 w-4 text-indigo-600 dark:text-[#AFA7FF]" viewBox="0 0 24 24" fill="none">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                              发送中
+                            </>
+                          ) : (
+                            emailCountdown > 0 ? `${emailCountdown}s` : "获取验证码"
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
 
-                <div className="space-y-1.5">
-                  <label className="text-slate-700 dark:text-white/60 font-bold block">修改密码 (选填)</label>
+                <div className="space-y-1.5 pt-1">
+                  <label className="text-slate-700 dark:text-white/60 font-bold block">新密码 (选填)</label>
                   <input
                     type="password"
                     placeholder="请输入新密码，不修改请留空"
                     value={securityForm.password || ""}
                     onChange={(e) => setSecurityForm({ ...securityForm, password: e.target.value })}
-                    className="w-full px-4 py-3 bg-white dark:bg-white/5 border border-slate-300 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 text-sm text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20"
+                    className="w-full px-4 py-3 bg-slate-50 dark:bg-white/5 border border-slate-200 dark:border-white/10 rounded-xl focus:outline-none focus:border-indigo-600 dark:focus:border-[#AFA7FF] text-sm text-slate-900 dark:text-white font-bold placeholder-slate-400 dark:placeholder-white/20 transition-colors"
                   />
                 </div>
 
-                <div className="pt-6 border-t border-slate-100 dark:border-white/5 flex gap-4 justify-end text-sm font-black">
+                <div className="pt-5 border-t border-slate-100 dark:border-white/5 flex gap-3 justify-end text-sm font-black">
                   <button
                     type="button"
                     onClick={handleCloseSecurityModal}
-                    className="px-6 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 transition-all text-slate-800 dark:text-white font-black cursor-pointer"
+                    className="px-5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 transition-all text-slate-700 dark:text-white font-black cursor-pointer"
                   >
                     取消
                   </button>
                   <button
                     type="submit"
                     disabled={isSavingSecurity}
-                    className="px-6 py-3 rounded-xl bg-indigo-100 hover:bg-indigo-200 text-indigo-700 dark:bg-primary dark:text-white font-black border border-indigo-200 dark:border-primary/30 shadow-md transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[100px]"
+                    className="px-6 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white dark:bg-[#AFA7FF] dark:text-[#050B1A] font-black shadow-md transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2 min-w-[110px]"
                   >
                     {isSavingSecurity ? (
                       <>
-                        <div className="w-4 h-4 border-2 border-indigo-700 border-t-transparent rounded-full animate-spin shrink-0" />
+                        <div className="w-4 h-4 border-2 border-white dark:border-[#050B1A] border-t-transparent rounded-full animate-spin shrink-0" />
                         <span>保存中...</span>
                       </>
                     ) : (
-                      <span>确认修改</span>
+                      <span>确认绑定 / 修改</span>
                     )}
                   </button>
                 </div>

@@ -311,15 +311,15 @@ export default function Home() {
           <div className="flex flex-wrap justify-center gap-6 pt-4 w-full">
             <button onClick={() => router.push("/debugger")} className="px-10 py-4 bg-primary text-on-primary text-lg font-extrabold rounded-xl shadow-xl hover:translate-y-[-2px] active:scale-95 transition-all flex items-center gap-2 cursor-pointer">
               开始免费分析
-              <span className="material-symbols-outlined">arrow_forward</span>
+              <span className="material-symbols-outlined" aria-hidden="true" data-nosnippet>arrow_forward</span>
             </button>
             <button onClick={() => window.open("/helper", "_blank")} className="px-10 py-4 glass-panel text-on-surface text-lg font-extrabold rounded-xl border-white/10 hover:bg-white/5 active:scale-95 transition-all cursor-pointer">
               观看真实案例
             </button>
           </div>
           
-          <div className="flex items-center justify-center gap-4 pt-10 w-full mx-auto">
-            <div className="flex -space-x-3 select-none">
+          <div className="flex items-center justify-center gap-4 pt-10 w-full mx-auto" data-nosnippet>
+            <div className="flex -space-x-3 select-none" data-nosnippet>
               {[
                 "/landingpage/student1.png",
                 "/landingpage/student2.png",
@@ -329,12 +329,13 @@ export default function Home() {
                   key={i}
                   className="w-10 h-10 rounded-full select-none"
                   src={src}
-                  alt={`Engineer ${i + 1}`}
+                  alt=""
+                  aria-hidden="true"
                 />
               ))}
             </div>
             <span className="text-on-surface-variant font-label-mono flex items-center gap-1.5 whitespace-nowrap font-bold" style={{ fontSize: "15px" }}>
-              1000+ 同学正在使用 <span className="text-tertiary animate-pulse font-black">●</span>
+              1000+ 同学正在使用 <span className="text-tertiary animate-pulse font-black" aria-hidden="true">●</span>
             </span>
           </div>
         </div>

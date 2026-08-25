@@ -181,7 +181,7 @@ export default function RegisterPage() {
       const res = await fetch(`${API_BASE}/api/auth/send-code`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: isPhone ? "phone" : "email", target })
+        body: JSON.stringify({ type: isPhone ? "phone" : "email", target, scene: "register" })
       });
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
@@ -523,11 +523,13 @@ export default function RegisterPage() {
   };
 
   const saveUserData = async (avatarDataUrl: string) => {
+    const isPhone = regMethod === "phone";
     const payload = {
       account: {
-        reg_method: "email",
-        email: email,
-        verify_code: emailVerifyCode,
+        reg_method: regMethod,
+        phone: isPhone ? phone : undefined,
+        email: !isPhone ? email : undefined,
+        verify_code: isPhone ? phoneVerifyCode : emailVerifyCode,
         username,
         password
       },
