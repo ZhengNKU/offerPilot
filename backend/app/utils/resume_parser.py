@@ -51,7 +51,7 @@ def extract_text_from_docx(content_bytes: bytes) -> str:
         if para.text:
             text += para.text + "\n"
     for table in doc.tables:
-        for row in doc.rows:
+        for row in table.rows:
             row_text = [cell.text for cell in row.cells if cell.text]
             if row_text:
                 text += " | ".join(row_text) + "\n"

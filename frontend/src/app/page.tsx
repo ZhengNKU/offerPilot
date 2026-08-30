@@ -911,14 +911,14 @@ export default function Home() {
           >
             苏ICP备2026058226号
           </a>
-          {/* <a 
+          <a 
             href="https://beian.mps.gov.cn/#/query/webSearch" 
             target="_blank" 
             rel="noopener noreferrer" 
             className="hover:text-white transition-colors"
           >
-            联网备案号
-          </a> */}
+            苏公网安备32011302323321号
+          </a>
         </div>
       </footer>
     </div>
