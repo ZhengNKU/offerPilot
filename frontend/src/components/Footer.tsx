@@ -35,14 +35,14 @@ export default function Footer({ className = "", showHomeLink = false }: FooterP
           >
             苏ICP备2026058226号
           </a>
-          {/* <a
+          <a
             href="https://beian.mps.gov.cn/#/query/webSearch"
             target="_blank"
             rel="noopener noreferrer"
             className="hover:text-slate-800 dark:hover:text-white/80 transition-colors"
           >
-            联网备案号
-          </a> */}
+            苏公网安备32011302323321号
+          </a>
         </div>
 
         {/* 右侧：服务条款、隐私政策、联系我们 */}
