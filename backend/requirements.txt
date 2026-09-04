@@ -37,3 +37,8 @@ mcp==1.27.0
 # 阿里百炼 ASR SDK
 # 提供 Transcription.async_call + Transcription.wait 用于长音频文件转写
 dashscope>=1.20.0
+
+# 高清 PDF 简历绘制与导出
+reportlab>=4.0.0
+fpdf2>=2.8.0
+

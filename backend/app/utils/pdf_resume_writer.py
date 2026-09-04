@@ -8,22 +8,7 @@ import logging
 import re
 from typing import Any, Dict, List, Optional
 
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-
 logger = logging.getLogger(__name__)
-
-# 注册中文字体（ReportLab 内置 CID 字体，全平台免部署外部 ttf）
-try:
-    pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
-    FONT_NAME = "STSong-Light"
-except Exception as e:
-    logger.warning("STSong-Light 字体注册失败，回退到 Helvetica: %s", e)
-    FONT_NAME = "Helvetica"
 
 # 模板颜色主题映射
 TEMPLATE_COLORS = {
@@ -65,6 +50,25 @@ def generate_pdf_from_analysis(
     template: str = "minimal",
 ) -> bytes:
     """根据解析数据与优化数据服务端直接绘制高清 PDF。"""
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+        from reportlab.platypus import HRFlowable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ImportError as e:
+        logger.error("[pdf_resume_writer] reportlab 未安装: %s", e)
+        raise RuntimeError("服务器缺少 reportlab 依赖包，请在服务器执行: pip install reportlab") from e
+
+    # 注册中文字体（ReportLab 内置 CID 字体，全平台免部署外部 ttf）
+    try:
+        pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
+        font_name = "STSong-Light"
+    except Exception as e:
+        logger.warning("STSong-Light 字体注册失败，回退到 Helvetica: %s", e)
+        font_name = "Helvetica"
+
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
         buf,
@@ -122,7 +126,7 @@ def generate_pdf_from_analysis(
     # 定义样式
     name_style = ParagraphStyle(
         "DocName",
-        fontName=FONT_NAME,
+        fontName=font_name,
         fontSize=20,
         leading=24,
         textColor=primary_color,
@@ -130,14 +134,14 @@ def generate_pdf_from_analysis(
     )
     meta_style = ParagraphStyle(
         "DocMeta",
-        fontName=FONT_NAME,
+        fontName=font_name,
         fontSize=10,
         leading=14,
         textColor=colors.HexColor("#475569"),
     )
     section_title_style = ParagraphStyle(
         "SectionTitle",
-        fontName=FONT_NAME,
+        fontName=font_name,
         fontSize=12,
         leading=16,
         textColor=primary_color,
@@ -146,21 +150,21 @@ def generate_pdf_from_analysis(
     )
     body_bold = ParagraphStyle(
         "BodyBold",
-        fontName=FONT_NAME,
+        fontName=font_name,
         fontSize=10,
         leading=14,
         textColor=colors.HexColor("#0f172a"),
     )
     body_text = ParagraphStyle(
         "BodyText",
-        fontName=FONT_NAME,
+        fontName=font_name,
         fontSize=9.5,
         leading=14,
         textColor=colors.HexColor("#334155"),
     )
     bullet_style = ParagraphStyle(
         "BulletText",
-        fontName=FONT_NAME,
+        fontName=font_name,
         fontSize=9.5,
         leading=14,
         leftIndent=12,
