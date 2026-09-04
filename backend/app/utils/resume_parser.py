@@ -103,34 +103,72 @@ _NAME_LINE_RE = re.compile(r"^[\s　]*([一-龥]{2,4})[\s　]*$")
 
 # Section headers
 _WORK_SECTION_KEYS = (
-    "工作经历", "工作经验", "职业经历", "任职经历", "employment",
-    "work experience", "professional experience", "experience",
+    "工作经历", "工作经验", "职业经历", "任职经历", "工作履历", "从业经历", "工作/实习经历", "工作与实习经历",
+    "employment", "work experience", "professional experience", "experience",
 )
 _INTERN_SECTION_KEYS = (
-    "实习经历", "实习经验", "internship",
+    "实习经历", "实习经验", "实习履历", "校内实习",
+    "internship", "internships", "intern experience",
+)
+_EDU_SECTION_KEYS = (
+    "教育背景", "教育经历", "教育信息", "学历信息", "学业背景",
+    "education", "academic background", "education history",
+)
+_PROJ_SECTION_KEYS = (
+    "项目经历", "项目经验", "个人项目", "核心项目", "项目案例", "主要项目", "项目实战", "项目背景",
+    "projects", "personal projects", "key projects", "project experience",
+)
+_SKILL_SECTION_KEYS = (
+    "专业技能", "技能清单", "核心技能", "技术栈", "技能专长", "专业能力", "it技能", "技能",
+    "skills", "technical skills", "professional skills", "core skills",
+)
+_SUMMARY_SECTION_KEYS = (
+    "自我评价", "个人评价", "个人总结", "综合评价", "个人优势", "职业目标", "关于我",
+    "summary", "personal summary", "about me", "profile summary",
 )
 _NEXT_SECTION_KEYS = (
-    "教育背景", "教育经历", "项目经历", "项目经验", "专业技能", "技能",
-    "自我评价", "兴趣爱好", "获奖", "证书", "语言",
+    "教育背景", "教育经历", "教育信息", "学历信息", "学业背景",
+    "项目经历", "项目经验", "个人项目", "核心项目", "项目案例", "主要项目", "项目实战",
+    "专业技能", "技能清单", "核心技能", "技术栈", "技能专长", "专业能力", "it技能", "技能",
+    "自我评价", "个人评价", "个人总结", "综合评价", "个人优势", "职业目标", "关于我",
+    "兴趣爱好", "获奖", "证书", "语言", "荣誉",
     "education", "projects", "skills", "awards", "certifications",
     "summary", "interests",
-    # 工作经历和实习经历互相作为边界，避免重叠解析
-    "工作经历", "工作经验", "职业经历", "任职经历", "employment",
-    "work experience", "professional experience", "experience",
+    "工作经历", "工作经验", "职业经历", "任职经历", "工作履历", "从业经历", "工作/实习经历",
     "实习经历", "实习经验", "internship",
 )
 
 _BULLET_PREFIX_RE = re.compile(r"^[\s　]*[•·●○■□◆◇▶▷\-–—\*]\s*")
 _NUMERIC_PREFIX_RE = re.compile(r"^[\s　]*(?:\d+[\.\)、]|\(\d+\)|[①-⑩])\s*")
-# 清洗 PDF/Word 抽文本时常见的装饰字符：PUA 区（IconFont 常见）+ 控制字符
-# 例: " 工作经历" / " 教育背景" 在排版软件里常加 PUA 前缀
 _PUA_PREFIX_RE = re.compile(r"^[- -⁯　-〿 - ]+")
 
 
 def _clean_line(s: str) -> str:
-    """去掉行首的 PUA / 装饰字符 + 全部空白（含全角空格），便于和 section key 严格匹配。"""
+    """去掉行首的 PUA / 装饰字符 + 全部空白（含全角空格）。"""
     s = _PUA_PREFIX_RE.sub("", s)
-    return s.lstrip()  # 顺手把残留空白也剥掉，避免   残留在 s[0] 干扰 startswith
+    return s.strip()
+
+
+def _clean_header_line(s: str) -> str:
+    """剥除【】、[]、()、序号（1. 1、 一、）、符号（◆ ■ #）及首尾空白。"""
+    s = _PUA_PREFIX_RE.sub("", s).strip()
+    s = re.sub(r"^[【\[\(\{\#\*◆■●★▲\s\d一二三四五六七八九十0-9.、\-+—–]+", "", s)
+    s = re.sub(r"[】\]\)\}\s]+.*$", "", s)
+    return s.strip().lower()
+
+
+def _is_header_match(line: str, keys: tuple[str, ...]) -> bool:
+    raw = line.strip().lower()
+    if not raw:
+        return False
+    cleaned = _clean_header_line(line)
+    for k in keys:
+        k_lower = k.lower()
+        if cleaned == k_lower or cleaned.startswith(k_lower):
+            return True
+        if raw == k_lower or raw.startswith(k_lower + " ") or raw.startswith(k_lower + ":") or raw.startswith(k_lower + "："):
+            return True
+    return False
 
 
 def _find_section_bounds(
@@ -141,33 +179,22 @@ def _find_section_bounds(
     """找到 start_keys 标记的 section 起始行（含）和结束行（不含）。"""
     start: int | None = None
     for i, line in enumerate(lines):
-        s = _clean_line(line.strip()).lower()
-        if not s:
-            continue
-        if any(s == k or s.startswith(k + " ") or s.startswith(k + ":") or s.startswith(k + "：")
-               for k in start_keys):
+        if _is_header_match(line, start_keys):
             start = i
             break
     if start is None:
         return None, len(lines)
-    # end: 下一个 section header
     for j in range(start + 1, len(lines)):
-        s = _clean_line(lines[j].strip()).lower()
-        if not s:
-            continue
-        if any(s == k or s.startswith(k + " ") or s.startswith(k + ":") or s.startswith(k + "：")
-               for k in end_keys):
+        if _is_header_match(lines[j], end_keys):
             return start, j
     return start, len(lines)
 
 
 def _parse_profile(lines: list[str], full_text: str) -> dict:
-    """从全文抽出基础字段：name / phone / email / years。
-
-    name 启发式：开头 5 行内第一个独立成行的 2-4 字中文行。
-    """
+    """从全文抽出基础字段：name / phone / email / years / gender / age / location。"""
     profile: dict[str, Any] = {
         "name": None, "phone": None, "email": None, "years": None,
+        "gender": None, "age": None, "location": None,
     }
 
     # phone / email 跨全文搜
@@ -184,16 +211,37 @@ def _parse_profile(lines: list[str], full_text: str) -> dict:
             profile["years"] = f"{years}年{months}个月"
         elif years:
             profile["years"] = f"{years}年"
+    elif "应届" in full_text or "校招" in full_text:
+        profile["years"] = "应届生"
 
-    # name: 前 5 行第一个 2-4 字纯中文独立行（过滤掉常见的标题/栏目头）
-    _EXCLUDE_NAME_HEADERS = {"基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料", "教育背景", "工作经历", "项目经历", "专业技能", "联系方式"}
-    for line in lines[:5]:
-        m = _NAME_LINE_RE.match(line)
-        if m:
-            val = m.group(1).strip()
-            if val not in _EXCLUDE_NAME_HEADERS:
-                profile["name"] = val
-                break
+    # 性别 / 年龄 / 城市 匹配
+    m_gender = re.search(r"性别[\s:：]*([男|女])", full_text)
+    if m_gender:
+        profile["gender"] = m_gender.group(1).strip()
+
+    m_age = re.search(r"年龄[\s:：]*(\d{1,2}\s*岁?)", full_text)
+    if m_age:
+        profile["age"] = m_age.group(1).strip()
+
+    m_loc = re.search(r"(?:城市|现居地|所在地)[\s:：]*([一-龥]{2,6})", full_text)
+    if m_loc:
+        profile["location"] = m_loc.group(1).strip()
+
+    # 1. 优先提取 "姓名：张三" / "姓名 张三" / "姓名:张三"
+    m_name = re.search(r"姓名[\s:：]*([一-龥]{2,4})", full_text)
+    if m_name:
+        profile["name"] = m_name.group(1).strip()
+    else:
+        # 2. 启发式兜底：前 10 行内寻找单行 2-4 字中文
+        _EXCLUDE_NAME_HEADERS = {"基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料", "教育背景", "工作经历", "项目经历", "专业技能", "联系方式"}
+        for line in lines[:10]:
+            clean_l = _clean_line(line.strip())
+            m = _NAME_LINE_RE.match(clean_l)
+            if m:
+                val = m.group(1).strip()
+                if val not in _EXCLUDE_NAME_HEADERS:
+                    profile["name"] = val
+                    break
 
     return profile
 
@@ -392,28 +440,195 @@ def _parse_work_experiences(lines: list[str]) -> list[dict]:
     return jobs
 
 
+_EDU_SECTION_KEYS = ("教育背景", "教育经历", "教育信息", "education", "academic background")
+_PROJ_SECTION_KEYS = ("项目经历", "项目经验", "项目案例", "个人项目", "projects", "personal projects", "project experience")
+_SKILL_SECTION_KEYS = ("专业技能", "技能", "技能特长", "IT技能", "skills", "technical skills", "professional skills")
+_DEGREE_KEYWORDS = ("学士", "硕士", "博士", "本科", "大专", "专科", "研究生", "高中", "master", "bachelor", "phd", "b.s.", "m.s.", "b.a.", "m.a.")
+
+
+def _parse_education(lines: list[str]) -> list[dict]:
+    if not lines:
+        return []
+    header_line_idx = []
+    header_date = []
+    for i, line in enumerate(lines):
+        clean = line.strip()
+        if not clean:
+            continue
+        m = _DATE_RE.search(clean)
+        if m or any(k in clean for k in ("大学", "学院", "分校", "University", "College", "Institute", "School")):
+            header_line_idx.append(i)
+            header_date.append(m)
+
+    if not header_line_idx:
+        bullets = [l.strip() for l in lines if l.strip() and not any(_clean_line(l.strip()).lower().startswith(k) for k in _NEXT_SECTION_KEYS)]
+        if bullets:
+            return [{"school": bullets[0], "degree": "", "major": "", "period": "", "bullets": bullets[1:]}]
+        return []
+
+    entries = []
+    for n, idx in enumerate(header_line_idx):
+        line = lines[idx].strip()
+        date_m = header_date[n]
+        period = date_m.group(0).strip() if date_m else ""
+        before = line[:date_m.start()].strip(" \t|-—–·") if date_m else line
+        parts = [p.strip() for p in re.split(r"[\s　]{2,}|\t+|[|｜]", before) if p.strip()]
+
+        school, degree, major = "", "", ""
+        for p in parts:
+            p_lower = p.lower()
+            if any(d in p_lower for d in _DEGREE_KEYWORDS):
+                degree = p
+            elif any(u in p for u in ("大学", "学院", "分校", "University", "College", "Institute", "School")):
+                school = p
+            elif not school:
+                school = p
+            elif not major:
+                major = p
+
+        end_idx = header_line_idx[n + 1] if n + 1 < len(header_line_idx) else len(lines)
+        bullets = []
+        for j in range(idx + 1, end_idx):
+            raw = lines[j].strip()
+            if not raw or any(_clean_line(raw).lower().startswith(k) for k in _NEXT_SECTION_KEYS):
+                continue
+            bullets.append(_BULLET_PREFIX_RE.sub("", raw).strip())
+
+        entries.append({
+            "school": school,
+            "degree": degree,
+            "major": major,
+            "period": period,
+            "bullets": bullets,
+        })
+    return entries
+
+
+def _parse_projects(lines: list[str]) -> list[dict]:
+    if not lines:
+        return []
+    header_line_idx = []
+    header_date = []
+    for i, line in enumerate(lines):
+        clean = line.strip()
+        if not clean:
+            continue
+        m = _DATE_RE.search(clean)
+        if m or clean.startswith("【") or clean.startswith("[") or "项目" in clean or "System" in clean or "Platform" in clean:
+            if not _BULLET_PREFIX_RE.match(clean) and len(clean) < 80:
+                header_line_idx.append(i)
+                header_date.append(m)
+
+    if not header_line_idx:
+        bullets = [_BULLET_PREFIX_RE.sub("", l.strip()).strip() for l in lines if l.strip() and not _is_header_match(l, _NEXT_SECTION_KEYS)]
+        if bullets:
+            return [{
+                "name": bullets[0],
+                "role": "",
+                "period": "",
+                "tech_stack": "",
+                "bullets": bullets[1:] if len(bullets) > 1 else bullets,
+            }]
+        return []
+
+    projects = []
+    for n, idx in enumerate(header_line_idx):
+        line = lines[idx].strip()
+        date_m = header_date[n]
+        period = date_m.group(0).strip() if date_m else ""
+        before = line[:date_m.start()].strip(" \t|-—–·") if date_m else line
+
+        parts = [p.strip() for p in re.split(r"[\s　]{2,}|\t+|[|｜]", before) if p.strip()]
+        name = parts[0] if parts else before
+        role = parts[1] if len(parts) > 1 else ""
+
+        end_idx = header_line_idx[n + 1] if n + 1 < len(header_line_idx) else len(lines)
+        bullets = []
+        tech_stack = ""
+        for j in range(idx + 1, end_idx):
+            raw = lines[j].strip()
+            if not raw or any(_clean_line(raw).lower().startswith(k) for k in _NEXT_SECTION_KEYS):
+                continue
+            clean_b = _BULLET_PREFIX_RE.sub("", raw).strip()
+            if clean_b.startswith("技术栈") or clean_b.startswith("关键技术") or clean_b.startswith("Tech Stack"):
+                tech_stack = re.sub(r"^(?:技术栈|关键技术|Tech Stack)[:：\s]*", "", clean_b)
+            else:
+                bullets.append(clean_b)
+
+        projects.append({
+            "name": name,
+            "role": role,
+            "period": period,
+            "tech_stack": tech_stack,
+            "bullets": bullets,
+        })
+    return projects
+
+
+def _parse_skills(lines: list[str]) -> list[str]:
+    skills = []
+    for line in lines:
+        raw = line.strip()
+        if not raw or any(_clean_line(raw).lower().startswith(k) for k in _NEXT_SECTION_KEYS):
+            continue
+        clean = _BULLET_PREFIX_RE.sub("", raw).strip()
+        if clean:
+            if "：" in clean or ":" in clean or len(clean) > 25:
+                if clean not in skills:
+                    skills.append(clean)
+            else:
+                items = [item.strip() for item in re.split(r"[,;；\n•·|]+", clean) if item.strip()]
+                for it in items:
+                    if len(it) < 60 and it not in skills:
+                        skills.append(it)
+    return skills
+
+
+_SUMMARY_SECTION_KEYS = ("自我评价", "个人评价", "个人总结", "综合评价", "summary", "personal summary")
+
+
+def _parse_summary(lines: list[str]) -> str:
+    collected = []
+    for line in lines:
+        raw = line.strip()
+        if not raw or any(_clean_line(raw).lower().startswith(k) for k in _NEXT_SECTION_KEYS):
+            continue
+        collected.append(_BULLET_PREFIX_RE.sub("", raw).strip())
+    return "\n".join(collected)
+
+
 def parse_resume_structure(text: str) -> dict:
-    """主入口。返回 {profile, work_experiences}，所有字段原文 verbatim。"""
+    """主入口。返回 {profile, work_experiences, education, projects, skills, summary}，所有字段原文 verbatim。"""
     lines = text.split("\n")
 
-    # 分别解析工作经历和实习经历，合并到 work_experiences
     work_start, work_end = _find_section_bounds(lines, _WORK_SECTION_KEYS)
     intern_start, intern_end = _find_section_bounds(lines, _INTERN_SECTION_KEYS)
+    edu_start, edu_end = _find_section_bounds(lines, _EDU_SECTION_KEYS)
+    proj_start, proj_end = _find_section_bounds(lines, _PROJ_SECTION_KEYS)
+    skill_start, skill_end = _find_section_bounds(lines, _SKILL_SECTION_KEYS)
+    sum_start, sum_end = _find_section_bounds(lines, _SUMMARY_SECTION_KEYS)
 
     work_experiences: list[dict] = []
     if work_start is not None:
         work_section = lines[work_start + 1: work_end]
         work_experiences.extend(_parse_work_experiences(work_section))
     if intern_start is not None:
-        # 如果工作经历 section 已覆盖实习内容，避免重复解析
         if work_start is None or intern_start < work_start or intern_start >= (work_end or 0):
             intern_section = lines[intern_start + 1: intern_end]
             work_experiences.extend(_parse_work_experiences(intern_section))
-        # else: 实习在 work section 内部，已被工作经历解析覆盖，跳过
 
+    education = _parse_education(lines[edu_start + 1: edu_end]) if edu_start is not None else []
+    projects = _parse_projects(lines[proj_start + 1: proj_end]) if proj_start is not None else []
+    skills = _parse_skills(lines[skill_start + 1: skill_end]) if skill_start is not None else []
+    summary = _parse_summary(lines[sum_start + 1: sum_end]) if sum_start is not None else ""
     profile = _parse_profile(lines, text)
 
     return {
         "profile": profile,
         "work_experiences": work_experiences,
+        "education": education,
+        "projects": projects,
+        "skills": skills,
+        "summary": summary,
     }
+

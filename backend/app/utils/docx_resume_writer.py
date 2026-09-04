@@ -290,3 +290,167 @@ def rewrite_resume_docx(content_bytes: bytes, analysis_data: Dict[str, Any]) -> 
     out = io.BytesIO()
     doc.save(out)
     return out.getvalue()
+
+
+def generate_structured_resume_docx(analysis_data: Dict[str, Any]) -> bytes:
+    """当就地改写原 DOCX 失败或为 PDF 源文件时，根据 AI 结构化分析结果从头生成一份排版美观的标准 DOCX 简历。"""
+    import docx
+    from docx import Document
+    from docx.shared import Inches, Pt, RGBColor
+
+    doc = Document()
+    
+    # 设置边距 0.8 英寸
+    for section in doc.sections:
+        section.top_margin = Inches(0.8)
+        section.bottom_margin = Inches(0.8)
+        section.left_margin = Inches(0.8)
+        section.right_margin = Inches(0.8)
+
+    profile = analysis_data.get("profile") or {}
+    name = (profile.get("name") or "求职者").strip()
+    target_role = (profile.get("target_role") or profile.get("role") or "").strip()
+    phone = (profile.get("phone") or "").strip()
+    email = (profile.get("email") or "").strip()
+    location = (profile.get("location") or profile.get("city") or "").strip()
+    experience_years = (profile.get("experience_years") or "").strip()
+
+    # 1. 姓名 & 目标岗位
+    title_p = doc.add_paragraph()
+    title_run = title_p.add_run(name)
+    title_run.bold = True
+    title_run.font.size = Pt(20)
+    title_p.paragraph_format.space_after = Pt(4)
+
+    if target_role:
+        role_run = title_p.add_run(f"  |  {target_role}")
+        role_run.font.size = Pt(13)
+        role_run.font.color.rgb = RGBColor(100, 116, 139)
+
+    # 2. 联系方式
+    contact_parts = [p for p in [phone, email, location, experience_years] if p]
+    if contact_parts:
+        contact_p = doc.add_paragraph("  •  ".join(contact_parts))
+        contact_p.paragraph_format.space_after = Pt(14)
+        for r in contact_p.runs:
+            r.font.size = Pt(9.5)
+            r.font.color.rgb = RGBColor(71, 85, 105)
+
+    def add_section_header(title_text: str):
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(12)
+        p.paragraph_format.space_after = Pt(6)
+        r = p.add_run(title_text)
+        r.bold = True
+        r.font.size = Pt(12)
+        r.font.color.rgb = RGBColor(30, 58, 138)
+
+    # 3. 个人优势 / 总结
+    summary = (analysis_data.get("summary") or profile.get("summary") or "").strip()
+    if summary:
+        add_section_header("个人优势 / 综合评价")
+        p = doc.add_paragraph(summary)
+        p.paragraph_format.space_after = Pt(8)
+        for r in p.runs:
+            r.font.size = Pt(10)
+
+    # 4. 工作经历
+    work_exps = analysis_data.get("work_experiences") or []
+    if work_exps:
+        add_section_header("工作经历")
+        for work in work_exps:
+            company = (work.get("company") or "").strip()
+            role = (work.get("role") or "").strip()
+            time_range = (work.get("time_range") or work.get("duration") or "").strip()
+
+            header_p = doc.add_paragraph()
+            header_p.paragraph_format.space_before = Pt(6)
+            header_p.paragraph_format.space_after = Pt(2)
+            
+            c_run = header_p.add_run(company)
+            c_run.bold = True
+            c_run.font.size = Pt(10.5)
+
+            if role:
+                r_run = header_p.add_run(f"  —  {role}")
+                r_run.bold = True
+                r_run.font.size = Pt(10.5)
+
+            if time_range:
+                t_run = header_p.add_run(f"\t{time_range}")
+                t_run.font.size = Pt(9.5)
+                t_run.font.color.rgb = RGBColor(100, 116, 139)
+
+            bullets = work.get("bullets") or []
+            for b in bullets:
+                opt_text = (b.get("optimizedText") or b.get("originalText") or "").strip()
+                if opt_text:
+                    bp = doc.add_paragraph(style='List Bullet')
+                    bp.paragraph_format.space_after = Pt(3)
+                    brun = bp.add_run(opt_text)
+                    brun.font.size = Pt(9.5)
+
+    # 5. 核心项目
+    projects = analysis_data.get("projects") or []
+    if projects:
+        add_section_header("核心项目经历")
+        for proj in projects:
+            p_name = (proj.get("name") or proj.get("title") or "").strip()
+            p_role = (proj.get("role") or "").strip()
+            p_time = (proj.get("duration") or proj.get("time") or "").strip()
+
+            header_p = doc.add_paragraph()
+            header_p.paragraph_format.space_before = Pt(6)
+            header_p.paragraph_format.space_after = Pt(2)
+
+            pr_run = header_p.add_run(p_name)
+            pr_run.bold = True
+            pr_run.font.size = Pt(10.5)
+
+            if p_role:
+                ro_run = header_p.add_run(f"  ({p_role})")
+                ro_run.font.size = Pt(10)
+
+            if p_time:
+                ti_run = header_p.add_run(f"\t{p_time}")
+                ti_run.font.size = Pt(9.5)
+
+            bullets = proj.get("bullets") or proj.get("details") or []
+            if isinstance(bullets, list):
+                for b in bullets:
+                    txt = b.get("optimizedText") or b.get("originalText") or b if isinstance(b, dict) else str(b)
+                    txt = str(txt).strip()
+                    if txt:
+                        bp = doc.add_paragraph(style='List Bullet')
+                        bp.paragraph_format.space_after = Pt(3)
+                        brun = bp.add_run(txt)
+                        brun.font.size = Pt(9.5)
+
+    # 6. 教育背景
+    education = analysis_data.get("education") or profile.get("education") or []
+    if education:
+        add_section_header("教育背景")
+        if isinstance(education, list):
+            for edu in education:
+                if isinstance(edu, dict):
+                    school = (edu.get("school") or "").strip()
+                    degree = (edu.get("degree") or "").strip()
+                    major = (edu.get("major") or "").strip()
+                    year = (edu.get("year") or edu.get("duration") or "").strip()
+                    
+                    ep = doc.add_paragraph()
+                    ep.paragraph_format.space_after = Pt(3)
+                    s_run = ep.add_run(school)
+                    s_run.bold = True
+                    s_run.font.size = Pt(10)
+                    if degree or major:
+                        ep.add_run(f"  |  {degree} {major}".strip())
+                    if year:
+                        ep.add_run(f"\t{year}")
+                else:
+                    ep = doc.add_paragraph(str(edu))
+                    ep.paragraph_format.space_after = Pt(3)
+
+    out = io.BytesIO()
+    doc.save(out)
+    return out.getvalue()

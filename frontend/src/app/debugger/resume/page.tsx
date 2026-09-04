@@ -61,6 +61,7 @@ function ResumeAnalysisPageContent() {
   const [expandedAts, setExpandedAts] = useState<Record<number, boolean>>({});
 
   // Prefill metadata from localStorage if available
+  // Prefill metadata from localStorage if available
   useEffect(() => {
     if (typeof window === "undefined") return;
     const storedResult = localStorage.getItem("interviewVar_resume_analysis_result");
@@ -73,6 +74,25 @@ function ResumeAnalysisPageContent() {
         }
         // Got data synchronously — clear the overlay now.
         setIsHydrating(false);
+
+        // If stored result has an ID, silently refetch from backend to get latest re-parsed sections
+        if (parsed.id) {
+          const token = localStorage.getItem("interviewVar_token");
+          const headers: Record<string, string> = { "Content-Type": "application/json" };
+          if (token) headers["Authorization"] = `Bearer ${token}`;
+          fetch(`${API_BASE}/api/resume/analyses/${parsed.id}`, { headers })
+            .then((res) => (res.ok ? res.json() : null))
+            .then((latest) => {
+              if (latest) {
+                setAnalysisResult(latest);
+                localStorage.setItem("interviewVar_resume_analysis_result", JSON.stringify(latest));
+                if (latest.profile) {
+                  setProfile((prev) => ({ ...prev, ...latest.profile }));
+                }
+              }
+            })
+            .catch((err) => console.error("Background sync failed:", err));
+        }
         return;
       } catch (e) {
         console.error("Failed to parse resume analysis result:", e);
@@ -99,10 +119,6 @@ function ResumeAnalysisPageContent() {
       }
     }
 
-    // No cached result. If we're navigating to a shared ?id= link, keep
-    // isHydrating=true so the second useEffect can fetch from API; only
-    // the second effect should unblock in that case. Otherwise (cold load
-    // with no id) unblock now so we don't strand the page on a spinner.
     const hasIdInUrl = new URLSearchParams(window.location.search).get("id");
     if (!hasIdInUrl) setIsHydrating(false);
   }, []);
@@ -115,13 +131,64 @@ function ResumeAnalysisPageContent() {
       const displayName = auth.user.name && auth.user.name.trim() !== "" && auth.user.name !== "XXX" ? auth.user.name : "候选人";
       setProfile((prev) => ({
         ...prev,
-        name: displayName,
-        company: validCompany,
-        role: validRole,
-        title: validRole !== "-" ? validRole : "-",
+        name: prev.name && prev.name !== "候选人" && prev.name !== "aa" && prev.name !== "XXX" ? prev.name : displayName,
+        company: prev.company && prev.company !== "-" ? prev.company : validCompany,
+        role: prev.role && prev.role !== "-" ? prev.role : validRole,
+        title: prev.title && prev.title !== "-" ? prev.title : (validRole !== "-" ? validRole : "-"),
       }));
     }
   }, [auth.isLoggedIn, auth.user]);
+
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [recommendedTemplate, setRecommendedTemplate] = useState("classic");
+  const [recommendReason, setRecommendReason] = useState("");
+  const [isSelectingTemplate, setIsSelectingTemplate] = useState(false);
+
+  const handleOpenExportModal = async () => {
+    const analysisId = analysisResult?.id;
+    if (!analysisId) {
+      triggerToast("未找到分析记录，请刷新后重试");
+      return;
+    }
+
+    setIsSelectingTemplate(true);
+    try {
+      const token = typeof window !== "undefined"
+        ? localStorage.getItem("interviewVar_token")
+        : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      // 1. Refetch latest analysis structure from backend to ensure 100% of sections (Education, Projects, Skills, Summary, Profile) are updated
+      const analysisRes = await fetch(`${API_BASE}/api/resume/analyses/${analysisId}`, { headers });
+      if (analysisRes.ok) {
+        const updatedData = await analysisRes.json();
+        setAnalysisResult(updatedData);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("interviewVar_resume_analysis_result", JSON.stringify(updatedData));
+        }
+      }
+
+      // 2. Select template
+      const res = await fetch(`${API_BASE}/api/resume/analyses/${analysisId}/select-template`, {
+        method: "POST",
+        headers,
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.data?.recommended_template) {
+          setRecommendedTemplate(data.data.recommended_template);
+          setRecommendReason(data.data.recommend_reason || "");
+        }
+      }
+    } catch (e) {
+      console.error("Select template failed:", e);
+    } finally {
+      setIsSelectingTemplate(false);
+      setIsExportModalOpen(true);
+    }
+  };
 
   // If URL has ?id=<analysis_id>, fetch that historical analysis from backend
   // and overwrite localStorage so the page renders the right report.
@@ -173,10 +240,10 @@ function ResumeAnalysisPageContent() {
     }, 2500);
   };
 
-  const handleDownload = async () => {
+  const handleDownload = async (fileFormat: string = "pdf") => {
     const analysisId = analysisResult?.id;
     if (!analysisId) {
-      triggerToast("未找到分析记录，请刷新后重试", "error");
+      triggerToast("未找到分析记录，请刷新后重试");
       setDownloadState("error");
       setTimeout(() => setDownloadState("idle"), 2500);
       return;
@@ -192,21 +259,17 @@ function ResumeAnalysisPageContent() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       const res = await fetch(
-        `${API_BASE}/api/resume/analyses/${analysisId}/download`,
+        `${API_BASE}/api/resume/analyses/${analysisId}/download?format=${fileFormat}&source=${viewMode}`,
         { headers }
       );
 
       if (!res.ok) {
-        // 鉴权失败：弹登录引导（用 .detail 文案但不抛 error，避免通用 catch 噪音）
         if (res.status === 401 || res.status === 403) {
           setDownloadState("error");
-          triggerToast("登录已失效，请重新登录后再下载", "error");
-          // 同时唤起登录弹窗（如果有 AuthProvider 暴露的方法）
+          triggerToast("登录已失效，请重新登录后再下载");
           try {
             auth.setShowLogin?.(true);
-          } catch {
-            /* AuthProvider 不可用时不阻塞 */
-          }
+          } catch {}
           setTimeout(() => setDownloadState("idle"), 2500);
           return;
         }
@@ -214,9 +277,7 @@ function ResumeAnalysisPageContent() {
         try {
           const errBody = await res.json();
           if (errBody?.detail) errMsg = errBody.detail;
-        } catch {
-          /* non-JSON error */
-        }
+        } catch {}
         throw new Error(errMsg);
       }
 
@@ -227,9 +288,7 @@ function ResumeAnalysisPageContent() {
       if (utf8Match) {
         try {
           filename = decodeURIComponent(utf8Match[1]);
-        } catch {
-          /* ignore */
-        }
+        } catch {}
       }
       if (!filename) {
         const asciiMatch = dispo.match(/filename="([^"]+)"/i);
@@ -238,7 +297,7 @@ function ResumeAnalysisPageContent() {
       if (!filename) {
         const safeName = (profile.name || "候选人").replace(/[\\/:*?"<>|\r\n\t]+/g, "_");
         const today = new Date().toISOString().slice(0, 10);
-        filename = `面试驾到_简历_${safeName}_${today}.docx`;
+        filename = `面试驾到_简历_${safeName}_${today}.${fileFormat}`;
       }
 
       const blob = await res.blob();
@@ -250,16 +309,15 @@ function ResumeAnalysisPageContent() {
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      // 延迟 revoke，避免某些浏览器下载未完成就 revoke
       setTimeout(() => URL.revokeObjectURL(url), 1000);
 
       setDownloadState("success");
-      triggerToast(`已下载 ${filename}`);
+      triggerToast(`已成功下载 ${filename}`);
       setTimeout(() => setDownloadState("idle"), 2500);
     } catch (e: any) {
-      console.error("Download DOCX failed:", e);
+      console.error("Download PDF failed:", e);
       setDownloadState("error");
-      triggerToast(e?.message || "下载失败，请稍后重试", "error");
+      triggerToast(e?.message || "下载失败，请稍后重试");
       setTimeout(() => setDownloadState("idle"), 2500);
     }
   };
@@ -361,7 +419,15 @@ function ResumeAnalysisPageContent() {
   ];
 
   const workExperiences = analysisResult?.work_experiences || DEFAULT_WORK_EXPERIENCES;
-  const personalProjects = analysisResult?.personal_projects || [];
+  const personalProjects = analysisResult?.personal_projects || analysisResult?.projects || [];
+  const educationList = analysisResult?.education || analysisResult?.education_history || [];
+  const rawSkills = analysisResult?.skills || analysisResult?.technical_skills || [];
+  const skillsList: string[] = Array.isArray(rawSkills)
+    ? rawSkills.map((s: any) => (typeof s === "string" ? s : s.name || s.skill || JSON.stringify(s)))
+    : typeof rawSkills === "string" && rawSkills.trim()
+    ? rawSkills.split(/[,;\n\s]+/).filter(Boolean)
+    : [];
+  const summaryText = (analysisResult?.summary || profile.summary || "").trim();
 
   const DEFAULT_RISKS = [
     { title: "核心业绩缺少量化指标", desc: "在字节跳动开发推荐服务时，未明确写出提升了多少吞吐量或降低了多少毫秒耗时。高水平架构师极度看重数据支撑。", severity: "高风险" },
@@ -1103,7 +1169,7 @@ function ResumeAnalysisPageContent() {
                     </div>
 
                     <div className="space-y-6">
-                      {workExperiences.map((exp, expIdx) => (
+                      {workExperiences.map((exp: any, expIdx: number) => (
                         <div key={expIdx} className="space-y-3.5 text-left">
                           <div className="flex justify-between items-center text-xs font-bold font-mono">
                             <div className="flex items-center gap-3">
@@ -1114,7 +1180,7 @@ function ResumeAnalysisPageContent() {
                           </div>
 
                           <div className="space-y-2.5">
-                            {exp.bullets.map((bullet, bullIdx) => {
+                            {exp.bullets.map((bullet: any, bullIdx: number) => {
                               const isOriginal = viewMode === "original";
                               const textContent = isOriginal ? bullet.originalText : bullet.optimizedText;
                               const badgeLabel = isOriginal ? bullet.originalTag : bullet.optimizedTag;
@@ -1177,7 +1243,7 @@ function ResumeAnalysisPageContent() {
                         </div>
                       ) : (
                         <div className="space-y-6">
-                          {personalProjects.map((proj, projIdx) => (
+                          {personalProjects.map((proj: any, projIdx: number) => (
                             <div key={projIdx} className="space-y-3.5 text-left">
                               <div className="flex justify-between items-center text-xs font-bold font-mono">
                                 <div className="flex items-center gap-3 flex-wrap">
@@ -1239,6 +1305,81 @@ function ResumeAnalysisPageContent() {
                         </div>
                       )}
                     </div>
+
+                    {/* ── 教育背景 ── */}
+                    {educationList.length > 0 && (
+                      <div className="space-y-4 pt-4 mt-2 border-t border-slate-200 dark:border-white/5">
+                        <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-white/5">
+                          <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-base text-indigo-600 dark:text-[#AFA7FF]">school</span>
+                            教育背景
+                          </h4>
+                        </div>
+                        <div className="space-y-3">
+                          {educationList.map((edu: any, idx: number) => {
+                            const schoolName = typeof edu === "string" ? edu : (edu.school || "教育背景");
+                            const period = typeof edu === "object" ? (edu.period || edu.year || edu.time_range || "") : "";
+                            const subInfo = typeof edu === "object" ? [edu.degree, edu.major].filter(Boolean).join(" · ") : "";
+                            const bullets = typeof edu === "object" ? (edu.bullets || []) : [];
+                            return (
+                              <div key={idx} className="p-3.5 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.02] space-y-2 text-xs md:text-sm text-left">
+                                <div className="flex justify-between items-center font-bold">
+                                  <div className="flex items-center gap-2.5 flex-wrap">
+                                    <span className="text-sm font-black text-slate-900 dark:text-white">{schoolName}</span>
+                                    {subInfo && (
+                                      <span className="text-slate-600 dark:text-white/60 font-semibold">{subInfo}</span>
+                                    )}
+                                  </div>
+                                  {period && <span className="text-slate-400 dark:text-white/30 font-mono shrink-0">{period}</span>}
+                                </div>
+                                {bullets.length > 0 && (
+                                  <div className="space-y-1 pl-1 pt-1 text-slate-600 dark:text-slate-300 text-xs leading-relaxed font-medium">
+                                    {bullets.map((b: string, bIdx: number) => (
+                                      <p key={bIdx}>• {b}</p>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── 专业技能 ── */}
+                    {skillsList.length > 0 && (
+                      <div className="space-y-4 pt-4 mt-2 border-t border-slate-200 dark:border-white/5">
+                        <div className="flex justify-between items-center pb-2 border-b border-slate-200 dark:border-white/5">
+                          <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-base text-emerald-600 dark:text-[#5DECCB]">construction</span>
+                            专业技能
+                          </h4>
+                        </div>
+                        <div className="p-3.5 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.02] space-y-2 text-xs md:text-sm text-left">
+                          {skillsList.map((skill: any, sIdx: number) => {
+                            const text = typeof skill === "string" ? skill : JSON.stringify(skill);
+                            return (
+                              <p key={sIdx} className="text-slate-700 dark:text-slate-200 leading-relaxed font-semibold">
+                                {text.startsWith("•") ? text : `• ${text}`}
+                              </p>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── 自我评价 ── */}
+                    {summaryText && (
+                      <div className="space-y-3 pt-4 mt-2 border-t border-slate-200 dark:border-white/5">
+                        <h4 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <span className="material-symbols-outlined text-base text-amber-500">person</span>
+                          自我评价
+                        </h4>
+                        <div className="p-3.5 rounded-xl border border-slate-200 dark:border-white/5 bg-slate-50/50 dark:bg-white/[0.02] text-xs md:text-sm text-slate-700 dark:text-slate-200 font-semibold leading-relaxed whitespace-pre-line text-left">
+                          {summaryText}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1730,7 +1871,8 @@ function ResumeAnalysisPageContent() {
             <div className="relative z-10 flex flex-col items-end gap-2 w-full md:w-auto text-sm font-black">
               <DownloadButtonWithTooltip
                 downloadState={downloadState}
-                onDownload={() => handleDownload("docx")}
+                isSelectingTemplate={false}
+                onDownload={() => handleDownload("pdf")}
               />
             </div>
           </div>
@@ -1742,7 +1884,7 @@ function ResumeAnalysisPageContent() {
       {/* ========================================================
           GLOBAL FOOTER
          ======================================================== */}
-      <Footer showHomeLink={true} />
+      <Footer />
 
       {/* ========================================================
           MODAL: EDIT PROFILE FORM
@@ -2135,7 +2277,7 @@ function ResumeAnalysisPageContent() {
                           针对性优化建议
                         </h5>
                         <ul className="resume-suggestions-list space-y-2 text-xs font-bold pl-5 list-disc leading-relaxed">
-                          {section.advice.map((item, i) => (
+                          {section.advice.map((item: string, i: number) => (
                             <li key={i}>{item}</li>
                           ))}
                         </ul>
@@ -2212,96 +2354,20 @@ type DownloadState = "idle" | "loading" | "success" | "error";
 
 function DownloadButtonWithTooltip({
   downloadState,
+  isSelectingTemplate,
   onDownload,
 }: {
   downloadState: DownloadState;
+  isSelectingTemplate?: boolean;
   onDownload: () => void;
 }) {
-  const buttonGroupRef = useRef<HTMLDivElement | null>(null);
-  const helpBtnRef = useRef<HTMLButtonElement | null>(null);
-  const [tooltipPos, setTooltipPos] = useState<{ top: number; left: number } | null>(null);
-  const [tooltipVisible, setTooltipVisible] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  const updatePos = () => {
-    const btn = helpBtnRef.current;
-    if (!btn) return;
-    const rect = btn.getBoundingClientRect();
-    // tooltip 320px 宽,右对齐到 help 按钮右边
-    const tooltipWidth = 320;
-    const gap = 8;
-    let left = rect.right - tooltipWidth;
-    // 防止溢出左边界
-    if (left < 8) left = 8;
-    setTooltipPos({ top: rect.bottom + gap, left });
-  };
-
-  const showTooltip = () => {
-    updatePos();
-    setTooltipVisible(true);
-  };
-  const hideTooltip = () => setTooltipVisible(false);
-
-  // 滚动/缩放时重算位置
-  useEffect(() => {
-    if (!tooltipVisible) return;
-    const handler = () => updatePos();
-    window.addEventListener("scroll", handler, true);
-    window.addEventListener("resize", handler);
-    return () => {
-      window.removeEventListener("scroll", handler, true);
-      window.removeEventListener("resize", handler);
-    };
-  }, [tooltipVisible]);
-
-  const tooltip = mounted && tooltipPos && tooltipVisible ? (
-    createPortal(
-      <div
-        role="tooltip"
-        style={{
-          position: "fixed",
-          top: tooltipPos.top,
-          left: tooltipPos.left,
-          width: 320,
-          zIndex: 9999,
-        }}
-        className="docx-tooltip-card bg-[#050B1A] text-white rounded-2xl shadow-2xl p-4 text-xs font-medium leading-relaxed pointer-events-none border border-white/15 relative"
-      >
-        {/* 上箭头：无缝无拼接倒三角 */}
-        <div className="absolute -top-1.5 right-4 w-3 h-3 bg-[#050B1A] border-l border-t border-white/15 rotate-45 z-10" />
-        <div className="space-y-2.5 relative z-20">
-          <div className="flex items-start gap-2">
-            <span className="material-symbols-outlined text-sm text-[#00D4FF] shrink-0 mt-0.5">info</span>
-            <span className="text-white text-xs leading-relaxed font-medium">当前仅支持导出 <b className="text-white font-black">DOCX</b> 格式，PDF 导出我们正在筹备中</span>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="material-symbols-outlined text-sm text-[#FF7A95] shrink-0 mt-0.5">warning</span>
-            <span className="text-white text-xs leading-relaxed font-medium">若您的简历是 <b className="text-white font-black">PDF 格式</b>，下载时会经 PDF→DOCX 转换，复杂排版（分栏、特殊字体、文本框等）<b className="text-white font-black">会有损失</b>。建议直接上传 <b className="text-white font-black">DOCX 原件</b>，完整保留你的排版</span>
-          </div>
-        </div>
-      </div>,
-      document.body
-    )
-  ) : null;
-
   return (
-    <div
-      ref={buttonGroupRef}
-      onMouseEnter={showTooltip}
-      onMouseLeave={hideTooltip}
-      onFocus={showTooltip}
-      onBlur={hideTooltip}
-      className="relative flex items-center gap-2 w-full md:w-auto"
-    >
+    <div className="relative flex items-center gap-2 w-full md:w-auto">
       <button
         onClick={onDownload}
-        disabled={downloadState === "loading"}
-        className={`flex-1 md:flex-none px-6 py-3 rounded-xl transition-all shadow-md whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer ${
-          downloadState === "loading"
+        disabled={downloadState === "loading" || isSelectingTemplate}
+        className={`flex-1 md:flex-none px-6 py-3 rounded-xl transition-all shadow-md whitespace-nowrap flex items-center justify-center gap-1.5 cursor-pointer font-extrabold ${
+          downloadState === "loading" || isSelectingTemplate
             ? "bg-slate-100 dark:bg-white/10 text-slate-500 dark:text-white/60 cursor-not-allowed shadow-none"
             : downloadState === "success"
               ? "bg-[#5DECCB] text-[#050B1A] shadow-[#5DECCB]/30"
@@ -2310,40 +2376,37 @@ function DownloadButtonWithTooltip({
                 : "bg-gradient-to-r from-[#AFA7FF] to-[#00D4FF] text-[#050B1A] hover:scale-[1.01] active:scale-98 shadow-[#AFA7FF]/25"
         }`}
       >
-        {downloadState === "loading" && (
+        {isSelectingTemplate && (
           <>
             <span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-            正在生成 DOCX…
+            AI 判别匹配模板中…
           </>
         )}
-        {downloadState === "success" && (
+        {!isSelectingTemplate && downloadState === "loading" && (
+          <>
+            <span className="inline-block w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+            正在生成简历…
+          </>
+        )}
+        {!isSelectingTemplate && downloadState === "success" && (
           <>
             <span className="material-symbols-outlined text-sm">check_circle</span>
             下载成功
           </>
         )}
-        {downloadState === "error" && (
+        {!isSelectingTemplate && downloadState === "error" && (
           <>
             <span className="material-symbols-outlined text-sm">error</span>
             重试下载
           </>
         )}
-        {downloadState === "idle" && (
+        {!isSelectingTemplate && downloadState === "idle" && (
           <>
-            下载 AI 优化版简历 (DOCX)
+            下载优化版简历
             <span className="material-symbols-outlined text-sm">download</span>
           </>
         )}
       </button>
-      <button
-        ref={helpBtnRef}
-        type="button"
-        aria-label="下载说明"
-        className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 dark:bg-white/5 dark:hover:bg-white/15 flex items-center justify-center transition-colors cursor-help shrink-0"
-      >
-        <span className="material-symbols-outlined text-base text-slate-500 dark:text-white/70">help</span>
-      </button>
-      {tooltip}
     </div>
   );
 }

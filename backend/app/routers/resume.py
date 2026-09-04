@@ -11,7 +11,7 @@ import time
 import uuid
 from datetime import datetime
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any, List
 from urllib.parse import quote
 
 from app import models
@@ -21,7 +21,8 @@ from app.routers.file import get_cos_client, bucket, delete_file_from_storage
 from app.utils.resume_parser import extract_resume_text, parse_resume_structure
 from app.services.embedding_indexer import schedule_index
 from app.utils.llm import analyze_resume_text
-from app.utils.docx_resume_writer import rewrite_resume_docx, BulletMatchError
+from app.utils.docx_resume_writer import rewrite_resume_docx, generate_structured_resume_docx, BulletMatchError
+from app.utils.pdf_resume_writer import generate_pdf_from_analysis
 from app.utils.pdf_to_docx import convert_pdf_to_docx
 from app.services.quota import FEATURE_RESUME, check_and_consume
 from app.utils.privacy import desensitize_text, desensitize_parsed_structure
@@ -437,27 +438,26 @@ async def _run_resume_analysis_impl_inner(file_id: int, task_id: str, user_id: O
 
         # ── Step 6: 后处理 + 持久化 ──
         await _resume_set_progress(task_id, 90, "processing")
+        analysis_result["raw_resume_text"] = resume_text
         _merge_parsed_structure(analysis_result, parsed_structure)
 
         profile_section = analysis_result.get("profile")
         if isinstance(profile_section, dict):
             if current_user:
-                profile_section["name"] = current_user.username
+                # 仅当 profile 里的姓名缺失或为通用占位符/账号名 aa 时，才兜底用 current_user.username
+                curr_name = (profile_section.get("name") or "").strip()
+                if not curr_name or curr_name in ("候选人", "基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料", "aa", "XXX"):
+                    profile_section["name"] = current_user.username or "候选人"
                 if current_user.profile:
                     p = current_user.profile
                     annotated_salary = _format_salary_range(p.salary_min, p.salary_max)
                     if annotated_salary:
                         profile_section["salary"] = annotated_salary
-                    if p.company_name and p.company_name.strip() and p.company_name.strip() not in ("暂无", "暂无公司", "-"):
+                    if (not profile_section.get("company") or profile_section.get("company") == "-") and p.company_name and p.company_name.strip() not in ("暂无", "暂无公司", "-"):
                         profile_section["company"] = p.company_name.strip()
-                    else:
-                        profile_section["company"] = "-"
-                    if p.role_name and p.role_name.strip() and p.role_name.strip() not in ("暂无", "-"):
+                    if (not profile_section.get("role") or profile_section.get("role") == "-") and p.role_name and p.role_name.strip() not in ("暂无", "-"):
                         profile_section["role"] = p.role_name.strip()
                         profile_section["title"] = p.role_name.strip()
-                    else:
-                        profile_section["role"] = "-"
-                        profile_section["title"] = "-"
             else:
                 if not profile_section.get("name") or profile_section.get("name") in ("基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料"):
                     profile_section["name"] = "候选人"
@@ -667,17 +667,18 @@ async def list_resume_analyses(
 @router.get("/analyses/{analysis_id}/download")
 async def download_resume_analysis(
     analysis_id: int,
+    file_format: str = "pdf",
+    source: str = "original",
+    template: str = "minimal",
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional)
 ):
-    """下载 AI 优化后的简历（DOCX）。
+    """下载简历文件（基于用户上传的原简历文件进行改写与导出）。
 
-    保留原简历的字体/颜色/图标/分栏/表格等所有样式，只把工作经历 bullets 的文字
-    就地替换为 LLM 优化后的版本。源文件是 PDF 时先转 DOCX 再改写；
-    bullet 识别率 < 80% 时返回 500，请用户检查简历排版后重试。
-
-    2026-08-04+：暂时只输出 DOCX，PDF 导出因 LibreOffice 吃紧（2 核 4G 服务器）
-    暂不支持。简历上传时若用户传 PDF，前端会有提示「PDF 转 DOCX 可能有格式损失」。
+    - 存在原简历文件：
+      * 原简历为 DOCX/PDF：原位置保留原格式/字号/表格/排版，将 bullet 替换为 AI 优化版本并转为 PDF / DOCX。
+      * 若选择原简历内容：直接基于原简历原始二进制导出 PDF / DOCX。
+    - 无原文件记录时：回退到通用高保真 PDF 渲染。
     """
     stmt = select(models.ResumeAnalysis).where(models.ResumeAnalysis.id == analysis_id)
     ra = (await db.execute(stmt)).scalars().first()
@@ -688,79 +689,259 @@ async def download_resume_analysis(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该简历分析记录")
 
     analysis_data = ra.result_json or {}
-    if not analysis_data.get("work_experiences"):
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="该简历分析记录缺少结构化数据，请重新上传简历生成新分析"
-        )
+    if isinstance(analysis_data, dict) and "parsed_structure" in analysis_data:
+        parsed_struct = analysis_data["parsed_structure"]
+    else:
+        parsed_struct = analysis_data.get("parsed_structure") or {}
 
-    # 用画像标注的薪资覆盖展示值
-    if current_user and current_user.profile and isinstance(analysis_data.get("profile"), dict):
-        annotated_salary = _format_salary_range(
-            current_user.profile.salary_min, current_user.profile.salary_max
-        )
-        if annotated_salary:
-            analysis_data["profile"]["salary"] = annotated_salary
-
-    # 拉源文件信息（需要 db_file 用于 COS key 和 filename）
-    file_stmt = select(models.UploadedFile).where(models.UploadedFile.id == ra.file_id)
-    db_file = (await db.execute(file_stmt)).scalars().first()
-    if not db_file:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="简历源文件记录缺失，请重新上传简历"
-        )
-
-    src_ext = (db_file.filename or "").rsplit(".", 1)[-1].lower()
-    if src_ext not in ("docx", "pdf"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"原文件格式不支持 DOCX 改写: {src_ext}"
-        )
-
-    profile = analysis_data.get("profile") or {}
+    profile = analysis_data.get("profile") or (parsed_struct.get("profile") if isinstance(parsed_struct, dict) else {}) or {}
     raw_name = (profile.get("name") or "").strip() or "候选人"
     safe_name = _sanitize_filename(raw_name)
     today = datetime.now().strftime("%Y-%m-%d")
 
+    # 检查是否有用户上传的原简历文件
+    file_stmt = select(models.UploadedFile).where(models.UploadedFile.id == ra.file_id)
+    db_file = (await db.execute(file_stmt)).scalars().first() if ra.file_id else None
+
+    # === 路径 A: 存在用户提交的原简历文件 ===
+    if db_file:
+        src_ext = (db_file.filename or "").rsplit(".", 1)[-1].lower()
+        try:
+            content_bytes = await _download_from_cos(db_file.cos_key)
+
+            # A1. 用户选择【原简历内容】(完全保留原始提交文件)
+            if source == "original":
+                if file_format.lower() == "pdf":
+                    if src_ext == "pdf":
+                        # 直接返回原 PDF 文件
+                        encoded_filename = quote(f"面试驾到_原简历_{safe_name}_{today}.pdf")
+                        headers = {
+                            "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}',
+                            "Access-Control-Expose-Headers": "Content-Disposition",
+                        }
+                        return Response(content=content_bytes, media_type="application/pdf", headers=headers)
+                    else:
+                        # 原文件是 DOCX，转成 PDF
+                        pdf_bytes = await asyncio.to_thread(docx_to_pdf, content_bytes)
+                        encoded_filename = quote(f"面试驾到_原简历_{safe_name}_{today}.pdf")
+                        headers = {
+                            "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}',
+                            "Access-Control-Expose-Headers": "Content-Disposition",
+                        }
+                        return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+                else:
+                    # 下载原 DOCX 文件
+                    return _make_file_response(content_bytes, safe_name, today)
+
+            # A2. 用户选择【AI 优化版履历】(在原简历文件排版上进行文字就地替换改写)
+            docx_source_bytes = content_bytes
+            if src_ext == "pdf":
+                # PDF 原文件转 DOCX 以进行文本改写
+                docx_source_bytes = await asyncio.to_thread(convert_pdf_to_docx, content_bytes)
+
+            try:
+                rewritten_docx_bytes = await asyncio.to_thread(rewrite_resume_docx, docx_source_bytes, analysis_data)
+            except Exception as rw_err:
+                logger.warning("[resume_download] 就地改写失败，走结构化 DOCX 兜底: %s", rw_err)
+                rewritten_docx_bytes = await asyncio.to_thread(generate_structured_resume_docx, analysis_data)
+
+            if file_format.lower() == "pdf":
+                pdf_bytes = await asyncio.to_thread(docx_to_pdf, rewritten_docx_bytes)
+                encoded_filename = quote(f"面试驾到_AI优化简历_{safe_name}_{today}.pdf")
+                headers = {
+                    "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}',
+                    "Access-Control-Expose-Headers": "Content-Disposition",
+                }
+                return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+            else:
+                return _make_file_response(rewritten_docx_bytes, safe_name, today)
+
+        except Exception as e:
+            logger.warning("[resume_download] 基于原简历文件修改/转码失败，走全局 PDF/DOCX 兜底生成: %s", e)
+
+    # === 路径 B: 无原文件记录或云端拉取失败时的通用 PDF / DOCX 兜底绘制 ===
+    if file_format.lower() == "pdf":
+        pdf_bytes = await asyncio.to_thread(
+            generate_pdf_from_analysis,
+            analysis_data,
+            source=source,
+            template=template,
+        )
+        encoded_filename = quote(f"面试驾到_简历_{safe_name}_{today}.pdf")
+        headers = {
+            "Content-Disposition": f'attachment; filename="{encoded_filename}"; filename*=UTF-8\'\'{encoded_filename}',
+            "Access-Control-Expose-Headers": "Content-Disposition",
+        }
+        return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+    else:
+        docx_bytes = await asyncio.to_thread(generate_structured_resume_docx, analysis_data)
+        return _make_file_response(docx_bytes, safe_name, today)
+
+
+async def select_resume_template_llm(analysis_data: Dict[str, Any]) -> Dict[str, Any]:
+    """结合之前大模型已输出的优化后简历上下文（profile, work_experiences, projects, summary等），
+    二次调用大模型，由大模型自主智能判定最适合该求职者的简历排版模板（classic, minimal, twocolumn, mint, morandi）并说明推荐理由。
+    """
+    profile = analysis_data.get("profile") or {}
+    parsed_struct = analysis_data.get("parsed_structure") or {}
+    raw_role = profile.get("target_role") or profile.get("role") or parsed_struct.get("target_role") or analysis_data.get("job_target") or ""
+    if not raw_role or raw_role.strip() in ("-", "未填写", "None", "null", "暂无"):
+        target_role = "求职目标岗位"
+    else:
+        target_role = raw_role.strip()
+
+    summary = (analysis_data.get("summary") or profile.get("summary") or "").strip()
+    work_exps = analysis_data.get("work_experiences") or []
+    projects = analysis_data.get("projects") or analysis_data.get("personal_projects") or []
+
+    exp_summary = []
+    for w in work_exps[:3]:
+        company = w.get("company", "")
+        role = w.get("role", "")
+        exp_summary.append(f"{company} - {role}")
+
+    proj_summary = []
+    for p in projects[:3]:
+        name = p.get("name") or p.get("title") or ""
+        proj_summary.append(name)
+
+    context_str = f"""
+- 个人优势总结: {summary[:150] if summary else '暂无'}
+- 核心工作经历: {', '.join(exp_summary) if exp_summary else '暂无'}
+- 核心项目案例: {', '.join(proj_summary) if proj_summary else '暂无'}
+"""
+
+    prompt = f"""你是一位顶级 HR 和职业生涯排版专家。
+请根据以下求职者简历的核心上下文信息：
+{context_str}
+
+请从以下 5 套精致简历排版模板中，由你自主智能决策选出唯一最契合该求职者履历风格与内容密度的模板：
+
+可选模板列表：
+1. minimal (极简纯白): 高对比度纯文本排版，极高 ATS 过审率，适合通用岗位、应届生、文字与基础履历
+2. twocolumn (沉稳双栏): 左侧技能与履历、右侧经历与项目，立体展示，适合资深技术、架构师、复合型高密履历
+3. burgundy (典雅酒红): 深红雅致线条，彰显高端专业力，适合管理、金融、咨询与高管
+4. geek (极客风尚): 极客程序员风格，高亮技术栈与算力成果，适合互联网、AI/算法、程序员、产品经理
+5. bluegrey (清新蓝灰): 蓝灰柔和圆角卡片，视觉优雅柔和，适合设计、市场、商务、通用职位
+
+请严格输出 JSON 格式（不要包含任何 markdown 代码块标识）。
+输出 JSON 示例格式如下（仅作为格式参考示例，请务必根据当前求职者的真实情况动态生成对应的推荐模板 ID 与个性化推荐理由）：
+{{
+  "recommended_template": "minimal",
+  "recommend_reason": "根据您丰富的实习经历与清晰的条理结构，推荐采用【极简纯白】模板，突出核心工作与项目表达。"
+}}
+注：请勿在推荐理由中出现任何目标岗位字样。
+"""
+
+    payload = {
+        "model": settings.DEEPSEEK_MODEL,
+        "messages": [
+            {"role": "system", "content": "你是一位专业的 HR 简历排版判别专家。请严格只输出 JSON。"},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"}
+    }
+
     try:
-        # 1) 从 COS 下载原文件
-        content_bytes = await _download_from_cos(db_file.cos_key)
-
-        # 2) PDF 源文件先转 DOCX（CPU 密集 + 阻塞，丢到线程池）
-        if src_ext == "pdf":
-            logger.info(
-                "[docx_writer] converting PDF -> DOCX for analysis_id=%s (%.1f KB)",
-                analysis_id, len(content_bytes) / 1024,
-            )
-            content_bytes = await asyncio.to_thread(convert_pdf_to_docx, content_bytes)
-
-        # 3) 就地改写 bullet 文字（保留 run 样式）
-        docx_bytes = await asyncio.to_thread(
-            rewrite_resume_docx, content_bytes, analysis_data
-        )
-    except HTTPException:
-        raise
-    except BulletMatchError as e:
-        logger.warning(
-            "[docx_writer] bullet match failed for analysis_id=%s (%s)",
-            analysis_id, e,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=format_failure(FEATURE_NAME_RESUME, "简历排版与诊断结果不匹配，请重新上传简历"),
-        ) from e
+        from app.utils.llm import call_llm_stream
+        res = await asyncio.to_thread(call_llm_stream, payload, 25.0)
+        content = res.get("choices", [{}])[0].get("message", {}).get("content", "")
+        clean_json = re.sub(r"^```json\s*", "", content.strip())
+        clean_json = re.sub(r"\s*```$", "", clean_json)
+        parsed = json.loads(clean_json)
+        if "recommended_template" in parsed:
+            return parsed
     except Exception as e:
-        logger.exception("[docx_writer] failed for analysis_id=%s", analysis_id)
-        reason = str(e) or "DOCX 生成失败"
-        if len(reason) > 200:
-            reason = reason[:200] + "..."
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=format_failure(FEATURE_NAME_RESUME, reason),
-        ) from e
+        logger.warning("[select_template_llm] LLM call failed or timeout: %s", e)
 
-    return _make_file_response(docx_bytes, safe_name, today)
+    return {
+        "recommended_template": "minimal",
+        "recommend_reason": "根据您的履历风格与内容密度，AI 已为您智能匹配最合适排版模板。"
+    }
+
+
+@router.post("/analyses/{analysis_id}/select-template")
+async def select_resume_template(
+    analysis_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: Optional[models.User] = Depends(get_current_user_optional)
+):
+    """点击「下载优化版简历」时再次调用大模型，结合上面大模型已输出的优化简历上下文，由大模型自主智能判定最匹配的简历模板。"""
+    stmt = select(models.ResumeAnalysis).where(models.ResumeAnalysis.id == analysis_id)
+    ra = (await db.execute(stmt)).scalars().first()
+    if not ra:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="简历分析记录不存在")
+    if ra.user_id is not None:
+        if not current_user or current_user.id != ra.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该简历分析记录")
+
+    analysis_data = ra.result_json or {}
+    result = await select_resume_template_llm(analysis_data)
+    return {"success": True, "data": result}
+
+
+async def _fetch_file_bytes(cos_key: str) -> bytes:
+    """从 COS 或本地文件系统读取简历二进制内容。"""
+    import os
+    if cos_key and os.path.exists(cos_key):
+        with open(cos_key, "rb") as f:
+            return f.read()
+    client = get_cos_client()
+    response = await asyncio.to_thread(
+        client.get_object,
+        Bucket=bucket,
+        Key=cos_key
+    )
+    body_stream = response['Body']
+    if hasattr(body_stream, 'get_raw_stream'):
+        return body_stream.get_raw_stream().read()
+    else:
+        return body_stream.read()
+
+
+def _backfill_missing_sections(res_data: dict) -> None:
+    """当源简历文件不可从 COS 重新下载（如老历史记录 NoSuchKey）时，
+    从现有 analysis_result 的 work_experiences 和 structure_analysis 智能提取与回填缺失的 skills, summary, profile 等。
+    """
+    if not isinstance(res_data, dict):
+        return
+
+    # 1. 技能提取：从工作经历 bullets 中提取提到的开源/技术栈/框架
+    skills = res_data.get("skills")
+    if not skills:
+        tech_keywords = [
+            "Java", "Go", "Python", "C++", "Spring Boot", "SpringBoot", "Spring Cloud",
+            "MyBatis", "Redis", "RabbitMQ", "Kafka", "RocketMQ", "Elasticsearch",
+            "MySQL", "Nacos", "Docker", "Kubernetes", "RPC", "RESTful", "Linux",
+            "JVM", "Netty", "Dubbo", "SQL", "Git", "Code Review", "IK分词器"
+        ]
+        found_skills = set()
+        work_exps = res_data.get("work_experiences") or []
+        for w in work_exps:
+            for b in (w.get("bullets") or []):
+                txt = (b.get("originalText") or b.get("optimizedText") or (str(b) if isinstance(b, str) else ""))
+                for kw in tech_keywords:
+                    if re.search(r"\b" + re.escape(kw) + r"\b", txt, re.IGNORECASE) or kw in txt:
+                        found_skills.add(kw)
+        if found_skills:
+            res_data["skills"] = list(sorted(found_skills))
+
+    # 2. 个人总结提取：从 structure_analysis 或 ai_suggestions 提取
+    if not res_data.get("summary"):
+        struct = res_data.get("structure_analysis") or {}
+        summary_desc = (struct.get("professional_capability") or {}).get("desc") or (struct.get("work_experience") or {}).get("desc")
+        if summary_desc and summary_desc != "暂无分析":
+            res_data["summary"] = summary_desc
+
+    # 3. 个人 Profile 保障
+    prof = res_data.get("profile")
+    if not isinstance(prof, dict):
+        prof = {}
+        res_data["profile"] = prof
+
+    if not prof.get("name") or prof.get("name") in ("基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料", "aa", "XXX"):
+        prof["name"] = "候选人"
 
 
 @router.get("/analyses/{analysis_id}")
@@ -778,22 +959,42 @@ async def get_resume_analysis(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该简历分析记录")
 
     res_data = dict(ra.result_json) if ra.result_json else {}
-    if current_user and "profile" in res_data and isinstance(res_data["profile"], dict):
-        prof = res_data["profile"]
-        prof["name"] = current_user.username
-        if current_user.profile:
-            p = current_user.profile
-            if p.company_name and p.company_name.strip() and p.company_name.strip() not in ("暂无", "暂无公司", "-"):
-                prof["company"] = p.company_name.strip()
-            else:
-                prof["company"] = "-"
 
-            if p.role_name and p.role_name.strip() and p.role_name.strip() not in ("暂无", "-"):
+    # 自动重解析原简历文件，补全 education / projects / skills / summary / 真实姓名
+    if ra.file_id:
+        try:
+            file_stmt = select(models.UploadedFile).where(models.UploadedFile.id == ra.file_id)
+            db_file = (await db.execute(file_stmt)).scalars().first()
+            if db_file:
+                content_bytes = await _fetch_file_bytes(db_file.cos_key)
+                src_text = extract_resume_text(content_bytes, db_file.filename)
+                if src_text and src_text.strip():
+                    parsed_struct = parse_resume_structure(src_text)
+                    res_data["raw_resume_text"] = src_text
+                    _merge_parsed_structure(res_data, parsed_struct)
+        except Exception as e:
+            logger.warning("[get_resume_analysis] Dynamic re-parse failed for analysis_id=%s: %s", analysis_id, e)
+
+    # 兜底：如果重解析未触发或源文件丢失（NoSuchKey），从已有的结构化诊断中抽取补全 skills / summary / profile
+    _backfill_missing_sections(res_data)
+    ra.result_json = res_data
+    await db.commit()
+
+    if "profile" in res_data and isinstance(res_data["profile"], dict):
+        prof = res_data["profile"]
+        curr_name = (prof.get("name") or "").strip()
+        if not curr_name or curr_name in ("基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料", "aa", "XXX"):
+            if current_user and current_user.username and current_user.username not in ("aa", "XXX"):
+                prof["name"] = current_user.username
+            else:
+                prof["name"] = "候选人"
+        if current_user and current_user.profile:
+            p = current_user.profile
+            if (not prof.get("company") or prof.get("company") == "-") and p.company_name and p.company_name.strip() not in ("暂无", "暂无公司", "-"):
+                prof["company"] = p.company_name.strip()
+            if (not prof.get("role") or prof.get("role") == "-") and p.role_name and p.role_name.strip() not in ("暂无", "-"):
                 prof["role"] = p.role_name.strip()
                 prof["title"] = p.role_name.strip()
-            else:
-                prof["role"] = "-"
-                prof["title"] = "-"
 
     _enrich_metrics(res_data)
 
@@ -932,82 +1133,94 @@ def _merge_parsed_structure(analysis_result: dict, parsed_structure: dict) -> No
 
     parsed_jobs = parsed_structure.get("work_experiences") or []
     llm_jobs = analysis_result.get("work_experiences") or []
-    if not parsed_jobs:
-        return
+    if parsed_jobs:
+        # work_experiences 整体覆盖：原文结构为准，bullet 顺序保持
+        new_jobs: list[dict] = []
+        for i, pj in enumerate(parsed_jobs):
+            new_job = {
+                "company": pj.get("company", ""),
+                "role": pj.get("role", ""),
+                "period": pj.get("period", ""),
+                "bullets": [],
+            }
+            lj = llm_jobs[i] if i < len(llm_jobs) else None
+            llm_bullets = (lj or {}).get("bullets") or []
 
-    # work_experiences 整体覆盖：原文结构为准，bullet 顺序保持
-    new_jobs: list[dict] = []
-    for i, pj in enumerate(parsed_jobs):
-        new_job = {
-            "company": pj.get("company", ""),
-            "role": pj.get("role", ""),
-            "period": pj.get("period", ""),
-            "bullets": [],
-        }
-        # 找对应位置的 LLM job（同位置最佳，没有就 1:1 用第一个）
-        lj = llm_jobs[i] if i < len(llm_jobs) else None
-        llm_bullets = (lj or {}).get("bullets") or []
+            for j, pb in enumerate(pj.get("bullets") or []):
+                pb_text = pb.strip()
+                llm_match = None
+                for lb in llm_bullets:
+                    if isinstance(lb, dict) and (lb.get("originalText") or "").strip() == pb_text:
+                        llm_match = lb
+                        break
+                if llm_match is None and j < len(llm_bullets):
+                    cand = llm_bullets[j]
+                    llm_match = cand if isinstance(cand, dict) else None
 
-        for j, pb in enumerate(pj.get("bullets") or []):
-            pb_text = pb.strip()
-            llm_match = None
-            # 策略 1: 按原文匹配
-            for lb in llm_bullets:
-                if isinstance(lb, dict) and (lb.get("originalText") or "").strip() == pb_text:
-                    llm_match = lb
-                    break
-            # 策略 2: 按位置兜底
-            if llm_match is None and j < len(llm_bullets):
-                cand = llm_bullets[j]
-                llm_match = cand if isinstance(cand, dict) else None
+                if llm_match:
+                    merged = copy.deepcopy(llm_match)
+                    merged["originalText"] = pb_text
+                    
+                    orig_tag = merged.get("originalTag")
+                    if orig_tag == "亮点":
+                        merged["originalTagClass"] = "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
+                    elif orig_tag == "风险":
+                        merged["originalTagClass"] = "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
+                    
+                    if merged.get("optimizedTag") == "已优化":
+                        merged["optimizedTagClass"] = "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
 
-            if llm_match:
-                merged = copy.deepcopy(llm_match)
-                merged["originalText"] = pb_text  # 强制覆盖为解析器原文（最严保真）
-                
-                # 规范化标签与样式类名：确保 亮点 为绿色 (#5DECCB)，风险 为红色/粉色 (#FF7A95)
-                orig_tag = merged.get("originalTag")
-                if orig_tag == "亮点":
-                    merged["originalTagClass"] = "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
-                elif orig_tag == "风险":
-                    merged["originalTagClass"] = "text-[#FF7A95] bg-[#FF7A95]/10 border-[#FF7A95]/20"
-                
-                # 规范化优化后的标签样式为绿色
-                if merged.get("optimizedTag") == "已优化":
-                    merged["optimizedTagClass"] = "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20"
+                    opt = (merged.get("optimizedText") or "").strip()
+                    if opt and opt == pb_text:
+                        merged.pop("optimizedText", None)
+                        merged.pop("optimizedTag", None)
+                        merged.pop("optimizedTagClass", None)
+                    new_job["bullets"].append(merged)
+                else:
+                    new_job["bullets"].append({
+                        "originalText": pb_text,
+                        "originalTag": "亮点",
+                        "originalTagClass": "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
+                        "originalDesc": "",
+                    })
+            new_jobs.append(new_job)
 
-                # optimizedText 不能与原文一字不差（否则就毫无意义），如果 LLM 偷懒原样返回则清空
-                opt = (merged.get("optimizedText") or "").strip()
-                if opt and opt == pb_text:
-                    merged.pop("optimizedText", None)
-                    merged.pop("optimizedTag", None)
-                    merged.pop("optimizedTagClass", None)
-                new_job["bullets"].append(merged)
-            else:
-                # LLM 没诊断到（罕见），原样塞一条无诊断的 bullet
-                new_job["bullets"].append({
-                    "originalText": pb_text,
-                    "originalTag": "亮点",
-                    "originalTagClass": "text-[#5DECCB] bg-[#5DECCB]/10 border-[#5DECCB]/20",
-                    "originalDesc": "",
-                })
-        new_jobs.append(new_job)
+        analysis_result["work_experiences"] = new_jobs
 
-    analysis_result["work_experiences"] = new_jobs
-
-    # profile 基础字段：years/phone/email 用解析器原文
+    # profile 基础字段：name/years/phone/email/gender/age/location 用解析器原文
     parser_profile = parsed_structure.get("profile") or {}
     llm_profile = analysis_result.get("profile")
-    if isinstance(llm_profile, dict) and parser_profile:
-        # years：LLM 经常编造"3年"（截断），解析器提取的更精确
-        v = parser_profile.get("years")
-        if v:
-            llm_profile["years"] = v
-        # phone/email 也带上（虽然 PDF 不一定用，但前端可能展示）
-        for key in ("phone", "email"):
+    if not isinstance(llm_profile, dict):
+        llm_profile = {}
+        analysis_result["profile"] = llm_profile
+
+    if parser_profile:
+        pn = parser_profile.get("name")
+        if pn and pn not in ("基本信息", "个人信息", "简历信息", "个人简历", "求职意向", "基本资料", "aa", "候选人"):
+            llm_profile["name"] = pn
+        for key in ("years", "phone", "email", "gender", "age", "location"):
             v = parser_profile.get(key)
             if v:
                 llm_profile[key] = v
+
+    # summary 补全
+    parsed_sum = parsed_structure.get("summary")
+    if parsed_sum:
+        analysis_result["summary"] = parsed_sum
+
+    # education / projects / skills 结构化原文补全
+    parsed_edu = parsed_structure.get("education") or []
+    if parsed_edu:
+        analysis_result["education"] = parsed_edu
+
+    parsed_proj = parsed_structure.get("projects") or []
+    if parsed_proj:
+        analysis_result["projects"] = parsed_proj
+        analysis_result["personal_projects"] = parsed_proj
+
+    parsed_skills = parsed_structure.get("skills") or []
+    if parsed_skills:
+        analysis_result["skills"] = parsed_skills
 
 
 def _enrich_metrics(analysis_result: dict, resume_text: Optional[str] = None) -> None:
