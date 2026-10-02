@@ -87,6 +87,8 @@ class UserProfileResponse(BaseModel):
     hasExp: bool
     is_online: bool = False
     membership: Optional[str] = None
+    membershipExpireAt: Optional[str] = None
+    membershipRemainingDays: Optional[int] = None
     phone: Optional[str] = None
     email: Optional[str] = None
     targetCity: Optional[str] = None

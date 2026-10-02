@@ -82,8 +82,14 @@ class SessionDetail(BaseModel):
 #   - test：按天重置 30 次/天，Redis key 带日期后缀，25h 过期
 
 COUNSELOR_LIMIT = {
-    None: 30,     # 免费：终身累计 30 次
-    "test": 30,   # 内测：30 次/天；注册起 30 天后过期降级为免费
+    None: 30,       # 免费：终身累计 30 次
+    "test": 30,     # 内测：30 次/天；注册起 30 天后过期降级为免费
+    "week_pro": 60, # 周度进阶版：60 次/天
+    "week_max": 80, # 周度旗舰版：80 次/天
+    "month_pro": 60, # 月度专业版：60 次/天
+    "month_max": 80, # 月度至尊版：80 次/天
+    "pro": 60,
+    "max": 80,
 }
 
 
@@ -113,26 +119,43 @@ def _counselor_key(user_id: int, membership: Optional[str]) -> str:
     return f"counselor:daily:{user_id}:{today}"
 
 
-async def _get_remaining_no_incr(redis_client: aioredis.Redis, user_id: int, membership: Optional[str]) -> int:
+async def _get_remaining_no_incr(redis_client: aioredis.Redis, db: AsyncSession, user_id: int, membership: Optional[str]) -> int:
     """只读查询剩余次数（不计数、不 +1）。"""
     key = _counselor_key(user_id, membership)
     used = int(await redis_client.get(key) or 0)
     limit = COUNSELOR_LIMIT.get(membership, COUNSELOR_LIMIT[None])
-    return max(0, limit - used)
+    
+    stmt = select(models.UserExtraQuota).where(models.UserExtraQuota.user_id == user_id)
+    res = await db.execute(stmt)
+    extra = res.scalars().first()
+    extra_remain = extra.advisor_remain if extra else 0
+    
+    return max(0, limit - used) + extra_remain
 
 
-async def _check_rate_limit(redis_client: aioredis.Redis, user_id: int, membership: Optional[str]) -> int:
+async def _check_rate_limit(redis_client: aioredis.Redis, db: AsyncSession, user_id: int, membership: Optional[str]) -> int:
     """消耗一次额度，返回剩余次数；-1 表示超限。"""
     key = _counselor_key(user_id, membership)
     used = int(await redis_client.get(key) or 0)
     limit = COUNSELOR_LIMIT.get(membership, COUNSELOR_LIMIT[None])
+    
+    stmt = select(models.UserExtraQuota).where(models.UserExtraQuota.user_id == user_id)
+    res = await db.execute(stmt)
+    extra = res.scalars().first()
+    extra_remain = extra.advisor_remain if extra else 0
+    
     if used >= limit:
+        if extra_remain > 0:
+            extra.advisor_remain -= 1
+            await db.commit()
+            return extra_remain - 1
         return -1
+        
     new_val = await redis_client.incr(key)
     # 非终身用户（按天）：首次写入时设 25h 过期
     if new_val == 1 and not _is_free_membership(membership):
         await redis_client.expire(key, 25 * 3600)
-    return max(0, limit - int(new_val))
+    return max(0, limit - int(new_val)) + extra_remain
 
 
 # ============================================================================
@@ -194,12 +217,13 @@ async def get_counselor_stats(
 
 @router.get("/quota")
 async def get_counselor_quota(
+    db: AsyncSession = Depends(get_db),
     redis_client: aioredis.Redis = Depends(get_redis),
     current_user: models.User = Depends(get_current_user),
 ):
     """查询今日剩余咨询次数（只读，不消耗额度）。"""
     eff_membership = _resolve_effective_membership(current_user)
-    remaining = await _get_remaining_no_incr(redis_client, current_user.id, eff_membership)
+    remaining = await _get_remaining_no_incr(redis_client, db, current_user.id, eff_membership)
     return {
         "remaining": remaining,
         "limit": COUNSELOR_LIMIT.get(eff_membership, COUNSELOR_LIMIT[None]),
@@ -228,7 +252,7 @@ async def chat(
     """
     # 1. 速率限制
     eff_membership = _resolve_effective_membership(current_user)
-    remaining = await _check_rate_limit(redis_client, current_user.id, eff_membership)
+    remaining = await _check_rate_limit(redis_client, db, current_user.id, eff_membership)
     if remaining < 0:
         limit = COUNSELOR_LIMIT.get(eff_membership, COUNSELOR_LIMIT[None])
         if _is_free_membership(eff_membership):

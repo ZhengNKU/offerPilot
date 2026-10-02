@@ -151,8 +151,9 @@ function InterviewTrainingPageContent() {
   // const [showNormsModal, setShowNormsModal] = useState(false);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackKind, setFeedbackKind] = useState<"tech_question" | "voice" | "ux" | "other">("tech_question");
-  // PR6 配额：会员等级 + 当月已用 + 限额
-  const [quota, setQuota] = useState<{ membership: string | null; limit_min: number; used_min: number; remaining_min: number } | null>(null);
+  // PR6 配额：会员等级 + 当月已用 + 限额 + 加油包/结转的额外时长
+  // extra_min 必须带上：limit_min 只是会员档位限额，真实可用总量是 limit_min + extra_min
+  const [quota, setQuota] = useState<{ membership: string | null; limit_min: number; used_min: number; remaining_min: number; extra_min: number } | null>(null);
   // 实际跑多少分钟（按配额截断）；进度面板 / backend 都用这个。
   // 必须放在 quota 声明之后，避免 TDZ。
   // 额度耗尽（remaining=0）时回到 durationMin（上面 useEffect 已把它重置为 10），
@@ -734,11 +735,9 @@ function InterviewTrainingPageContent() {
         return;
       }
       setBootState("analyzing");
-      // PR6: 刷新 quota（已用时长）
-      fetch(`${apiBase}/api/live/quota`, { headers: authHeaders() })
-        .then((r) => r.ok ? r.json() : null)
-        .then((q) => { if (q) setQuota(q); })
-        .catch(() => {});
+      // PR6: 刷新 quota（已用时长）—— 走统一的 fetchQuota，别再手写一份，
+      // 否则 quotaFetchedRef 不会置位，刷新逻辑容易跟主路径分叉
+      fetchQuota();
       void pollUntilCompleted(sess.live_session_id);
     } catch (e) {
       auth.triggerToast("无法结束面试", "error");
@@ -1538,7 +1537,7 @@ AI 报告生成了 ${totalSuggestions} 条针对性改进建议，其中第 ${in
                               : "border-tertiary/30 bg-tertiary/10 text-tertiary"
                           }`}>
                             <span className="material-symbols-outlined text-xs">{isQuotaExhausted ? "block" : "science"}</span>
-                            {isQuotaExhausted ? "配额已耗尽 · 0 分钟" : `内测 · ${quota.used_min}/${quota.limit_min} 分钟`}
+                            {isQuotaExhausted ? "额度已耗尽 · 0 分钟" : `额度 · 剩余 ${quota.remaining_min}/${quota.limit_min + (quota.extra_min ?? 0)} 分钟`}
                           </div>
                         )}
                       </div>

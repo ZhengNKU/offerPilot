@@ -39,9 +39,15 @@ router = APIRouter(prefix="/api/live", tags=["Live Interview"])
 # 按会员等级的月度实时面试时长上限（分钟）。0 表示不可用。
 # 内测版本：test 档 = 20 分钟/月（2026-07-18+）
 MEMBERSHIP_MONTHLY_MINUTES = {
-    None: 0,      # 免费用户：0 分钟（不可使用实时模拟面试；只能试文本/录音分析）
+    None: 0,        # 免费用户：0 分钟（不可使用实时模拟面试）
     "free": 0,
-    "test": 10,   # 内测用户：10 分钟/月（统一）；注册起 30 天后过期降级为 0
+    "test": 10,     # 内测用户：10 分钟/月（统一）；注册起 30 天后过期降级为 0
+    "week_pro": 30, # 周度进阶版：30 分钟
+    "week_max": 60, # 周度旗舰版：60 分钟
+    "month_pro": 120, # 月度专业版：120 分钟
+    "month_max": 180, # 月度至尊版：180 分钟
+    "pro": 120,
+    "max": 180,
 }
 
 
@@ -64,10 +70,58 @@ async def upsert_user_live_minutes(
 ) -> None:
     """
     PR6: 结束面试后把 added_seconds 累加到 user_live_minutes 表的当周 + 当月行。
+    并执行双轨制扣减：若本月累计使用分钟数超过了套餐限额，超出的部分从 UserExtraQuota.live_remain_min 中扣除。
     失败仅 warn，不影响主流程。
     """
     if added_seconds <= 0 or not user_id:
         return
+
+    # 获取用户的 current membership
+    try:
+        user_res = await db.execute(select(models.User).where(models.User.id == user_id))
+        user = user_res.scalars().first()
+        membership = user.membership if user else None
+        if membership and membership.lower() == "test":
+            from app.services.quota import _is_trial_expired
+            if _is_trial_expired(user):
+                membership = None
+        limit_min = MEMBERSHIP_MONTHLY_MINUTES.get(membership, 0)
+
+        # 获取在本次添加前，当月的 old_seconds
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        mk = period_key_for("month", now)
+        used_res = await db.execute(
+            select(func.coalesce(func.sum(models.UserLiveMinutes.total_seconds), 0))
+            .where(
+                models.UserLiveMinutes.user_id == user_id,
+                models.UserLiveMinutes.period_type == "month",
+                models.UserLiveMinutes.period_key == mk,
+            )
+        )
+        old_seconds = int(used_res.scalar() or 0)
+        new_seconds = old_seconds + added_seconds
+
+        old_min = old_seconds // 60
+        new_min = new_seconds // 60
+        delta_min = new_min - old_min
+
+        # 计算有多少分钟需要从加油包里扣除
+        available_cycle_min = max(0, limit_min - old_min)
+        extra_to_deduct = max(0, delta_min - available_cycle_min)
+
+        if extra_to_deduct > 0:
+            extra_res = await db.execute(
+                select(models.UserExtraQuota).where(models.UserExtraQuota.user_id == user_id).with_for_update()
+            )
+            extra = extra_res.scalars().first()
+            if extra and extra.live_remain_min > 0:
+                deducted = min(extra.live_remain_min, extra_to_deduct)
+                extra.live_remain_min -= deducted
+                logger.info(f"[live] user={user_id} 扣除加油包 {deducted} 分钟 (live_remain_min={extra.live_remain_min})")
+
+    except Exception as e:
+        logger.warning(f"[live] deduct extra_live_min 失败: {e}")
+
     for period_type in ("week", "month"):
         key = period_key_for(period_type, ended_at)
         try:
@@ -89,7 +143,6 @@ async def upsert_user_live_minutes(
         except Exception as e:
             await db.rollback()
             logger.warning(f"[live] upsert user_live_minutes 失败 ({period_type}): {e}")
-
 
 async def _cleanup_zombie_session(
     db: AsyncSession,
@@ -302,21 +355,31 @@ async def create_live_session(
             )
             used_seconds = int(used_res.scalar() or 0)
             used_min = used_seconds // 60
-            if used_min >= limit_min:
+            
+            # 获取加油包永久额度
+            extra_res = await db.execute(
+                select(models.UserExtraQuota).where(models.UserExtraQuota.user_id == current_user_id)
+            )
+            extra = extra_res.scalars().first()
+            extra_live_min = extra.live_remain_min if extra else 0
+
+            remaining_min = max(0, limit_min - used_min) + extra_live_min
+
+            if remaining_min <= 0:
                 detail = (
-                    f"本月实时面试已用 {used_min} 分钟，达到 {membership or '免费'} 会员上限 {limit_min} 分钟。"
-                    f"请升级套餐或下月再试。"
+                    f"本月实时面试配额已用完。"
+                    f"请升级套餐、购买加油包或下月再试。"
                 )
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+            
             # 配额截断：剩余配额 < 请求时长 → 实际面试时长 = 剩余配额
-            remaining_min = max(0, limit_min - used_min)
-            if remaining_min > 0 and effective_duration_min > remaining_min:
+            if effective_duration_min > remaining_min:
                 logger.info(
                     f"[live] user={current_user_id} 请求 {effective_duration_min} 分钟超出剩余 {remaining_min} 分钟，截断"
                 )
                 effective_duration_min = remaining_min
             logger.info(
-                f"[live] user={current_user_id} 当月已用 {used_min}/{limit_min} 分钟，effective_duration_min={effective_duration_min} 校验通过"
+                f"[live] user={current_user_id} 当月已用 {used_min}/{limit_min} 分钟, 额外 {extra_live_min} 分钟, effective_duration_min={effective_duration_min} 校验通过"
             )
 
     row = models.InterviewLiveSession(
@@ -1053,9 +1116,14 @@ async def get_user_quota(
     db: AsyncSession = Depends(get_db),
     current_user: Optional[models.User] = Depends(get_current_user_optional),
 ):
-    """前端快速查询：会员等级 + 月度限额 + 当月已用 + 剩余。"""
+    """前端快速查询：会员等级 + 月度限额 + 当月已用 + 剩余。
+
+    `limit_min` 只是**会员档位**的月限额；用户真实可用时长还要加 `extra_min`
+    （加油包 + 周期结转的剩余额度）。前端若只用 limit_min 当分母，会漏掉这整块，
+    表现为「买了加油包但额度数字不动」。展示总量请用 limit_min + extra_min。
+    """
     if not current_user:
-        return {"membership": None, "limit_min": 0, "used_min": 0, "remaining_min": 0}
+        return {"membership": None, "limit_min": 0, "used_min": 0, "remaining_min": 0, "extra_min": 0}
     limit_min = MEMBERSHIP_MONTHLY_MINUTES.get(current_user.membership, 0)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     mk = period_key_for("month", now)
@@ -1067,13 +1135,22 @@ async def get_user_quota(
         )
     )
     used_min = int(res.scalar() or 0) // 60
-    # 所有档位都有明确限额：MAX=120、P=60、Free=0。统一返回 max(0, limit - used)
-    remaining_min = max(0, limit_min - used_min)
+    
+    # 获取加油包永久额度
+    extra_res = await db.execute(
+        select(models.UserExtraQuota).where(models.UserExtraQuota.user_id == current_user.id)
+    )
+    extra = extra_res.scalars().first()
+    extra_live_min = extra.live_remain_min if extra else 0
+
+    # 所有档位都有明确限额：MAX=120、P=60、Free=0。统一返回 max(0, limit - used) + 加油包
+    remaining_min = max(0, limit_min - used_min) + extra_live_min
     return {
         "membership": current_user.membership,
         "limit_min": limit_min,
         "used_min": used_min,
         "remaining_min": remaining_min,
+        "extra_min": extra_live_min,
     }
 
 

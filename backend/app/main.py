@@ -19,7 +19,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base
-from app.routers import auth, audio, file, resume, live, counselor, feedback, guide, admin_moderation, moderation_preview
+from app.routers import auth, audio, file, resume, live, counselor, feedback, guide, admin_moderation, moderation_preview, billing
 
 try:
     import app.routers.memory as _memory_router
@@ -219,6 +219,7 @@ app.include_router(feedback.router)
 app.include_router(guide.router)
 app.include_router(admin_moderation.router)
 app.include_router(moderation_preview.router)
+app.include_router(billing.router)
 if _MEMORY_LOADED and _memory_router is not None:
     app.include_router(_memory_router.router)
     log_once("memory-router", "[main] Memory router registered successfully")
@@ -265,9 +266,14 @@ async def startup_event():
         logging.error(f"[startup] Failed to ensure pgvector extension: {_e}")
         # 不抛出——其他功能可用，仅 counselor 向量检索不可用
 
-    # 2. 自动建表（仅建缺失的表；不 ALTER 已存在的列）
+    # 2. 启动时自动建表与更新：
+    # - create_all 自动创建本次新加的 orders, user_subscriptions, user_extra_quotas 表（若不存在）
+    # - 给已有的 users 表补充本次新增的 membership（会员等级）字段，原生支持多次重启与重复执行
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        from sqlalchemy import text as _text
+        await conn.execute(_text("ALTER TABLE users ADD COLUMN IF NOT EXISTS membership VARCHAR(50);"))
+        log_once("user-payment-ready", "[startup] 数据库表结构同步完成（orders/subscriptions/extra_quota 与 membership 字段已就绪）")
 
     # ── 周期任务 + 启动期一次性任务：多 worker 下只让一个进程执行 ──
     # uvicorn --workers 2 时每个 worker 都会跑 startup_event，若不互斥，

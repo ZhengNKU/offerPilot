@@ -654,7 +654,7 @@ export default function InterviewRecordAnalysisPage() {
     // ── CHECK: Limit free users/guests to 1 analysis per type ──
     if (!auth.isLoggedIn) {
       if (localStorage.getItem("interviewVar_analyzed_text") === "true") {
-        auth.triggerToast("您的该项分析免费体验次数已达上限，请注册或登录后使用更多功能！", "error");
+        auth.triggerToast("您的该项分析额度已达上限，请充值或升级会员！", "error");
         return;
       }
     } else {
@@ -672,7 +672,7 @@ export default function InterviewRecordAnalysisPage() {
         if (status.record.remaining <= 0) {
           const detail = status.membership === "test"
             ? "您的内测面试记录分析额度已用完（一次性），内测期间无重置，敬请期待正式版！"
-            : "您已使用过面试记录分析的免费体验，剩余次数不足，敬请期待后续更多功能！";
+            : "您已使用过面试记录分析的体验额度，剩余次数不足，敬请充值或升级会员！";
           auth.triggerToast(detail, "error");
           return;
         }

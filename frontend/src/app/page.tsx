@@ -9,6 +9,8 @@ import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components/LegalModals";
 import { Suspense } from "react";
+import { PricingModal } from "@/components/PricingModal";
+import { PRICING_PLANS, getPlanById } from "@/lib/pricingPlans";
 
 // Elegant Count-Up Component - Animate every time it appears in the viewport
 function StatCounter({ target, suffix = "" }: { target: number | string; suffix?: string }) {
@@ -158,6 +160,10 @@ export default function Home() {
   const auth = useAuth();
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(378); // Start at 06:18 (crash point)
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [selectedPlanId, setSelectedPlanId] = useState("MONTH_PRO");
+  const [pricingCategory, setPricingCategory] = useState<"subscription" | "pack">("subscription");
+  const [subCycle, setSubCycle] = useState<"month" | "week">("month");
   const heroVideoRef = useRef<HTMLVideoElement>(null);
 
   // Play video from start whenever Hero section scrolls into viewport
@@ -717,67 +723,480 @@ export default function Home() {
       {/* Pricing Section - Spans 100% width across the browser */}
       <section className="py-section-padding px-gutter relative overflow-hidden w-full block" id="pricing">
         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-[500px] bg-primary/5 blur-[120px] rounded-full -z-10 pointer-events-none"></div>
-        <div className="max-w-container-max mx-auto space-y-12 relative z-10 w-full flex flex-col items-center">
+        <div className="max-w-container-max mx-auto space-y-10 relative z-10 w-full flex flex-col items-center">
           <div className="text-center space-y-4 w-full">
-            <div className="inline-flex items-center gap-2.5 px-5 py-2 rounded-full glass-panel border-tertiary/30 mb-4">
-              <span className="font-label-mono tracking-[0.2em] text-tertiary uppercase font-bold" style={{ fontSize: "14px" }}>Internal Beta · 内测体验</span>
+            <div className="inline-flex items-center gap-2.5 px-5 py-2 rounded-full glass-panel border-tertiary/30 mb-2">
+              <span className="font-label-mono tracking-[0.2em] text-tertiary uppercase font-bold text-xs sm:text-sm">
+                Pricing & Plans · 会员与定价
+              </span>
             </div>
-            <h2 className="text-on-surface font-black tracking-tight" style={{ fontSize: "52px", fontFamily: "'Hanken Grotesk', sans-serif" }}>投资你的职业未来</h2>
-            <p className="text-on-surface-variant font-semibold" style={{ fontSize: "18px" }}>内测期间所有功能免费体验</p>
+            <h2 className="text-slate-900 dark:text-white font-black tracking-tight" style={{ fontSize: "52px", fontFamily: "'Hanken Grotesk', sans-serif" }}>
+              投资你的职业未来
+            </h2>
+            <p className="text-slate-600 dark:text-on-surface-variant font-semibold text-lg max-w-2xl mx-auto">
+              全流程 AI 深度护航，从简历精修到实战模拟，助你斩获心仪 Offer
+            </p>
           </div>
 
-          {/* 内测统一 test 档：单卡片居中展示 */}
-          <div className="w-full max-w-3xl flex justify-center">
-            <div className="glass-panel p-10 md:p-12 rounded-[32px] flex flex-col border-tertiary/30 bg-surface-container-low/50 shadow-[0_20px_60px_rgba(78,222,163,0.12)] relative overflow-hidden w-full text-center">
-              {/* 角标 */}
-              <div className="absolute top-0 right-0 px-4 py-1.5 bg-tertiary text-on-tertiary text-xs font-black rounded-bl-xl uppercase tracking-widest font-label-mono">
-                Beta · 内测
-              </div>
-
-              <div className="mb-6 mt-4">
-                <h3 className="font-black text-white mb-3" style={{ fontSize: "32px", fontFamily: "'Hanken Grotesk', sans-serif" }}>
-                  内测体验版
-                </h3>
-                <p className="text-on-surface-variant text-base font-medium">
-                  所有注册用户自动获得内测体验版会员资格，无需付费 · 一次性额度，用完即止
-                </p>
-              </div>
-
-              <div className="mb-8 inline-flex items-baseline gap-2 justify-center">
-                <span className="font-black text-tertiary" style={{ fontSize: "56px", fontFamily: "'Hanken Grotesk', sans-serif" }}>¥0</span>
-                <span className="text-on-surface-variant text-base font-bold">/ 内测期</span>
-              </div>
-
-              <ul className="space-y-5 mb-10 flex-1 font-semibold text-left max-w-xl mx-auto w-full">
-                <li className="flex items-center gap-3 text-base text-on-surface">
-                  <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">2 次</span> 面试录音分析</span>
-                </li>
-                <li className="flex items-center gap-3 text-base text-on-surface">
-                  <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">3 次</span> 面试记录分析</span>
-                </li>
-                <li className="flex items-center gap-3 text-base text-on-surface">
-                  <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">3 次</span> 简历分析</span>
-                </li>
-                <li className="flex items-center gap-3 text-base text-on-surface">
-                  <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span><span className="text-tertiary font-black">10 分钟</span> AI 模拟面试</span>
-                </li>
-                <li className="flex items-center gap-3 text-base text-on-surface">
-                  <span className="material-symbols-outlined text-tertiary text-xl shrink-0">check_circle</span>
-                  <span>30 次/天 AI 职业顾问</span>
-                </li>
-              </ul>
-
+          {/* Tab Controls: Category Switcher */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 w-full">
+            <div className="inline-flex p-1.5 rounded-2xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10 shadow-sm">
               <button
-                onClick={() => router.push("/register")}
-                className="w-full py-4 rounded-xl bg-tertiary text-on-tertiary font-black hover:scale-[1.02] active:scale-[0.98] transition-all shadow-[0_0_20px_rgba(78,222,163,0.25)] cursor-pointer"
+                type="button"
+                onClick={() => setPricingCategory("subscription")}
+                className={`px-6 py-2.5 rounded-xl text-sm font-black transition-all cursor-pointer flex items-center gap-2 ${
+                  pricingCategory === "subscription"
+                    ? "bg-white dark:bg-white/15 text-indigo-600 dark:text-white shadow-sm border border-slate-200/80 dark:border-white/20"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
               >
-                免费内测注册
+                <span className="material-symbols-outlined text-base">calendar_month</span>
+                周期订阅会员 (周卡 / 月卡)
+              </button>
+              <button
+                type="button"
+                onClick={() => setPricingCategory("pack")}
+                className={`px-6 py-2.5 rounded-xl text-sm font-black transition-all cursor-pointer flex items-center gap-2 ${
+                  pricingCategory === "pack"
+                    ? "bg-white dark:bg-white/15 text-indigo-600 dark:text-white shadow-sm border border-slate-200/80 dark:border-white/20"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                }`}
+              >
+                <span className="material-symbols-outlined text-base">battery_charging_full</span>
+                单次加油包 (按需即用)
               </button>
             </div>
+
+            {/* Cycle toggle when on subscription */}
+            {pricingCategory === "subscription" && (
+              <div className="inline-flex p-1 rounded-xl bg-slate-100 dark:bg-white/5 border border-slate-200 dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setSubCycle("month")}
+                  className={`px-4 py-2 rounded-lg text-sm font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                    subCycle === "month"
+                      ? "bg-white dark:bg-white/15 text-indigo-600 dark:text-white shadow-sm border border-slate-200/80 dark:border-white/20"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                >
+                  <span>⭐ 月度套餐 (全周期求职)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSubCycle("week")}
+                  className={`px-4 py-2 rounded-lg text-sm font-black transition-all cursor-pointer flex items-center gap-1.5 ${
+                    subCycle === "week"
+                      ? "bg-white dark:bg-white/15 text-indigo-600 dark:text-white shadow-sm border border-slate-200/80 dark:border-white/20"
+                      : "text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                  }`}
+                >
+                  <span>周度冲刺 (短期突击)</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Pricing Cards */}
+          <div className="w-full max-w-6xl">
+            {pricingCategory === "subscription" ? (
+              subCycle === "month" ? (
+                // 2 Monthly Plans: MONTH_PRO & MONTH_MAX
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                  {/* MONTH_PRO */}
+                  {(() => {
+                    const plan = getPlanById("MONTH_PRO")!;
+                    return (
+                      <div className="glass-panel p-8 md:p-10 rounded-[32px] flex flex-col justify-between border-2 border-indigo-500/50 dark:border-tertiary/60 bg-white/90 dark:bg-surface-container-low/60 shadow-[0_20px_60px_rgba(78,222,163,0.15)] relative overflow-hidden transition-all duration-300 hover:scale-[1.01]">
+                        <div className="absolute top-0 right-0 px-5 py-2 bg-gradient-to-r from-emerald-500 to-tertiary text-white text-xs font-black rounded-bl-2xl uppercase tracking-wider font-label-mono shadow-sm">
+                          ⭐ 官方主推 · 爆款首选
+                        </div>
+
+                        <div>
+                          <div className="mb-4 mt-2">
+                            <h3 className="font-black text-slate-900 dark:text-white text-2xl" style={{ fontFamily: "'Hanken Grotesk', sans-serif" }}>
+                              {plan.name}
+                            </h3>
+                            <p className="text-slate-500 dark:text-on-surface-variant text-sm font-medium mt-1">
+                              {plan.subtitle}
+                            </p>
+                          </div>
+
+                          <div className="mb-6 flex items-baseline gap-2">
+                            <span className="font-black text-indigo-600 dark:text-tertiary text-5xl font-label-mono">
+                              ¥{plan.price}
+                            </span>
+                            <span className="text-slate-500 dark:text-on-surface-variant text-sm font-bold">
+                              / {plan.cycleLabel}
+                            </span>
+                            {plan.originalPrice && (
+                              <span className="text-xs text-slate-400 line-through ml-1">
+                                ¥{plan.originalPrice}
+                              </span>
+                            )}
+                          </div>
+
+                          <ul className="space-y-3.5 mb-8 text-sm font-semibold text-slate-700 dark:text-on-surface">
+                            {plan.features.map((f) => (
+                              <li key={f.key} className="flex items-center gap-3">
+                                <span className="material-symbols-outlined text-emerald-500 dark:text-tertiary text-lg shrink-0">
+                                  check_circle
+                                </span>
+                                <span>
+                                  <span className="font-black text-slate-900 dark:text-white">{f.value} {f.unit}</span> {f.name}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            setSelectedPlanId("MONTH_PRO");
+                            if (!auth.isLoggedIn) auth.setShowLogin(true);
+                            else setShowPricingModal(true);
+                          }}
+                          className="btn-solid-primary w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 dark:bg-tertiary dark:hover:bg-tertiary/90 text-white dark:!text-[#003824] font-black transition-all shadow-md active:scale-98 cursor-pointer flex items-center justify-center"
+                        >
+                          <span>立即开通月度专业版</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  {/* MONTH_MAX */}
+                  {(() => {
+                    const plan = getPlanById("MONTH_MAX")!;
+                    return (
+                      <div className="glass-panel p-8 md:p-10 rounded-[32px] flex flex-col justify-between border border-slate-200 dark:border-white/10 bg-white/70 dark:bg-surface-container-low/40 shadow-lg relative overflow-hidden transition-all duration-300 hover:border-slate-300 dark:hover:border-white/20">
+                        <div className="absolute top-0 right-0 px-4 py-1.5 bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-on-surface-variant text-xs font-black rounded-bl-2xl">
+                          豪华高配
+                        </div>
+
+                        <div>
+                          <div className="mb-4 mt-2">
+                            <h3 className="font-black text-slate-900 dark:text-white text-2xl" style={{ fontFamily: "'Hanken Grotesk', sans-serif" }}>
+                              {plan.name}
+                            </h3>
+                            <p className="text-slate-500 dark:text-on-surface-variant text-sm font-medium mt-1">
+                              {plan.subtitle}
+                            </p>
+                          </div>
+
+                          <div className="mb-6 flex items-baseline gap-2">
+                            <span className="font-black text-slate-900 dark:text-white text-5xl font-label-mono">
+                              ¥{plan.price}
+                            </span>
+                            <span className="text-slate-500 dark:text-on-surface-variant text-sm font-bold">
+                              / {plan.cycleLabel}
+                            </span>
+                            {plan.originalPrice && (
+                              <span className="text-xs text-slate-400 line-through ml-1">
+                                ¥{plan.originalPrice}
+                              </span>
+                            )}
+                          </div>
+
+                          <ul className="space-y-3.5 mb-8 text-sm font-semibold text-slate-700 dark:text-on-surface">
+                            {plan.features.map((f) => (
+                              <li key={f.key} className="flex items-center gap-3">
+                                <span className="material-symbols-outlined text-indigo-500 dark:text-primary text-lg shrink-0">
+                                  check_circle
+                                </span>
+                                <span>
+                                  <span className="font-black text-slate-900 dark:text-white">{f.value} {f.unit}</span> {f.name}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            setSelectedPlanId("MONTH_MAX");
+                            if (!auth.isLoggedIn) auth.setShowLogin(true);
+                            else setShowPricingModal(true);
+                          }}
+                          className="btn-solid-primary w-full py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white/10 dark:hover:bg-white/20 text-white font-black transition-all shadow-md active:scale-98 cursor-pointer flex items-center justify-center"
+                        >
+                          <span>立即开通月度至尊版</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : (
+                // 2 Weekly Plans: WEEK_PRO & WEEK_MAX
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                  {/* WEEK_PRO */}
+                  {(() => {
+                    const plan = getPlanById("WEEK_PRO")!;
+                    return (
+                      <div className="glass-panel p-8 md:p-10 rounded-[32px] flex flex-col justify-between border border-slate-200 dark:border-white/10 bg-white/70 dark:bg-surface-container-low/40 shadow-lg relative overflow-hidden transition-all duration-300 hover:border-indigo-400 dark:hover:border-primary/40">
+                        <div>
+                          <div className="mb-4 mt-2">
+                            <h3 className="font-black text-slate-900 dark:text-white text-2xl" style={{ fontFamily: "'Hanken Grotesk', sans-serif" }}>
+                              {plan.name}
+                            </h3>
+                            <p className="text-slate-500 dark:text-on-surface-variant text-sm font-medium mt-1">
+                              {plan.subtitle}
+                            </p>
+                          </div>
+
+                          <div className="mb-6 flex items-baseline gap-2">
+                            <span className="font-black text-indigo-600 dark:text-primary text-5xl font-label-mono">
+                              ¥{plan.price}
+                            </span>
+                            <span className="text-slate-500 dark:text-on-surface-variant text-sm font-bold">
+                              / {plan.cycleLabel}
+                            </span>
+                            {plan.originalPrice && (
+                              <span className="text-xs text-slate-400 line-through ml-1">
+                                ¥{plan.originalPrice}
+                              </span>
+                            )}
+                          </div>
+
+                          <ul className="space-y-3.5 mb-8 text-sm font-semibold text-slate-700 dark:text-on-surface">
+                            {plan.features.map((f) => (
+                              <li key={f.key} className="flex items-center gap-3">
+                                <span className="material-symbols-outlined text-indigo-500 dark:text-primary text-lg shrink-0">
+                                  check_circle
+                                </span>
+                                <span>
+                                  <span className="font-black text-slate-900 dark:text-white">{f.value} {f.unit}</span> {f.name}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            setSelectedPlanId("WEEK_PRO");
+                            if (!auth.isLoggedIn) auth.setShowLogin(true);
+                            else setShowPricingModal(true);
+                          }}
+                          className="btn-solid-primary w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black transition-all shadow-md shadow-indigo-600/20 active:scale-98 cursor-pointer flex items-center justify-center"
+                        >
+                          <span>立即开通周度进阶版</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  {/* WEEK_MAX */}
+                  {(() => {
+                    const plan = getPlanById("WEEK_MAX")!;
+                    return (
+                      <div className="glass-panel p-8 md:p-10 rounded-[32px] flex flex-col justify-between border border-slate-200 dark:border-white/10 bg-white/70 dark:bg-surface-container-low/40 shadow-lg relative overflow-hidden transition-all duration-300 hover:border-slate-300 dark:hover:border-white/20">
+                        <div>
+                          <div className="mb-4 mt-2">
+                            <h3 className="font-black text-slate-900 dark:text-white text-2xl" style={{ fontFamily: "'Hanken Grotesk', sans-serif" }}>
+                              {plan.name}
+                            </h3>
+                            <p className="text-slate-500 dark:text-on-surface-variant text-sm font-medium mt-1">
+                              {plan.subtitle}
+                            </p>
+                          </div>
+
+                          <div className="mb-6 flex items-baseline gap-2">
+                            <span className="font-black text-slate-900 dark:text-white text-5xl font-label-mono">
+                              ¥{plan.price}
+                            </span>
+                            <span className="text-slate-500 dark:text-on-surface-variant text-sm font-bold">
+                              / {plan.cycleLabel}
+                            </span>
+                            {plan.originalPrice && (
+                              <span className="text-xs text-slate-400 line-through ml-1">
+                                ¥{plan.originalPrice}
+                              </span>
+                            )}
+                          </div>
+
+                          <ul className="space-y-3.5 mb-8 text-sm font-semibold text-slate-700 dark:text-on-surface">
+                            {plan.features.map((f) => (
+                              <li key={f.key} className="flex items-center gap-3">
+                                <span className="material-symbols-outlined text-indigo-500 dark:text-primary text-lg shrink-0">
+                                  check_circle
+                                </span>
+                                <span>
+                                  <span className="font-black text-slate-900 dark:text-white">{f.value} {f.unit}</span> {f.name}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+
+                        <button
+                          onClick={() => {
+                            setSelectedPlanId("WEEK_MAX");
+                            if (!auth.isLoggedIn) auth.setShowLogin(true);
+                            else setShowPricingModal(true);
+                          }}
+                          className="btn-solid-primary w-full py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white/10 dark:hover:bg-white/20 text-white font-black transition-all shadow-md active:scale-98 cursor-pointer flex items-center justify-center"
+                        >
+                          <span>立即开通周度旗舰版</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )
+            ) : (
+              // 2 Packs: PACK_A & PACK_B
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+                {/* PACK_A */}
+                {(() => {
+                  const plan = getPlanById("PACK_A")!;
+                  return (
+                    <div className="glass-panel p-8 md:p-10 rounded-[32px] flex flex-col justify-between border border-slate-200 dark:border-white/10 bg-white/70 dark:bg-surface-container-low/40 shadow-lg relative overflow-hidden transition-all duration-300 hover:border-slate-300 dark:hover:border-white/20">
+                      <div className="absolute top-0 right-0 px-4 py-1.5 bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-on-surface-variant text-xs font-black rounded-bl-2xl">
+                        按需加油 · 永不过期
+                      </div>
+
+                      <div>
+                        <div className="mb-4 mt-2">
+                          <h3 className="font-black text-slate-900 dark:text-white text-2xl" style={{ fontFamily: "'Hanken Grotesk', sans-serif" }}>
+                            {plan.name}
+                          </h3>
+                          <p className="text-slate-500 dark:text-on-surface-variant text-sm font-medium mt-1">
+                            {plan.subtitle}
+                          </p>
+                        </div>
+
+                        <div className="mb-6 flex items-baseline gap-2">
+                          <span className="font-black text-indigo-600 dark:text-primary text-5xl font-label-mono">
+                            ¥{plan.price}
+                          </span>
+                          <span className="text-slate-500 dark:text-on-surface-variant text-sm font-bold">
+                            / {plan.cycleLabel}
+                          </span>
+                          {plan.originalPrice && (
+                            <span className="text-xs text-slate-400 line-through ml-1">
+                              ¥{plan.originalPrice}
+                            </span>
+                          )}
+                        </div>
+
+                        <ul className="space-y-3.5 mb-8 text-sm font-semibold text-slate-700 dark:text-on-surface">
+                          {plan.features.map((f) => (
+                            <li key={f.key} className="flex items-center gap-3">
+                              <span className="material-symbols-outlined text-emerald-500 dark:text-tertiary text-lg shrink-0">
+                                check_circle
+                              </span>
+                              <span>
+                                <span className="font-black text-slate-900 dark:text-white">{f.value} {f.unit}</span> {f.name}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setSelectedPlanId("PACK_A");
+                          if (!auth.isLoggedIn) auth.setShowLogin(true);
+                          else setShowPricingModal(true);
+                        }}
+                        className="btn-solid-primary w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black transition-all shadow-md shadow-indigo-600/20 active:scale-98 cursor-pointer flex items-center justify-center"
+                      >
+                        <span>购买打包 A (¥9.9)</span>
+                      </button>
+                    </div>
+                  );
+                })()}
+
+                {/* PACK_B */}
+                {(() => {
+                  const plan = getPlanById("PACK_B")!;
+                  return (
+                    <div className="glass-panel p-8 md:p-10 rounded-[32px] flex flex-col justify-between border-2 border-indigo-500/40 dark:border-primary/40 bg-white/90 dark:bg-surface-container-low/60 shadow-lg relative overflow-hidden transition-all duration-300 hover:scale-[1.01]">
+                      <div className="badge-solid-primary absolute top-0 right-0 px-4 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-xs font-black rounded-bl-2xl shadow-sm">
+                        <span>高性价比加油包</span>
+                      </div>
+
+                      <div>
+                        <div className="mb-4 mt-2">
+                          <h3 className="font-black text-slate-900 dark:text-white text-2xl" style={{ fontFamily: "'Hanken Grotesk', sans-serif" }}>
+                            {plan.name}
+                          </h3>
+                          <p className="text-slate-500 dark:text-on-surface-variant text-sm font-medium mt-1">
+                            {plan.subtitle}
+                          </p>
+                        </div>
+
+                        <div className="mb-6 flex items-baseline gap-2">
+                          <span className="font-black text-indigo-600 dark:text-primary text-5xl font-label-mono">
+                            ¥{plan.price}
+                          </span>
+                          <span className="text-slate-500 dark:text-on-surface-variant text-sm font-bold">
+                            / {plan.cycleLabel}
+                          </span>
+                          {plan.originalPrice && (
+                            <span className="text-xs text-slate-400 line-through ml-1">
+                              ¥{plan.originalPrice}
+                            </span>
+                          )}
+                        </div>
+
+                        <ul className="space-y-3.5 mb-8 text-sm font-semibold text-slate-700 dark:text-on-surface">
+                          {plan.features.map((f) => (
+                            <li key={f.key} className="flex items-center gap-3">
+                              <span className="material-symbols-outlined text-emerald-500 dark:text-tertiary text-lg shrink-0">
+                                check_circle
+                              </span>
+                              <span>
+                                <span className="font-black text-slate-900 dark:text-white">{f.value} {f.unit}</span> {f.name}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setSelectedPlanId("PACK_B");
+                          if (!auth.isLoggedIn) auth.setShowLogin(true);
+                          else setShowPricingModal(true);
+                        }}
+                        className="btn-solid-primary w-full py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black transition-all shadow-md shadow-indigo-600/20 active:scale-98 cursor-pointer flex items-center justify-center"
+                      >
+                        <span>购买打包 B (¥14.9)</span>
+                      </button>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+
+          {/* New User Beta Benefit Banner */}
+          <div className="w-full max-w-4xl p-5 rounded-2xl bg-emerald-500/5 dark:bg-tertiary/10 border border-emerald-500/20 dark:border-tertiary/20 flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/10 dark:bg-tertiary/20 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-2xl text-emerald-600 dark:text-tertiary">
+                  card_giftcard
+                </span>
+              </div>
+              <div>
+                <div className="flex items-center gap-2 justify-center sm:justify-start">
+                  <h4 className="text-base font-black text-slate-900 dark:text-white">新手注册专属礼遇</h4>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-tertiary font-black">
+                    零门槛体验
+                  </span>
+                </div>
+                <p className="text-sm text-slate-600 dark:text-on-surface-variant/80 mt-1 leading-relaxed">
+                  新注册用户自动获赠起步体验配额：<span className="font-bold text-slate-900 dark:text-white">1 次简历深度分析</span> + <span className="font-bold text-slate-900 dark:text-white">1 次面试记录复盘</span> + <span className="font-bold text-slate-900 dark:text-white">30 次 AI 职业顾问答疑</span>
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => router.push(auth.isLoggedIn ? "/home" : "/register")}
+              className="btn-solid-primary px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black transition-all shrink-0 cursor-pointer shadow-sm active:scale-95 flex items-center gap-1"
+            >
+              <span>{auth.isLoggedIn ? "前往驾驶舱查看额度" : "免费注册领取"}</span>
+            </button>
           </div>
         </div>
       </section>
@@ -921,6 +1340,15 @@ export default function Home() {
           </a>
         </div>
       </footer>
+
+      {/* Pricing and Payment Modal */}
+      <PricingModal
+        open={showPricingModal}
+        onClose={() => setShowPricingModal(false)}
+        defaultPlanId={selectedPlanId}
+        defaultCategory={pricingCategory}
+        currentMembership={auth.user?.membership || "free"}
+      />
     </div>
   );
 }

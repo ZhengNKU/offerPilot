@@ -159,9 +159,73 @@ async def clear_single_session(
             user_id, e,
         )
 
+def get_user_effective_membership_and_expiry(user: models.User) -> tuple[str, Optional[str], Optional[int]]:
+    """
+    计算用户当前实际生效的 membership 等级、到期时间与剩余有效天数：
+    - 若用户有有效 subscription (status == 'active' 且 end_time > now)，取最新的 end_time：
+        membership = sub.tier.lower()
+        expire_at_str = end_time.strftime("%Y-%m-%d")
+        remaining_days = max(1, math.ceil((end_time - now).total_seconds() / 86400))
+    - 若无有效 subscription，但为内测用户 (membership == 'test')：
+        若 user.created_at + 30天 > now:
+            membership = 'test'
+            expire_at_str = (user.created_at + timedelta(days=30)).strftime("%Y-%m-%d")
+            remaining_days = max(1, math.ceil((expire_at - now).total_seconds() / 86400))
+        若已超过 30 天：
+            降级为 'free'，无到期时间
+    - 其余情况：
+        membership = 'free'，无到期时间
+    """
+    import math
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+
+    # 优先检查充值周期订阅记录
+    subs = []
+    try:
+        subs = user.subscriptions or []
+    except Exception:
+        subs = []
+
+    active_subs = [
+        s for s in subs
+        if getattr(s, "status", "") == "active" and getattr(s, "end_time", None) and s.end_time.replace(tzinfo=None) > now
+    ]
+    if active_subs:
+        latest_sub = max(active_subs, key=lambda s: s.end_time)
+        end_time = latest_sub.end_time.replace(tzinfo=None)
+        remaining_days = max(1, math.ceil((end_time - now).total_seconds() / 86400))
+        return (
+            latest_sub.tier.lower(),
+            end_time.strftime("%Y-%m-%d"),
+            remaining_days,
+        )
+
+    # 其次检查内测用户（注册起30天体验期）
+    m = (user.membership or "").lower()
+    if m == "test":
+        created = user.created_at.replace(tzinfo=None) if user.created_at else now
+        expire_at = created + timedelta(days=30)
+        if expire_at > now:
+            remaining_days = max(1, math.ceil((expire_at - now).total_seconds() / 86400))
+            return ("test", expire_at.strftime("%Y-%m-%d"), remaining_days)
+        return ("free", None, None)
+
+    # 防御兜底：若 subscriptions 未加载但 user.membership 为有效付费等级，暂保留
+    if m in ("week_pro", "week_max", "month_pro", "month_max", "pro", "max"):
+        return (m, None, None)
+
+    # 其余情况（包括未开通、或已过期的订阅档位）均视为普通用户
+    return ("free", None, None)
+
+def get_user_effective_membership_sync(user: models.User) -> str:
+    tier, _, _ = get_user_effective_membership_and_expiry(user)
+    return tier
+
 # Helper function to format UserProfile to Frontend expected structure
 def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
     p = user.profile
+    effective_membership, expire_at, remaining_days = get_user_effective_membership_and_expiry(user)
     # 防御性兜底：脏数据 / 种子账号导致 profile 为 None 时，用一组合理默认值构造响应，
     # 避免登录等接口因 AttributeError 直接 500（曾导致 admin 账号无法登录）。
     if p is None:
@@ -183,7 +247,9 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
             degree="本科",
             hasExp=False,
             is_online=user.is_online,
-            membership=user.membership,
+            membership=effective_membership,
+            membershipExpireAt=expire_at,
+            membershipRemainingDays=remaining_days,
             phone=user.phone,
             email=user.email,
             targetCity=None,
@@ -208,7 +274,9 @@ def format_user_profile(user: models.User) -> schemas.UserProfileResponse:
         degree=p.degree or "本科",
         hasExp=p.has_experience,
         is_online=user.is_online,
-        membership=user.membership,
+        membership=effective_membership,
+        membershipExpireAt=expire_at,
+        membershipRemainingDays=remaining_days,
         phone=user.phone,
         email=user.email,
         targetCity="、".join(p.target_cities) if p.target_cities else None,
@@ -239,7 +307,7 @@ async def get_current_user(
         
     result = await db.execute(
         select(models.User)
-        .options(selectinload(models.User.profile))
+        .options(selectinload(models.User.profile), selectinload(models.User.subscriptions))
         .where(models.User.id == user_id)
     )
     user = result.scalars().first()

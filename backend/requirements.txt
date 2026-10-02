@@ -1,6 +1,12 @@
 fastapi
 uvicorn[standard]
-sqlalchemy>=2.0.0
+# 必须带 [asyncio] extra。greenlet 是 SQLAlchemy asyncio 运行时的硬依赖，
+# 但 2.1 起它**只**在 asyncio extra 里声明（2.0.x 还有一条
+# `greenlet; platform_machine == "x86_64"` 的平台条件依赖会自动带上）。
+# 裸写 sqlalchemy 时：本地装的是 2.0.28 所以有 greenlet，容器全新构建解析到
+# 2.1.x 就没有 → 启动即 ImportError: requires that the Python 'greenlet' library is installed。
+# 同时封 <2.1：容器一直解析到 2.0.4x，2.1 是本地从未验证过的版本，别在上线期跳。
+sqlalchemy[asyncio]>=2.0.0,<2.1
 asyncpg
 redis
 pyjwt

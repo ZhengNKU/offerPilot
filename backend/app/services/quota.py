@@ -1,22 +1,17 @@
-"""使用次数配额 helper —— 集中维护配额逻辑。
+﻿"""使用次数配额 helper —— 集中维护配额与加油包双轨制消耗逻辑。
 
-配额策略（按会员等级差异化）：
-  - FREE（membership is None）：每个功能**永久** 1 次，不限时间窗口。
-    计数走全表 COUNT(*)，旧记录永远不"过期"。
-  - PRO：每个功能 30 天内 10 次。
-  - MAX：每个功能 30 天内 30 次。
+配额策略（按会员等级差异化与双轨制）：
+  - FREE（普通免费用户）：简历 1 次 / 记录 1 次 / 录音 0 次（关闭）
+  - TEST（内测体验用户）：简历 3 次 / 记录 3 次 / 录音 2 次（30 天试用期后自动降级为 FREE）
+  - WEEK_PRO（周度进阶版）：简历 5 次 / 记录 5 次 / 录音 3 次（7天窗口）
+  - WEEK_MAX（周度旗舰版）：简历 10 次 / 记录 10 次 / 录音 5 次（7天窗口）
+  - MONTH_PRO（月度专业版）：简历 30 次 / 记录 30 次 / 录音 10 次（30天窗口）
+  - MONTH_MAX（月度至尊版）：简历 30 次 / 记录 30 次 / 录音 20 次（30天窗口）
 
-为什么用 user_quota_usage 表存每次使用时刻：
-  - 删除业务记录（InterviewSession / ResumeAnalysis）不会重置配额
-    （这是本次修复的核心 bug）
-  - PRO/MAX 的 30 天窗口天然支持，无需复杂的"过期"判断
-  - FREE 永久 1 次 = 全表 COUNT 即可，逻辑统一
-
-调用方：
-  - routers/audio.py 的 5 个入口（check_limit / create_session /
-    create_record_session / analyze_audio / 重跑 session 分支）
-  - routers/resume.py 的 analyze_resume 入口
-  - routers/audio.py 的 GET /api/quota/status（只读，不扣减）
+双轨制扣减机制：
+  - 用户发起分析时，优先扣减当前周期会员的自然配额；
+  - 若周期会员配额已用尽（或免费用户），自动检测并扣减用户的永久加油包资产（user_extra_quotas）；
+  - 真正实现“额度随用随抵，加油包永久有效，周期到期无损保留加油包”。
 """
 from __future__ import annotations
 
@@ -31,13 +26,12 @@ from app import models
 from app.config import settings
 
 
-# 功能标识符常量（与 UserQuotaUsage.feature 字段对齐）
+# 功能标识符常量（与 UserQuotaUsage.feature 及 UserExtraQuota 字段对齐）
 FEATURE_AUDIO = "audio"    # 面试录音分析
 FEATURE_RECORD = "record"   # 面试记录分析（粘贴文本 / 重跑 session）
 FEATURE_RESUME = "resume"   # 简历分析
 
 _ALL_FEATURES = (FEATURE_AUDIO, FEATURE_RECORD, FEATURE_RESUME)
-
 
 _FEATURE_LABELS = {
     FEATURE_AUDIO: "面试录音分析",
@@ -45,76 +39,92 @@ _FEATURE_LABELS = {
     FEATURE_RESUME: "简历分析",
 }
 
+EXTRA_QUOTA_FIELDS = {
+    FEATURE_AUDIO: "audio_remain",
+    FEATURE_RECORD: "record_remain",
+    FEATURE_RESUME: "resume_remain",
+}
+
+# 6 档位周期配额表 (audio, record, resume)
+TIER_QUOTAS = {
+    "free": {"audio": 0, "record": 1, "resume": 1},
+    "test": {"audio": 2, "record": 3, "resume": 3},
+    "week_pro": {"audio": 3, "record": 5, "resume": 5},
+    "week_max": {"audio": 5, "record": 10, "resume": 10},
+    "month_pro": {"audio": 10, "record": 30, "resume": 30},
+    "month_max": {"audio": 20, "record": 30, "resume": 30},
+}
+
+# 周期窗口天数
+TIER_WINDOW_DAYS = {
+    "week_pro": 7,
+    "week_max": 7,
+    "month_pro": 30,
+    "month_max": 30,
+}
 
 # 内测免费试用天数
 TRIAL_DAYS = 30
 
 
 def _is_trial_expired(user: models.User) -> bool:
-    """判断内测用户（test）是否已超过 30 天试用期。
-
-    试用期过后自动降级为 FREE 配额（永久 1 次），配额和额度提示均改回 FREE 语义。
-    """
+    """判断内测用户（test）是否已超过 30 天试用期。"""
     plan = (user.membership or "").lower()
     if plan != "test":
         return False
     if user.created_at is None:
-        return True  # 没有创建时间也降级，保守兜底
+        return True
     elapsed = datetime.utcnow() - user.created_at.replace(tzinfo=None)
     return elapsed >= timedelta(days=TRIAL_DAYS)
 
 
-def _is_free_user(user: Optional[models.User]) -> bool:
-    """判断是否为"非会员"或"内测用户"（membership 为 None / "free" / "test" / 未知值）。
-
-    所有用户当前均为一次性累计配额（不滚窗），PRO/MAX 暂未上线。
+async def get_effective_membership(db: AsyncSession, user: Optional[models.User]) -> str:
+    """获取用户当前实际生效的 membership。
+    - 若用户无 membership 或为 free，返回 'free'
+    - 若为 test，检查是否超过 30 天试用期；过期返回 'free'
+    - 若为付费订阅档（week_pro / week_max / month_pro / month_max），检查在 user_subscriptions 中是否有未到期的 active 订阅，无/到期返回 'free'
     """
     if user is None:
-        return False  # 未登录不视为 FREE，由路由层拦截
+        return "free"
     plan = (user.membership or "").lower()
-    # 已过试用期的 test 按 free 处理
-    if plan == "test" and _is_trial_expired(user):
-        return True
-    return True
-
-
-# 允许「知识库题目过期后自动重新生成」的付费档位。
-# PRO/MAX 尚未上线 → 当前无人命中该集合 = 所有用户都走 PG 永久缓存，不再烧 LLM token。
-# PRO/MAX 上线后无需改动业务代码，membership 落到这两个值即自动恢复刷新能力。
-PAID_MEMBERSHIPS = {"pro", "max"}
-
-
-def is_paid_user(user: Optional[models.User]) -> bool:
-    """是否为已生效的付费会员。
-
-    内测（test）不算付费；已过 30 天试用期的 test 更不算。
-    """
-    if user is None:
-        return False
-    plan = (user.membership or "").lower()
+    if not plan or plan == "free":
+        return "free"
     if plan == "test":
-        return False
-    return plan in PAID_MEMBERSHIPS
+        if _is_trial_expired(user):
+            return "free"
+        return "test"
+
+    # 付费订阅档：检查有效订阅
+    now = datetime.utcnow()
+    stmt = (
+        select(models.UserSubscription)
+        .where(
+            models.UserSubscription.user_id == user.id,
+            models.UserSubscription.status == "active",
+            models.UserSubscription.end_time > now,
+        )
+        .order_by(models.UserSubscription.end_time.desc())
+        .limit(1)
+    )
+    res = await db.execute(stmt)
+    active_sub = res.scalars().first()
+    if not active_sub:
+        # 订阅已到期，自动判定回退为 free
+        return "free"
+    return active_sub.tier.lower()
 
 
-def can_refresh_knowledge(user: Optional[models.User]) -> bool:
-    """知识库题目是否允许因缓存过期而重新调用 LLM 生成。
+PAID_MEMBERSHIPS = {"week_pro", "week_max", "month_pro", "month_max", "pro", "max"}
 
-    - 免费 / 内测 → False：首次生成后永久复用 PG 里的 knowledge_question_cache，
-      Redis TTL 过期只是回落到 PG 读取，不触发任何 LLM 调用。
-    - 付费（PRO/MAX）→ True：保持「过期后用户点开题谱时静默重生成」的体验。
 
-    注意：这个开关只管「刷新」。首次生成、以及换目标岗位后的重建
-    （trigger_knowledge_generation）不受此限制，所有档位一视同仁。
-    """
-    return is_paid_user(user)
+async def is_paid_user(db: AsyncSession, user: Optional[models.User]) -> bool:
+    """是否为当前有效的付费会员。"""
+    eff = await get_effective_membership(db, user)
+    return eff in PAID_MEMBERSHIPS
 
 
 async def can_refresh_knowledge_by_id(db: AsyncSession, user_id: int) -> bool:
-    """按 user_id 查库再判定，供只有 user_id 的 service 层（question_generator）调用。
-
-    查不到用户 / 查询异常一律按 False 兜底（宁可不刷新，也不误烧 token）。
-    """
+    """按 user_id 判定是否允许知识库重新生成。"""
     try:
         result = await db.execute(
             select(models.User).where(models.User.id == user_id)
@@ -122,24 +132,7 @@ async def can_refresh_knowledge_by_id(db: AsyncSession, user_id: int) -> bool:
         user = result.scalars().first()
     except Exception:
         return False
-    return can_refresh_knowledge(user)
-
-
-def get_quota_for(user: Optional[models.User]) -> dict:
-    """根据会员等级返回该用户的功能配额表。
-
-    返回 dict[feature, max_count]。
-    未登录用户 / 异常 membership 一律按 FREE 算（保守兜底）。
-    """
-    if user is None:
-        return settings.QUOTA_FREE
-    plan = (user.membership or "").lower()
-    if plan == "test":
-        if _is_trial_expired(user):
-            return settings.QUOTA_FREE
-        return settings.QUOTA_TEST
-    # None 或其他未知值 → FREE
-    return settings.QUOTA_FREE
+    return await is_paid_user(db, user)
 
 
 async def _count_used(
@@ -147,54 +140,74 @@ async def _count_used(
     user: models.User,
     feature: str,
     *,
-    windowed: bool,
+    window_days: Optional[int],
 ) -> int:
-    """统计已用次数。
-
-    windowed=True  → 按 30 天窗口过滤（PRO/MAX 用）
-    windowed=False → 全表 COUNT（FREE 用，永久累计）
-    """
+    """统计当前窗口内已用次数。"""
     stmt = select(func.count(models.UserQuotaUsage.id)).where(
         models.UserQuotaUsage.user_id == user.id,
         models.UserQuotaUsage.feature == feature,
     )
-    if windowed:
-        cutoff = datetime.utcnow() - timedelta(days=settings.QUOTA_WINDOW_DAYS)
+    if window_days is not None and window_days > 0:
+        cutoff = datetime.utcnow() - timedelta(days=window_days)
         stmt = stmt.where(models.UserQuotaUsage.used_at >= cutoff)
     res = await db.execute(stmt)
     return res.scalar() or 0
 
 
 async def get_remaining(db: AsyncSession, user: Optional[models.User], feature: str) -> int:
-    """返回当前剩余次数（>=0）。未登录用户按 FREE 配额算剩余。"""
+    """返回当前总剩余次数（周期可用 + 加油包可用）。"""
     if feature not in _ALL_FEATURES:
         raise ValueError(f"unknown feature: {feature!r}")
     if user is None:
-        return settings.QUOTA_FREE.get(feature, 0)
+        return TIER_QUOTAS["free"].get(feature, 0)
 
-    quota_dict = get_quota_for(user)
+    eff = await get_effective_membership(db, user)
+    quota_dict = TIER_QUOTAS.get(eff, TIER_QUOTAS["free"])
     max_count = quota_dict.get(feature, 0)
-    used = await _count_used(db, user, feature, windowed=not _is_free_user(user))
-    return max(0, max_count - used)
+    window_days = TIER_WINDOW_DAYS.get(eff)
+    used = await _count_used(db, user, feature, window_days=window_days)
+    cycle_remain = max(0, max_count - used)
+
+    # 加上加油包
+    field = EXTRA_QUOTA_FIELDS[feature]
+    stmt = select(models.UserExtraQuota).where(models.UserExtraQuota.user_id == user.id)
+    res = await db.execute(stmt)
+    extra = res.scalars().first()
+    extra_remain = getattr(extra, field, 0) if extra else 0
+
+    return cycle_remain + extra_remain
 
 
 async def get_status(db: AsyncSession, user: Optional[models.User]) -> dict:
-    """返回 {feature: {used, remaining, max}, membership} 结构给前端展示。"""
-    membership = (user.membership if user else None) or "free"
-    quota_dict = get_quota_for(user)
-    windowed = user is not None and not _is_free_user(user)
+    """返回完整的额度状态（周期 + 加油包明细）给前端展示。"""
+    eff = await get_effective_membership(db, user)
+    quota_dict = TIER_QUOTAS.get(eff, TIER_QUOTAS["free"])
+    window_days = TIER_WINDOW_DAYS.get(eff)
 
-    out: dict = {"membership": membership}
+    extra = None
+    if user:
+        stmt = select(models.UserExtraQuota).where(models.UserExtraQuota.user_id == user.id)
+        res = await db.execute(stmt)
+        extra = res.scalars().first()
+
+    out: dict = {"membership": eff}
     for feat in _ALL_FEATURES:
         max_count = quota_dict.get(feat, 0)
         if user is None:
             used = 0
         else:
-            used = await _count_used(db, user, feat, windowed=windowed)
+            used = await _count_used(db, user, feat, window_days=window_days)
+        cycle_remain = max(0, max_count - used)
+        field = EXTRA_QUOTA_FIELDS[feat]
+        extra_remain = getattr(extra, field, 0) if extra else 0
+        total_remaining = cycle_remain + extra_remain
+
         out[feat] = {
             "used": used,
             "max": max_count,
-            "remaining": max(0, max_count - used),
+            "cycle_remaining": cycle_remain,
+            "extra_remaining": extra_remain,
+            "remaining": total_remaining,
         }
     return out
 
@@ -204,22 +217,10 @@ async def check_and_consume(
     user: Optional[models.User],
     feature: str,
 ) -> int:
-    """检查配额并记录本次使用。
-
-    - 返回扣减后的剩余次数（>=0）
-    - 未登录：抛 403（路由层应提前拦截）
-    - 配额耗尽：抛 403，文案带会员升级提示
-    - 通过：写入一条 UserQuotaUsage 并 commit，返回 remaining-1
-
-    配额语义：
-      - FREE 用户：永久 1 次，旧记录不"过期"
-      - PRO 用户：30 天内 10 次
-      - MAX 用户：30 天内 30 次
-
-    并发说明：本实现采用"先 SELECT COUNT 再 INSERT"两步式，理论上极端并发（同
-    用户同一功能毫秒级并发）可能让配额多扣 1 次。面试分析是重操作（LLM 30-90s），
-    并发窗口极小；如未来需要严格并发控制，可在 User 表加 audio_used_at /
-    record_used_at / resume_used_at 三个 DateTime 字段做乐观锁。
+    """检查配额并扣减（双轨制）：
+    - 优先扣除周期会员配额；
+    - 周期额度用完时，自动划扣加油包储备余额；
+    - 均耗尽时抛出友好 403 异常引导续费/加购。
     """
     if feature not in _ALL_FEATURES:
         raise ValueError(f"unknown feature: {feature!r}")
@@ -230,37 +231,47 @@ async def check_and_consume(
             detail="请先登录后再使用此功能",
         )
 
-    quota_dict = get_quota_for(user)
+    eff = await get_effective_membership(db, user)
+    quota_dict = TIER_QUOTAS.get(eff, TIER_QUOTAS["free"])
     max_count = quota_dict.get(feature, 0)
-    if max_count <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"当前会员等级不支持{_FEATURE_LABELS[feature]}，请升级会员",
-        )
+    window_days = TIER_WINDOW_DAYS.get(eff)
+    used = await _count_used(db, user, feature, window_days=window_days)
+    cycle_remain = max(0, max_count - used)
 
-    is_free = _is_free_user(user)
-    used = await _count_used(db, user, feature, windowed=not is_free)
+    # 1. 优先使用周期会员配额
+    if cycle_remain > 0:
+        db.add(models.UserQuotaUsage(user_id=user.id, feature=feature))
+        await db.flush()
+        # 返回总剩余
+        field = EXTRA_QUOTA_FIELDS[feature]
+        stmt = select(models.UserExtraQuota).where(models.UserExtraQuota.user_id == user.id)
+        res = await db.execute(stmt)
+        extra = res.scalars().first()
+        extra_remain = getattr(extra, field, 0) if extra else 0
+        return (cycle_remain - 1) + extra_remain
 
-    if used >= max_count:
-        plan = (user.membership or "").lower()
-        if plan == "test":
-            detail = (
-                f"您的内测{_FEATURE_LABELS[feature]}额度已用完（{max_count} 次），"
-                f"内测期间无重置，敬请期待正式版！"
-            )
-        else:
-            detail = (
-                f"您已使用过{_FEATURE_LABELS[feature]}的免费体验，"
-                f"剩余次数不足，敬请期待后续更多功能！"
-            )
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=detail,
-        )
+    # 2. 周期配额为 0，尝试消耗单次加油包
+    field = EXTRA_QUOTA_FIELDS[feature]
+    stmt = (
+        select(models.UserExtraQuota)
+        .where(models.UserExtraQuota.user_id == user.id)
+        .with_for_update()
+    )
+    res = await db.execute(stmt)
+    extra = res.scalars().first()
+    extra_remain = getattr(extra, field, 0) if extra else 0
 
-    # 通过：记录本次使用
-    # 注意：只用 flush 不 commit，让调用方控制事务边界，
-    # 避免调用方同一 session 里的其他 pending 更改被提前提交。
-    db.add(models.UserQuotaUsage(user_id=user.id, feature=feature))
-    await db.flush()
-    return max_count - used - 1
+    if extra_remain > 0:
+        setattr(extra, field, extra_remain - 1)
+        await db.flush()
+        return extra_remain - 1
+
+    # 3. 均已耗尽
+    detail = (
+        f"您的{_FEATURE_LABELS[feature]}额度已用完，"
+        f"您可以续费/升级会员套餐，或购买按需即用的额度加油包继续使用！"
+    )
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=detail,
+    )

@@ -22,9 +22,12 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    profile: Mapped["UserProfile"] = relationship("UserProfile", back_populates="user", cascade="all, delete-orphan", uselist=False)
+    profile: Mapped["UserProfile"] = relationship("UserProfile", back_populates="user", cascade="all, delete-orphan", uselist=False, lazy="selectin")
     sessions: Mapped[List["InterviewSession"]] = relationship("InterviewSession", back_populates="user", cascade="all, delete-orphan")
     files: Mapped[List["UploadedFile"]] = relationship("UploadedFile", back_populates="user", cascade="all, delete-orphan")
+    orders: Mapped[List["Order"]] = relationship("Order", back_populates="user", cascade="all, delete-orphan")
+    subscriptions: Mapped[List["UserSubscription"]] = relationship("UserSubscription", back_populates="user", cascade="all, delete-orphan", lazy="selectin")
+    extra_quota: Mapped[Optional["UserExtraQuota"]] = relationship("UserExtraQuota", back_populates="user", cascade="all, delete-orphan", uselist=False)
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"
@@ -891,4 +894,77 @@ class ModerationAuditLog(Base):
         Index("ix_mod_audit_scene_time", "scene", "created_at"),
         Index("ix_mod_audit_user_time", "user_id", "created_at"),
     )
+
+
+# ============================================================================
+# 支付与订单、会员订阅及加油包模型
+# ============================================================================
+
+class Order(Base):
+    """
+    统一支付订单表：微信支付 / 支付宝 统一下单与履约追踪
+    """
+    __tablename__ = "orders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    order_no: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    
+    plan_id: Mapped[str] = mapped_column(String(32), nullable=False)       # WEEK_PRO / WEEK_MAX / MONTH_PRO / MONTH_MAX / PACK_A / PACK_B
+    plan_category: Mapped[str] = mapped_column(String(20), nullable=False) # subscription / pack
+    plan_name: Mapped[str] = mapped_column(String(64), nullable=False)     # 如 "月度专业版"
+    
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)           # 单位：分 (例如 7490 代表 ¥74.90)
+    payment_channel: Mapped[str] = mapped_column(String(20), nullable=False) # wechat / alipay
+    
+    status: Mapped[str] = mapped_column(String(20), default="pending", index=True, nullable=False) # pending / paid / expired / closed
+    trade_no: Mapped[Optional[str]] = mapped_column(String(128), nullable=True) # 第三方流水号
+    qr_code_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), index=True)
+    paid_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    expired_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    
+    snapshot_benefits: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    
+    user: Mapped["User"] = relationship("User", back_populates="orders")
+
+
+class UserSubscription(Base):
+    """
+    周期会员订阅履约明细表
+    """
+    __tablename__ = "user_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True, nullable=False)
+    order_id: Mapped[int] = mapped_column(Integer, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False)
+    
+    tier: Mapped[str] = mapped_column(String(32), nullable=False) # week_pro / week_max / month_pro / month_max
+    start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False) # active / expired / superseded
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    user: Mapped["User"] = relationship("User", back_populates="subscriptions")
+
+
+class UserExtraQuota(Base):
+    """
+    用户加油包永久额度资产表 (按需加油 · 永不过期 · 随用随抵)
+    """
+    __tablename__ = "user_extra_quotas"
+
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    
+    resume_remain: Mapped[int] = mapped_column(Integer, default=0, nullable=False)      # 简历分析次数
+    record_remain: Mapped[int] = mapped_column(Integer, default=0, nullable=False)      # 面试记录分析次数
+    audio_remain: Mapped[int] = mapped_column(Integer, default=0, nullable=False)       # 录音分析次数
+    live_remain_min: Mapped[int] = mapped_column(Integer, default=0, nullable=False)    # 模拟面试时长（分钟）
+    advisor_remain: Mapped[int] = mapped_column(Integer, default=0, nullable=False)     # AI 职业顾问次数
+    
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    user: Mapped["User"] = relationship("User", back_populates="extra_quota")
 
