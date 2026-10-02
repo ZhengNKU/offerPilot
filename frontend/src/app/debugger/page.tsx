@@ -362,7 +362,7 @@ function NewAnalysisDebuggerContent() {
     const hasAnalyzedKey = `interviewVar_analyzed_${activeMode}`;
     if (!auth.isLoggedIn) {
       if (localStorage.getItem(hasAnalyzedKey) === "true") {
-        auth.triggerToast("您的该项分析免费体验次数已达上限，请注册或登录后使用更多功能！", "error");
+        auth.triggerToast("您的该项分析额度已达上限，请充值或升级会员！", "error");
         return;
       }
     } else {
@@ -390,7 +390,7 @@ function NewAnalysisDebuggerContent() {
           const isTestUser = status.membership === "test";
           const detail = isTestUser
             ? `您的内测${featureLabel}额度已用完（一次性），内测期间无重置，敬请期待正式版！`
-            : `您已使用过${featureLabel}的免费体验，剩余次数不足，敬请期待后续更多功能！`;
+            : `您已使用过${featureLabel}的体验额度，剩余次数不足，敬请充值或升级会员！`;
           auth.triggerToast(detail, "error");
           return;
         }
@@ -1118,8 +1118,8 @@ function NewAnalysisDebuggerContent() {
                       : "bg-primary/10 border border-primary/20 text-primary animate-pulse"
                   }`}>
                     {auth.user?.membership === "test"
-                      ? `内测档 · 剩余体验：${remainingCount}次`
-                      : `免费体验剩余：${remainingCount}次`}
+                      ? `内测档 · 额度剩余：${remainingCount}次`
+                      : `额度剩余：${remainingCount}次`}
                   </div>
                 )}
               </div>
@@ -1208,7 +1208,7 @@ function NewAnalysisDebuggerContent() {
                               体验次数已用完，暂时无法上传文件
                             </h4>
                             <p className="text-xs md:text-sm text-secondary/80 font-bold">
-                              当前剩余体验次数为 0 次，请升级会员或充值体验配额
+                              当前剩余额度为 0 次，请升级会员或充值额度包
                             </p>
                           </div>
                         ) : (

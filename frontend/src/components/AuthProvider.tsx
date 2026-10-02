@@ -4,6 +4,7 @@ import { createContext, useContext, useState, useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { API_BASE } from "@/lib/api";
+import { getMembershipInfo } from "@/lib/membership";
 
 export interface UserProfile {
   name: string;
@@ -23,7 +24,9 @@ export interface UserProfile {
   degree?: string;
   gradYear?: string;
   hasExp?: boolean;
-  membership?: string;  // 内测版本：值为 "free" | "test" | "pro" | "max"
+  membership?: string;  // 内测版本：值为 "free" | "test" | "week_pro" | "week_max" | "month_pro" | "month_max" | "pro" | "max"
+  membershipExpireAt?: string;
+  membershipRemainingDays?: number;
   phone?: string;
   email?: string;
   targetCity?: string;
@@ -169,6 +172,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }
               }
               const merged = { ...defaultUser, ...userRef.current, ...apiData };
+              if (!data.membershipExpireAt) {
+                delete merged.membershipExpireAt;
+                delete merged.membershipRemainingDays;
+              }
               // API 返回的 role 可能不含当前职级（仅岗位名），
               // 此时保留 localStorage 中的完整版本（"岗位 · 职级"），防止职级信息丢失
               if (apiData.role && !apiData.role.includes(" · ") && userRef.current.role && userRef.current.role.includes(" · ")) {
@@ -1339,9 +1346,14 @@ export function UserMenu() {
             </div>
             <div className="flex items-center justify-between gap-2">
               <p className="text-xs font-bold truncate user-role-text" style={{ color: "rgba(255, 255, 255, 0.75)" }}>{auth.user.role || "求职者"}</p>
-              <span className="px-2 py-0.5 rounded-full text-[11px] font-black shrink-0 user-badge-purple bg-[#f3e8ff] dark:bg-purple-500/20 text-[#6b21a8] dark:text-purple-300 border border-[#e9d5ff] dark:border-purple-500/30">
-                内测用户
-              </span>
+              {(() => {
+                const mem = getMembershipInfo(auth.user.membership, auth.user.createdAt);
+                return (
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-black shrink-0 ${mem.badgeClass}`}>
+                    {mem.label}
+                  </span>
+                );
+              })()}
             </div>
           </div>
           <button

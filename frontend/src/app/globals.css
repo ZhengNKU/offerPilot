@@ -997,6 +997,32 @@ html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-mo
   color: #334155 !important;
 }
 
+/* 覆盖上条规则：开通支付/确认结算等高亮实体按钮与胶囊标签文字在浅色模式下必须 100% 保持纯白高对比度 */
+html.light div[class*="fixed"][class*="z-50"] .pay-checkout-btn,
+html.light div[class*="fixed"][class*="z-50"] .pay-checkout-btn *,
+html.light div[class*="fixed"][class*="z-50"] button.pay-checkout-btn,
+html.light div[class*="fixed"][class*="z-50"] button.pay-checkout-btn *,
+html.light div[class*="fixed"][class*="z-50"] .badge-solid-primary,
+html.light div[class*="fixed"][class*="z-50"] .badge-solid-primary *,
+html.light div[class*="fixed"][class*="z-50"] .pricing-card-badge,
+html.light div[class*="fixed"][class*="z-50"] .pricing-card-badge *,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .pay-checkout-btn,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .pay-checkout-btn *,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .pay-checkout-btn span,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) button.pay-checkout-btn span,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .btn-solid-primary span,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) button.btn-solid-primary span,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .badge-solid-primary,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .badge-solid-primary *,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .badge-solid-primary span,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .badge-solid-primary span:not(.material-symbols-outlined),
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .pricing-card-badge,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .pricing-card-badge *,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .pricing-card-badge span,
+html.light div[class*="fixed"][class*="z-50"]:not(:has(> div.resume-structure-modal)):not(.docx-tooltip-card) .pricing-card-badge span:not(.material-symbols-outlined) {
+  color: #ffffff !important;
+}
+
 /* 下载 AI 优化版简历按钮旁边的 Tooltip 提示框：浅色模式下依然锁定黑底高亮纯白字 */
 html.light .docx-tooltip-card,
 html.light div.docx-tooltip-card,
@@ -2722,3 +2748,43 @@ html.light .border-white\/20 {
 .force-dark .border-white\/10 { border-color: rgba(255, 255, 255, 0.1) !important; }
 .force-dark .border-white\/15 { border-color: rgba(255, 255, 255, 0.15) !important; }
 .force-dark .border-white\/20 { border-color: rgba(255, 255, 255, 0.2) !important; }
+
+/* =========================================================================
+   深色背景实体按钮与高亮角标：彻底保障浅色与深色模式下均为高对比纯白文字
+   全面覆盖弹窗内部 (div[class*="fixed"][class*="z-50"]) 与全局各种深色按钮
+   防止被 html.light .text-white 或 modal span 规则覆写成黑色或暗灰
+   ========================================================================= */
+.btn-solid-primary,
+button.btn-solid-primary,
+html.light .btn-solid-primary,
+html.light button.btn-solid-primary,
+html.light div[class*="fixed"][class*="z-50"] .btn-solid-primary,
+html.light div[class*="fixed"][class*="z-50"] button.btn-solid-primary,
+.badge-solid-primary,
+html.light .badge-solid-primary,
+html.light div[class*="fixed"][class*="z-50"] .badge-solid-primary {
+  color: #ffffff !important;
+}
+
+.btn-solid-primary *,
+button.btn-solid-primary *,
+html.light .btn-solid-primary *,
+html.light button.btn-solid-primary *,
+html.light div[class*="fixed"][class*="z-50"] .btn-solid-primary *,
+html.light div[class*="fixed"][class*="z-50"] button.btn-solid-primary *,
+.badge-solid-primary *,
+html.light .badge-solid-primary *,
+html.light div[class*="fixed"][class*="z-50"] .badge-solid-primary * {
+  color: #ffffff !important;
+}
+
+/* 强力击穿 line 996 的 div[class*="fixed"][class*="z-50"] span:not(.material-symbols-outlined) 规则 */
+html.light div[class*="fixed"][class*="z-50"] .btn-solid-primary span,
+html.light div[class*="fixed"][class*="z-50"] button.btn-solid-primary span,
+html.light div[class*="fixed"][class*="z-50"] .btn-solid-primary span:not(.material-symbols-outlined),
+html.light div[class*="fixed"][class*="z-50"] button.btn-solid-primary span:not(.material-symbols-outlined),
+html.light div[class*="fixed"][class*="z-50"] .badge-solid-primary span,
+html.light div[class*="fixed"][class*="z-50"] .badge-solid-primary span:not(.material-symbols-outlined) {
+  color: #ffffff !important;
+}
+

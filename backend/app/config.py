@@ -180,6 +180,28 @@ class Settings(BaseSettings):
     #   新加坡：https://{WorkspaceId}.ap-southeast-1.maas.aliyuncs.com/api/v1
     DASHSCOPE_WORKSPACE_ID: str = ""
 
+    # ── 支付相关配置 (微信支付 V3 & 支付宝 OpenAPI) ──
+    # 微信支付 V3
+    WECHAT_PAY_APPID: str = ""
+    WECHAT_PAY_MCHID: str = ""
+    WECHAT_PAY_API_V3_KEY: str = ""
+    WECHAT_PAY_CERT_SERIAL_NO: str = ""
+    WECHAT_PAY_SERIAL_NO: str = ""
+    WECHAT_PAY_PRIVATE_KEY_PATH: str = ""
+    WECHAT_PAY_NOTIFY_URL: str = ""
+
+    # 支付宝开放平台
+    ALIPAY_APP_ID: str = ""
+    ALIPAY_PRIVATE_KEY_PATH: str = ""
+    ALIPAY_PUBLIC_KEY_PATH: str = ""
+    ALIPAY_SIGN_TYPE: str = "RSA2"
+    # 网关留空则由 ALIPAY_SANDBOX 决定：沙箱走 openapi-sandbox.dl.alipaydev.com，
+    # 否则走正式 https://openapi.alipay.com/gateway.do。显式填写可强制覆盖。
+    ALIPAY_GATEWAY_URL: str = ""
+    # 沙箱开关（联调用）。需搭配沙箱环境的 APP_ID + 密钥，否则预下单会直接返回 mock 二维码。
+    ALIPAY_SANDBOX: bool = False
+    ALIPAY_NOTIFY_URL: str = ""
+
     @model_validator(mode="after")
     def _check_jwt_secret(self) -> "Settings":
         """
@@ -204,6 +226,10 @@ class Settings(BaseSettings):
             )
         return self
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=(".env.public", ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore"
+    )
 
 settings = Settings()

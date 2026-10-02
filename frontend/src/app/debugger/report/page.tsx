@@ -7,6 +7,7 @@ import { useAuth, UserMenu } from "@/components/AuthProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import Footer from "@/components/Footer";
 import { API_BASE } from "@/lib/api";
+import { getMembershipInfo } from "@/lib/membership";
 
 export default function CareerDashboard() {
   const router = useRouter();
@@ -367,8 +368,8 @@ export default function CareerDashboard() {
                   <span className="px-2.5 py-0.5 rounded-full bg-tertiary/10 text-tertiary text-[11px] font-black border border-tertiary/20 whitespace-nowrap">
                     {profile.status}
                   </span>
-                  <span className="px-2.5 py-0.5 rounded-full bg-purple-500/10 text-purple-300 text-[11px] font-black border border-purple-500/20 whitespace-nowrap">
-                    内测用户
+                  <span className={`px-2.5 py-0.5 rounded-full text-[11px] font-black border whitespace-nowrap ${getMembershipInfo(auth.user?.membership, auth.user?.createdAt).badgeClass}`}>
+                    {getMembershipInfo(auth.user?.membership, auth.user?.createdAt).label}
                   </span>
                 </div>
 
@@ -611,7 +612,7 @@ export default function CareerDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6 w-full items-stretch">
             
             {/* WIDGET 4: RECENT ACTIVITY */}
-            <div className="col-span-12 md:col-span-4 flex flex-col h-full">
+            <div className="col-span-12 md:col-span-6 flex flex-col h-full">
               <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-start gap-4 hover:border-primary/20 transition-all duration-300">
                 
                 <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
@@ -672,7 +673,7 @@ export default function CareerDashboard() {
             </div>
 
             {/* WIDGET 5: QUICK ACTIONS */}
-            <div className="col-span-12 md:col-span-4 flex flex-col h-full">
+            <div className="col-span-12 md:col-span-6 flex flex-col h-full">
               <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-start gap-4 hover:border-secondary/20 transition-all duration-300">
                 
                 <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
@@ -706,23 +707,6 @@ export default function CareerDashboard() {
                   ))}
                 </div>
 
-              </div>
-            </div>
-
-            {/* WIDGET 6: TESTING NOTES */}
-            <div className="col-span-12 md:col-span-4 flex flex-col h-full">
-              <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-start gap-4 hover:border-tertiary/20 transition-all duration-300">
-
-                <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
-                  <h4 className="text-base font-black text-white flex items-center gap-2">
-                    <span className="material-symbols-outlined text-lg text-tertiary">info</span>
-                    内测说明
-                  </h4>
-                </div>
-
-                <p className="text-sm text-on-surface-variant/70 leading-relaxed font-semibold">
-                  内测期间所有功能免费使用，不产生任何订单或费用。正式计费策略上线前，会通过站内信与邮件提前通知。
-                </p>
               </div>
             </div>
 

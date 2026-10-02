@@ -10,6 +10,8 @@ import { openLegalTerms, openLegalPrivacy, openLegalContact } from "@/components
 import Footer from "@/components/Footer";
 import { API_BASE } from "@/lib/api";
 import { getQuotaStatus } from "@/lib/quotaClient";
+import { PricingModal } from "@/components/PricingModal";
+import { getMembershipInfo } from "@/lib/membership";
 
 interface TimelineItem {
   id: string;
@@ -62,6 +64,7 @@ export default function CareerDashboard() {
   const [recentActivity, setRecentActivity] = useState<TimelineItem[]>([]);
   const [quotaStatus, setQuotaStatus] = useState<any>(null);
   const [liveQuota, setLiveQuota] = useState<any>(null);
+  const [counselorQuota, setCounselorQuota] = useState<any>(null);
   const dashboardBootstrapFetchedRef = useRef(false);
 
   // 最近活动 & 资源配额获取
@@ -84,6 +87,12 @@ export default function CareerDashboard() {
     fetch(`${API_BASE}/api/live/quota`, { headers })
       .then(r => r.ok ? r.json() : null)
       .then(q => { if (q) setLiveQuota(q); })
+      .catch(() => {});
+      
+    // 获取顾问配额
+    fetch(`${API_BASE}/api/counselor/quota`, { headers })
+      .then(r => r.ok ? r.json() : null)
+      .then(q => { if (q) setCounselorQuota(q); })
       .catch(() => {});
   }, [auth.isLoggedIn]);
   const [profile, setProfile] = useState({
@@ -131,7 +140,22 @@ export default function CareerDashboard() {
   const [showEditProfileModal, setShowEditProfileModal] = useState(false);
   const [showEditGoalModal, setShowEditGoalModal] = useState(false);
   const [showEditSecurityModal, setShowEditSecurityModal] = useState(false);
+  const [showPricingModal, setShowPricingModal] = useState(false);
+  const [pricingDefaultPlanId, setPricingDefaultPlanId] = useState("MONTH_PRO");
+  const [pricingDefaultCategory, setPricingDefaultCategory] = useState<"subscription" | "pack">("subscription");
   const [avatarError, setAvatarError] = useState(false);
+
+  const handleOpenUpgrade = (planId = "MONTH_PRO") => {
+    setPricingDefaultCategory("subscription");
+    setPricingDefaultPlanId(planId);
+    setShowPricingModal(true);
+  };
+
+  const handleOpenPack = (packId = "PACK_A") => {
+    setPricingDefaultCategory("pack");
+    setPricingDefaultPlanId(packId);
+    setShowPricingModal(true);
+  };
 
   // Form states for modals
   const [profileForm, setProfileForm] = useState({ ...profile, tagsString: profile.tags.join(", ") });
@@ -850,8 +874,13 @@ export default function CareerDashboard() {
                   <span className="px-3.5 py-1 rounded-full bg-tertiary/10 text-tertiary text-xs md:text-sm font-black border border-tertiary/20 whitespace-nowrap">
                     {profile.status}
                   </span>
-                  <span className="px-3 py-1 rounded-full bg-purple-500/10 text-purple-300 text-xs md:text-sm font-black border border-purple-500/20 whitespace-nowrap">
-                    内测用户
+                  <span
+                    onClick={() => handleOpenUpgrade()}
+                    className="px-3 py-1 rounded-full bg-indigo-500/10 dark:bg-primary/10 text-indigo-600 dark:text-primary text-xs md:text-sm font-black border border-indigo-500/20 dark:border-primary/20 whitespace-nowrap cursor-pointer hover:scale-105 transition-all flex items-center gap-1"
+                    title="点击查看/升级会员特权"
+                  >
+                    <span className="material-symbols-outlined text-xs">workspace_premium</span>
+                    {getMembershipInfo(auth.user?.membership, auth.user?.createdAt).label}
                   </span>
                 </div>
 
@@ -997,58 +1026,123 @@ export default function CareerDashboard() {
               </div>
             </div>
 
-            {/* WIDGET 2: BETA STATUS */}
+            {/* WIDGET 2: VIP MEMBERSHIP STATUS & UPGRADE */}
             <div className="col-span-12 md:col-span-4 flex flex-col h-full">
-              <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-4.5 relative overflow-hidden hover:border-secondary/20 transition-all duration-300">
-
-                <div className="flex justify-between items-center pb-2.5 border-b border-white/5 relative z-10">
-                  <h4 className="text-base font-black text-white flex items-center gap-2">
-                    <span className="material-symbols-outlined text-lg text-secondary">science</span>
+              <div className="glass-panel p-5.5 rounded-3xl border-white/10 dark:border-white/10 text-left h-full flex flex-col justify-between gap-4 relative overflow-hidden hover:border-indigo-500/30 dark:hover:border-primary/30 transition-all duration-300">
+                <div className="flex justify-between items-center pb-2.5 border-b border-slate-100 dark:border-white/5 relative z-10">
+                  <h4 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
+                    <span className="material-symbols-outlined text-lg text-amber-500" style={{ fontVariationSettings: "'FILL' 1" }}>
+                      workspace_premium
+                    </span>
                     当前账号状态
                   </h4>
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-black border ${getMembershipInfo(auth.user?.membership, auth.user?.createdAt).badgeClass}`}>
+                    {getMembershipInfo(auth.user?.membership, auth.user?.createdAt).label}
+                  </span>
                 </div>
 
-                <div className="space-y-3.5 flex-1 flex flex-col justify-center relative z-10">
-                  <p className="text-sm text-on-surface-variant/70 leading-relaxed font-semibold">
-                    当前正处于内部测试阶段，会员体系暂未开放。系统将根据你的内测反馈持续优化体验，正式上线后将第一时间通知。
+                <div className="space-y-3 flex-1 flex flex-col justify-center relative z-10">
+                  <div className="p-3.5 rounded-2xl bg-slate-50/80 dark:bg-white/[0.02] border border-slate-200/70 dark:border-white/5 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-on-surface-variant/60 font-semibold">特权状态</span>
+                      <span className="text-emerald-600 dark:text-tertiary font-bold flex items-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        权益生效中
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500 dark:text-on-surface-variant/60 font-semibold">
+                        {auth.user?.membership === "test" ? "内测有效期" : "会员有效期"}
+                      </span>
+                      <span className="text-slate-800 dark:text-white font-bold font-label-mono">
+                        {auth.user?.membershipExpireAt ? (
+                          <span className="text-indigo-600 dark:text-primary">
+                            {auth.user.membershipExpireAt}
+                            <span className="ml-1 text-[11px] text-slate-500 dark:text-on-surface-variant/60 font-normal">
+                              (剩余 {auth.user.membershipRemainingDays ?? 0} 天)
+                            </span>
+                          </span>
+                        ) : auth.user?.membership === "test" ? (
+                          "30天体验期"
+                        ) : (
+                          "永久免费基础额度"
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-500 dark:text-on-surface-variant/70 leading-relaxed font-semibold">
+                    支持按需随时续费或升级周/月套餐，原有额度无损累加，有效期自动顺延。
                   </p>
+                </div>
+
+                {/* Buttons: 续费/升级 & 购买加油包 */}
+                <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100 dark:border-white/5 relative z-10">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenUpgrade("MONTH_PRO")}
+                    className="btn-solid-primary w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm transition-all shadow-md shadow-indigo-600/20 active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-sm text-white">upgrade</span>
+                    <span className="text-white">续费 / 升级</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenPack("PACK_A")}
+                    className="w-full py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 text-slate-700 dark:text-on-surface font-black text-sm border border-slate-200 dark:border-white/10 transition-all active:scale-95 cursor-pointer flex items-center justify-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-sm">battery_charging_full</span>
+                    额度加油包
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* WIDGET 3: QUOTA LIMITS */}
+            {/* WIDGET 3: QUOTA LIMITS (5 ITEMS FULL OVERVIEW) */}
             <div className="col-span-12 md:col-span-4 flex flex-col h-full">
-              <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-4.5 relative hover:border-tertiary/20 transition-all duration-300">
+              <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-between gap-3.5 relative hover:border-tertiary/20 transition-all duration-300">
                 
-                <div className="flex justify-between items-center pb-2.5 border-b border-white/5">
-                  <h4 className="text-base font-black text-white flex items-center gap-2">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-white/5">
+                  <h4 className="text-base font-black text-slate-900 dark:text-white flex items-center gap-2">
                     <span className="material-symbols-outlined text-lg text-tertiary">pie_chart</span>
                     资源额度
                   </h4>
-                  <span 
-                    onClick={() => router.push("/memory?tab=timeline")}
-                    className="text-sm text-tertiary font-black hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
-                  >
-                    使用记录 →
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span
+                      onClick={() => handleOpenPack("PACK_A")}
+                      className="text-xs text-indigo-600 dark:text-primary font-bold hover:underline cursor-pointer"
+                    >
+                      +加油
+                    </span>
+                    <span 
+                      onClick={() => router.push("/memory?tab=timeline")}
+                      className="text-xs text-slate-500 dark:text-tertiary font-bold hover:text-indigo-600 dark:hover:text-white transition-colors cursor-pointer flex items-center gap-0.5"
+                    >
+                      使用记录 →
+                    </span>
+                  </div>
                 </div>
 
-                {/* Circular Quota meters in 2x2 grids */}
-                <div className="grid grid-cols-2 gap-3.5 flex-1 items-center">
+                {/* 5-Item Quota Layout: 2x2 grid for top 4 + wide card for AI Advisor */}
+                <div className="flex flex-col gap-2.5 flex-1 justify-center">
                   {(() => {
-                    // fallback 统一用 test 档额度，避免接口异常时显示 0
-                    const TEST_QUOTA = { audio: 2, record: 3, resume: 3, live: 10 };
+                    const TEST_QUOTA = { audio: 0, record: 1, resume: 1, live: 0, advisor: 30 };
                     const audioRemaining = quotaStatus?.audio?.remaining ?? TEST_QUOTA.audio;
-                    const audioTotal = quotaStatus?.audio?.max ?? TEST_QUOTA.audio;
+                    const audioTotal = Math.max(quotaStatus?.audio?.max ?? TEST_QUOTA.audio, audioRemaining);
 
                     const recordRemaining = quotaStatus?.record?.remaining ?? TEST_QUOTA.record;
-                    const recordTotal = quotaStatus?.record?.max ?? TEST_QUOTA.record;
+                    const recordTotal = Math.max(quotaStatus?.record?.max ?? TEST_QUOTA.record, recordRemaining);
 
                     const resumeRemaining = quotaStatus?.resume?.remaining ?? TEST_QUOTA.resume;
-                    const resumeTotal = quotaStatus?.resume?.max ?? TEST_QUOTA.resume;
+                    const resumeTotal = Math.max(quotaStatus?.resume?.max ?? TEST_QUOTA.resume, resumeRemaining);
 
                     const liveRemaining = liveQuota?.remaining_min ?? TEST_QUOTA.live;
-                    const liveTotal = liveQuota?.limit_min ?? TEST_QUOTA.live;
+                    // 分母用 limit_min + extra_min（加油包/结转），只取 limit_min 会漏掉额外时长；
+                    // 外层 Math.max 兜底 remaining 因四舍五入略大于总量的情况
+                    const liveTotal = Math.max((liveQuota?.limit_min ?? TEST_QUOTA.live) + (liveQuota?.extra_min ?? 0), liveRemaining);
+
+                    const advisorRemaining = counselorQuota?.remaining ?? TEST_QUOTA.advisor;
+                    const advisorTotal = Math.max(counselorQuota?.limit ?? TEST_QUOTA.advisor, advisorRemaining);
 
                     const quotas = [
                       { label: "录音分析", remaining: audioRemaining, total: audioTotal, unit: "次", color: "stroke-[#4edea3]", textStyle: "text-[#4edea3]", icon: "graphic_eq" },
@@ -1057,44 +1151,77 @@ export default function CareerDashboard() {
                       { label: "模拟面试", remaining: liveRemaining, total: liveTotal, unit: "分钟", color: "stroke-amber-400", textStyle: "text-amber-400", icon: "videocam" }
                     ];
 
-                    return quotas.map((quota, i) => {
-                      const percent = quota.total > 0 ? (quota.remaining / quota.total) : 0;
-                      return (
-                        <div key={i} className="p-3 rounded-2xl bg-white/[0.01] border border-white/5 flex items-center gap-3 w-full">
-                          <div className="relative w-12 h-12 flex items-center justify-center shrink-0">
-                            <svg className="w-full h-full -rotate-90">
-                              <circle cx="24" cy="24" r="21" fill="transparent" stroke="rgba(255,255,255,0.03)" strokeWidth="3.5" />
-                              <circle
-                                cx="24"
-                                cy="24"
-                                r="21"
-                                fill="transparent"
-                                className={quota.color}
-                                strokeWidth="3.5"
-                                strokeDasharray={2 * Math.PI * 21}
-                                strokeDashoffset={2 * Math.PI * 21 * (1 - percent)}
-                                strokeLinecap="round"
-                              />
-                            </svg>
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <span className={`material-symbols-outlined text-[17px] ${quota.textStyle}`}>
-                                {quota.icon}
-                              </span>
+                    return (
+                      <>
+                        <div className="grid grid-cols-2 gap-2.5">
+                          {quotas.map((quota, i) => {
+                            const percent = quota.total > 0 ? (quota.remaining / quota.total) : 0;
+                            const isLow = quota.remaining <= 1 && quota.total > 0;
+                            return (
+                              <div key={i} className={`p-2.5 rounded-2xl border flex items-center gap-2.5 w-full transition-all ${
+                                isLow
+                                  ? "bg-amber-500/5 border-amber-500/30"
+                                  : "bg-slate-50/70 dark:bg-white/[0.01] border-slate-200/60 dark:border-white/5"
+                              }`}>
+                                <div className="relative w-10 h-10 flex items-center justify-center shrink-0">
+                                  <svg className="w-full h-full -rotate-90">
+                                    <circle cx="20" cy="20" r="17" fill="transparent" stroke="currentColor" className="text-slate-200 dark:text-white/5" strokeWidth="3" />
+                                    <circle
+                                      cx="20"
+                                      cy="20"
+                                      r="17"
+                                      fill="transparent"
+                                      className={quota.color}
+                                      strokeWidth="3"
+                                      strokeDasharray={2 * Math.PI * 17}
+                                      strokeDashoffset={2 * Math.PI * 17 * (1 - percent)}
+                                      strokeLinecap="round"
+                                    />
+                                  </svg>
+                                  <div className="absolute inset-0 flex items-center justify-center">
+                                    <span className={`material-symbols-outlined text-[15px] ${quota.textStyle}`}>
+                                      {quota.icon}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="text-left min-w-0 flex-1">
+                                  <span className="text-xs text-slate-900 dark:text-white font-black block truncate leading-none">{quota.label}</span>
+                                  <span className="text-[10px] text-slate-400 dark:text-on-surface-variant/40 font-bold block mt-1">剩余额度</span>
+                                  <span className="text-xs font-black text-slate-900 dark:text-white block mt-0.5 font-label-mono whitespace-nowrap">
+                                    {quota.remaining} <span className="text-slate-400 dark:text-on-surface-variant/40 font-normal text-[10px]">/ {quota.total}{quota.unit}</span>
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* 5th Quota: AI 顾问 (跨两列宽卡片) */}
+                        <div className="p-2.5 rounded-2xl bg-slate-50/70 dark:bg-white/[0.01] border border-slate-200/60 dark:border-white/5 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-8 h-8 rounded-xl bg-purple-500/10 text-purple-500 flex items-center justify-center">
+                              <span className="material-symbols-outlined text-base">smart_toy</span>
+                            </div>
+                            <div className="text-left">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-black text-slate-900 dark:text-white">AI 职业顾问</span>
+                                <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-purple-500/10 text-purple-600 dark:text-purple-300 font-bold">
+                                  每日0点重置
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 dark:text-on-surface-variant/40 font-semibold block">随时提问岗位、简历与面试疑惑</span>
                             </div>
                           </div>
-                          <div className="text-left min-w-0 flex-1">
-                            <span className="text-sm text-white font-black block truncate leading-none">{quota.label}</span>
-                            <span className="text-xs text-on-surface-variant/30 font-bold block mt-1 scale-90 -ml-1">剩余额度</span>
-                            <span className="text-xs font-black text-white block mt-0.5 font-label-mono whitespace-nowrap">
-                              {quota.remaining} <span className="text-on-surface-variant/35 font-normal text-xs">/ {quota.total}{quota.unit}</span>
+                          <div className="text-right">
+                            <span className="text-xs font-black text-slate-900 dark:text-white font-label-mono whitespace-nowrap">
+                              {advisorRemaining} <span className="text-slate-400 dark:text-on-surface-variant/40 font-normal text-[10px]">/ {advisorTotal}次/天</span>
                             </span>
                           </div>
                         </div>
-                      );
-                    });
+                      </>
+                    );
                   })()}
                 </div>
-
               </div>
             </div>
 
@@ -1104,7 +1231,7 @@ export default function CareerDashboard() {
           <div className="grid grid-cols-1 md:grid-cols-12 gap-6 w-full items-stretch">
             
             {/* WIDGET 4: RECENT ACTIVITY */}
-            <div className="col-span-12 md:col-span-4 flex flex-col h-full">
+            <div className="col-span-12 md:col-span-6 flex flex-col h-full">
               <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-start gap-4 hover:border-primary/20 transition-all duration-300">
                 
                 <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
@@ -1183,7 +1310,7 @@ export default function CareerDashboard() {
             </div>
 
             {/* WIDGET 5: QUICK ACTIONS */}
-            <div className="col-span-12 md:col-span-4 flex flex-col h-full">
+            <div className="col-span-12 md:col-span-6 flex flex-col h-full">
               <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-start gap-4 hover:border-secondary/20 transition-all duration-300">
                 
                 <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
@@ -1217,25 +1344,6 @@ export default function CareerDashboard() {
                   ))}
                 </div>
 
-              </div>
-            </div>
-
-            {/* WIDGET 6: TESTING NOTES */}
-            <div className="col-span-12 md:col-span-4 flex flex-col h-full">
-              <div className="glass-panel p-5.5 rounded-3xl border-white/10 text-left h-full flex flex-col justify-start gap-4 hover:border-tertiary/20 transition-all duration-300">
-
-                <div className="flex justify-between items-center pb-2.5 border-b border-white/5 shrink-0">
-                  <h4 className="text-base font-black text-white flex items-center gap-2">
-                    <span className="material-symbols-outlined text-lg text-tertiary">info</span>
-                    内测说明
-                  </h4>
-                </div>
-
-                <div className="flex-1 flex items-center py-2">
-                  <p className="text-sm text-on-surface-variant/70 leading-relaxed font-semibold my-auto">
-                    内测期间所有功能免费使用，不产生任何订单或费用。正式计费策略上线前，会通过站内信与邮件提前通知。
-                  </p>
-                </div>
               </div>
             </div>
 
@@ -1961,6 +2069,18 @@ export default function CareerDashboard() {
         </div>
       )}
 
+      {/* VIP Pricing / Top-up / Upgrade Modal */}
+      <PricingModal
+        open={showPricingModal}
+        onClose={() => setShowPricingModal(false)}
+        defaultPlanId={pricingDefaultPlanId}
+        defaultCategory={pricingDefaultCategory}
+        currentMembership={auth.user?.membership || "free"}
+        onSuccess={() => {
+          getQuotaStatus({ force: true }).then((status) => setQuotaStatus(status));
+          auth.triggerToast("会员权益充值成功，额度已即时生效！");
+        }}
+      />
     </div>
   );
 }
